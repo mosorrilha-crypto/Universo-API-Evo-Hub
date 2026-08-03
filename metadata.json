@@ -1,0 +1,6 @@
+{
+  "name": "Agente IA WhatsApp, CRM & Financeiro",
+  "description": "Plataforma de Atendimento com IA no WhatsApp, CRM Kanban para Operadores, Gestão Financeira com Faturamento PIX/Links e Atribuição Meta CAPI.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
