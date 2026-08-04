@@ -1,9 +1,10 @@
+import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
@@ -11,11 +12,40 @@ dotenv.config();
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
+  const isProduction = process.env.NODE_ENV === 'production';
 
   // Configuração Supabase - Universo.ai
-  const SUPABASE_URL = 'https://pkocepjfedtsxmufymvd.supabase.co';
-  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrb2NlcGpmZWR0c3htdWZ5bXZkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTcyODM0OCwiZXhwIjoyMTAxMzA0MzQ4fQ.78eNGIwpZeY_lHU5UTeZ1-4AJAhXgGFyaIkJTLU9oUk';
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  // Em produção exigimos as credenciais reais. Em desenvolvimento/preview (ex: AI Studio,
+  // antes de existir um projeto Supabase), o servidor sobe mesmo sem elas — apenas as
+  // rotas que dependem do Supabase respondem 503, o resto do app (modo demo em
+  // localStorage) continua funcionando normalmente.
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  let supabase: SupabaseClient | null = null;
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  } else if (isProduction) {
+    throw new Error(
+      'SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias em produção. Configure-as no .env (veja .env.example).'
+    );
+  } else {
+    console.warn(
+      '⚠️  Supabase não configurado (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY ausentes). ' +
+      'Rotas de autenticação real (/api/auth/login, /api/setup-db) ficam desativadas — ' +
+      'o app segue funcional em modo demo (localStorage). Configure o .env quando tiver um projeto Supabase.'
+    );
+  }
+
+  // JWT_SECRET é obrigatória em produção. Em dev, geramos uma efêmera (só dura enquanto
+  // o processo estiver de pé) para não travar o preview — não usar isso em produção.
+  let JWT_SECRET = process.env.JWT_SECRET;
+  if (!JWT_SECRET) {
+    if (isProduction) {
+      throw new Error('JWT_SECRET é obrigatória em produção. Configure-a no .env (veja .env.example).');
+    }
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    console.warn('⚠️  JWT_SECRET não configurada — usando um segredo temporário só para esta execução (dev only).');
+  }
 
   app.use(express.json());
 
@@ -25,7 +55,7 @@ async function startServer() {
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.sendStatus(401);
 
-    jwt.verify(token, process.env.JWT_SECRET || 'universo_secret_key_2024', (err: any, user: any) => {
+    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
       if (err) return res.sendStatus(403);
       req.user = user;
       next();
@@ -34,8 +64,11 @@ async function startServer() {
 
   // Rota de Login de Operadores e Administradores com verificação de senha
   app.post('/api/auth/login', async (req, res) => {
+    if (!supabase) {
+      return res.status(503).json({ error: 'Supabase não configurado neste ambiente. Use o modo demo na tela de login.' });
+    }
     const { tenantId, email, password } = req.body;
-    
+
     try {
       if (!password || password.trim() === '') {
         throw new Error('A senha é obrigatória.');
@@ -55,7 +88,7 @@ async function startServer() {
 
       const token = jwt.sign(
         { id: operator.id, tenantId: operator.tenant_id, role: operator.role },
-        process.env.JWT_SECRET || 'universo_secret_key_2024',
+        JWT_SECRET,
         { expiresIn: '24h' }
       );
 
@@ -68,9 +101,12 @@ async function startServer() {
 
   // Rota de Setup Inicial (Cria Admin no Supabase)
   app.get('/api/setup-db', async (req, res) => {
+    if (!supabase) {
+      return res.status(503).json({ error: 'Supabase não configurado neste ambiente.' });
+    }
     try {
       const hashedPassword = await bcrypt.hash('mudar-senha-123', 10);
-      
+
       const { data, error } = await supabase
         .from('operators')
         .upsert({
