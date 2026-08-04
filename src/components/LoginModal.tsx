@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { UserProfile, UserRole } from '../types';
 import { SAAS_DEMO_USERS } from '../data/mockTenants';
-import { ShieldCheck, UserCheck, Lock, Sparkles, LogIn, Key, Building2, User, Layers, AlertCircle } from 'lucide-react';
+import { ShieldCheck, UserCheck, Lock, Sparkles, LogIn, Key, Building2, User, Layers, AlertCircle, Flame } from 'lucide-react';
+import { loginWithGoogle } from '../lib/firebase';
 
 export const DEMO_USERS: UserProfile[] = SAAS_DEMO_USERS;
 
@@ -65,13 +66,30 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       authenticatedUser = DEMO_USERS.find((u) => u.id === selectedUserId) || DEMO_USERS[0];
     }
 
-    // Strict Password Validation Check
-    // Demo passwords allowed: '123456', 'admin123', 'universo2024', or 'mudar-senha-123'
-    const validPasswords = ['123456', 'admin123', 'universo2024', 'mudar-senha-123', 'admin', 'operator'];
-    const isPasswordValid = validPasswords.includes(password.trim()) || password.trim().length >= 4;
+    // Per-user password mapping for Demo / Production Preset Profiles
+    const USER_PASSWORDS: Record<string, string[]> = {
+      usr_monique: ['monique2026', 'admin123', '123456'],
+      usr_carlos: ['viva1234', '123456'],
+      usr_fernanda: ['meta2026', '123456'],
+      usr_ricardo: ['master2026#', 'adminMaster123'], // Enforce strict password for SaaS Master Admin
+    };
+
+    let isPasswordValid = false;
+
+    if (useCustomLogin && customEmail) {
+      // General custom password check
+      const validPasswords = ['123456', 'admin123', 'universo2024', 'mudar-senha-123', 'monique2026', 'master2026#'];
+      isPasswordValid = validPasswords.includes(password.trim());
+    } else if (authenticatedUser) {
+      const allowedForUser = USER_PASSWORDS[authenticatedUser.id] || ['123456', 'admin123'];
+      isPasswordValid = allowedForUser.includes(password.trim());
+    }
 
     if (!isPasswordValid) {
-      setErrorMsg('Senha incorreta! Digite uma senha válida (Ex: 123456, admin123 ou universo2024).');
+      const hint = authenticatedUser?.role === 'saas_admin'
+        ? 'Dica: A senha do SaaS Master Admin é "master2026#".'
+        : 'Verifique a senha informada para este usuário.';
+      setErrorMsg(`Senha incorreta! Acesso negado. ${hint}`);
       return;
     }
 
@@ -187,8 +205,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 />
                 <Lock className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
               </div>
-              <p className="text-[10px] text-slate-500 mt-1">
-                Dica de demonstração: Senha padrão <span className="text-emerald-400 font-mono">123456</span> ou <span className="text-emerald-400 font-mono">admin123</span>
+              <p className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
+                <span>
+                  Senha do perfil selecionado:{' '}
+                  <span className="text-emerald-400 font-mono font-bold">
+                    {selectedUserId === 'usr_ricardo'
+                      ? 'master2026#'
+                      : selectedUserId === 'usr_monique'
+                      ? 'monique2026'
+                      : selectedUserId === 'usr_fernanda'
+                      ? 'meta2026'
+                      : 'viva1234'}
+                  </span>
+                </span>
+                <span className="text-slate-500">Validação Estreita v2.0</span>
               </p>
             </div>
 
@@ -200,6 +230,40 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <span>Validar Senha e Acessar Painel</span>
             </button>
           </form>
+
+          {/* Alternative Google / Firebase Login */}
+          <div className="pt-3 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={async () => {
+                setErrorMsg(null);
+                try {
+                  const googleUser = await loginWithGoogle();
+                  const authenticatedUser: UserProfile = {
+                    id: googleUser.uid,
+                    name: googleUser.displayName || googleUser.email?.split('@')[0] || 'Usuário Google',
+                    email: googleUser.email || '',
+                    role: 'admin',
+                    avatar: googleUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+                    department: 'Autenticação Firebase',
+                    tenantId: 'tenant_004',
+                  };
+                  onLogin(authenticatedUser);
+                } catch (err: any) {
+                  setErrorMsg(`Erro ao autenticar via Google: ${err.message || 'Falha no login'}`);
+                }
+              }}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center space-x-2 border border-slate-700 transition-all cursor-pointer"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.2 9 5 12 5z" />
+                <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z" />
+                <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15s.7 5.3 1.9 7.7l3.7-2.9z" />
+                <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.2-6.4-5.2L1.9 16C3.7 19.7 7.5 22.3 12 23z" />
+              </svg>
+              <span>Autenticar com Conta do Google (Firebase)</span>
+            </button>
+          </div>
         </div>
 
         {/* Modal Footer */}

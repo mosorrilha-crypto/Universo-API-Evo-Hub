@@ -207,21 +207,25 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   // Fetch live token telemetry and queue state
   const fetchTelemetry = async () => {
     try {
-      const res = await fetch('/api/telemetry/tokens');
-      const isJson = res.headers.get('content-type')?.includes('application/json');
-      if (res.ok && isJson) {
-        const data = await res.json();
-        setTelemetryData(data);
-        setIsMockAiActive(!!data.useMockAiMode);
+      const res = await fetch('/api/telemetry/tokens').catch(() => null);
+      if (res && res.ok) {
+        const isJson = res.headers.get('content-type')?.includes('application/json');
+        if (isJson) {
+          const data = await res.json();
+          setTelemetryData(data);
+          setIsMockAiActive(!!data.useMockAiMode);
+        }
       }
-      const qRes = await fetch('/api/queue/status');
-      const qIsJson = qRes.headers.get('content-type')?.includes('application/json');
-      if (qRes.ok && qIsJson) {
-        const qData = await qRes.json();
-        setQueueStatus(qData);
+      const qRes = await fetch('/api/queue/status').catch(() => null);
+      if (qRes && qRes.ok) {
+        const qIsJson = qRes.headers.get('content-type')?.includes('application/json');
+        if (qIsJson) {
+          const qData = await qRes.json();
+          setQueueStatus(qData);
+        }
       }
     } catch (err) {
-      console.error('Error fetching token telemetry:', err);
+      // Ignore transient network errors when polling
     }
   };
 
