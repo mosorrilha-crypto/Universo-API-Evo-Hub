@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { blobToBase64 } from '../utils/audioUtils';
+import { apiFetch } from '../lib/apiClient';
 import { TranscriptionResult, SavedTranscriptItem } from '../types';
 import { TranscriptionCard } from './TranscriptionCard';
 import { Upload, FileAudio, Sparkles, Loader2, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
@@ -61,7 +62,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSaveTranscript }) => {
       const base64Data = await blobToBase64(selectedFile);
       const mimeType = selectedFile.type || 'audio/ogg';
 
-      const response = await fetch('/api/transcribe', {
+      const response = await apiFetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

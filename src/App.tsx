@@ -19,6 +19,7 @@ import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components
 import { EvoHubIntegration } from './components/EvoHubIntegration';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { LoginModal } from './components/LoginModal';
+import { setAuthToken } from './lib/apiClient';
 
 import { INITIAL_TENANTS, SAAS_DEMO_USERS } from './data/mockTenants';
 import { INITIAL_MOCK_LEADS } from './data/mockLeads';
@@ -186,6 +187,7 @@ export const App: React.FC = () => {
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={() => {
           setCurrentUser(null);
+          setAuthToken(null);
           setIsLoginModalOpen(true);
           showToast('Sessão encerrada');
         }}
@@ -327,8 +329,9 @@ export const App: React.FC = () => {
         onClose={() => {
           if (currentUser) setIsLoginModalOpen(false);
         }}
-        onLogin={(usr) => {
+        onLogin={(usr, token) => {
           setCurrentUser(usr);
+          setAuthToken(token || null);
           setIsLoginModalOpen(false);
           showToast(`Bem-vindo, ${usr.name}!`);
         }}

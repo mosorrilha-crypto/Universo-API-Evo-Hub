@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { blobToBase64 } from '../utils/audioUtils';
+import { apiFetch } from '../lib/apiClient';
 import { TranscriptionResult, SavedTranscriptItem } from '../types';
 import { TranscriptionCard } from './TranscriptionCard';
 import { Mic, Square, Play, RefreshCw, Sparkles, Loader2, Volume2, AlertCircle } from 'lucide-react';
@@ -159,7 +160,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onSaveTranscript }
     try {
       const base64Audio = await blobToBase64(audioBlob);
 
-      const response = await fetch('/api/transcribe', {
+      const response = await apiFetch('/api/transcribe', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

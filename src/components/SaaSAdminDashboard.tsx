@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { Tenant, TenantPlan, TenantStatus, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus } from '../types';
 import { INITIAL_TENANTS, SAAS_DEMO_USERS } from '../data/mockTenants';
+import { apiFetch } from '../lib/apiClient';
 
 const PLAN_DISTRIBUTION = [
   { name: 'Starter (R$ 590)', value: 12, color: '#10b981' },
@@ -207,7 +208,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   // Fetch live token telemetry and queue state
   const fetchTelemetry = async () => {
     try {
-      const res = await fetch('/api/telemetry/tokens').catch(() => null);
+      const res = await apiFetch('/api/telemetry/tokens').catch(() => null);
       if (res && res.ok) {
         const isJson = res.headers.get('content-type')?.includes('application/json');
         if (isJson) {
@@ -237,7 +238,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
   const handleToggleMockMode = async () => {
     try {
-      const res = await fetch('/api/telemetry/toggle-mock', {
+      const res = await apiFetch('/api/telemetry/toggle-mock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !isMockAiActive }),
@@ -256,7 +257,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const handleRunBatchJob = async () => {
     setIsBatchRunning(true);
     try {
-      const res = await fetch('/api/batch/lead-analysis', {
+      const res = await apiFetch('/api/batch/lead-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
