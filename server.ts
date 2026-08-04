@@ -13,9 +13,19 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
 
   // Configuração Supabase - Universo.ai
-  const SUPABASE_URL = 'https://pkocepjfedtsxmufymvd.supabase.co';
-  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrb2NlcGpmZWR0c3htdWZ5bXZkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTcyODM0OCwiZXhwIjoyMTAxMzA0MzQ4fQ.78eNGIwpZeY_lHU5UTeZ1-4AJAhXgGFyaIkJTLU9oUk';
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error(
+      'SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias. Configure-as no .env (veja .env.example).'
+    );
+  }
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const JWT_SECRET = process.env.JWT_SECRET;
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET é obrigatória. Configure-a no .env (veja .env.example).');
+  }
 
   app.use(express.json());
 
@@ -25,7 +35,7 @@ async function startServer() {
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.sendStatus(401);
 
-    jwt.verify(token, process.env.JWT_SECRET || 'universo_secret_key_2024', (err: any, user: any) => {
+    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
       if (err) return res.sendStatus(403);
       req.user = user;
       next();
@@ -55,7 +65,7 @@ async function startServer() {
 
       const token = jwt.sign(
         { id: operator.id, tenantId: operator.tenant_id, role: operator.role },
-        process.env.JWT_SECRET || 'universo_secret_key_2024',
+        JWT_SECRET,
         { expiresIn: '24h' }
       );
 
