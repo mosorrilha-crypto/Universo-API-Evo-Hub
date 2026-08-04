@@ -54,9 +54,9 @@ Fundação   Core        Dados       UX/CRM      Integrações  Escala
 
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
-| 0.1.1 | Middleware de auth JWT em rotas sensíveis (`/api/transcribe`, `/api/analyze-conversation`, `/api/test-gemini`, `/api/telemetry/*`) | P0 | S | Pendente |
+| 0.1.1 | Middleware de auth JWT em rotas sensíveis (`/api/transcribe`, `/api/analyze-conversation`, `/api/test-gemini`, `/api/telemetry/*`, `/api/analytics/ai-report`, `/api/meta-capi/send-event`, `/api/batch/lead-analysis`) | P0 | S | ✅ Feito |
 | 0.1.2 | Remover/forçar `JWT_SECRET` em produção (fail fast se ausente) | P0 | XS | ✅ Feito (mesmo padrão aplicado a `META_WEBHOOK_VERIFY_TOKEN` e `EVOHUB_API_KEY`) |
-| 0.1.3 | Rate limiting por IP/tenant nas rotas de IA (`express-rate-limit`) | P0 | S | Pendente |
+| 0.1.3 | Rate limiting por IP/tenant nas rotas de IA (`express-rate-limit`) | P0 | S | ✅ Feito (20 req/min por IP nas rotas de IA) |
 | 0.1.4 | `helmet` + CORS restrito por `APP_URL` | P1 | XS | Pendente |
 | 0.1.5 | Reduzir body limit de 50MB para rota específica de transcribe | P1 | XS | Pendente |
 | 0.1.6 | Proteger `/api/test-gemini` — só `NODE_ENV=development` ou admin | P1 | XS | Pendente |
@@ -67,10 +67,10 @@ Fundação   Core        Dados       UX/CRM      Integrações  Escala
 
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
-| 0.2.1 | Criar env `DEMO_MODE=true\|false` | P0 | XS | Pendente |
-| 0.2.2 | Fallbacks mock retornam `{ source: 'fallback', success: true }` — nunca fingir Gemini | P0 | S | Pendente |
+| 0.2.1 | Criar env `DEMO_MODE=true\|false` | P0 | XS | ✅ Feito |
+| 0.2.2 | Fallbacks mock retornam `{ source: 'fallback', success: true }` — nunca fingir Gemini | P0 | S | ✅ Feito (analyze-conversation, transcribe, analytics/ai-report) |
 | 0.2.3 | UI exibe badge "Modo Demo" quando `source !== 'gemini'` | P1 | S | Pendente |
-| 0.2.4 | Login demo (LoginModal senhas hardcoded) só funciona se `DEMO_MODE=true` | P0 | S | Pendente |
+| 0.2.4 | Login demo (LoginModal senhas hardcoded) só funciona se `DEMO_MODE=true` | P0 | S | ✅ Feito (fora do demo mode, exige login real via Supabase) |
 
 ### Epic 0.3 — Higiene do repositório
 
@@ -290,11 +290,11 @@ Schema mínimo sugerido:
 
 | # | ID | Issue | Fase | P | Esforço | Status |
 |---|---|---|---|---|---|---|
-| 1 | 0.1.1 | Auth JWT nas APIs de IA | 0 | P0 | S | Pendente |
+| 1 | 0.1.1 | Auth JWT nas APIs de IA | 0 | P0 | S | ✅ Feito |
 | 2 | 0.1.2 | JWT_SECRET obrigatório em prod | 0 | P0 | XS | ✅ Feito |
-| 3 | 0.2.2 | Flag `source: fallback` nos mocks | 0 | P0 | S | Pendente |
-| 4 | 0.2.4 | Demo login só em DEMO_MODE | 0 | P0 | S | Pendente |
-| 5 | 0.1.3 | Rate limiting APIs IA | 0 | P0 | S | Pendente |
+| 3 | 0.2.2 | Flag `source: fallback` nos mocks | 0 | P0 | S | ✅ Feito |
+| 4 | 0.2.4 | Demo login só em DEMO_MODE | 0 | P0 | S | ✅ Feito |
+| 5 | 0.1.3 | Rate limiting APIs IA | 0 | P0 | S | ✅ Feito |
 | 6 | 1.1.1 | Extrair services de server.ts | 1 | P0 | M | Pendente |
 | 7 | 1.1.2–3 | Parsers webhook Meta + Evolution | 1 | P0 | M | Pendente |
 | 8 | 1.1.4 | Download mídia áudio WhatsApp | 1 | P0 | L | Pendente |

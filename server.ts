@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { rateLimit } from 'express-rate-limit';
 
 dotenv.config();
 
@@ -47,6 +48,13 @@ async function startServer() {
     console.warn('⚠️  JWT_SECRET não configurada — usando um segredo temporário só para esta execução (dev only).');
   }
 
+  // DEMO_MODE: fora de produção, ligado por padrão (facilita testar sem backend
+  // completo). Em produção, desligado por padrão — só liga com DEMO_MODE=true
+  // explícito. Controla o login com senhas fixas e o endpoint de token demo abaixo.
+  const DEMO_MODE = process.env.DEMO_MODE === 'true' ? true
+    : process.env.DEMO_MODE === 'false' ? false
+    : !isProduction;
+
   let supabase: ReturnType<typeof createClient> | null = null;
   if (SUPABASE_URL && SUPABASE_KEY && /^https?:\/\//i.test(SUPABASE_URL.trim())) {
     try {
@@ -81,6 +89,38 @@ async function startServer() {
       next();
     });
   };
+
+  // Rate limit para as rotas que chamam o Gemini ou geram custo — protege contra
+  // abuso mesmo vindo de um usuário autenticado.
+  const aiRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Muitas requisições. Aguarde um minuto e tente novamente.' },
+  });
+
+  // Config pública — o frontend usa isso pra saber se pode oferecer o login de
+  // demonstração (senhas fixas) ou se precisa exigir credenciais reais.
+  app.get('/api/public/config', (req, res) => {
+    res.json({ demoMode: DEMO_MODE });
+  });
+
+  // Emite um JWT válido pra um perfil de demonstração — só funciona com DEMO_MODE=true.
+  // Não valida senha (isso já foi feito no frontend com as senhas fixas de demo);
+  // existe só para que o modo demo também tenha um Bearer token de verdade pra
+  // chamar as rotas protegidas abaixo, sem precisar de um operador real no Supabase.
+  app.post('/api/auth/demo-token', (req, res) => {
+    if (!DEMO_MODE) {
+      return res.status(403).json({ error: 'Login de demonstração desabilitado (DEMO_MODE=false).' });
+    }
+    const { id, tenantId, role, email } = req.body || {};
+    if (!id || !tenantId || !role) {
+      return res.status(400).json({ error: 'id, tenantId e role são obrigatórios.' });
+    }
+    const token = jwt.sign({ id, tenantId, role, email, demo: true }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token });
+  });
 
   // Rota de Login de Operadores e Administradores com verificação de senha
   app.post('/api/auth/login', async (req, res) => {
@@ -125,7 +165,7 @@ async function startServer() {
   // Se precisar de um endpoint de setup, use Opção B do guia: protegido com token único
 
   // ✅ Endpoint de teste do Gemini
-  app.get('/api/test-gemini', async (req, res) => {
+  app.get('/api/test-gemini', authenticateToken, aiRateLimiter, async (req, res) => {
     const ai = getGeminiClient();
     if (!ai) return res.status(500).json({ error: 'Gemini não configurado (GEMINI_API_KEY ausente)' });
 
@@ -159,7 +199,7 @@ async function startServer() {
   // Telemetria de Tokens & Cache AI Strategy
   let mockAiEnabled = false;
 
-  app.get('/api/telemetry/tokens', (req, res) => {
+  app.get('/api/telemetry/tokens', authenticateToken, (req, res) => {
     res.json({
       useMockAiMode: mockAiEnabled,
       summary: {
@@ -193,7 +233,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/telemetry/toggle-mock', (req, res) => {
+  app.post('/api/telemetry/toggle-mock', authenticateToken, (req, res) => {
     const { enabled } = req.body || {};
     mockAiEnabled = typeof enabled === 'boolean' ? enabled : !mockAiEnabled;
     res.json({ useMockAiMode: mockAiEnabled, message: `Mock AI Mode ${mockAiEnabled ? 'Ativado' : 'Desativado'}` });
@@ -209,7 +249,7 @@ async function startServer() {
     });
   });
 
-  app.post('/api/batch/lead-analysis', (req, res) => {
+  app.post('/api/batch/lead-analysis', authenticateToken, aiRateLimiter, (req, res) => {
     res.json({
       success: true,
       processedCount: 10,
@@ -337,7 +377,7 @@ async function startServer() {
 
 
   // AI Conversation Analysis Endpoint
-  app.post('/api/analyze-conversation', async (req, res) => {
+  app.post('/api/analyze-conversation', authenticateToken, aiRateLimiter, async (req, res) => {
     try {
       const { leadInfo, messages, agentKnowledgeBase } = req.body || {};
 
@@ -381,7 +421,7 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
 
           const rawText = response.text || '';
           const parsed = JSON.parse(rawText);
-          return res.json({ success: true, analysis: parsed });
+          return res.json({ success: true, source: 'gemini', analysis: parsed });
         } catch (geminiError) {
           console.warn('Gemini API call error, fallbacking to preset analysis:', geminiError);
         }
@@ -411,14 +451,14 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
         suggestedSmartReply: `Olá ${leadInfo?.name ? leadInfo.name.split(' ')[0] : ''}! Verifiquei sua solicitação e conseguimos liberar 10% de desconto adicional para fechamento via PIX hoje. Posso gerar o seu link exclusivo?`
       };
 
-      return res.json({ success: true, analysis: fallbackAnalysis });
+      return res.json({ success: true, source: 'fallback', analysis: fallbackAnalysis });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao analisar conversa.' });
     }
   });
 
   // AI Audio Transcription Endpoint
-  app.post('/api/transcribe', async (req, res) => {
+  app.post('/api/transcribe', authenticateToken, aiRateLimiter, async (req, res) => {
     try {
       const { audioBase64, mimeType, leadName, customInstructions } = req.body || {};
 
@@ -459,7 +499,7 @@ ${customInstructions || ''}`;
 
           const rawText = response.text || '';
           const parsed = JSON.parse(rawText);
-          return res.json({ success: true, result: parsed });
+          return res.json({ success: true, source: 'gemini', result: parsed });
         } catch (geminiError) {
           console.warn('Gemini Audio Transcription error, fallbacking:', geminiError);
         }
@@ -477,14 +517,14 @@ ${customInstructions || ''}`;
         urgencyScore: 4,
       };
 
-      return res.json({ success: true, result: fallbackResult });
+      return res.json({ success: true, source: 'fallback', result: fallbackResult });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao processar áudio.' });
     }
   });
 
   // Meta CAPI Send Event Endpoint
-  app.post('/api/meta-capi/send-event', (req, res) => {
+  app.post('/api/meta-capi/send-event', authenticateToken, (req, res) => {
     const { eventName, pixelId } = req.body || {};
     const eventId = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     res.json({
@@ -501,7 +541,7 @@ ${customInstructions || ''}`;
   });
 
   // Analytics AI Strategic Report Endpoint
-  app.post('/api/analytics/ai-report', async (req, res) => {
+  app.post('/api/analytics/ai-report', authenticateToken, aiRateLimiter, async (req, res) => {
     try {
       const { leads } = req.body || {};
       const ai = getGeminiClient();
@@ -513,7 +553,7 @@ ${customInstructions || ''}`;
 Analise os dados dos leads a seguir e gere um relatório de inteligência estratégica conciso em português (3 parágrafos) destacando ROAS, Canais de Alta Conversão, CAPI Match Quality Score e sugestões de otimização:
 Leads: ${JSON.stringify(leads || [])}`,
           });
-          return res.json({ success: true, report: response.text });
+          return res.json({ success: true, source: 'gemini', report: response.text });
         } catch (err) {
           console.warn('AI Report generation error:', err);
         }
@@ -525,7 +565,7 @@ Leads: ${JSON.stringify(leads || [])}`,
 2. **Qualidade do CAPI (Meta Cloud)**: O Match Quality Score da API de Conversões está em **8.9/10**, com sincronização de fbc, fbp e números de telefone criptografados via SHA-256.
 3. **Recomendação de Mídia**: Aumentar em 25% o orçamento nas campanhas do topo do funil no Meta Ads e ativar o disparo automático do evento **PurchaseIntention** para otimização de lances.`;
 
-      return res.json({ success: true, report: fallbackReport });
+      return res.json({ success: true, source: 'fallback', report: fallbackReport });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao gerar relatório.' });
     }

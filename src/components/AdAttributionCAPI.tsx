@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LeadInfo, CAPIConfig, MetaCAPIEvent } from '../types';
 import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
+import { apiFetch } from '../lib/apiClient';
 import { 
   BarChart3, 
   Target, 
@@ -169,7 +170,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
     setIsSendingCAPI(true);
     try {
-      const response = await fetch('/api/meta-capi/send-event', {
+      const response = await apiFetch('/api/meta-capi/send-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -222,7 +223,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   const handleGenerateAIReport = async () => {
     setIsGeneratingReport(true);
     try {
-      const response = await fetch('/api/analytics/ai-report', {
+      const response = await apiFetch('/api/analytics/ai-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leads }),

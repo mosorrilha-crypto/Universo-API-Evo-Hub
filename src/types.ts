@@ -210,6 +210,7 @@ export interface FullConversationAnalysis {
   suggestedSmartReply: string;
   suggestedSmartReplyTranslation?: string; // Tradução/Explicação em Português para análise prévia do atendente
   lastUpdated?: string;
+  source?: 'gemini' | 'fallback'; // 'fallback' = Gemini indisponível, resposta simulada
 }
 
 export interface LeadInfo {
@@ -245,6 +246,7 @@ export interface TranscriptionResult {
   keyPoints: string[];
   suggestedReply: string;
   urgencyScore: number; // 1 to 5
+  source?: 'gemini' | 'fallback'; // 'fallback' = Gemini indisponível, resposta simulada
 }
 
 export interface SavedTranscriptItem {

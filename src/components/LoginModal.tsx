@@ -1,17 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile, UserRole } from '../types';
 import { SAAS_DEMO_USERS } from '../data/mockTenants';
 import { ShieldCheck, UserCheck, Lock, Sparkles, LogIn, Key, Building2, User, Layers, AlertCircle, Flame } from 'lucide-react';
 import { loginWithGoogle } from '../lib/firebase';
+import { apiFetch } from '../lib/apiClient';
 
 export const DEMO_USERS: UserProfile[] = SAAS_DEMO_USERS;
 
 interface LoginModalProps {
-  onLogin: (user: UserProfile) => void;
+  onLogin: (user: UserProfile, token?: string) => void;
   isOpen: boolean;
   onClose?: () => void;
   isForcedLogin?: boolean;
 }
+
+// Emite um Bearer token de verdade pro perfil (só funciona quando o backend
+// está em DEMO_MODE=true). Sem isso, as rotas protegidas de IA retornariam 401
+// mesmo depois de "logar" no modo demo.
+const mintDemoToken = async (id: string, tenantId: string, role: string, email: string): Promise<string | undefined> => {
+  try {
+    const res = await apiFetch('/api/auth/demo-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, tenantId, role, email }),
+    });
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    return data.token;
+  } catch {
+    return undefined;
+  }
+};
 
 export const LoginModal: React.FC<LoginModalProps> = ({
   onLogin,
@@ -24,6 +43,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [customEmail, setCustomEmail] = useState<string>(DEMO_USERS[0].email);
   const [useCustomLogin, setUseCustomLogin] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  // Assume true (comportamento atual) até a config real chegar do backend, pra
+  // não travar a tela de login por causa de uma requisição lenta/falha.
+  const [demoMode, setDemoMode] = useState<boolean>(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/public/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data.demoMode === 'boolean') {
+          setDemoMode(data.demoMode);
+        }
+      })
+      .catch(() => {
+        // Mantém o valor otimista em caso de falha de rede.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -44,7 +84,43 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    // Try backend authentication or fallback to local demo check
+    const presetUser = useCustomLogin ? null : (DEMO_USERS.find((u) => u.id === selectedUserId) || DEMO_USERS[0]);
+
+    // Fora do modo demo, as senhas fixas abaixo não valem nada — a validação
+    // é sempre feita de verdade contra o backend/Supabase.
+    if (!demoMode) {
+      setIsSubmitting(true);
+      try {
+        const tenantId = presetUser?.tenantId || 'main-tenant';
+        const email = useCustomLogin ? customEmail : presetUser!.email;
+        const res = await apiFetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenantId, email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Falha na autenticação');
+        }
+        const authenticatedUser: UserProfile = {
+          id: data.operator.email,
+          tenantId,
+          name: data.operator.name,
+          email: data.operator.email,
+          role: data.operator.role,
+          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+          department: 'Operador',
+        };
+        onLogin(authenticatedUser, data.token);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Erro ao fazer login.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // --- Modo demo (DEMO_MODE=true no backend) ---
     let authenticatedUser: UserProfile | null = null;
 
     if (useCustomLogin && customEmail) {
@@ -63,7 +139,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         };
       }
     } else {
-      authenticatedUser = DEMO_USERS.find((u) => u.id === selectedUserId) || DEMO_USERS[0];
+      authenticatedUser = presetUser;
     }
 
     // Per-user password mapping for Demo / Production Preset Profiles
@@ -93,7 +169,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    onLogin(authenticatedUser);
+    const token = await mintDemoToken(authenticatedUser.id, authenticatedUser.tenantId, authenticatedUser.role, authenticatedUser.email);
+    onLogin(authenticatedUser, token);
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -205,29 +282,36 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 />
                 <Lock className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
               </div>
-              <p className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
-                <span>
-                  Senha do perfil selecionado:{' '}
-                  <span className="text-emerald-400 font-mono font-bold">
-                    {selectedUserId === 'usr_ricardo'
-                      ? 'master2026#'
-                      : selectedUserId === 'usr_monique'
-                      ? 'monique2026'
-                      : selectedUserId === 'usr_fernanda'
-                      ? 'meta2026'
-                      : 'viva1234'}
+              {demoMode ? (
+                <p className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
+                  <span>
+                    Senha do perfil selecionado:{' '}
+                    <span className="text-emerald-400 font-mono font-bold">
+                      {selectedUserId === 'usr_ricardo'
+                        ? 'master2026#'
+                        : selectedUserId === 'usr_monique'
+                        ? 'monique2026'
+                        : selectedUserId === 'usr_fernanda'
+                        ? 'meta2026'
+                        : 'viva1234'}
+                    </span>
                   </span>
-                </span>
-                <span className="text-slate-500">Validação Estreita v2.0</span>
-              </p>
+                  <span className="text-slate-500">Validação Estreita v2.0</span>
+                </p>
+              ) : (
+                <p className="text-[10px] text-amber-400 mt-1">
+                  Modo de demonstração desativado neste ambiente — informe a senha real do operador.
+                </p>
+              )}
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer"
+              disabled={isSubmitting}
+              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
-              <span>Validar Senha e Acessar Painel</span>
+              <span>{isSubmitting ? 'Verificando...' : 'Validar Senha e Acessar Painel'}</span>
             </button>
           </form>
 
@@ -248,7 +332,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     department: 'Autenticação Firebase',
                     tenantId: 'tenant_004',
                   };
-                  onLogin(authenticatedUser);
+                  // Login Google é real (Firebase), mas o Bearer token das rotas
+                  // protegidas do backend só existe via demo-token (DEMO_MODE=true).
+                  const token = demoMode
+                    ? await mintDemoToken(authenticatedUser.id, authenticatedUser.tenantId, authenticatedUser.role, authenticatedUser.email)
+                    : undefined;
+                  onLogin(authenticatedUser, token);
                 } catch (err: any) {
                   setErrorMsg(`Erro ao autenticar via Google: ${err.message || 'Falha no login'}`);
                 }

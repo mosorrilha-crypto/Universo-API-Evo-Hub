@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
+import { apiFetch } from '../lib/apiClient';
 import { TranscriptionCard } from './TranscriptionCard';
 import { ConversationAnalysisPanel } from './ConversationAnalysisPanel';
 import { 
@@ -193,7 +194,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setErrorMsg(null);
 
     try {
-      const response = await fetch('/api/analyze-conversation', {
+      const response = await apiFetch('/api/analyze-conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -220,6 +221,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       const fullAnalysis: FullConversationAnalysis = {
         ...data.analysis,
+        source: data.source,
         lastUpdated: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       };
 
@@ -244,7 +246,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const { blob, mimeType } = await createSpeechAudioBlob(lead.textContent, 'pt-BR');
       const base64Audio = await blobToBase64(blob);
 
-      const response = await fetch('/api/transcribe', {
+      const response = await apiFetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -267,7 +269,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         throw new Error(data?.error || 'Erro ao processar áudio do lead.');
       }
 
-      const res: TranscriptionResult = data.result;
+      const res: TranscriptionResult = { ...data.result, source: data.source };
 
       setLeads((prev) =>
         prev.map((l) => (l.id === lead.id ? { ...l, status: 'transcribed', result: res } : l))
@@ -495,7 +497,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const handleDirectCAPI = async (eventName: string) => {
     if (!selectedLead) return;
     try {
-      const response = await fetch('/api/meta-capi/send-event', {
+      const response = await apiFetch('/api/meta-capi/send-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
