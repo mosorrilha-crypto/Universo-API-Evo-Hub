@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { getQueueStats } from '../services/transcriptionQueue';
 
 interface TelemetryRouterDeps {
   authenticateToken: RequestHandler;
@@ -51,14 +52,10 @@ export function createTelemetryRouter({ authenticateToken, rateLimiter }: Teleme
     res.json({ useMockAiMode: mockAiEnabled, message: `Mock AI Mode ${mockAiEnabled ? 'Ativado' : 'Desativado'}` });
   });
 
+  // Status real da fila de transcrição (server/services/transcriptionQueue.ts) —
+  // substitui os números fixos que existiam aqui antes (Epic 5.1.3 do roadmap).
   router.get('/api/queue/status', (req, res) => {
-    res.json({
-      activeWorkers: 4,
-      pendingQueue: 0,
-      processedTotal: 12840,
-      failedTotal: 2,
-      avgLatencyMs: 420
-    });
+    res.json(getQueueStats());
   });
 
   router.post('/api/batch/lead-analysis', authenticateToken, rateLimiter, (req, res) => {

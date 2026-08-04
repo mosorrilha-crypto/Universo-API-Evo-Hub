@@ -96,24 +96,24 @@ Fundação   Core        Dados       UX/CRM      Integrações  Escala
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
 | 1.1.1 | Extrair `services/webhook/` de `server.ts` | P0 | M | ✅ Feito (server.ts virou composition root; config/gemini/supabase/middlewares/rotas em `server/`) |
-| 1.1.2 | Parser Meta Cloud API: extrair `from`, `type`, `audio.id` | P0 | M | Pendente |
-| 1.1.3 | Parser Evolution API: `MESSAGES_UPSERT` com mídia de áudio | P0 | M | Pendente |
-| 1.1.4 | Download de mídia Meta (Graph API) e Evolution | P0 | L | Pendente |
-| 1.1.5 | Enfileirar job de transcrição (in-memory queue → Fase 2 Redis) | P0 | M | Pendente |
-| 1.1.6 | Corrigir rota `/api/webhooks/evolution_hub` → alinhar com frontend ou redirect | P2 | XS | Pendente |
-| 1.1.7 | Idempotência por `message_id` (evitar reprocessar) | P1 | S | Pendente |
+| 1.1.2 | Parser Meta Cloud API: extrair `from`, `type`, `audio.id` | P0 | M | ✅ Feito |
+| 1.1.3 | Parser Evolution API: `MESSAGES_UPSERT` com mídia de áudio | P0 | M | ✅ Feito |
+| 1.1.4 | Download de mídia Meta (Graph API) e Evolution | P0 | L | ✅ Código feito, não validado ponta-a-ponta (sem WhatsApp real conectado ainda) |
+| 1.1.5 | Enfileirar job de transcrição (in-memory queue → Fase 2 Redis) | P0 | M | ✅ Feito (fila em memória, ver server/services/transcriptionQueue.ts) |
+| 1.1.6 | Corrigir rota `/api/webhooks/evolution_hub` → alinhar com frontend ou redirect | P2 | XS | ✅ Feito |
+| 1.1.7 | Idempotência por `message_id` (evitar reprocessar) | P1 | S | ✅ Feito (em memória; migra pra DB na Fase 2) |
 
 **Critério de aceite:** POST simulado de áudio WhatsApp cria lead com transcrição real (não TTS).
 
 ### Epic 1.2 — Serviço de transcrição robusto
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 1.2.1 | Extrair `services/gemini/transcribe.ts` | P0 | S |
-| 1.2.2 | Validar modelos Gemini (`/api/test-gemini`) e fixar modelo estável (ex.: `gemini-2.0-flash`) | P0 | S |
-| 1.2.3 | Validar resposta JSON com schema Zod | P1 | S |
-| 1.2.4 | Suportar OGG/Opus nativo do WhatsApp (não só TTS) | P0 | M |
-| 1.2.5 | Log de tokens por request (input/output) | P1 | S |
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 1.2.1 | Extrair `services/gemini/transcribe.ts` | P0 | S | ✅ Feito (`server/services/geminiTranscription.ts`, compartilhado entre `/api/transcribe` e a fila de webhook) |
+| 1.2.2 | Validar modelos Gemini (`/api/test-gemini`) e fixar modelo estável (ex.: `gemini-2.0-flash`) | P0 | S | Pendente (rotas reais já usam `gemini-3.6-flash`; só `/api/test-gemini` ainda testa modelos antigos/descontinuados) |
+| 1.2.3 | Validar resposta JSON com schema Zod | P1 | S | Pendente |
+| 1.2.4 | Suportar OGG/Opus nativo do WhatsApp (não só TTS) | P0 | M | Pendente (download de mídia já traz o áudio original; falta só confirmar com um arquivo real) |
+| 1.2.5 | Log de tokens por request (input/output) | P1 | S | Pendente |
 
 ### Epic 1.3 — Resposta automática opcional
 
@@ -251,11 +251,11 @@ Schema mínimo sugerido:
 
 ### Epic 5.1 — Fila e workers
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 5.1.1 | Redis + BullMQ para jobs de transcrição/análise batch | P1 | L |
-| 5.1.2 | Retry com backoff; dead letter queue | P1 | M |
-| 5.1.3 | Substituir telemetria fake por agregação real de tokens | P1 | M |
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 5.1.1 | Redis + BullMQ para jobs de transcrição/análise batch | P1 | L | Pendente (fila em memória feita na Fase 1, item 1.1.5 — migrar quando volume justificar) |
+| 5.1.2 | Retry com backoff; dead letter queue | P1 | M | Pendente |
+| 5.1.3 | Substituir telemetria fake por agregação real de tokens | P1 | M | ✅ Parcial (`/api/queue/status` já usa números reais da fila; `/api/telemetry/tokens` continua simulado até ter tenants reais) |
 
 ### Epic 5.2 — Testes e CI
 
@@ -296,8 +296,8 @@ Schema mínimo sugerido:
 | 4 | 0.2.4 | Demo login só em DEMO_MODE | 0 | P0 | S | ✅ Feito |
 | 5 | 0.1.3 | Rate limiting APIs IA | 0 | P0 | S | ✅ Feito |
 | 6 | 1.1.1 | Extrair services de server.ts | 1 | P0 | M | ✅ Feito |
-| 7 | 1.1.2–3 | Parsers webhook Meta + Evolution | 1 | P0 | M | Pendente |
-| 8 | 1.1.4 | Download mídia áudio WhatsApp | 1 | P0 | L | Pendente |
+| 7 | 1.1.2–3 | Parsers webhook Meta + Evolution | 1 | P0 | M | ✅ Feito |
+| 8 | 1.1.4 | Download mídia áudio WhatsApp | 1 | P0 | L | ✅ Código feito, falta validar com WhatsApp real |
 | 9 | 1.2.2 | Fixar modelo Gemini válido | 1 | P0 | S | Pendente |
 | 10 | 1.2.4 | Suporte OGG/Opus real | 1 | P0 | M | Pendente |
 | 11 | 2.1.1–2 | Schema Supabase + RLS | 2 | P0 | M | Pendente |
