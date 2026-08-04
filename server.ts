@@ -1,9 +1,10 @@
+import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
@@ -11,20 +12,39 @@ dotenv.config();
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
+  const isProduction = process.env.NODE_ENV === 'production';
 
   // Configuração Supabase - Universo.ai
+  // Em produção exigimos as credenciais reais. Em desenvolvimento/preview (ex: AI Studio,
+  // antes de existir um projeto Supabase), o servidor sobe mesmo sem elas — apenas as
+  // rotas que dependem do Supabase respondem 503, o resto do app (modo demo em
+  // localStorage) continua funcionando normalmente.
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
+  let supabase: SupabaseClient | null = null;
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  } else if (isProduction) {
     throw new Error(
-      'SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias. Configure-as no .env (veja .env.example).'
+      'SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias em produção. Configure-as no .env (veja .env.example).'
+    );
+  } else {
+    console.warn(
+      '⚠️  Supabase não configurado (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY ausentes). ' +
+      'Rotas de autenticação real (/api/auth/login, /api/setup-db) ficam desativadas — ' +
+      'o app segue funcional em modo demo (localStorage). Configure o .env quando tiver um projeto Supabase.'
     );
   }
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  const JWT_SECRET = process.env.JWT_SECRET;
+  // JWT_SECRET é obrigatória em produção. Em dev, geramos uma efêmera (só dura enquanto
+  // o processo estiver de pé) para não travar o preview — não usar isso em produção.
+  let JWT_SECRET = process.env.JWT_SECRET;
   if (!JWT_SECRET) {
-    throw new Error('JWT_SECRET é obrigatória. Configure-a no .env (veja .env.example).');
+    if (isProduction) {
+      throw new Error('JWT_SECRET é obrigatória em produção. Configure-a no .env (veja .env.example).');
+    }
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    console.warn('⚠️  JWT_SECRET não configurada — usando um segredo temporário só para esta execução (dev only).');
   }
 
   app.use(express.json());
@@ -44,8 +64,11 @@ async function startServer() {
 
   // Rota de Login de Operadores e Administradores com verificação de senha
   app.post('/api/auth/login', async (req, res) => {
+    if (!supabase) {
+      return res.status(503).json({ error: 'Supabase não configurado neste ambiente. Use o modo demo na tela de login.' });
+    }
     const { tenantId, email, password } = req.body;
-    
+
     try {
       if (!password || password.trim() === '') {
         throw new Error('A senha é obrigatória.');
@@ -78,9 +101,12 @@ async function startServer() {
 
   // Rota de Setup Inicial (Cria Admin no Supabase)
   app.get('/api/setup-db', async (req, res) => {
+    if (!supabase) {
+      return res.status(503).json({ error: 'Supabase não configurado neste ambiente.' });
+    }
     try {
       const hashedPassword = await bcrypt.hash('mudar-senha-123', 10);
-      
+
       const { data, error } = await supabase
         .from('operators')
         .upsert({
