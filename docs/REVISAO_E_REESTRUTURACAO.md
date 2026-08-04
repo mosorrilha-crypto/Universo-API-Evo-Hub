@@ -14,16 +14,19 @@ total exposta no código-fonte, e o build de produção **não compilava** por d
 faltante. Nada disso é intuito de design — é o padrão típico de apps gerados por IA sem
 revisão humana: cada tela foi gerada isoladamente, sem integração real entre elas.
 
-## 🔴 Crítico — segurança (ação sua, fora do código)
+## 🔴 Crítico — segurança
 
 - **`server.ts` tinha a `service_role key` do Supabase cravada em texto puro no
   código**, já commitada e enviada ao GitHub (commit `67cac74`, presente em `main` e na
-  branch remota). Essa chave dá acesso total ao banco, ignorando RLS. **Ela deve ser
-  rotacionada no painel do Supabase (Project Settings → API → Reset service_role key)
-  assim que possível** — a correção de código abaixo remove a chave do arquivo, mas não
-  invalida a que já vazou.
+  branch remota). Confirmado depois: o projeto Supabase (`pkocepjfedtsxmufymvd`) é real e
+  estava ativo, ou seja, não era um risco teórico. ✅ **Resolvido em 04/08/2026** — as
+  chaves legadas (`anon`/`service_role` em formato JWT) foram desativadas via API de
+  gerenciamento do Supabase (`PUT /v1/projects/{ref}/api-keys/legacy?enabled=false`), e o
+  backend migrado para a chave nova no formato `sb_secret_...` (nunca esteve no código-fonte
+  nem no histórico do Git). A chave antiga que vazou está permanentemente inválida.
 - O `JWT_SECRET` também tinha um valor padrão hardcoded (`'universo_secret_key_2024'`),
-  ou seja, qualquer pessoa que leia o repositório sabia como forjar tokens válidos.
+  ou seja, qualquer pessoa que leia o repositório sabia como forjar tokens válidos. ✅
+  Corrigido — agora obrigatória em produção, sem valor padrão.
 
 ## 🟠 Erros concretos corrigidos nesta revisão
 
@@ -95,10 +98,10 @@ exige decisão de arquitetura, então não foram tocados nesta revisão:
 
 ## Plano de reestruturação (fases)
 
-**Fase 0 — Segurança (você, fora do código):** rotacionar a `service_role key` do
-Supabase; se possível, reescrever o histórico do Git para remover o commit com a chave
-antiga (força push coordenado) — rotacionar já resolve o risco prático, reescrever
-histórico é limpeza adicional.
+**Fase 0 — Segurança:** ✅ chave do Supabase rotacionada (chaves legadas desativadas,
+migrado para `sb_secret_...`). Ainda pendente, opcional: reescrever o histórico do Git
+para remover o commit com a chave antiga (força push coordenado) — é limpeza adicional,
+já que a chave em si não funciona mais.
 
 **Fase 1 — Estabilizar o build (feito nesta revisão):** dependências corretas,
 segredos fora do código-fonte, remoção de código morto. ✅
