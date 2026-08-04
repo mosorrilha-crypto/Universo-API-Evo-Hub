@@ -5,6 +5,7 @@ import { createServer as createViteServer } from 'vite';
 
 import { loadConfig } from './server/config';
 import { createSupabaseClientFromConfig } from './server/supabaseClient';
+import { getGeminiClient } from './server/gemini';
 import { createAuthenticateToken } from './server/middleware/auth';
 import { aiRateLimiter } from './server/middleware/rateLimit';
 import { createAuthenticateEvoHub } from './server/middleware/evoHubAuth';
@@ -14,6 +15,7 @@ import { createTelemetryRouter } from './server/routes/telemetry';
 import { createWebhooksRouter } from './server/routes/webhooks';
 import { createMetaCapiRouter } from './server/routes/metaCapi';
 import { createEvoHubRouter } from './server/routes/evoHub';
+import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 
 dotenv.config();
 
@@ -39,6 +41,16 @@ async function startServer() {
   app.use(createWebhooksRouter({ metaWebhookVerifyToken: config.metaWebhookVerifyToken }));
   app.use(createMetaCapiRouter({ authenticateToken }));
   app.use(createEvoHubRouter({ authenticateEvoHub }));
+
+  // Worker em background que processa a fila de transcrição (webhook → download
+  // de mídia → Gemini). Ver server/services/transcriptionQueue.ts.
+  startTranscriptionWorker({
+    getAi: () => getGeminiClient(config),
+    metaAccessToken: config.metaAccessToken,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
+  });
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
   if (!config.isProduction) {

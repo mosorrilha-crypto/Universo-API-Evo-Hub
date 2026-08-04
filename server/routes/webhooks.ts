@@ -1,5 +1,8 @@
 import crypto from 'crypto';
 import { Router } from 'express';
+import { parseMetaWebhookPayload, parseEvolutionWebhookPayload } from '../services/webhookParsers';
+import { markProcessedIfNew } from '../services/idempotency';
+import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
@@ -56,13 +59,33 @@ export function createWebhooksRouter({ metaWebhookVerifyToken }: WebhooksRouterD
 
     const body = req.body || {};
 
+    // Extrai as mensagens em um formato comum, enfileira áudio pra transcrição
+    // (idempotente por message_id) e ignora o resto (texto/imagem por ora —
+    // ver Epic 1.3 pra resposta automática).
+    const enqueueAudioMessages = (parsedMessages: ReturnType<typeof parseMetaWebhookPayload>) => {
+      let enqueued = 0;
+      for (const msg of parsedMessages) {
+        if (msg.type !== 'audio') continue;
+        if (!markProcessedIfNew(msg.messageId)) {
+          console.log(`↩️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} já processada, ignorando reentrega.`);
+          continue;
+        }
+        enqueueTranscriptionJob(msg);
+        enqueued += 1;
+      }
+      return enqueued;
+    };
+
     // 1. Evolution API v2 Format (e.g. MESSAGES_UPSERT, CONNECTION_UPDATE)
     if (body.event || body.instance) {
       const eventName = body.event || 'EVOLUTION_EVENT';
       const instance = body.instance || process.env.EVOLUTION_INSTANCE_NAME || 'WhatsApp Universo.ai';
       const data = body.data || body;
 
-      console.log(`📱 [Evolution Webhook ${instance}] Evento: ${eventName}`, data?.key ? `(Key: ${data.key.id})` : '');
+      const parsedMessages = parseEvolutionWebhookPayload(body);
+      const enqueued = enqueueAudioMessages(parsedMessages);
+
+      console.log(`📱 [Evolution Webhook ${instance}] Evento: ${eventName}`, data?.key ? `(Key: ${data.key.id})` : '', enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
 
       return res.status(200).json({
         success: true,
@@ -80,9 +103,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken }: WebhooksRouterD
       const value = changes?.value;
       const messages = value?.messages;
 
+      const parsedMessages = parseMetaWebhookPayload(body);
+      const enqueued = enqueueAudioMessages(parsedMessages);
+
       if (messages && messages.length > 0) {
         const msg = messages[0];
-        console.log(`📱 [Webhook Meta WhatsApp] Nova mensagem de ${msg.from}:`, msg.text?.body || `[Tipo: ${msg.type}]`);
+        console.log(`📱 [Webhook Meta WhatsApp] Nova mensagem de ${msg.from}:`, msg.text?.body || `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
       }
 
       return res.status(200).json({
@@ -110,6 +136,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken }: WebhooksRouterD
 
   router.get('/api/webhooks/evolution', handleWebhookVerification);
   router.post('/api/webhooks/evolution', handleWebhookPayload);
+
+  // Alias: o EvoHubIntegration.tsx usa esse caminho como URL padrão de webhook
+  // no frontend — sem essa rota, ele apontava pra um endpoint inexistente (404).
+  router.get('/api/webhooks/evolution_hub', handleWebhookVerification);
+  router.post('/api/webhooks/evolution_hub', handleWebhookPayload);
 
   router.get('/api/webhooks/whatsapp', handleWebhookVerification);
   router.post('/api/webhooks/whatsapp', handleWebhookPayload);

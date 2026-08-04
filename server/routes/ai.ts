@@ -1,6 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import type { ServerConfig } from '../config';
 import { getGeminiClient } from '../gemini';
+import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 
 interface AiRouterDeps {
   config: ServerConfig;
@@ -127,62 +128,8 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
   router.post('/api/transcribe', authenticateToken, rateLimiter, async (req, res) => {
     try {
       const { audioBase64, mimeType, leadName, customInstructions } = req.body || {};
-
-      if (ai && audioBase64) {
-        try {
-          const prompt = `Você é um transcritor e analista de áudios de atendimento para WhatsApp CRM.
-Processe o áudio fornecido e responda estritamente em formato JSON com a seguinte estrutura:
-{
-  "transcription": "transcrição do áudio em português",
-  "language": "Português (Brasil)",
-  "summary": "resumo de 1-2 frases do áudio",
-  "intent": "Intenção do cliente",
-  "sentiment": "Positivo" | "Neutro" | "Dúvida" | "Urgente" | "Objeção",
-  "keyPoints": ["ponto chave 1", "ponto chave 2"],
-  "suggestedReply": "sugestão de resposta amigável",
-  "urgencyScore": número de 1 a 5
-}
-${customInstructions || ''}`;
-
-          const cleanBase64 = audioBase64.replace(/^data:audio\/\w+;base64,/, '');
-
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
-            contents: [
-              {
-                inlineData: {
-                  data: cleanBase64,
-                  mimeType: mimeType || 'audio/ogg',
-                },
-              },
-              { text: prompt },
-            ],
-            config: {
-              responseMimeType: 'application/json',
-            },
-          });
-
-          const rawText = response.text || '';
-          const parsed = JSON.parse(rawText);
-          return res.json({ success: true, source: 'gemini', result: parsed });
-        } catch (geminiError) {
-          console.warn('Gemini Audio Transcription error, fallbacking:', geminiError);
-        }
-      }
-
-      // Fallback preset transcription
-      const fallbackResult = {
-        transcription: 'Olá, gostaria de confirmar os detalhes do plano comercial e saber se há suporte para dúvidas de integração.',
-        language: 'Português (Brasil)',
-        summary: 'Cliente solicita confirmação de suporte e detalhes sobre o plano comercial.',
-        intent: 'Dúvida Comercial & Suporte',
-        sentiment: 'Positivo',
-        keyPoints: ['Suporte técnico', 'Plano comercial'],
-        suggestedReply: `Olá ${leadName || ''}! Nosso plano inclui suporte dedicado 24/7 e onboarding acompanhado. Como posso ajudar com seu início?`,
-        urgencyScore: 4,
-      };
-
-      return res.json({ success: true, source: 'fallback', result: fallbackResult });
+      const outcome = await transcribeAudioWithGemini(ai, audioBase64, mimeType, { leadName, customInstructions });
+      return res.json({ success: true, source: outcome.source, result: outcome.result });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao processar áudio.' });
     }
