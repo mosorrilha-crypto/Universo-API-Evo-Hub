@@ -1,15 +1,34 @@
 import crypto from 'crypto';
 import { Router } from 'express';
-import { parseMetaWebhookPayload, parseEvolutionWebhookPayload } from '../services/webhookParsers';
+import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
+  evoHubWebhookSecret?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret }: WebhooksRouterDeps): Router {
   const router = Router();
+
+  // Extrai as mensagens em um formato comum, enfileira áudio pra transcrição
+  // (idempotente por message_id) e ignora o resto (texto/imagem por ora —
+  // ver Epic 1.3 pra resposta automática). Compartilhado entre os handlers de
+  // Meta/Evolution direto e o handler dedicado do Evo Hub.
+  const enqueueAudioMessages = (parsedMessages: ParsedIncomingMessage[]) => {
+    let enqueued = 0;
+    for (const msg of parsedMessages) {
+      if (msg.type !== 'audio') continue;
+      if (!markProcessedIfNew(msg.messageId)) {
+        console.log(`↩️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} já processada, ignorando reentrega.`);
+        continue;
+      }
+      enqueueTranscriptionJob(msg);
+      enqueued += 1;
+    }
+    return enqueued;
+  };
 
   const handleWebhookVerification = (req: any, res: any) => {
     const mode = req.query['hub.mode'];
@@ -58,23 +77,6 @@ export function createWebhooksRouter({ metaWebhookVerifyToken }: WebhooksRouterD
     }
 
     const body = req.body || {};
-
-    // Extrai as mensagens em um formato comum, enfileira áudio pra transcrição
-    // (idempotente por message_id) e ignora o resto (texto/imagem por ora —
-    // ver Epic 1.3 pra resposta automática).
-    const enqueueAudioMessages = (parsedMessages: ReturnType<typeof parseMetaWebhookPayload>) => {
-      let enqueued = 0;
-      for (const msg of parsedMessages) {
-        if (msg.type !== 'audio') continue;
-        if (!markProcessedIfNew(msg.messageId)) {
-          console.log(`↩️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} já processada, ignorando reentrega.`);
-          continue;
-        }
-        enqueueTranscriptionJob(msg);
-        enqueued += 1;
-      }
-      return enqueued;
-    };
 
     // 1. Evolution API v2 Format (e.g. MESSAGES_UPSERT, CONNECTION_UPDATE)
     if (body.event || body.instance) {
@@ -127,6 +129,77 @@ export function createWebhooksRouter({ metaWebhookVerifyToken }: WebhooksRouterD
     });
   };
 
+  /**
+   * Webhook dedicado do Evo Hub real (api.evohub.ai, canal BYO). Diferente do
+   * handler genérico acima: a assinatura HMAC usa o webhook_secret que a gente
+   * escolhe ao criar o canal (EVO_HUB_WEBHOOK_SECRET), não o META_APP_SECRET —
+   * o Hub é quem fala com a Meta, nunca recebemos o payload direto dela. Não
+   * expõe o alias /api/webhooks/evolution_hub (esse é o endpoint mockado do
+   * nosso próprio facade /api/v1/*, usado só como URL de exemplo no frontend).
+   */
+  const handleEvoHubVerification = (req: any, res: any) => {
+    res.status(200).json({
+      status: 'active',
+      message: 'Webhook do Evo Hub (real) operando e pronto para receber eventos.',
+    });
+  };
+
+  const handleEvoHubWebhook = (req: any, res: any) => {
+    const signatureHeader = req.headers['x-hub-signature-256'] as string | undefined;
+
+    if (evoHubWebhookSecret) {
+      if (!signatureHeader) {
+        console.warn('❌ Webhook Evo Hub: assinatura ausente. Rejeitando requisição.');
+        return res.status(403).json({ error: 'Assinatura ausente.' });
+      }
+      try {
+        const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+        const hash = crypto.createHmac('sha256', evoHubWebhookSecret).update(rawBody).digest('hex');
+        const expectedSignature = `sha256=${hash}`;
+        const sigBuffer = Buffer.from(signatureHeader);
+        const expectedBuffer = Buffer.from(expectedSignature);
+
+        if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+          console.warn('❌ Webhook Evo Hub: assinatura HMAC-SHA256 inválida. Rejeitando requisição fraudulenta.');
+          return res.status(403).json({ error: 'Assinatura HMAC-SHA256 inválida. Requisição rejeitada.' });
+        }
+      } catch (err) {
+        console.error('Erro na validação HMAC do Webhook Evo Hub:', err);
+        return res.status(403).json({ error: 'Erro ao validar assinatura HMAC-SHA256.' });
+      }
+    } else {
+      console.warn('⚠️  EVO_HUB_WEBHOOK_SECRET não configurado — aceitando webhook do Evo Hub sem verificar assinatura (dev only).');
+    }
+
+    const body = req.body || {};
+
+    // Evento de ciclo de vida do canal (conectado/desconectado etc.) — não é
+    // mensagem de WhatsApp, só log por ora.
+    const lifecycle = parseEvoHubLifecycleEvent(body);
+    if (lifecycle) {
+      console.log(`🔔 [Evo Hub] Evento de ciclo de vida: ${lifecycle.eventName}`, lifecycle.details);
+      return res.status(200).json({ success: true, received: 'lifecycle_event' });
+    }
+
+    // Passthrough de mensagem no formato Meta Cloud API (BYO: o Hub repassa a
+    // estrutura oficial da Meta sem alterar).
+    if (body?.object === 'whatsapp_business_account') {
+      const parsedMessages = parseMetaWebhookPayload(body, 'evohub');
+      const enqueued = enqueueAudioMessages(parsedMessages);
+
+      const messages = body.entry?.[0]?.changes?.[0]?.value?.messages;
+      if (messages && messages.length > 0) {
+        const msg = messages[0];
+        console.log(`📱 [Webhook Evo Hub] Nova mensagem de ${msg.from}:`, msg.text?.body || `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+      }
+
+      return res.status(200).json({ success: true, processedMessages: messages?.length || 0 });
+    }
+
+    console.warn('🔔 [Evo Hub] Payload de webhook não reconhecido:', JSON.stringify(body).slice(0, 500));
+    return res.status(200).json({ success: true, received: 'unknown_payload' });
+  };
+
   // Webhook Routes (Supports /webhook, /api/webhooks/meta, /api/webhooks/evolution, /api/webhooks/whatsapp)
   router.get('/webhook', handleWebhookVerification);
   router.post('/webhook', handleWebhookPayload);
@@ -144,6 +217,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken }: WebhooksRouterD
 
   router.get('/api/webhooks/whatsapp', handleWebhookVerification);
   router.post('/api/webhooks/whatsapp', handleWebhookPayload);
+
+  // Endpoint dedicado do Evo Hub real — é esse que deve ser cadastrado como
+  // webhook_url ao criar o canal via POST /api/v1/channels no Evo Hub.
+  router.get('/api/webhooks/evohub', handleEvoHubVerification);
+  router.post('/api/webhooks/evohub', handleEvoHubWebhook);
 
   return router;
 }

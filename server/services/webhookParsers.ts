@@ -6,7 +6,7 @@
  */
 
 export interface ParsedIncomingMessage {
-  provider: 'meta' | 'evolution';
+  provider: 'meta' | 'evolution' | 'evohub';
   messageId: string;
   from: string;
   contactName?: string;
@@ -21,8 +21,14 @@ export interface ParsedIncomingMessage {
 /**
  * Meta Cloud API manda o payload dentro de entry[].changes[].value.messages[].
  * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/payload-examples
+ *
+ * O Evo Hub, no modo BYO (Bring Your Own Meta App), repassa esse mesmo formato
+ * de mensagem sem alterar a estrutura (passthrough) — só muda quem assina o
+ * HMAC do webhook (nosso webhook_secret, não o META_APP_SECRET) e como a mídia
+ * é baixada depois (ver server/services/mediaDownload.ts). Por isso o parser
+ * é o mesmo, com o provider identificando de onde a mensagem veio.
  */
-export function parseMetaWebhookPayload(body: any): ParsedIncomingMessage[] {
+export function parseMetaWebhookPayload(body: any, provider: 'meta' | 'evohub' = 'meta'): ParsedIncomingMessage[] {
   const parsed: ParsedIncomingMessage[] = [];
   if (body?.object !== 'whatsapp_business_account') return parsed;
 
@@ -41,7 +47,7 @@ export function parseMetaWebhookPayload(body: any): ParsedIncomingMessage[] {
         if (!msg?.id || !msg?.from) continue;
 
         const base: Omit<ParsedIncomingMessage, 'type'> = {
-          provider: 'meta',
+          provider,
           messageId: msg.id,
           from: msg.from,
           contactName: contactsByWaId.get(msg.from),
@@ -108,4 +114,19 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   }
 
   return [{ ...base, type: 'other' }];
+}
+
+/**
+ * Eventos de ciclo de vida do Evo Hub (ex.: canal conectado/desconectado,
+ * template aprovado) não são mensagens do WhatsApp — são avisos administrativos
+ * sobre o canal em si. A documentação do Hub mostra dois formatos de envelope
+ * pra esse tipo de evento em seções diferentes: `{event, properties}` numa
+ * seção e `{event_type, meta_connection}` no guia de integração. Aceitamos os
+ * dois até confirmar qual é o real com um evento de verdade chegando.
+ */
+export function parseEvoHubLifecycleEvent(body: any): { eventName: string; details: unknown } | null {
+  if (body?.object === 'whatsapp_business_account') return null; // mensagem normal, não é lifecycle
+  const eventName = body?.event || body?.event_type;
+  if (!eventName) return null;
+  return { eventName: String(eventName), details: body.properties ?? body.meta_connection ?? body };
 }

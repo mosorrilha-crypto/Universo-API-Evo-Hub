@@ -38,7 +38,7 @@ async function startServer() {
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, demoMode: config.demoMode, supabase }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken, rateLimiter: aiRateLimiter }));
-  app.use(createWebhooksRouter({ metaWebhookVerifyToken: config.metaWebhookVerifyToken }));
+  app.use(createWebhooksRouter({ metaWebhookVerifyToken: config.metaWebhookVerifyToken, evoHubWebhookSecret: config.evoHubWebhookSecret }));
   app.use(createMetaCapiRouter({ authenticateToken }));
   app.use(createEvoHubRouter({ authenticateEvoHub }));
 
@@ -50,6 +50,8 @@ async function startServer() {
     evolutionApiUrl: config.evolutionApiUrl,
     evolutionApiKey: config.evolutionApiKey,
     evolutionInstanceName: config.evolutionInstanceName,
+    evoHubApiUrl: config.evoHubApiUrl,
+    evoHubChannelToken: config.evoHubChannelToken,
   });
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
