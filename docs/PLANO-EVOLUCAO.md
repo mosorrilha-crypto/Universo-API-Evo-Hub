@@ -355,6 +355,7 @@ paralelo à Fase 1/2.
 | Scope creep (10 módulos UI) | Alto | Congelar features novas até Fase 2 done |
 | Migração localStorage perde dados | Médio | Script export/import JSON (já existe backup) |
 | Supabase vs Firebase indecisão | Médio | Decisão: Supabase (documentada acima) |
+| ~~Chave service_role do Supabase vazada no Git~~ | ~~Alto~~ | ✅ Resolvido 04/08/2026 — chaves legadas desativadas, migrado para `sb_secret_...` |
 
 ## Próximo passo imediato (Sprint 0 — semana 1)
 
