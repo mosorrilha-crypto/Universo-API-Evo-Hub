@@ -93,15 +93,15 @@ Fundação   Core        Dados       UX/CRM      Integrações  Escala
 
 ### Epic 1.1 — Pipeline de webhook
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 1.1.1 | Extrair `services/webhook/` de `server.ts` | P0 | M |
-| 1.1.2 | Parser Meta Cloud API: extrair `from`, `type`, `audio.id` | P0 | M |
-| 1.1.3 | Parser Evolution API: `MESSAGES_UPSERT` com mídia de áudio | P0 | M |
-| 1.1.4 | Download de mídia Meta (Graph API) e Evolution | P0 | L |
-| 1.1.5 | Enfileirar job de transcrição (in-memory queue → Fase 2 Redis) | P0 | M |
-| 1.1.6 | Corrigir rota `/api/webhooks/evolution_hub` → alinhar com frontend ou redirect | P2 | XS |
-| 1.1.7 | Idempotência por `message_id` (evitar reprocessar) | P1 | S |
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 1.1.1 | Extrair `services/webhook/` de `server.ts` | P0 | M | ✅ Feito (server.ts virou composition root; config/gemini/supabase/middlewares/rotas em `server/`) |
+| 1.1.2 | Parser Meta Cloud API: extrair `from`, `type`, `audio.id` | P0 | M | Pendente |
+| 1.1.3 | Parser Evolution API: `MESSAGES_UPSERT` com mídia de áudio | P0 | M | Pendente |
+| 1.1.4 | Download de mídia Meta (Graph API) e Evolution | P0 | L | Pendente |
+| 1.1.5 | Enfileirar job de transcrição (in-memory queue → Fase 2 Redis) | P0 | M | Pendente |
+| 1.1.6 | Corrigir rota `/api/webhooks/evolution_hub` → alinhar com frontend ou redirect | P2 | XS | Pendente |
+| 1.1.7 | Idempotência por `message_id` (evitar reprocessar) | P1 | S | Pendente |
 
 **Critério de aceite:** POST simulado de áudio WhatsApp cria lead com transcrição real (não TTS).
 
@@ -295,7 +295,7 @@ Schema mínimo sugerido:
 | 3 | 0.2.2 | Flag `source: fallback` nos mocks | 0 | P0 | S | ✅ Feito |
 | 4 | 0.2.4 | Demo login só em DEMO_MODE | 0 | P0 | S | ✅ Feito |
 | 5 | 0.1.3 | Rate limiting APIs IA | 0 | P0 | S | ✅ Feito |
-| 6 | 1.1.1 | Extrair services de server.ts | 1 | P0 | M | Pendente |
+| 6 | 1.1.1 | Extrair services de server.ts | 1 | P0 | M | ✅ Feito |
 | 7 | 1.1.2–3 | Parsers webhook Meta + Evolution | 1 | P0 | M | Pendente |
 | 8 | 1.1.4 | Download mídia áudio WhatsApp | 1 | P0 | L | Pendente |
 | 9 | 1.2.2 | Fixar modelo Gemini válido | 1 | P0 | S | Pendente |
