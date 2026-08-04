@@ -1,15 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User } from 'firebase/auth';
 
-const env = (import.meta as any).env || {};
-const defaultFirebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || "AIzaSyDummyKeyForDevelopment12345",
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "monique-studio-crm.firebaseapp.com",
-  projectId: env.VITE_FIREBASE_PROJECT_ID || "monique-studio-crm",
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "monique-studio-crm.appspot.com",
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789012",
-  appId: env.VITE_FIREBASE_APP_ID || "1:123456789012:web:abcdef1234567890"
-};
+import firebaseConfig from '../../firebase-applet-config.json';
+
+const defaultFirebaseConfig = firebaseConfig;
 
 const app = getApps().length > 0 ? getApp() : initializeApp(defaultFirebaseConfig);
 export const auth = getAuth(app);

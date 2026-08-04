@@ -207,10 +207,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         }),
       });
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        throw new Error(`Erro na resposta do servidor (${response.status}). Tente novamente.`);
+      }
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Erro ao analisar histórico da conversa.');
+        throw new Error(data?.error || 'Erro ao analisar histórico da conversa.');
       }
 
       const fullAnalysis: FullConversationAnalysis = {
@@ -251,10 +256,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         }),
       });
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        throw new Error(`Erro na resposta do servidor (${response.status}). Tente novamente.`);
+      }
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Erro ao processar áudio do lead.');
+        throw new Error(data?.error || 'Erro ao processar áudio do lead.');
       }
 
       const res: TranscriptionResult = data.result;
