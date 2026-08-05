@@ -56,6 +56,8 @@ async function startServer() {
     getAi: () => getGeminiClient(config),
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    supabaseUrl: config.supabaseUrl,
+    supabaseKey: config.supabaseKey,
   }));
   app.use(createMetaCapiRouter({ authenticateToken }));
   app.use(createEvoHubRouter({ authenticateEvoHub }));
@@ -63,6 +65,8 @@ async function startServer() {
     authenticateToken,
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    supabaseUrl: config.supabaseUrl,
+    supabaseKey: config.supabaseKey,
   }));
 
   // Worker em background que processa a fila de transcrição (webhook → download

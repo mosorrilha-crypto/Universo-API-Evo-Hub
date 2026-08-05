@@ -14,6 +14,8 @@ export interface ParsedIncomingMessage {
   text?: string;
   /** Presente quando type === 'audio' via Meta Cloud API. */
   metaAudio?: { mediaId: string; mimeType?: string };
+  /** Presente quando type === 'image' via Meta Cloud API. */
+  metaImage?: { mediaId: string; mimeType?: string };
   /** Presente quando type === 'audio' via Evolution API. */
   evolutionAudio?: { url?: string; mediaKey?: string; mimeType?: string };
 }
@@ -57,8 +59,8 @@ export function parseMetaWebhookPayload(body: any, provider: 'meta' | 'evohub' =
           parsed.push({ ...base, type: 'audio', metaAudio: { mediaId: msg.audio.id, mimeType: msg.audio.mime_type } });
         } else if (msg.type === 'text' && msg.text?.body) {
           parsed.push({ ...base, type: 'text', text: msg.text.body });
-        } else if (msg.type === 'image') {
-          parsed.push({ ...base, type: 'image' });
+        } else if (msg.type === 'image' && msg.image?.id) {
+          parsed.push({ ...base, type: 'image', metaImage: { mediaId: msg.image.id, mimeType: msg.image.mime_type } });
         } else {
           parsed.push({ ...base, type: 'other' });
         }

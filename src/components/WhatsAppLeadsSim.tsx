@@ -56,6 +56,44 @@ interface WhatsAppLeadsSimProps {
   onDeleteLead?: (leadId: string) => void;
 }
 
+// Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
+// comprovante de pagamento) — buscada via rota autenticada (nunca pública,
+// pode conter dado sensível), em vez do placeholder genérico de antes.
+const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => void }> = ({ messageId, onOpen }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    apiFetch(`/api/media/${encodeURIComponent(messageId)}`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled) return;
+        if (!blob) { setFailed(true); return; }
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [messageId]);
+
+  if (failed) {
+    return <div className="w-full h-20 bg-slate-800 rounded-lg flex items-center justify-center text-slate-500 text-[10px]">Imagem indisponível</div>;
+  }
+  if (!url) {
+    return <div className="w-full h-36 bg-slate-800 rounded-lg animate-pulse flex items-center justify-center text-slate-500 text-[10px]">Carregando imagem...</div>;
+  }
+  return (
+    <div onClick={() => onOpen(url)} className="relative group rounded-lg overflow-hidden border border-white/10 cursor-pointer">
+      <img src={url} alt="Imagem enviada pelo lead" className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-300" />
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold">
+        <ImageIcon className="w-4 h-4 mr-1" /> Ampliar
+      </div>
+    </div>
+  );
+};
+
 export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onSaveTranscript,
   knowledgeBase,
@@ -1358,7 +1396,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           {msg.type === 'image' && (
                             <div className="space-y-1.5 min-w-[200px]">
                               {msg.mediaUrl && (
-                                <div 
+                                <div
                                   onClick={() => setViewImageUrl(msg.mediaUrl || null)}
                                   className="relative group rounded-lg overflow-hidden border border-white/10 cursor-pointer"
                                 >
@@ -1371,6 +1409,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                     <ImageIcon className="w-4 h-4 mr-1" /> Ampliar
                                   </div>
                                 </div>
+                              )}
+                              {!msg.mediaUrl && (selectedLead as any)?.isReal && msg.sender === 'lead' && (
+                                <RealClientImage messageId={msg.id} onOpen={setViewImageUrl} />
                               )}
                               <p className="text-xs">{msg.text}</p>
                             </div>
