@@ -1,8 +1,9 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
-import { updateMessageText, recordOutgoingMessage } from './conversationStore';
-import { sendWhatsAppTextMessage } from './metaSend';
+import { updateMessageText, recordOutgoingMessage, getConversation } from './conversationStore';
+import { sendBubbles } from './sendBubbles';
+import { generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
@@ -127,13 +128,24 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
 
     // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
     // verdade (não do fallback simulado), pra não responder algo genérico.
-    if (outcome.source === 'gemini' && outcome.result.suggestedReply && !isAgentPaused()) {
-      runExclusive(message.from, () => sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, outcome.result.suggestedReply))
-        .then(() => {
-          recordOutgoingMessage(message.from, { type: 'text', text: outcome.result.suggestedReply, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
-          console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${outcome.result.suggestedReply}"`);
-        })
-        .catch((err) => console.warn('❌ [Resposta Automática] Falhou:', err.message));
+    // Reaproveita o mesmo motor de bolhas/humanização do caminho de texto
+    // (generateAutoReplyForText), passando a transcrição como se fosse a
+    // mensagem recebida — evita duplicar a lógica de estilo em dois lugares.
+    if (outcome.source === 'gemini' && !isAgentPaused()) {
+      runExclusive(message.from, async () => {
+        const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
+        const history = getConversation(message.from)?.messages.slice(0, -1);
+        try {
+          const bubbles = await generateAutoReplyForText(deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history);
+          if (!bubbles) return;
+          await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, bubbles, (bubbleText) => {
+            recordOutgoingMessage(message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+            console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}"`);
+          });
+        } catch (err: any) {
+          console.warn('❌ [Resposta Automática] Falhou:', err.message);
+        }
+      });
     }
   } catch (err: any) {
     totalFailed += 1;
