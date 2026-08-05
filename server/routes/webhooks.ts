@@ -6,6 +6,7 @@ import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
+import { markAsReadAndShowTyping } from '../services/metaSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { runExclusive } from '../services/perPhoneQueue';
@@ -24,7 +25,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
 
   // Resposta automática pra mensagens de texto (Epic 1.3): gera e envia de
   // volta via Meta Cloud API, sem bloquear a resposta do webhook (fire-and-forget).
-  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string) => {
+  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string) => {
     if (!getAi || isAgentPaused()) return;
     // runExclusive garante que, se a mensagem anterior desse número ainda
     // estiver gerando resposta, esta espera a vez — sem isso, uma chamada
@@ -34,12 +35,15 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
       const history = getConversation(phone)?.messages.slice(0, -1); // exclui a mensagem atual, já registrada antes de chamar isso
       try {
+        // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
+        // longa), não só na hora de enviar as bolhas.
+        await markAsReadAndShowTyping(metaPhoneNumberId, metaAccessToken, messageId);
         const bubbles = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history);
         if (!bubbles) return;
         await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, bubbles, (bubbleText) => {
           recordOutgoingMessage(phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
           console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}"`);
-        });
+        }, messageId);
       } catch (err: any) {
         console.warn('❌ [Resposta Automática] Falhou:', err.message);
       }
@@ -65,7 +69,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         enqueued += 1;
       } else if (msg.type === 'text') {
         recordIncomingMessage(msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
-        if (msg.text) triggerAutoReply(msg.from, msg.contactName, msg.text);
+        if (msg.text) triggerAutoReply(msg.from, msg.contactName, msg.text, msg.messageId);
       } else {
         recordIncomingMessage(msg.from, msg.contactName, { type: msg.type === 'image' ? 'image' : 'text', text: msg.type === 'image' ? '📷 Imagem recebida' : `[${msg.type}]`, timestamp: nowLabel });
       }

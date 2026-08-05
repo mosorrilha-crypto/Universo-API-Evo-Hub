@@ -1,4 +1,4 @@
-import { sendWhatsAppTextMessage } from './metaSend';
+import { sendWhatsAppTextMessage, markAsReadAndShowTyping } from './metaSend';
 
 /** Atraso realista de digitação antes de cada bolha — mesma lógica usada no whatsapp-agent-monique. */
 function calcularAtrasoDigitacao(texto: string): number {
@@ -13,16 +13,20 @@ function calcularAtrasoDigitacao(texto: string): number {
  * Envia uma resposta fracionada em várias "bolhas" curtas, uma de cada vez,
  * com um atraso entre elas que simula alguém digitando — em vez de despejar
  * tudo de uma vez (o que denunciaria na hora que é um agente automático).
+ * Reativa o indicador "digitando..." antes de cada bolha (ele expira em 25s,
+ * então uma resposta com várias bolhas precisa renová-lo a cada uma).
  */
 export async function sendBubbles(
   phoneNumberId: string | undefined,
   accessToken: string | undefined,
   to: string,
   bubbles: string[],
-  onBubbleSent: (text: string) => void
+  onBubbleSent: (text: string) => void,
+  incomingMessageId?: string
 ): Promise<void> {
   for (const bubble of bubbles) {
     if (!bubble.trim()) continue;
+    await markAsReadAndShowTyping(phoneNumberId, accessToken, incomingMessageId);
     await new Promise((resolve) => setTimeout(resolve, calcularAtrasoDigitacao(bubble)));
     await sendWhatsAppTextMessage(phoneNumberId, accessToken, to, bubble);
     onBubbleSent(bubble);
