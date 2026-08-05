@@ -9,7 +9,6 @@ import {
   User,
   Phone,
   DollarSign,
-  Calendar,
   MessageSquare,
   Sparkles,
   ChevronRight,
@@ -39,7 +38,6 @@ interface OperatorCRMProps {
   currentOperator?: any;
   tenantId?: string;
   onNavigateToFinancial?: (lead: LeadInfo) => void;
-  onNavigateToCalendar?: (lead: LeadInfo) => void;
 }
 
 const STAGES: { id: CRMStage; label: string; color: string; badge: string }[] = [
@@ -59,7 +57,6 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   currentUser: propCurrentUser,
   currentOperator,
   onNavigateToFinancial,
-  onNavigateToCalendar,
 }) => {
   const leads = propLeads || INITIAL_MOCK_LEADS;
   const currentUser = propCurrentUser || currentOperator || { name: 'Operador Admin', id: 'op_1' };
@@ -643,20 +640,6 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                   <span>Abrir WhatsApp</span>
                 </a>
 
-                {onNavigateToCalendar && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onNavigateToCalendar(selectedLead);
-                      setSelectedLead(null);
-                    }}
-                    className="py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-2 transition-all shadow"
-                  >
-                    <Calendar className="w-4 h-4" />
-                    <span>Google Calendar</span>
-                  </button>
-                )}
-
                 {onNavigateToFinancial && (
                   <button
                     type="button"
@@ -842,19 +825,6 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                 >
                   Fechar
                 </button>
-                {onNavigateToCalendar && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onNavigateToCalendar(selectedLead);
-                      setSelectedLead(null);
-                    }}
-                    className="py-2 px-3 bg-blue-950/60 hover:bg-blue-900 border border-blue-800 text-blue-300 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-all"
-                  >
-                    <Calendar className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Agendar no Google Calendar</span>
-                  </button>
-                )}
                 {onDeleteLead && (
                   <button
                     type="button"

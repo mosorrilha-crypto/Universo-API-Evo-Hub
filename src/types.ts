@@ -1,4 +1,4 @@
-export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'calendar' | 'evohub';
+export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'evohub';
 
 export type UserRole = 'operator' | 'manager' | 'admin' | 'saas_admin';
 
