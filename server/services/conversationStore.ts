@@ -129,3 +129,19 @@ export function listConversations(): StoredConversation[] {
 export function getConversation(phone: string): StoredConversation | undefined {
   return conversations.get(phone);
 }
+
+/**
+ * Limpa o histórico de mensagens de um número específico (ex: número de
+ * teste), mas mantém o contato/lead (nome, telefone) — pra testes não
+ * ficarem contaminados pela memória de conversas anteriores, sem perder o
+ * cadastro do contato. Equivalente ao deleteHistory() do
+ * whatsapp-agent-monique, mas sem apagar o registro do lead.
+ */
+export function clearConversationHistory(phone: string): StoredConversation | undefined {
+  const conv = conversations.get(phone);
+  if (!conv) return undefined;
+  conv.messages = [];
+  conv.updatedAt = new Date().toISOString();
+  scheduleSave();
+  return conv;
+}
