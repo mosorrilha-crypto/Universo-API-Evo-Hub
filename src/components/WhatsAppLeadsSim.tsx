@@ -117,6 +117,48 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Active Image Modal / Lightbox state
   const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
 
+  // Busca conversas reais de WhatsApp (recebidas via webhook) e mescla na
+  // lista — sem substituir os leads de exemplo/simulados que já existirem.
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchRealConversations = async () => {
+      try {
+        const response = await apiFetch('/api/conversations');
+        if (!response.ok || cancelled) return;
+        const data = await response.json();
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string }[] = data.conversations || [];
+
+        setLeads((prev) => {
+          const byId = new Map(prev.map((l) => [l.id, l]));
+          for (const conv of realConversations) {
+            const id = `real-${conv.phone}`;
+            const existing = byId.get(id);
+            const lastText = conv.messages[conv.messages.length - 1]?.text || '';
+            byId.set(id, {
+              ...(existing as any || {}),
+              id,
+              name: conv.name || conv.phone,
+              phone: conv.phone,
+              timestamp: conv.updatedAt,
+              status: 'transcribed',
+              textContent: lastText,
+              messages: conv.messages,
+              isReal: true,
+            } as any);
+          }
+          return Array.from(byId.values());
+        });
+      } catch {
+        // silencioso: painel continua funcionando com o que já tiver em memória/localStorage
+      }
+    };
+
+    fetchRealConversations();
+    const interval = setInterval(fetchRealConversations, 8000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
   const selectedLead = leads.find((l) => l.id === activeLeadId) || leads[0];
 
   // Filtered Leads according to search and WhatsApp filter tabs
@@ -317,8 +359,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
     setInputMessage('');
 
+    if (senderRole === 'agent' && (selectedLead as any).isReal) {
+      sendRealWhatsAppMessage(selectedLead.phone, newMsg.text!);
+    }
+
     if (autoAnalyze) {
       handleAnalyzeConversation(updatedLead);
+    }
+  };
+
+  // Envia de verdade via Meta Cloud API (só quando o lead é uma conversa real, não simulada)
+  const sendRealWhatsAppMessage = async (phone: string, text: string) => {
+    try {
+      await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+    } catch (err) {
+      console.error('Falha ao enviar mensagem real via WhatsApp:', err);
     }
   };
 
@@ -339,6 +398,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     };
 
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
+
+    if ((selectedLead as any).isReal) {
+      sendRealWhatsAppMessage(selectedLead.phone, replyText);
+    }
 
     if (autoAnalyze) {
       handleAnalyzeConversation(updatedLead);

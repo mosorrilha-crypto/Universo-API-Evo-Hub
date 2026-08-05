@@ -12,9 +12,19 @@ export interface ServerConfig {
   geminiApiKey?: string;
   /** Token de acesso à Graph API pra baixar mídia (diferente do META_APP_SECRET usado no HMAC). */
   metaAccessToken?: string;
+  /** ID do número de telefone WhatsApp (Meta Cloud API), usado pra enviar mensagens (POST /{id}/messages). */
+  metaPhoneNumberId?: string;
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
   evolutionInstanceName?: string;
+  /** URL base da API real do Evo Hub (api.evohub.ai) — não confundir com evohubApiKey acima. */
+  evoHubApiUrl: string;
+  /** Chave de conta (evh_pk_...) pra chamar a API do Evo Hub (criar canal, credenciais BYO etc.). */
+  evoHubAccountApiKey?: string;
+  /** Segredo escolhido por nós ao criar o canal, usado pelo Hub pra assinar X-Hub-Signature-256. */
+  evoHubWebhookSecret?: string;
+  /** Token do canal específico, usado pra autenticar no proxy de mídia /meta/* do Hub. */
+  evoHubChannelToken?: string;
 }
 
 /**
@@ -57,6 +67,10 @@ export function loadConfig(): ServerConfig {
     console.warn('⚠️  EVOHUB_API_KEY não configurada — rotas /api/v1/* do Evo Hub aceitam qualquer chamada (dev only).');
   }
 
+  if (!process.env.EVO_HUB_WEBHOOK_SECRET && !isProduction) {
+    console.warn('⚠️  EVO_HUB_WEBHOOK_SECRET não configurado — /api/webhooks/evohub aceita chamadas sem verificar assinatura (dev only).');
+  }
+
   return {
     port,
     isProduction,
@@ -68,8 +82,13 @@ export function loadConfig(): ServerConfig {
     metaWebhookVerifyToken,
     geminiApiKey: process.env.GEMINI_API_KEY,
     metaAccessToken: process.env.META_ACCESS_TOKEN,
+    metaPhoneNumberId: process.env.META_PHONE_NUMBER_ID,
     evolutionApiUrl: process.env.EVOLUTION_API_URL,
     evolutionApiKey: process.env.EVOLUTION_API_KEY,
     evolutionInstanceName: process.env.EVOLUTION_INSTANCE_NAME,
+    evoHubApiUrl: process.env.EVO_HUB_API_URL || 'https://api.evohub.ai',
+    evoHubAccountApiKey: process.env.EVO_HUB_ACCOUNT_API_KEY,
+    evoHubWebhookSecret: process.env.EVO_HUB_WEBHOOK_SECRET,
+    evoHubChannelToken: process.env.EVO_HUB_CHANNEL_TOKEN,
   };
 }

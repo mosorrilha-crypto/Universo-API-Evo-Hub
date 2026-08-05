@@ -102,8 +102,12 @@ Fundação   Core        Dados       UX/CRM      Integrações  Escala
 | 1.1.5 | Enfileirar job de transcrição (in-memory queue → Fase 2 Redis) | P0 | M | ✅ Feito (fila em memória, ver server/services/transcriptionQueue.ts) |
 | 1.1.6 | Corrigir rota `/api/webhooks/evolution_hub` → alinhar com frontend ou redirect | P2 | XS | ✅ Feito |
 | 1.1.7 | Idempotência por `message_id` (evitar reprocessar) | P1 | S | ✅ Feito (em memória; migra pra DB na Fase 2) |
+| 1.1.8 | Integração real com Evo Hub (BYO Meta App): rota dedicada `/api/webhooks/evohub`, verificação HMAC com `EVO_HUB_WEBHOOK_SECRET`, download de mídia via proxy `/meta/*` do Hub, tratamento de eventos de ciclo de vida do canal | P0 | M | ✅ Código feito (`server/routes/webhooks.ts`, `server/services/{webhookParsers,mediaDownload}.ts`), validado localmente com payloads sintéticos (assinatura HMAC ok, passthrough de mensagem ok, lifecycle event ok); falta testar com canal real conectado (ver 1.1.9) |
+| 1.1.9 | Criar canal real no Evo Hub via API (`POST /api/v1/channels`), obter link de conexão, conectar o número, validar webhook/mídia ponta-a-ponta | P0 | M | Pendente — depende do usuário concluir o cadastro do Meta App (Business Manager verificado) no painel do Evo Hub |
 
 **Critério de aceite:** POST simulado de áudio WhatsApp cria lead com transcrição real (não TTS).
+
+**Nota sobre ambiguidades na doc do Evo Hub (a confirmar com evento real):** (a) se o proxy `/meta/*` de mídia inclui ou não o segmento de versão da Graph API — implementado com fallback (tenta com `v23.0`, cai pra sem versão); (b) formato exato do envelope de eventos de ciclo de vida — implementado aceitando os dois formatos vistos na doc (`{event, properties}` e `{event_type, meta_connection}`).
 
 ### Epic 1.2 — Serviço de transcrição robusto
 

@@ -1,6 +1,7 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
-import { downloadMetaMedia, downloadEvolutionMedia } from './mediaDownload';
+import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
+import { updateMessageText } from './conversationStore';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
 export interface TranscriptionJob {
@@ -23,6 +24,8 @@ export interface TranscriptionQueueDeps {
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
   evolutionInstanceName?: string;
+  evoHubApiUrl?: string;
+  evoHubChannelToken?: string;
 }
 
 /**
@@ -86,7 +89,11 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     let audioBase64: string | undefined;
     let mimeType: string | undefined;
 
-    if (message.type === 'audio' && message.metaAudio) {
+    if (message.type === 'audio' && message.metaAudio && message.provider === 'evohub') {
+      const downloaded = await downloadEvoHubMedia(message.metaAudio.mediaId, deps.evoHubChannelToken, deps.evoHubApiUrl);
+      audioBase64 = downloaded.base64;
+      mimeType = downloaded.mimeType;
+    } else if (message.type === 'audio' && message.metaAudio) {
       const downloaded = await downloadMetaMedia(message.metaAudio.mediaId, deps.metaAccessToken);
       audioBase64 = downloaded.base64;
       mimeType = downloaded.mimeType;
@@ -109,7 +116,8 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
 
     totalProcessed += 1;
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
-    console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source})`);
+    updateMessageText(message.from, message.messageId, outcome.result.transcription);
+    console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.result.transcription}"`);
   } catch (err: any) {
     totalFailed += 1;
     recordResult({ job, status: 'failed', error: err.message, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
