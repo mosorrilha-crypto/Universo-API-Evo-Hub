@@ -5,7 +5,7 @@ import { markProcessedIfNew } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
-import { sendWhatsAppTextMessage } from '../services/metaSend';
+import { sendBubbles } from '../services/sendBubbles';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { runExclusive } from '../services/perPhoneQueue';
@@ -34,11 +34,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
       const history = getConversation(phone)?.messages.slice(0, -1); // exclui a mensagem atual, já registrada antes de chamar isso
       try {
-        const reply = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history);
-        if (!reply) return;
-        await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, phone, reply);
-        recordOutgoingMessage(phone, { type: 'text', text: reply, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
-        console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${reply}"`);
+        const bubbles = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history);
+        if (!bubbles) return;
+        await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, bubbles, (bubbleText) => {
+          recordOutgoingMessage(phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+          console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}"`);
+        });
       } catch (err: any) {
         console.warn('❌ [Resposta Automática] Falhou:', err.message);
       }

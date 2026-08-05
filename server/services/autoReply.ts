@@ -15,10 +15,13 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Gera uma resposta automática curta e natural pra uma mensagem de texto
- * recebida no WhatsApp, no mesmo estilo de atendimento comercial usado pela
- * transcrição de áudio (server/services/geminiTranscription.ts). Sem
- * fallback simulado aqui: se o Gemini falhar, simplesmente não respondemos
+ * Gera a resposta automática já fracionada em "bolhas" curtas (1 a 3
+ * mensagens), no estilo de atendimento humano real de WhatsApp — não um
+ * bloco único tipo e-mail. Baseado nas diretrizes consolidadas de
+ * posicionamento pro agente (fracionamento, dialeto/tom local vindo da Base
+ * de Conhecimento, empatia antes de credenciais, sem "speech" de vendedor).
+ *
+ * Sem fallback simulado: se o Gemini falhar, simplesmente não respondemos
  * automaticamente (melhor não responder do que responder algo genérico/errado
  * pra um cliente real).
  *
@@ -32,7 +35,7 @@ export async function generateAutoReplyForText(
   contactName?: string,
   knowledgeBaseContext?: string,
   history?: { sender: 'lead' | 'agent'; text?: string }[]
-): Promise<string | null> {
+): Promise<string[] | null> {
   if (!ai || !text.trim()) return null;
 
   try {
@@ -42,26 +45,41 @@ export async function generateAutoReplyForText(
       .map((m) => `${m.sender === 'lead' ? 'Cliente' : 'Atendente'}: ${m.text}`)
       .join('\n');
 
-    const prompt = `Você é um atendente de WhatsApp de um negócio real, respondendo diretamente ao cliente.
-Responda de forma curta (1-3 frases), natural, cordial e no mesmo idioma da mensagem do cliente.
-Não invente preços, horários ou dados específicos que você não tem — nesse caso, diga que vai confirmar e retornar em breve.
+    const prompt = `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
+
+REGRAS DE ESTILO (sempre aplicar):
+1. Fracione a resposta em 1 a 3 "bolhas" curtas e sequenciais (como mensagens reais de WhatsApp), nunca um bloco único tipo e-mail/panfleto.
+2. Adapte vocabulário, saudações e tom ao idioma/dialeto do cliente e ao "toneOfVoice" abaixo (se vier voseo, gírias regionais, diminutivos — use-os naturalmente).
+3. Empatia e foco no benefício primeiro — nunca abra com currículo, dados técnicos ou lista de qualificações. Valide o desejo/dúvida do cliente antes de qualquer coisa.
+4. Prefira perguntas abertas de diálogo a despejar informação toda de uma vez.
+5. Não invente preços, horários ou dados específicos que não estão no contexto — nesse caso, diga que vai confirmar e retornar em breve.
+6. Se o histórico mostra que vocês já se falaram, NUNCA se apresente de novo — continue a conversa naturalmente, como quem lembra o que já foi dito.
+7. Pode usar leve leveza/humor quando cabível, mas sempre com segurança e sem soar debochado.
+
 ${contactName ? `Nome do cliente: ${contactName}.` : ''}
 ${knowledgeBaseContext || ''}
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"
-Responda apenas com o texto da resposta, sem aspas, sem JSON, sem explicações. Se o histórico já mostra que vocês já se falaram, não se apresente de novo — continue a conversa naturalmente.`;
+
+Responda ESTRITAMENTE em JSON no formato:
+{"bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)", "terceira bolha curta (se precisar)"]}
+Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1).`;
 
     const response = await withTimeout(
       ai.models.generateContent({
         model: 'gemini-3.6-flash',
         contents: [{ text: prompt }],
+        config: { responseMimeType: 'application/json' },
       }),
       GEMINI_TIMEOUT_MS
     );
 
-    const reply = (response.text || '').trim();
-    if (!reply) console.warn('⚠️  Gemini Auto-Reply (texto): resposta vazia, nada enviado.');
-    return reply || null;
+    const rawText = response.text || '';
+    const parsed = JSON.parse(rawText) as { bubbles?: string[] };
+    const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean);
+
+    if (!bubbles.length) console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
+    return bubbles.length ? bubbles : null;
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;
