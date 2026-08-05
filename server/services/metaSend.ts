@@ -1,4 +1,35 @@
 /**
+ * Marca a mensagem recebida como lida e ativa o indicador "digitando..." no
+ * celular do cliente — mesmo mecanismo usado no whatsapp-agent-monique
+ * (lib/whatsapp.js: markAsRead + sendTypingIndicator). Válido por até 25s;
+ * como nossa geração de resposta (Gemini + delays de bolha) pode passar
+ * disso, chamamos de novo por segurança logo antes de cada bolha ser enviada
+ * (ver server/services/sendBubbles.ts). Falha aqui nunca deve travar o envio
+ * real da resposta — por isso engole erros silenciosamente.
+ */
+export async function markAsReadAndShowTyping(
+  phoneNumberId: string | undefined,
+  accessToken: string | undefined,
+  messageId: string | undefined
+): Promise<void> {
+  if (!phoneNumberId || !accessToken || !messageId) return;
+  try {
+    await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+        typing_indicator: { type: 'text' },
+      }),
+    });
+  } catch (err) {
+    console.warn('⚠️  Falha ao mostrar indicador de digitação:', (err as Error).message);
+  }
+}
+
+/**
  * Envio de mensagem de texto via Meta Cloud API (POST /{phone-number-id}/messages).
  * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages
  */

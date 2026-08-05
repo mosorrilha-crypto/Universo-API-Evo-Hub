@@ -141,7 +141,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, bubbles, (bubbleText) => {
             recordOutgoingMessage(message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
             console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}"`);
-          });
+          }, message.messageId);
         } catch (err: any) {
           console.warn('❌ [Resposta Automática] Falhou:', err.message);
         }
