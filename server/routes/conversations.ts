@@ -5,11 +5,14 @@ import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/ag
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
+import { getMediaImage } from '../services/mediaImageStore';
 
 interface ConversationsRouterDeps {
   authenticateToken: RequestHandler;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  supabaseUrl?: string;
+  supabaseKey?: string;
 }
 
 /**
@@ -18,8 +21,17 @@ interface ConversationsRouterDeps {
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, metaAccessToken, metaPhoneNumberId }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey }: ConversationsRouterDeps): Router {
   const router = Router();
+
+  // Imagem real recebida de um cliente (ex: comprovante de pagamento) —
+  // nunca pública, só acessível autenticado (pode conter dado sensível).
+  router.get('/api/media/:messageId', authenticateToken, async (req, res) => {
+    const media = await getMediaImage(supabaseUrl, supabaseKey, req.params.messageId);
+    if (!media) return res.status(404).json({ error: 'Imagem não encontrada.' });
+    res.setHeader('Content-Type', media.contentType);
+    res.send(media.buffer);
+  });
 
   router.get('/api/conversations', authenticateToken, (req, res) => {
     res.json({ conversations: listConversations() });

@@ -12,6 +12,8 @@ import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/know
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated } from '../services/escalationStore';
+import { downloadMetaMedia } from '../services/mediaDownload';
+import { saveMediaImage } from '../services/mediaImageStore';
 import type { GoogleGenAI } from '@google/genai';
 
 interface WebhooksRouterDeps {
@@ -20,9 +22,11 @@ interface WebhooksRouterDeps {
   getAi?: () => GoogleGenAI | null;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  supabaseUrl?: string;
+  supabaseKey?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey }: WebhooksRouterDeps): Router {
   const router = Router();
 
   // Resposta automática pra mensagens de texto (Epic 1.3): gera e envia de
@@ -98,8 +102,15 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           logEscalation(msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
         }
         if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId);
+      } else if (msg.type === 'image') {
+        recordIncomingMessage(msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
+        if (msg.metaImage) {
+          downloadMetaMedia(msg.metaImage.mediaId, metaAccessToken)
+            .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
+            .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
+        }
       } else {
-        recordIncomingMessage(msg.from, msg.contactName, { type: msg.type === 'image' ? 'image' : 'text', text: msg.type === 'image' ? '📷 Imagem recebida' : `[${msg.type}]`, timestamp: nowLabel });
+        recordIncomingMessage(msg.from, msg.contactName, { type: 'text', text: `[${msg.type}]`, timestamp: nowLabel });
       }
     }
     return enqueued;
