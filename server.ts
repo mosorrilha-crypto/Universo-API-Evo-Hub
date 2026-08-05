@@ -18,6 +18,7 @@ import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initConversationPersistence } from './server/services/conversationStore';
+import { initAgentStatusPersistence } from './server/services/agentStatus';
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ async function startServer() {
   const authenticateEvoHub = createAuthenticateEvoHub(config.evohubApiKey, config.isProduction);
 
   await initConversationPersistence(config.supabaseUrl, config.supabaseKey);
+  await initAgentStatusPersistence(config.supabaseUrl, config.supabaseKey);
 
   app.use(express.json({
     limit: '50mb',

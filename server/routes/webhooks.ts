@@ -6,6 +6,7 @@ import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendWhatsAppTextMessage } from '../services/metaSend';
+import { isAgentPaused } from '../services/agentStatus';
 import type { GoogleGenAI } from '@google/genai';
 
 interface WebhooksRouterDeps {
@@ -22,7 +23,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // Resposta automática pra mensagens de texto (Epic 1.3): gera e envia de
   // volta via Meta Cloud API, sem bloquear a resposta do webhook (fire-and-forget).
   const triggerAutoReply = (phone: string, contactName: string | undefined, text: string) => {
-    if (!getAi) return;
+    if (!getAi || isAgentPaused()) return;
     generateAutoReplyForText(getAi(), text, contactName)
       .then(async (reply) => {
         if (!reply) return;
