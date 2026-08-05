@@ -15,14 +15,15 @@ interface LoginModalProps {
 }
 
 // Emite um Bearer token de verdade pro perfil (só funciona quando o backend
-// está em DEMO_MODE=true). Sem isso, as rotas protegidas de IA retornariam 401
-// mesmo depois de "logar" no modo demo.
-const mintDemoToken = async (id: string, tenantId: string, role: string, email: string): Promise<string | undefined> => {
+// está em DEMO_MODE=true). O servidor valida a senha contra o cadastro fixo
+// dele mesmo (server/routes/auth.ts) — role/tenantId/email vêm de lá, nunca
+// do que mandamos aqui, então não adianta chamar isso com um id qualquer.
+const mintDemoToken = async (id: string, password: string): Promise<string | undefined> => {
   try {
     const res = await apiFetch('/api/auth/demo-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, tenantId, role, email }),
+      body: JSON.stringify({ id, password }),
     });
     if (!res.ok) return undefined;
     const data = await res.json();
@@ -169,7 +170,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    const token = await mintDemoToken(authenticatedUser.id, authenticatedUser.tenantId, authenticatedUser.role, authenticatedUser.email);
+    const token = await mintDemoToken(authenticatedUser.id, password.trim());
     onLogin(authenticatedUser, token);
   };
 
@@ -327,17 +328,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     id: googleUser.uid,
                     name: googleUser.displayName || googleUser.email?.split('@')[0] || 'Usuário Google',
                     email: googleUser.email || '',
-                    role: 'admin',
+                    // Nunca 'admin' automático: login Google (Firebase) prova só que a
+                    // pessoa é dona daquele e-mail, não que ela é um operador
+                    // autorizado deste sistema — antes, qualquer conta Google virava
+                    // admin sem checagem nenhuma. Sem mapeamento real Google→Supabase,
+                    // o papel mais seguro por padrão é o de menor privilégio.
+                    role: 'operator',
                     avatar: googleUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-                    department: 'Autenticação Firebase',
+                    department: 'Autenticação Firebase (sem operador cadastrado)',
                     tenantId: 'tenant_004',
                   };
-                  // Login Google é real (Firebase), mas o Bearer token das rotas
-                  // protegidas do backend só existe via demo-token (DEMO_MODE=true).
-                  const token = demoMode
-                    ? await mintDemoToken(authenticatedUser.id, authenticatedUser.tenantId, authenticatedUser.role, authenticatedUser.email)
-                    : undefined;
-                  onLogin(authenticatedUser, token);
+                  // Login Google não emite Bearer token de backend: não temos como
+                  // provar que esse e-mail corresponde a um dos 4 perfis fixos de
+                  // demo (nem a um operador real do Supabase), então as rotas
+                  // protegidas continuam corretamente bloqueadas (401) até haver um
+                  // login de verdade (senha demo ou operador real cadastrado).
+                  onLogin(authenticatedUser, undefined);
                 } catch (err: any) {
                   setErrorMsg(`Erro ao autenticar via Google: ${err.message || 'Falha no login'}`);
                 }

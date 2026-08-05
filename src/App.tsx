@@ -39,7 +39,11 @@ export const App: React.FC = () => {
   // Auth User
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem('saas_current_user');
-    return saved ? JSON.parse(saved) : SAAS_DEMO_USERS[0]; // Monique Sorrilha as default
+    // Antes, sem sessão salva, o app assumia SAAS_DEMO_USERS[0] (Monique,
+    // admin) como logado por padrão — abrindo o painel inteiro sem exigir
+    // login nenhum. null aciona a tela de login forçada já existente logo
+    // abaixo (isForcedLogin={!currentUser}).
+    return saved ? JSON.parse(saved) : null;
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
 

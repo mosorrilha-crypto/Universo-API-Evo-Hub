@@ -18,19 +18,37 @@ export function createAuthRouter({ jwtSecret, demoMode, supabase }: AuthRouterDe
     res.json({ demoMode });
   });
 
-  // Emite um JWT válido pra um perfil de demonstração — só funciona com DEMO_MODE=true.
-  // Não valida senha (isso já foi feito no frontend com as senhas fixas de demo);
-  // existe só para que o modo demo também tenha um Bearer token de verdade pra
-  // chamar as rotas protegidas, sem precisar de um operador real no Supabase.
+  // Cadastro fixo dos 4 perfis de demonstração — espelha exatamente
+  // src/data/mockTenants.ts (SAAS_DEMO_USERS) e as senhas de
+  // src/components/LoginModal.tsx (USER_PASSWORDS). Precisa ficar em sincronia
+  // manual com esses dois arquivos caso os perfis demo mudem.
+  //
+  // Antes desta correção, o endpoint confiava cegamente em id/tenantId/role
+  // vindos do corpo da requisição — qualquer um podia POST
+  // {"id":"x","tenantId":"y","role":"saas_admin"} e ganhar um JWT de admin,
+  // sem senha nenhuma. Agora role/tenantId/email vêm SEMPRE do cadastro fixo
+  // abaixo, nunca do que o cliente mandou, e a senha é obrigatória.
+  const DEMO_USERS: Record<string, { passwords: string[]; tenantId: string; role: string; email: string }> = {
+    usr_monique: { passwords: ['monique2026', 'admin123', '123456'], tenantId: 'tenant_004', role: 'admin', email: 'monique@pestanaspormonique.com' },
+    usr_carlos: { passwords: ['viva1234', '123456'], tenantId: 'tenant_001', role: 'operator', email: 'carlos@drogariaviva.com.br' },
+    usr_fernanda: { passwords: ['meta2026', '123456'], tenantId: 'tenant_002', role: 'manager', email: 'fernanda@metaleads.com.br' },
+    usr_ricardo: { passwords: ['master2026#', 'adminMaster123'], tenantId: 'tenant_001', role: 'saas_admin', email: 'ricardo.master@saasplatform.com' },
+  };
+
+  // Emite um JWT válido pra um perfil de demonstração — só funciona com
+  // DEMO_MODE=true. Valida a senha contra o cadastro fixo acima (nunca
+  // confia em role/tenantId/email vindos do cliente).
   router.post('/api/auth/demo-token', (req, res) => {
     if (!demoMode) {
       return res.status(403).json({ error: 'Login de demonstração desabilitado (DEMO_MODE=false).' });
     }
-    const { id, tenantId, role, email } = req.body || {};
-    if (!id || !tenantId || !role) {
-      return res.status(400).json({ error: 'id, tenantId e role são obrigatórios.' });
+    const { id, password } = req.body || {};
+    const user = DEMO_USERS[id];
+    if (!user || typeof password !== 'string' || !user.passwords.includes(password)) {
+      // Mensagem genérica de propósito — não revela se o id existe ou só a senha está errada.
+      return res.status(401).json({ error: 'Credenciais de demonstração inválidas.' });
     }
-    const token = jwt.sign({ id, tenantId, role, email, demo: true }, jwtSecret, { expiresIn: '24h' });
+    const token = jwt.sign({ id, tenantId: user.tenantId, role: user.role, email: user.email, demo: true }, jwtSecret, { expiresIn: '24h' });
     res.json({ token });
   });
 
@@ -56,10 +74,13 @@ export function createAuthRouter({ jwtSecret, demoMode, supabase }: AuthRouterDe
 
       const operator = data as any;
 
-      if (error || !operator) throw new Error('Usuário não encontrado');
+      // Mensagem genérica de propósito — "usuário não encontrado" vs "senha
+      // incorreta" permite enumerar quais e-mails/tenants existem no sistema.
+      const genericError = 'E-mail ou senha incorretos.';
+      if (error || !operator) throw new Error(genericError);
 
       const validPassword = await bcrypt.compare(password, operator.password_hash);
-      if (!validPassword) throw new Error('Senha incorreta.');
+      if (!validPassword) throw new Error(genericError);
 
       const token = jwt.sign(
         { id: operator.id, tenantId: operator.tenant_id, role: operator.role },
