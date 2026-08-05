@@ -8,6 +8,7 @@ import { generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
+import { logEscalation, isPaymentRelated } from './escalationStore';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
 export interface TranscriptionJob {
@@ -127,6 +128,10 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     updateMessageText(message.from, message.messageId, outcome.result.transcription);
     console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.result.transcription}"`);
 
+    if (isPaymentRelated(outcome.result.transcription)) {
+      logEscalation(message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
+    }
+
     // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
     // verdade (não do fallback simulado), pra não responder algo genérico.
     // Reaproveita o mesmo motor de bolhas/humanização do caminho de texto
@@ -138,13 +143,21 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         const history = getConversation(message.from)?.messages.slice(0, -1);
         try {
           const result = await generateAutoReplyForText(deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history);
-          if (!result) return;
+          if (!result) {
+            logEscalation(message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
+            return;
+          }
           await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, result.bubbles, (bubbleText) => {
             recordOutgoingMessage(message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
             console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}"`);
           }, message.messageId, result.phase);
         } catch (err: any) {
-          if (isGeoRestrictedError(err)) markGeoRestricted(message.from, err.message);
+          if (isGeoRestrictedError(err)) {
+            markGeoRestricted(message.from, err.message);
+            logEscalation(message.from, message.contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', outcome.result.transcription);
+          } else {
+            logEscalation(message.from, message.contactName, `Falha ao responder automaticamente: ${err.message}`, outcome.result.transcription);
+          }
           console.warn('❌ [Resposta Automática] Falhou:', err.message);
         }
       });

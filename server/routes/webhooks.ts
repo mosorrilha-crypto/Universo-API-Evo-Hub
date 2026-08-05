@@ -11,6 +11,7 @@ import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText } from '../services/messageBuffer';
+import { logEscalation, isPaymentRelated } from '../services/escalationStore';
 import type { GoogleGenAI } from '@google/genai';
 
 interface WebhooksRouterDeps {
@@ -42,13 +43,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // longa), não só na hora de enviar as bolhas.
         await markAsReadAndShowTyping(metaPhoneNumberId, metaAccessToken, messageId);
         const result = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history);
-        if (!result) return;
+        if (!result) {
+          logEscalation(phone, contactName, 'IA não conseguiu gerar resposta automática', text);
+          return;
+        }
         await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, result.bubbles, (bubbleText) => {
           recordOutgoingMessage(phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
           console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}"`);
         }, messageId, result.phase);
       } catch (err: any) {
-        if (isGeoRestrictedError(err)) markGeoRestricted(phone, err.message);
+        if (isGeoRestrictedError(err)) {
+          markGeoRestricted(phone, err.message);
+          logEscalation(phone, contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', text);
+        } else {
+          logEscalation(phone, contactName, `Falha ao responder automaticamente: ${err.message}`, text);
+        }
         console.warn('❌ [Resposta Automática] Falhou:', err.message);
       }
     });
@@ -82,6 +91,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         enqueued += 1;
       } else if (msg.type === 'text') {
         recordIncomingMessage(msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+        if (msg.text && isPaymentRelated(msg.text)) {
+          logEscalation(msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
+        }
         if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId);
       } else {
         recordIncomingMessage(msg.from, msg.contactName, { type: msg.type === 'image' ? 'image' : 'text', text: msg.type === 'image' ? '📷 Imagem recebida' : `[${msg.type}]`, timestamp: nowLabel });
