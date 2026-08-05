@@ -4,6 +4,7 @@ import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from '
 import { updateMessageText, recordOutgoingMessage } from './conversationStore';
 import { sendWhatsAppTextMessage } from './metaSend';
 import { isAgentPaused } from './agentStatus';
+import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
@@ -127,7 +128,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
     // verdade (não do fallback simulado), pra não responder algo genérico.
     if (outcome.source === 'gemini' && outcome.result.suggestedReply && !isAgentPaused()) {
-      sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, outcome.result.suggestedReply)
+      runExclusive(message.from, () => sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, outcome.result.suggestedReply))
         .then(() => {
           recordOutgoingMessage(message.from, { type: 'text', text: outcome.result.suggestedReply, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
           console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${outcome.result.suggestedReply}"`);

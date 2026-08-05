@@ -3,11 +3,12 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendWhatsAppTextMessage } from '../services/metaSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { runExclusive } from '../services/perPhoneQueue';
 import type { GoogleGenAI } from '@google/genai';
 
 interface WebhooksRouterDeps {
@@ -25,15 +26,23 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // volta via Meta Cloud API, sem bloquear a resposta do webhook (fire-and-forget).
   const triggerAutoReply = (phone: string, contactName: string | undefined, text: string) => {
     if (!getAi || isAgentPaused()) return;
-    const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
-    generateAutoReplyForText(getAi(), text, contactName, kbContext)
-      .then(async (reply) => {
+    // runExclusive garante que, se a mensagem anterior desse número ainda
+    // estiver gerando resposta, esta espera a vez — sem isso, uma chamada
+    // lenta ao Gemini pode terminar DEPOIS de uma mais rápida disparada por
+    // uma mensagem seguinte, respondendo fora de ordem (bug real observado).
+    runExclusive(phone, async () => {
+      const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
+      const history = getConversation(phone)?.messages.slice(0, -1); // exclui a mensagem atual, já registrada antes de chamar isso
+      try {
+        const reply = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history);
         if (!reply) return;
         await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, phone, reply);
         recordOutgoingMessage(phone, { type: 'text', text: reply, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
         console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${reply}"`);
-      })
-      .catch((err) => console.warn('❌ [Resposta Automática] Falhou:', err.message));
+      } catch (err: any) {
+        console.warn('❌ [Resposta Automática] Falhou:', err.message);
+      }
+    });
   };
 
   // Extrai as mensagens em um formato comum, enfileira áudio pra transcrição
