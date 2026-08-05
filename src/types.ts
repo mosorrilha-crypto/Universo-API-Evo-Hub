@@ -145,6 +145,8 @@ export interface AgentProduct {
   description: string;
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
+  promoPrice?: string;
+  promoUntil?: string;
 }
 
 export interface AgentFAQ {

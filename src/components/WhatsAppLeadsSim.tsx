@@ -128,6 +128,46 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       .catch(() => {});
   }, []);
 
+  // Respostas rápidas configuráveis — lista compartilhada pela equipe.
+  const [quickReplies, setQuickRepliesState] = useState<string[]>([]);
+
+  useEffect(() => {
+    apiFetch('/api/quick-replies')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.quickReplies) setQuickRepliesState(data.quickReplies); })
+      .catch(() => {});
+  }, []);
+
+  const handleAddQuickReply = async () => {
+    const text = window.prompt('Texto da nova resposta rápida:');
+    if (!text?.trim()) return;
+    const updated = [...quickReplies, text.trim()];
+    setQuickRepliesState(updated);
+    try {
+      await apiFetch('/api/quick-replies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quickReplies: updated }),
+      });
+    } catch (err) {
+      console.error('Falha ao salvar resposta rápida:', err);
+    }
+  };
+
+  const handleDeleteQuickReply = async (index: number) => {
+    const updated = quickReplies.filter((_, i) => i !== index);
+    setQuickRepliesState(updated);
+    try {
+      await apiFetch('/api/quick-replies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quickReplies: updated }),
+      });
+    } catch (err) {
+      console.error('Falha ao remover resposta rápida:', err);
+    }
+  };
+
   const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
     setAgentStatusState(status);
     try {
@@ -1423,6 +1463,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       <Mic className="w-3 h-3" />
                       <span>{isRecordingReal ? 'Gravando... (clique p/ enviar)' : 'Áudio'}</span>
                     </button>
+
+                    <select
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '__add__') handleAddQuickReply();
+                        else if (val.startsWith('__del__')) {
+                          const idx = Number(val.replace('__del__', ''));
+                          if (window.confirm(`Remover a resposta rápida "${quickReplies[idx]}"?`)) handleDeleteQuickReply(idx);
+                        } else if (val) setInputMessage(val);
+                        e.target.value = '';
+                      }}
+                      defaultValue=""
+                      className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-amber-400 text-[10px] font-semibold cursor-pointer max-w-[110px]"
+                      title="Respostas rápidas"
+                    >
+                      <option value="" disabled>⚡ Resp. rápida...</option>
+                      {quickReplies.map((qr, i) => (
+                        <option key={i} value={qr}>{qr.slice(0, 40)}{qr.length > 40 ? '…' : ''}</option>
+                      ))}
+                      <option value="__add__">➕ Nova resposta rápida</option>
+                      {quickReplies.length > 0 && (
+                        <optgroup label="Remover">
+                          {quickReplies.map((qr, i) => (
+                            <option key={`del-${i}`} value={`__del__${i}`}>🗑️ {qr.slice(0, 30)}{qr.length > 30 ? '…' : ''}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
 
                     {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
                       <select
