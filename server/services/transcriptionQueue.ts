@@ -136,12 +136,12 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
         const history = getConversation(message.from)?.messages.slice(0, -1);
         try {
-          const bubbles = await generateAutoReplyForText(deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history);
-          if (!bubbles) return;
-          await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, bubbles, (bubbleText) => {
+          const result = await generateAutoReplyForText(deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history);
+          if (!result) return;
+          await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, result.bubbles, (bubbleText) => {
             recordOutgoingMessage(message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
             console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}"`);
-          }, message.messageId);
+          }, message.messageId, result.phase);
         } catch (err: any) {
           console.warn('❌ [Resposta Automática] Falhou:', err.message);
         }
