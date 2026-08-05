@@ -17,6 +17,7 @@ import { createMetaCapiRouter } from './server/routes/metaCapi';
 import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
+import { initConversationPersistence } from './server/services/conversationStore';
 
 dotenv.config();
 
@@ -27,6 +28,8 @@ async function startServer() {
   const supabase = createSupabaseClientFromConfig(config);
   const authenticateToken = createAuthenticateToken(config.jwtSecret);
   const authenticateEvoHub = createAuthenticateEvoHub(config.evohubApiKey, config.isProduction);
+
+  await initConversationPersistence(config.supabaseUrl, config.supabaseKey);
 
   app.use(express.json({
     limit: '50mb',
@@ -39,7 +42,13 @@ async function startServer() {
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, demoMode: config.demoMode, supabase }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken, rateLimiter: aiRateLimiter }));
-  app.use(createWebhooksRouter({ metaWebhookVerifyToken: config.metaWebhookVerifyToken, evoHubWebhookSecret: config.evoHubWebhookSecret }));
+  app.use(createWebhooksRouter({
+    metaWebhookVerifyToken: config.metaWebhookVerifyToken,
+    evoHubWebhookSecret: config.evoHubWebhookSecret,
+    getAi: () => getGeminiClient(config),
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+  }));
   app.use(createMetaCapiRouter({ authenticateToken }));
   app.use(createEvoHubRouter({ authenticateEvoHub }));
   app.use(createConversationsRouter({
@@ -58,6 +67,7 @@ async function startServer() {
     evolutionInstanceName: config.evolutionInstanceName,
     evoHubApiUrl: config.evoHubApiUrl,
     evoHubChannelToken: config.evoHubChannelToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
   });
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção

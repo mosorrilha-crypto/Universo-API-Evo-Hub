@@ -1,7 +1,8 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
-import { updateMessageText } from './conversationStore';
+import { updateMessageText, recordOutgoingMessage } from './conversationStore';
+import { sendWhatsAppTextMessage } from './metaSend';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
 export interface TranscriptionJob {
@@ -26,6 +27,7 @@ export interface TranscriptionQueueDeps {
   evolutionInstanceName?: string;
   evoHubApiUrl?: string;
   evoHubChannelToken?: string;
+  metaPhoneNumberId?: string;
 }
 
 /**
@@ -118,6 +120,17 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
     updateMessageText(message.from, message.messageId, outcome.result.transcription);
     console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.result.transcription}"`);
+
+    // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
+    // verdade (não do fallback simulado), pra não responder algo genérico.
+    if (outcome.source === 'gemini' && outcome.result.suggestedReply) {
+      sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, outcome.result.suggestedReply)
+        .then(() => {
+          recordOutgoingMessage(message.from, { type: 'text', text: outcome.result.suggestedReply, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+          console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${outcome.result.suggestedReply}"`);
+        })
+        .catch((err) => console.warn('❌ [Resposta Automática] Falhou:', err.message));
+    }
   } catch (err: any) {
     totalFailed += 1;
     recordResult({ job, status: 'failed', error: err.message, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
