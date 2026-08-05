@@ -24,6 +24,9 @@ import { initKnowledgeBasePersistence } from './server/services/knowledgeBaseSto
 import { initEscalationPersistence } from './server/services/escalationStore';
 import { initQuickRepliesPersistence } from './server/services/quickRepliesStore';
 import { initGoogleCalendarPersistence } from './server/services/googleCalendar';
+import { initAppointmentPersistence } from './server/services/appointmentStore';
+import { initReminderPersistence } from './server/services/reminderStore';
+import { startReminderJob } from './server/services/reminderJob';
 
 dotenv.config();
 
@@ -41,6 +44,8 @@ async function startServer() {
   await initEscalationPersistence(config.supabaseUrl, config.supabaseKey);
   await initQuickRepliesPersistence(config.supabaseUrl, config.supabaseKey);
   initGoogleCalendarPersistence(config.supabaseUrl, config.supabaseKey);
+  await initAppointmentPersistence(config.supabaseUrl, config.supabaseKey);
+  await initReminderPersistence(config.supabaseUrl, config.supabaseKey);
 
   app.use(express.json({
     limit: '50mb',
@@ -61,6 +66,9 @@ async function startServer() {
     metaPhoneNumberId: config.metaPhoneNumberId,
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
+    googleClientId: config.googleClientId,
+    googleClientSecret: config.googleClientSecret,
+    googleRedirectUri: config.googleRedirectUri,
   }));
   app.use(createMetaCapiRouter({ authenticateToken }));
   app.use(createEvoHubRouter({ authenticateEvoHub }));
@@ -88,6 +96,18 @@ async function startServer() {
     evolutionInstanceName: config.evolutionInstanceName,
     evoHubApiUrl: config.evoHubApiUrl,
     evoHubChannelToken: config.evoHubChannelToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+  });
+
+  // Job em background que verifica a agenda real e manda lembretes de
+  // WhatsApp na véspera/dia do horário marcado. Ver server/services/reminderJob.ts.
+  startReminderJob({
+    getCalendarConfig: () => ({
+      clientId: config.googleClientId,
+      clientSecret: config.googleClientSecret,
+      redirectUri: config.googleRedirectUri,
+    }),
+    metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
   });
 

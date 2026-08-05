@@ -124,12 +124,44 @@ export interface CalendarConfig {
   redirectUri: string;
 }
 
-/** Verifica se um intervalo está livre na agenda primária. */
-export async function checkFreeBusy(cfg: CalendarConfig, startIso: string, endIso: string): Promise<boolean> {
+/** Offset (ms) de um fuso IANA num instante específico — soma no instante UTC pra obter a hora "de parede" local nesse fuso, naquele momento (correto mesmo em transições de horário de verão). */
+function getUtcOffsetMs(instantMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(instantMs));
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  const hour = map.hour === '24' ? '00' : map.hour;
+  const asUtcMs = Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day), Number(hour), Number(map.minute), Number(map.second));
+  return asUtcMs - instantMs;
+}
+
+/**
+ * Converte "YYYY-MM-DDTHH:mm:ss" (hora LOCAL no fuso informado, sem offset —
+ * o formato que pedimos ao agente de IA, pra ele não precisar calcular
+ * offset de fuso horário) pro instante UTC real em ISO com "Z".
+ *
+ * Só é preciso pro freebusy.query: diferente de events.insert/patch (que
+ * aceitam dateTime sem offset + um campo timeZone separado pra interpretar),
+ * o freebusy.query exige timeMin/timeMax já em RFC3339 com offset explícito.
+ */
+export function localNaiveToUtcIso(naiveLocal: string, timeZone: string): string {
+  const guessMs = new Date(`${naiveLocal}Z`).getTime();
+  const offsetMs = getUtcOffsetMs(guessMs, timeZone);
+  return new Date(guessMs - offsetMs).toISOString();
+}
+
+/** Verifica se um intervalo está livre na agenda primária. startIso/endIso: hora local (sem offset) no fuso `timezone`. */
+export async function checkFreeBusy(cfg: CalendarConfig, startIso: string, endIso: string, timezone = 'America/Asuncion'): Promise<boolean> {
   const auth = await getAuthorizedClient(cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
+  const timeMin = localNaiveToUtcIso(startIso, timezone);
+  const timeMax = localNaiveToUtcIso(endIso, timezone);
   const res = await calendar.freebusy.query({
-    requestBody: { timeMin: startIso, timeMax: endIso, items: [{ id: 'primary' }] },
+    requestBody: { timeMin, timeMax, items: [{ id: 'primary' }] },
   });
   const busy = res.data.calendars?.primary?.busy || [];
   return busy.length === 0;

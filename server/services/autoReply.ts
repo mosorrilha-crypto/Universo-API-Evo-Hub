@@ -1,6 +1,16 @@
-import type { GoogleGenAI } from '@google/genai';
+import { Type, FunctionCallingConfigMode, type GoogleGenAI, type Content, type Part, type FunctionDeclaration } from '@google/genai';
+import {
+  checkFreeBusy,
+  createCalendarEvent,
+  rescheduleCalendarEvent,
+  cancelCalendarEvent,
+  isGoogleCalendarConnected,
+  type CalendarConfig,
+} from './googleCalendar';
+import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone } from './appointmentStore';
 
 const GEMINI_TIMEOUT_MS = 20000;
+const BUSINESS_TIMEZONE = 'America/Asuncion';
 
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
 export type AgentType = 'triagem' | 'faq' | 'agendamento';
@@ -70,7 +80,7 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento"}`;
 const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
   triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo.`,
   faq: `Seu papel agora é FAQ/ESPECIALISTA: responda a dúvida específica (preço, procedimento, política) com precisão total usando SOMENTE o contexto do negócio abaixo. Se não tiver o dado exato, diga que vai confirmar — nunca invente.`,
-  agendamento: `Seu papel agora é AGENDAMENTO: o cliente quer marcar/confirmar/remarcar um horário. Ainda NÃO temos acesso automático à agenda real — então acolha com entusiasmo, confirme os dados que puder (nome, dia/horário desejado), e avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo). Marque needsHumanConfirmation como true sempre que o cliente já deu detalhes suficientes pra tentar fechar (nome + dia/horário), pra alguém da equipe confirmar de verdade.`,
+  agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações já executadas na agenda real" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.`,
 };
 
 /**
@@ -87,13 +97,15 @@ async function generateSpecialistReply(
   text: string,
   contactName?: string,
   knowledgeBaseContext?: string,
-  history?: { sender: 'lead' | 'agent'; text?: string }[]
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  extraContext?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean } | null> {
   const historyText = buildHistoryText(history);
 
   const prompt = `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
 
 ${AGENT_INSTRUCTIONS[agent]}
+${extraContext ? `\nAções já executadas na agenda real:\n${extraContext}\n` : ''}
 
 REGRAS DE ESTILO (sempre aplicar):
 1. Fracione a resposta em 1 a 3 "bolhas" curtas e sequenciais (como mensagens reais de WhatsApp), nunca um bloco único tipo e-mail/panfleto.
@@ -137,6 +149,206 @@ Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode 
   return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation };
 }
 
+/** Data/hora atual "de parede" no fuso do negócio — dá ao agente uma âncora real pra resolver referências relativas ("amanhã às 15h") sem precisar calcular fuso horário sozinho. */
+function getNowLocalNaive(timeZone: string): { naive: string; weekday: string } {
+  const parts = new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+    weekday: 'long',
+  }).formatToParts(new Date());
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  return { naive: `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}:${map.second}`, weekday: map.weekday };
+}
+
+const DATA_HORA_PARAM_DESCRIPTION = `Data e hora LOCAL (fuso ${BUSINESS_TIMEZONE}), formato "YYYY-MM-DDTHH:mm:ss", SEM offset UTC. Ex: "2026-08-06T15:00:00".`;
+
+/**
+ * Ferramentas reais de agenda expostas ao agente de agendamento via
+ * function-calling do Gemini. Nenhuma delas recebe um "evento_id" do
+ * modelo — remarcar/cancelar sempre resolvem o evento certo a partir do
+ * telefone de quem está conversando (server/services/appointmentStore.ts),
+ * pra nunca depender do modelo "lembrar" ou inventar um ID.
+ */
+const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
+  {
+    name: 'verificar_disponibilidade',
+    description: 'Verifica se um intervalo de horário está livre na agenda real do negócio, antes de tentar criar um agendamento.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        data_hora_inicio: { type: Type.STRING, description: DATA_HORA_PARAM_DESCRIPTION },
+        data_hora_fim: { type: Type.STRING, description: DATA_HORA_PARAM_DESCRIPTION },
+      },
+      required: ['data_hora_inicio', 'data_hora_fim'],
+    },
+  },
+  {
+    name: 'criar_agendamento',
+    description: 'Cria um agendamento real na agenda do negócio, DEPOIS de confirmar que o horário está disponível.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        titulo: { type: Type.STRING, description: 'Título curto do serviço/procedimento agendado.' },
+        descricao: { type: Type.STRING, description: 'Detalhes relevantes: nome do cliente, telefone, observações.' },
+        data_hora_inicio: { type: Type.STRING, description: DATA_HORA_PARAM_DESCRIPTION },
+        data_hora_fim: { type: Type.STRING, description: DATA_HORA_PARAM_DESCRIPTION },
+      },
+      required: ['titulo', 'data_hora_inicio', 'data_hora_fim'],
+    },
+  },
+  {
+    name: 'remarcar_agendamento',
+    description: 'Remarca o agendamento ATIVO deste contato (já identificado pelo telefone da conversa) para um novo horário.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        nova_data_hora_inicio: { type: Type.STRING, description: DATA_HORA_PARAM_DESCRIPTION },
+        nova_data_hora_fim: { type: Type.STRING, description: DATA_HORA_PARAM_DESCRIPTION },
+      },
+      required: ['nova_data_hora_inicio', 'nova_data_hora_fim'],
+    },
+  },
+  {
+    name: 'cancelar_agendamento',
+    description: 'Cancela o agendamento ATIVO deste contato (já identificado pelo telefone da conversa).',
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+];
+
+async function executeCalendarTool(
+  name: string,
+  args: Record<string, any>,
+  phone: string,
+  cfg: CalendarConfig
+): Promise<{ response: Record<string, unknown>; summary: string }> {
+  try {
+    switch (name) {
+      case 'verificar_disponibilidade': {
+        const disponivel = await checkFreeBusy(cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+        return {
+          response: { disponivel },
+          summary: `Verificou disponibilidade em ${args.data_hora_inicio}–${args.data_hora_fim}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
+        };
+      }
+      case 'criar_agendamento': {
+        const eventId = await createCalendarEvent(cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+        setAppointmentForPhone(phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim });
+        return {
+          response: { sucesso: true, evento_id: eventId },
+          summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
+        };
+      }
+      case 'remarcar_agendamento': {
+        const existing = getAppointmentForPhone(phone);
+        if (!existing) {
+          return {
+            response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
+            summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
+          };
+        }
+        await rescheduleCalendarEvent(cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+        setAppointmentForPhone(phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
+        return {
+          response: { sucesso: true },
+          summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
+        };
+      }
+      case 'cancelar_agendamento': {
+        const existing = getAppointmentForPhone(phone);
+        if (!existing) {
+          return {
+            response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
+            summary: 'Tentou cancelar mas não há nenhum agendamento ativo registrado pra este contato.',
+          };
+        }
+        await cancelCalendarEvent(cfg, existing.eventId);
+        clearAppointmentForPhone(phone);
+        return { response: { sucesso: true }, summary: 'Cancelou o agendamento existente com sucesso.' };
+      }
+      default:
+        return { response: { erro: `Ferramenta desconhecida: ${name}` }, summary: `Tentou chamar uma ferramenta desconhecida (${name}).` };
+    }
+  } catch (err: any) {
+    return { response: { erro: err.message }, summary: `Erro ao executar ${name}: ${err.message}` };
+  }
+}
+
+/**
+ * Roda o agente de agendamento com ferramentas reais (function-calling) sobre
+ * o Google Calendar. Não gera a resposta final ao cliente diretamente — só
+ * executa as ações reais (consultar/criar/remarcar/cancelar) e devolve um
+ * resumo em texto do que aconteceu de verdade, pra generateSpecialistReply
+ * humanizar a resposta em cima de fatos, nunca de suposição do modelo.
+ */
+async function runAgendamentoTools(
+  ai: GoogleGenAI,
+  text: string,
+  phone: string,
+  cfg: CalendarConfig,
+  history?: { sender: 'lead' | 'agent'; text?: string }[]
+): Promise<{ actionsSummary: string[]; hadError: boolean }> {
+  const connected = await isGoogleCalendarConnected();
+  if (!connected) {
+    return { actionsSummary: [], hadError: false };
+  }
+
+  const { naive, weekday } = getNowLocalNaive(BUSINESS_TIMEZONE);
+  const historyText = buildHistoryText(history);
+  const existing = getAppointmentForPhone(phone);
+
+  const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
+
+Data e hora ATUAL (fuso ${BUSINESS_TIMEZONE}): ${naive} (${weekday}).
+${existing ? `Este contato já tem um agendamento ativo: "${existing.summary}" começando em ${existing.startIso} (fuso ${BUSINESS_TIMEZONE}).` : 'Este contato não tem nenhum agendamento ativo no momento.'}
+${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}
+Mensagem do cliente: "${text}"
+
+Regras:
+- Sempre passe datas/horas no formato "YYYY-MM-DDTHH:mm:ss" (hora local, SEM offset), fuso ${BUSINESS_TIMEZONE}.
+- Se faltar informação essencial pra agir (dia/horário desejado), NÃO chame nenhuma ferramenta.
+- Antes de criar um agendamento novo, verifique disponibilidade primeiro; só crie se estiver livre.
+- Duração padrão de uma sessão, se o cliente não especificar: 90 minutos.
+- Pra remarcar/cancelar, você NÃO precisa saber o ID do evento — as ferramentas já resolvem isso sozinhas a partir deste contato.`;
+
+  const contents: Content[] = [{ role: 'user', parts: [{ text: prompt }] }];
+  const actionsSummary: string[] = [];
+  let hadError = false;
+
+  for (let i = 0; i < 4; i++) {
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents,
+        config: {
+          tools: [{ functionDeclarations: AGENDAMENTO_TOOLS }],
+          toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+        },
+      }),
+      GEMINI_TIMEOUT_MS
+    );
+
+    const calls = response.functionCalls;
+    if (!calls || !calls.length) break;
+
+    const modelContent = response.candidates?.[0]?.content;
+    if (modelContent) contents.push(modelContent);
+
+    const responseParts: Part[] = [];
+    for (const call of calls) {
+      const { response: toolResponse, summary } = await executeCalendarTool(call.name || '', call.args || {}, phone, cfg);
+      actionsSummary.push(summary);
+      if ('erro' in toolResponse) hadError = true;
+      responseParts.push({ functionResponse: { name: call.name, response: toolResponse } });
+    }
+    contents.push({ role: 'user', parts: responseParts });
+  }
+
+  return { actionsSummary, hadError };
+}
+
 /**
  * Orquestra router + especialista: 1ª chamada decide qual agente
  * (triagem/faq/agendamento), 2ª chamada gera a resposta especializada.
@@ -153,7 +365,9 @@ export async function generateAutoReplyForText(
   text: string,
   contactName?: string,
   knowledgeBaseContext?: string,
-  history?: { sender: 'lead' | 'agent'; text?: string }[]
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  phone?: string,
+  calendarConfig?: CalendarConfig
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
@@ -162,13 +376,24 @@ export async function generateAutoReplyForText(
     const agent = await classifyAgent(ai, text, history);
     const routerElapsedMs = Date.now() - routerStart;
 
-    const specialist = await generateSpecialistReply(ai, agent, text, contactName, knowledgeBaseContext, history);
+    let extraContext: string | undefined;
+    let forcedHumanConfirmation = false;
+
+    if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
+      const { actionsSummary, hadError } = await runAgendamentoTools(ai, text, phone, calendarConfig, history);
+      if (actionsSummary.length) {
+        extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
+      }
+      forcedHumanConfirmation = hadError;
+    }
+
+    const specialist = await generateSpecialistReply(ai, agent, text, contactName, knowledgeBaseContext, history, extraContext);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
     }
 
-    return { ...specialist, agent, routerElapsedMs };
+    return { ...specialist, needsHumanConfirmation: specialist.needsHumanConfirmation || forcedHumanConfirmation, agent, routerElapsedMs };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;
