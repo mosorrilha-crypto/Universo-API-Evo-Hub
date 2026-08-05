@@ -1,8 +1,9 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
-import { updateMessageText, recordOutgoingMessage, getConversation } from './conversationStore';
+import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted } from './conversationStore';
 import { sendBubbles } from './sendBubbles';
+import { isGeoRestrictedError } from './metaSend';
 import { generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
@@ -143,6 +144,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}"`);
           }, message.messageId, result.phase);
         } catch (err: any) {
+          if (isGeoRestrictedError(err)) markGeoRestricted(message.from, err.message);
           console.warn('❌ [Resposta Automática] Falhou:', err.message);
         }
       });

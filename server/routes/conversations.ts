@@ -1,6 +1,6 @@
 import { Router, type RequestHandler } from 'express';
-import { listConversations, getConversation, recordOutgoingMessage, clearConversationHistory } from '../services/conversationStore';
-import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage } from '../services/metaSend';
+import { listConversations, getConversation, recordOutgoingMessage, clearConversationHistory, markGeoRestricted } from '../services/conversationStore';
+import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 
@@ -44,6 +44,7 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       });
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
+      if (isGeoRestrictedError(err)) markGeoRestricted(req.params.phone, err.message);
       console.error('❌ [Conversas] Falha ao enviar mensagem real:', err.message);
       res.status(502).json({ error: err.message });
     }
@@ -66,6 +67,7 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       });
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
+      if (isGeoRestrictedError(err)) markGeoRestricted(req.params.phone, err.message);
       console.error('❌ [Conversas] Falha ao enviar mídia real:', err.message);
       res.status(502).json({ error: err.message });
     }

@@ -180,7 +180,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string } }[] = data.conversations || [];
 
         setLeads((prev) => {
           const byId = new Map(prev.map((l) => [l.id, l]));
@@ -198,6 +198,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               textContent: lastText,
               messages: conv.messages,
               isReal: true,
+              geoRestriction: conv.geoRestriction,
             } as any);
           }
           return Array.from(byId.values());
@@ -853,6 +854,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <RefreshCw className="w-3 h-3" />
             <span>Tentar Novamente</span>
           </button>
+        </div>
+      )}
+
+      {/* Geo Restriction Alert (erro 130497 — negócio ainda não verificado pela Meta) */}
+      {(selectedLead as any)?.geoRestriction && (
+        <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold">Bloqueio geográfico da Meta ({(selectedLead as any).geoRestriction.country}): </span>
+            <span>
+              O envio pra esse número falhou porque o negócio ainda não completou a Verificação de Negócio na Meta.
+              Detectado em {new Date((selectedLead as any).geoRestriction.detectedAt).toLocaleString('pt-BR')}.
+            </span>
+          </div>
         </div>
       )}
 
