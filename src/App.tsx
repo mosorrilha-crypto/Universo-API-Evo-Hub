@@ -13,7 +13,6 @@ import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import { OperatorCRM } from './components/OperatorCRM';
 import { FinancialDashboard } from './components/FinancialDashboard';
-import { GoogleCalendarIntegration } from './components/GoogleCalendarIntegration';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
 import { EvoHubIntegration } from './components/EvoHubIntegration';
@@ -70,7 +69,6 @@ export const App: React.FC = () => {
 
   // Inter-tab Selection States
   const [financialPreselectedLead, setFinancialPreselectedLead] = useState<LeadInfo | null>(null);
-  const [calendarPreselectedLead, setCalendarPreselectedLead] = useState<LeadInfo | null>(null);
 
   // Toast Notification
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -194,11 +192,6 @@ export const App: React.FC = () => {
     setActiveTab('financial');
   };
 
-  const handleNavigateToCalendar = (lead: LeadInfo) => {
-    setCalendarPreselectedLead(lead);
-    setActiveTab('calendar');
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
       
@@ -280,16 +273,6 @@ export const App: React.FC = () => {
             }}
             currentUser={currentUser || SAAS_DEMO_USERS[0]}
             onNavigateToFinancial={handleNavigateToFinancial}
-            onNavigateToCalendar={handleNavigateToCalendar}
-          />
-        )}
-
-        {activeTab === 'calendar' && (
-          <GoogleCalendarIntegration
-            activeTenant={activeTenant}
-            leads={leads}
-            showToast={showToast}
-            initialLeadForSync={calendarPreselectedLead}
           />
         )}
 

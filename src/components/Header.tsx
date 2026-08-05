@@ -23,8 +23,7 @@ import {
   Download,
   AlertTriangle,
   X,
-  Zap,
-  Calendar
+  Zap
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -255,19 +254,6 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Kanban className="w-4 h-4 text-emerald-400" />
               <span>CRM do Operador</span>
-            </button>
-
-            <button
-              id="tab-calendar"
-              onClick={() => setActiveTab('calendar')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'calendar'
-                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-900/50'
-                  : 'text-blue-300 hover:text-white hover:bg-blue-950/40 border border-blue-800/40'
-              }`}
-            >
-              <Calendar className="w-4 h-4 text-blue-400" />
-              <span>Google Calendar</span>
             </button>
 
             <button

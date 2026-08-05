@@ -209,9 +209,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Conexão do backend com o Google Calendar real (usada pelo agente de
   // agendamento pra consultar disponibilidade e criar/reagendar/cancelar
-  // consultas) — separado do GoogleCalendarIntegration.tsx, que é uma
-  // visualização de agenda no navegador do operador via Firebase, não o que
-  // o agente usa durante a conversa.
+  // consultas).
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
 
   const fetchGoogleCalendarStatus = () => {
