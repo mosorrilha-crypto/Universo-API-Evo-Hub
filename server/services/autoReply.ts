@@ -2,6 +2,13 @@ import type { GoogleGenAI } from '@google/genai';
 
 const GEMINI_TIMEOUT_MS = 20000;
 
+export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
+
+export interface AutoReplyResult {
+  phase: ConversationPhase;
+  bubbles: string[];
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
@@ -21,6 +28,11 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * posicionamento pro agente (fracionamento, dialeto/tom local vindo da Base
  * de Conhecimento, empatia antes de credenciais, sem "speech" de vendedor).
  *
+ * Também classifica a fase da conversa (abertura/informação/objeção/
+ * fechamento) na MESMA chamada — sem custo extra de latência ou API — pra
+ * o chamador (server/services/sendBubbles.ts) ajustar o ritmo do atraso de
+ * digitação de acordo com o momento certo pra conversão.
+ *
  * Sem fallback simulado: se o Gemini falhar, simplesmente não respondemos
  * automaticamente (melhor não responder do que responder algo genérico/errado
  * pra um cliente real).
@@ -35,7 +47,7 @@ export async function generateAutoReplyForText(
   contactName?: string,
   knowledgeBaseContext?: string,
   history?: { sender: 'lead' | 'agent'; text?: string }[]
-): Promise<string[] | null> {
+): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
   try {
@@ -61,8 +73,14 @@ ${knowledgeBaseContext || ''}
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"
 
+Classifique também a fase atual desta conversa em UMA destas opções:
+- "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
+- "informacao": tirando dúvida técnica, pergunta sobre preço/procedimento/disponibilidade.
+- "objecao": cliente hesitante, com medo, dúvida sobre resultado, ou pedindo desconto/"vou pensar".
+- "fechamento": cliente decidido, confirmando nome/horário, pronto pra agendar.
+
 Responda ESTRITAMENTE em JSON no formato:
-{"bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)", "terceira bolha curta (se precisar)"]}
+{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)", "terceira bolha curta (se precisar)"]}
 Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1).`;
 
     const response = await withTimeout(
@@ -75,11 +93,16 @@ Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode 
     );
 
     const rawText = response.text || '';
-    const parsed = JSON.parse(rawText) as { bubbles?: string[] };
+    const parsed = JSON.parse(rawText) as { phase?: string; bubbles?: string[] };
     const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean);
+    const validPhases: ConversationPhase[] = ['abertura', 'informacao', 'objecao', 'fechamento'];
+    const phase = validPhases.includes(parsed.phase as ConversationPhase) ? (parsed.phase as ConversationPhase) : 'informacao';
 
-    if (!bubbles.length) console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
-    return bubbles.length ? bubbles : null;
+    if (!bubbles.length) {
+      console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
+      return null;
+    }
+    return { phase, bubbles };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;

@@ -1,12 +1,26 @@
 import { sendWhatsAppTextMessage, markAsReadAndShowTyping } from './metaSend';
+import type { ConversationPhase } from './autoReply';
 
-/** Atraso realista de digitação antes de cada bolha — mesma lógica usada no whatsapp-agent-monique. */
-function calcularAtrasoDigitacao(texto: string): number {
+/**
+ * Multiplicador de atraso por fase da conversa — pensado pra conversão:
+ * rápido na abertura e no fechamento (onde fricção de espera custa a venda),
+ * mais devagar tirando dúvida técnica ou lidando com objeção (onde parecer
+ * "pensativo" transmite atenção genuína em vez de resposta automática).
+ */
+const PHASE_MULTIPLIER: Record<ConversationPhase, number> = {
+  abertura: 0.8,
+  fechamento: 0.8,
+  informacao: 1.6,
+  objecao: 1.9,
+};
+
+/** Atraso realista de digitação antes de cada bolha — mesma lógica usada no whatsapp-agent-monique, ajustado por fase. */
+function calcularAtrasoDigitacao(texto: string, phase: ConversationPhase): number {
   const CARACTERES_POR_SEGUNDO = 12;
   const MIN_MS = 900;
   const MAX_MS = 3500;
-  const estimado = (texto.length / CARACTERES_POR_SEGUNDO) * 1000;
-  return Math.min(MAX_MS, Math.max(MIN_MS, estimado));
+  const estimado = (texto.length / CARACTERES_POR_SEGUNDO) * 1000 * PHASE_MULTIPLIER[phase];
+  return Math.min(MAX_MS * PHASE_MULTIPLIER[phase], Math.max(MIN_MS, estimado));
 }
 
 /**
@@ -22,12 +36,13 @@ export async function sendBubbles(
   to: string,
   bubbles: string[],
   onBubbleSent: (text: string) => void,
-  incomingMessageId?: string
+  incomingMessageId?: string,
+  phase: ConversationPhase = 'informacao'
 ): Promise<void> {
   for (const bubble of bubbles) {
     if (!bubble.trim()) continue;
     await markAsReadAndShowTyping(phoneNumberId, accessToken, incomingMessageId);
-    await new Promise((resolve) => setTimeout(resolve, calcularAtrasoDigitacao(bubble)));
+    await new Promise((resolve) => setTimeout(resolve, calcularAtrasoDigitacao(bubble, phase)));
     await sendWhatsAppTextMessage(phoneNumberId, accessToken, to, bubble);
     onBubbleSent(bubble);
   }
