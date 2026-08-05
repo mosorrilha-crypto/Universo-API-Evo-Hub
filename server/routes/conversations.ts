@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import { listConversations, getConversation, recordOutgoingMessage } from '../services/conversationStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
+import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 
 interface ConversationsRouterDeps {
   authenticateToken: RequestHandler;
@@ -83,6 +84,21 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // Base de conhecimento real do agente (objetivo, regras, preços, FAQ) —
+  // usada como contexto nos prompts de resposta automática.
+  router.get('/api/knowledge-base', authenticateToken, (req, res) => {
+    res.json({ knowledgeBase: getKnowledgeBase() });
+  });
+
+  router.post('/api/knowledge-base', authenticateToken, async (req, res) => {
+    const { knowledgeBase } = req.body || {};
+    if (!knowledgeBase || typeof knowledgeBase !== 'object') {
+      return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
+    }
+    await setKnowledgeBase(knowledgeBase);
+    res.json({ success: true });
   });
 
   return router;
