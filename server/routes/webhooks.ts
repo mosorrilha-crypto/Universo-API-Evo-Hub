@@ -3,15 +3,35 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage } from '../services/conversationStore';
+import { generateAutoReplyForText } from '../services/autoReply';
+import { sendWhatsAppTextMessage } from '../services/metaSend';
+import type { GoogleGenAI } from '@google/genai';
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
   evoHubWebhookSecret?: string;
+  getAi?: () => GoogleGenAI | null;
+  metaAccessToken?: string;
+  metaPhoneNumberId?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId }: WebhooksRouterDeps): Router {
   const router = Router();
+
+  // Resposta automática pra mensagens de texto (Epic 1.3): gera e envia de
+  // volta via Meta Cloud API, sem bloquear a resposta do webhook (fire-and-forget).
+  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string) => {
+    if (!getAi) return;
+    generateAutoReplyForText(getAi(), text, contactName)
+      .then(async (reply) => {
+        if (!reply) return;
+        await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, phone, reply);
+        recordOutgoingMessage(phone, { type: 'text', text: reply, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+        console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${reply}"`);
+      })
+      .catch((err) => console.warn('❌ [Resposta Automática] Falhou:', err.message));
+  };
 
   // Extrai as mensagens em um formato comum, enfileira áudio pra transcrição
   // (idempotente por message_id) e ignora o resto (texto/imagem por ora —
@@ -32,6 +52,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         enqueued += 1;
       } else if (msg.type === 'text') {
         recordIncomingMessage(msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+        if (msg.text) triggerAutoReply(msg.from, msg.contactName, msg.text);
       } else {
         recordIncomingMessage(msg.from, msg.contactName, { type: msg.type === 'image' ? 'image' : 'text', text: msg.type === 'image' ? '📷 Imagem recebida' : `[${msg.type}]`, timestamp: nowLabel });
       }
