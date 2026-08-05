@@ -3,10 +3,10 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
-import { markAsReadAndShowTyping } from '../services/metaSend';
+import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { runExclusive } from '../services/perPhoneQueue';
@@ -48,6 +48,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}"`);
         }, messageId, result.phase);
       } catch (err: any) {
+        if (isGeoRestrictedError(err)) markGeoRestricted(phone, err.message);
         console.warn('❌ [Resposta Automática] Falhou:', err.message);
       }
     });

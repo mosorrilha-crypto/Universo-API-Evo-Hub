@@ -14,11 +14,27 @@ export interface StoredMessage {
   timestamp: string;
 }
 
+export interface GeoRestriction {
+  detectedAt: string;
+  country: string;
+  reason: string;
+}
+
 export interface StoredConversation {
   phone: string;
   name?: string;
   messages: StoredMessage[];
   updatedAt: string;
+  geoRestriction?: GeoRestriction;
+}
+
+/** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
+export function inferCountryFromPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('55')) return 'Brasil';
+  if (digits.startsWith('595')) return 'Paraguay';
+  if (digits.startsWith('54')) return 'Argentina';
+  return 'Desconhecido';
 }
 
 const conversations = new Map<string, StoredConversation>();
@@ -137,6 +153,18 @@ export function getConversation(phone: string): StoredConversation | undefined {
  * cadastro do contato. Equivalente ao deleteHistory() do
  * whatsapp-agent-monique, mas sem apagar o registro do lead.
  */
+/**
+ * Marca a conversa como bloqueada por restrição geográfica da Meta (erro
+ * 130497 — negócio ainda não passou pela Verificação de Negócio). Chamado
+ * quando um envio falha por esse motivo específico, pra o painel mostrar um
+ * aviso visível em vez do erro ficar só no log do servidor.
+ */
+export function markGeoRestricted(phone: string, reason: string) {
+  const conv = getOrCreate(phone);
+  conv.geoRestriction = { detectedAt: new Date().toISOString(), country: inferCountryFromPhone(phone), reason };
+  scheduleSave();
+}
+
 export function clearConversationHistory(phone: string): StoredConversation | undefined {
   const conv = conversations.get(phone);
   if (!conv) return undefined;

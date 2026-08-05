@@ -30,6 +30,28 @@ export async function markAsReadAndShowTyping(
 }
 
 /**
+ * Código de erro que a Meta devolve quando a conta está com restrição
+ * geográfica ativa (ex: WABA/negócio ainda não passou pela Verificação de
+ * Negócio e está bloqueada de enviar mensagens business-initiated pra
+ * certos países). Mesma constante usada no whatsapp-agent-monique
+ * (lib/whatsapp.js). Ver: https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/
+ */
+export const ERROR_CODE_GEO_RESTRICTED = 130497;
+
+/** Detecta se um erro lançado pelas funções deste arquivo é especificamente a restrição geográfica (130497). */
+export function isGeoRestrictedError(err: unknown): boolean {
+  return (err as any)?.metaErrorCode === ERROR_CODE_GEO_RESTRICTED;
+}
+
+async function throwMetaError(res: Response, contextMsg: string): Promise<never> {
+  const data = await res.json().catch(() => ({}) as any);
+  const errorMsg = data?.error?.message || `${contextMsg}: HTTP ${res.status}`;
+  const error: any = new Error(errorMsg);
+  error.metaErrorCode = data?.error?.code;
+  throw error;
+}
+
+/**
  * Envio de mensagem de texto via Meta Cloud API (POST /{phone-number-id}/messages).
  * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages
  */
@@ -58,8 +80,7 @@ export async function sendWhatsAppTextMessage(
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Falha ao enviar mensagem via Meta Cloud API: HTTP ${res.status} — ${body.slice(0, 300)}`);
+    await throwMetaError(res, 'Falha ao enviar mensagem via Meta Cloud API');
   }
 }
 
@@ -128,7 +149,6 @@ export async function sendWhatsAppMediaMessage(
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Falha ao enviar mídia via Meta Cloud API: HTTP ${res.status} — ${body.slice(0, 300)}`);
+    await throwMetaError(res, 'Falha ao enviar mídia via Meta Cloud API');
   }
 }
