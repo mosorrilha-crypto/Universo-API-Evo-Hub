@@ -170,6 +170,90 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Gravação de voz real do operador — mesmo microfone do AudioRecorder.tsx,
+  // mas enviando o áudio de verdade pro WhatsApp em vez de só transcrever.
+  const [isRecordingReal, setIsRecordingReal] = useState(false);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const audioChunksRef = React.useRef<Blob[]>([]);
+
+  const handleToggleRealRecording = async () => {
+    if (isRecordingReal) {
+      mediaRecorderRef.current?.stop();
+      setIsRecordingReal(false);
+      return;
+    }
+
+    if (!selectedLead) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus';
+      else if (MediaRecorder.isTypeSupported('audio/ogg')) mimeType = 'audio/ogg';
+
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        const base64 = await blobToBase64(blob);
+
+        const newMsg: ChatMessage = {
+          id: `msg-audio-real-${Date.now()}`,
+          sender: 'agent',
+          type: 'audio',
+          text: '🎤 Áudio enviado',
+          audioDuration: Math.round(blob.size / 4000),
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        };
+        setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
+
+        try {
+          await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64, mimeType, filename: 'audio.webm' }),
+          });
+        } catch (err) {
+          console.error('Falha ao enviar áudio real via WhatsApp:', err);
+        }
+      };
+
+      recorder.start();
+      setIsRecordingReal(true);
+    } catch (err) {
+      console.error('Erro ao acessar microfone:', err);
+      alert('Não foi possível acessar o microfone. Verifique as permissões do navegador.');
+    }
+  };
+
+  // Envia a foto de exemplo de um serviço (cadastrada na Base de
+  // Conhecimento) pro lead selecionado — útil quando ele pergunta sobre um
+  // procedimento específico e o operador quer mostrar o resultado.
+  const handleSendExamplePhoto = async (productName: string) => {
+    if (!selectedLead || !(selectedLead as any).isReal) return;
+    const newMsg: ChatMessage = {
+      id: `msg-example-photo-${Date.now()}`,
+      sender: 'agent',
+      type: 'image',
+      text: `📷 Foto de exemplo: ${productName}`,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    };
+    setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
+
+    try {
+      await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-example-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productName }),
+      });
+    } catch (err) {
+      console.error('Falha ao enviar foto de exemplo:', err);
+    }
+  };
+
   // Busca conversas reais de WhatsApp (recebidas via webhook) e mescla na
   // lista — sem substituir os leads de exemplo/simulados que já existirem.
   useEffect(() => {
@@ -1328,13 +1412,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <div className="flex items-center space-x-1">
                     <button
                       type="button"
-                      onClick={() => handleSendAudioNote()}
-                      className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-emerald-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
-                      title="Simular Envio de Áudio"
+                      onClick={() => (selectedLead as any)?.isReal ? handleToggleRealRecording() : handleSendAudioNote()}
+                      className={`px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 cursor-pointer ${
+                        isRecordingReal
+                          ? 'bg-red-500/20 border-red-500/50 text-red-300 animate-pulse'
+                          : 'bg-[#111b21] hover:bg-slate-800 border-slate-800 text-emerald-400'
+                      }`}
+                      title={(selectedLead as any)?.isReal ? (isRecordingReal ? 'Parar e enviar áudio' : 'Gravar áudio real') : 'Simular Envio de Áudio'}
                     >
                       <Mic className="w-3 h-3" />
-                      <span>Áudio</span>
+                      <span>{isRecordingReal ? 'Gravando... (clique p/ enviar)' : 'Áudio'}</span>
                     </button>
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                      <select
+                        onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
+                        defaultValue=""
+                        className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-blue-400 text-[10px] font-semibold cursor-pointer"
+                        title="Enviar foto de exemplo de um serviço"
+                      >
+                        <option value="" disabled>📷 Foto do serviço...</option>
+                        {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                          <option key={p.id} value={p.name}>{p.name}</option>
+                        ))}
+                      </select>
+                    )}
 
                     <button
                       type="button"

@@ -143,6 +143,8 @@ export interface AgentProduct {
   name: string;
   price: string;
   description: string;
+  exampleImageBase64?: string;
+  exampleImageMimeType?: string;
 }
 
 export interface AgentFAQ {

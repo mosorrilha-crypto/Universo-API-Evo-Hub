@@ -61,9 +61,10 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     try {
       const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, base64, mimeType, filename || 'arquivo');
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, caption);
+      const msgType = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'file';
       const conv = recordOutgoingMessage(req.params.phone, {
-        type: mimeType.startsWith('image/') ? 'image' : 'file',
-        text: caption || `📎 ${filename || 'Arquivo enviado'}`,
+        type: msgType,
+        text: msgType === 'audio' ? '🎤 Áudio enviado' : (caption || `📎 ${filename || 'Arquivo enviado'}`),
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       });
       res.json({ success: true, conversation: conv });
@@ -81,6 +82,36 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     const conv = clearConversationHistory(req.params.phone);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
     res.json({ success: true, conversation: conv });
+  });
+
+  // Envia a foto de exemplo cadastrada na Base de Conhecimento pro serviço
+  // indicado — pro operador (ou futuramente o agente) responder com a foto
+  // certa quando o lead perguntar sobre aquele procedimento específico.
+  router.post('/api/conversations/:phone/send-example-photo', authenticateToken, async (req, res) => {
+    const { productName } = req.body || {};
+    if (!productName) return res.status(400).json({ error: 'Campo "productName" é obrigatório.' });
+
+    const kb = getKnowledgeBase();
+    const product = kb?.products?.find((p) => p.name === productName);
+    if (!product?.exampleImageBase64) {
+      return res.status(404).json({ error: 'Esse serviço não tem foto de exemplo cadastrada na Base de Conhecimento.' });
+    }
+
+    try {
+      const mimeType = product.exampleImageMimeType || 'image/jpeg';
+      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, product.exampleImageBase64, mimeType, `${productName}.jpg`);
+      await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, productName);
+      const conv = recordOutgoingMessage(req.params.phone, {
+        type: 'image',
+        text: `📷 Foto de exemplo: ${productName}`,
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      });
+      res.json({ success: true, conversation: conv });
+    } catch (err: any) {
+      if (isGeoRestrictedError(err)) markGeoRestricted(req.params.phone, err.message);
+      console.error('❌ [Conversas] Falha ao enviar foto de exemplo:', err.message);
+      res.status(502).json({ error: err.message });
+    }
   });
 
   // Status do agente automático (Epic 1.3 — pausar/restringir horário)
