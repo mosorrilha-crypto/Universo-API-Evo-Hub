@@ -1,5 +1,5 @@
 import { Router, type RequestHandler } from 'express';
-import { listConversations, getConversation, recordOutgoingMessage } from '../services/conversationStore';
+import { listConversations, getConversation, recordOutgoingMessage, clearConversationHistory } from '../services/conversationStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
@@ -69,6 +69,15 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       console.error('❌ [Conversas] Falha ao enviar mídia real:', err.message);
       res.status(502).json({ error: err.message });
     }
+  });
+
+  // Limpa o histórico de mensagens de um número (ex: número de teste), mas
+  // mantém o contato/lead — útil pra testes não ficarem contaminados pela
+  // memória de conversas anteriores (o agente usa o histórico como contexto).
+  router.delete('/api/conversations/:phone/history', authenticateToken, (req, res) => {
+    const conv = clearConversationHistory(req.params.phone);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    res.json({ success: true, conversation: conv });
   });
 
   // Status do agente automático (Epic 1.3 — pausar/restringir horário)
