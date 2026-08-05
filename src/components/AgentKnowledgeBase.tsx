@@ -329,6 +329,21 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  const handleProductImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result);
+      setFormData((prev) => ({
+        ...prev,
+        products: prev.products.map((p) => (p.id === id ? { ...p, exampleImageBase64: base64, exampleImageMimeType: file.type } : p)),
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleAddRule = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRuleText.trim()) return;
@@ -758,6 +773,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     <h4 className="text-xs font-bold text-white pr-6">{prod.name}</h4>
                     <span className="text-xs font-extrabold text-emerald-400 block mt-1">{prod.price}</span>
                     <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">{prod.description}</p>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    {prod.exampleImageBase64 ? (
+                      <img src={prod.exampleImageBase64} alt={prod.name} className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px]">sem foto</div>
+                    )}
+                    <label className="text-[10px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
+                      {prod.exampleImageBase64 ? 'Trocar foto' : 'Adicionar foto de exemplo'}
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => handleProductImageChange(prod.id, e)} />
+                    </label>
                   </div>
                 </div>
               ))}

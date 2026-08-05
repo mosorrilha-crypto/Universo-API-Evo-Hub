@@ -10,6 +10,9 @@ export interface AgentProduct {
   name: string;
   price: string;
   description?: string;
+  /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
+  exampleImageBase64?: string;
+  exampleImageMimeType?: string;
 }
 
 export interface AgentFAQ {

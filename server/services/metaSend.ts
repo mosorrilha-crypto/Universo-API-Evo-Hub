@@ -134,13 +134,10 @@ export async function sendWhatsAppMediaMessage(
     throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mídia via Meta Cloud API.');
   }
 
-  const isImage = mimeType.startsWith('image/');
-  const payload: any = {
-    messaging_product: 'whatsapp',
-    to,
-    type: isImage ? 'image' : 'document',
-  };
-  payload[isImage ? 'image' : 'document'] = { id: mediaId, ...(caption ? { caption } : {}) };
+  // Mensagem de áudio da Meta não aceita "caption" (diferente de imagem/documento).
+  const type = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
+  const payload: any = { messaging_product: 'whatsapp', to, type };
+  payload[type] = type === 'audio' ? { id: mediaId } : { id: mediaId, ...(caption ? { caption } : {}) };
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
     method: 'POST',
