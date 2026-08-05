@@ -98,7 +98,18 @@ export const App: React.FC = () => {
   useEffect(() => {
     apiFetch('/api/knowledge-base')
       .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data?.knowledgeBase) setKnowledgeBase(data.knowledgeBase); })
+      .then((data) => {
+        if (data?.knowledgeBase) {
+          setKnowledgeBase((prev) => ({
+            ...prev,
+            ...data.knowledgeBase,
+            products: data.knowledgeBase.products || prev.products || [],
+            businessRules: data.knowledgeBase.businessRules || prev.businessRules || [],
+            faqs: data.knowledgeBase.faqs || prev.faqs || [],
+            documents: data.knowledgeBase.documents || prev.documents || [],
+          }));
+        }
+      })
       .catch(() => {});
   }, []);
 
