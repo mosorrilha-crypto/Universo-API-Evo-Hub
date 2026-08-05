@@ -4,6 +4,7 @@ import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage,
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
+import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 
 interface ConversationsRouterDeps {
   authenticateToken: RequestHandler;
@@ -161,6 +162,18 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
   router.delete('/api/escalations/:id', authenticateToken, (req, res) => {
     const deleted = deleteEscalation(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ success: true });
+  });
+
+  // Respostas rápidas configuráveis (lista única, compartilhada pela equipe)
+  router.get('/api/quick-replies', authenticateToken, (req, res) => {
+    res.json({ quickReplies: getQuickReplies() });
+  });
+
+  router.post('/api/quick-replies', authenticateToken, async (req, res) => {
+    const { quickReplies } = req.body || {};
+    if (!Array.isArray(quickReplies)) return res.status(400).json({ error: 'Campo "quickReplies" deve ser uma lista.' });
+    await setQuickReplies(quickReplies);
     res.json({ success: true });
   });
 
