@@ -1,6 +1,7 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
+import { updateMessageText } from './conversationStore';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
 export interface TranscriptionJob {
@@ -115,7 +116,8 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
 
     totalProcessed += 1;
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
-    console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.transcription}"`);
+    updateMessageText(message.from, message.messageId, outcome.result.transcription);
+    console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.result.transcription}"`);
   } catch (err: any) {
     totalFailed += 1;
     recordResult({ job, status: 'failed', error: err.message, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });

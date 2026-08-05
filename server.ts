@@ -15,6 +15,7 @@ import { createTelemetryRouter } from './server/routes/telemetry';
 import { createWebhooksRouter } from './server/routes/webhooks';
 import { createMetaCapiRouter } from './server/routes/metaCapi';
 import { createEvoHubRouter } from './server/routes/evoHub';
+import { createConversationsRouter } from './server/routes/conversations';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 
 dotenv.config();
@@ -41,6 +42,11 @@ async function startServer() {
   app.use(createWebhooksRouter({ metaWebhookVerifyToken: config.metaWebhookVerifyToken, evoHubWebhookSecret: config.evoHubWebhookSecret }));
   app.use(createMetaCapiRouter({ authenticateToken }));
   app.use(createEvoHubRouter({ authenticateEvoHub }));
+  app.use(createConversationsRouter({
+    authenticateToken,
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+  }));
 
   // Worker em background que processa a fila de transcrição (webhook → download
   // de mídia → Gemini). Ver server/services/transcriptionQueue.ts.

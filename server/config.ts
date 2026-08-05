@@ -12,6 +12,8 @@ export interface ServerConfig {
   geminiApiKey?: string;
   /** Token de acesso à Graph API pra baixar mídia (diferente do META_APP_SECRET usado no HMAC). */
   metaAccessToken?: string;
+  /** ID do número de telefone WhatsApp (Meta Cloud API), usado pra enviar mensagens (POST /{id}/messages). */
+  metaPhoneNumberId?: string;
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
   evolutionInstanceName?: string;
@@ -80,6 +82,7 @@ export function loadConfig(): ServerConfig {
     metaWebhookVerifyToken,
     geminiApiKey: process.env.GEMINI_API_KEY,
     metaAccessToken: process.env.META_ACCESS_TOKEN,
+    metaPhoneNumberId: process.env.META_PHONE_NUMBER_ID,
     evolutionApiUrl: process.env.EVOLUTION_API_URL,
     evolutionApiKey: process.env.EVOLUTION_API_KEY,
     evolutionInstanceName: process.env.EVOLUTION_INSTANCE_NAME,

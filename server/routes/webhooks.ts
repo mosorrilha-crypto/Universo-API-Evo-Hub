@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
+import { recordIncomingMessage } from '../services/conversationStore';
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
@@ -18,14 +19,22 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // Meta/Evolution direto e o handler dedicado do Evo Hub.
   const enqueueAudioMessages = (parsedMessages: ParsedIncomingMessage[]) => {
     let enqueued = 0;
+    const nowLabel = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     for (const msg of parsedMessages) {
-      if (msg.type !== 'audio') continue;
       if (!markProcessedIfNew(msg.messageId)) {
         console.log(`↩️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} já processada, ignorando reentrega.`);
         continue;
       }
-      enqueueTranscriptionJob(msg);
-      enqueued += 1;
+
+      if (msg.type === 'audio') {
+        recordIncomingMessage(msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
+        enqueueTranscriptionJob(msg);
+        enqueued += 1;
+      } else if (msg.type === 'text') {
+        recordIncomingMessage(msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+      } else {
+        recordIncomingMessage(msg.from, msg.contactName, { type: msg.type === 'image' ? 'image' : 'text', text: msg.type === 'image' ? '📷 Imagem recebida' : `[${msg.type}]`, timestamp: nowLabel });
+      }
     }
     return enqueued;
   };
