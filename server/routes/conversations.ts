@@ -3,6 +3,7 @@ import { listConversations, getConversation, recordOutgoingMessage, clearConvers
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
+import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
 
 interface ConversationsRouterDeps {
   authenticateToken: RequestHandler;
@@ -109,6 +110,26 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
     }
     await setKnowledgeBase(knowledgeBase);
+    res.json({ success: true });
+  });
+
+  // Escalonamentos pra atendimento humano — "isso precisa de você"
+  // (respostas que a IA não conseguiu gerar, bloqueios de envio, e qualquer
+  // menção a pagamento/transferência, que nunca deve ser confirmada sozinha
+  // pelo agente). Paraguai aparece primeiro (preferência de negócio atual).
+  router.get('/api/escalations', authenticateToken, (req, res) => {
+    res.json({ escalations: listEscalations() });
+  });
+
+  router.post('/api/escalations/:id/resolve', authenticateToken, (req, res) => {
+    const e = resolveEscalation(req.params.id);
+    if (!e) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ escalation: e });
+  });
+
+  router.delete('/api/escalations/:id', authenticateToken, (req, res) => {
+    const deleted = deleteEscalation(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ success: true });
   });
 
