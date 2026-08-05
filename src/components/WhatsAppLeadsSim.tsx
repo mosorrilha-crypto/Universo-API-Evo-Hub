@@ -19,6 +19,7 @@ import {
   AlertCircle, 
   RefreshCw,
   Image as ImageIcon,
+  Calendar as CalendarIcon,
   FileText,
   Mic,
   Zap,
@@ -203,6 +204,32 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       });
     } catch (err) {
       console.error('Falha ao remover resposta rápida:', err);
+    }
+  };
+
+  // Conexão do backend com o Google Calendar real (usada pelo agente de
+  // agendamento pra consultar disponibilidade e criar/reagendar/cancelar
+  // consultas) — separado do GoogleCalendarIntegration.tsx, que é uma
+  // visualização de agenda no navegador do operador via Firebase, não o que
+  // o agente usa durante a conversa.
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
+
+  const fetchGoogleCalendarStatus = () => {
+    apiFetch('/api/google-calendar/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setGoogleCalendarConnected(!!data?.connected))
+      .catch(() => setGoogleCalendarConnected(false));
+  };
+
+  useEffect(() => { fetchGoogleCalendarStatus(); }, []);
+
+  const handleConnectGoogleCalendar = async () => {
+    try {
+      const res = await apiFetch('/api/google-calendar/connect');
+      const data = await res.json();
+      if (data.url) window.open(data.url, '_blank', 'width=520,height=650');
+    } catch (err) {
+      console.error('Falha ao iniciar conexão com Google Calendar:', err);
     }
   };
 
@@ -973,6 +1000,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
             ))}
           </div>
+
+          {/* Conexão do backend com Google Calendar real (usada pelo agente de agendamento) */}
+          <button
+            onClick={googleCalendarConnected ? fetchGoogleCalendarStatus : handleConnectGoogleCalendar}
+            title={googleCalendarConnected ? 'Conectado — clique pra atualizar status' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
+            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+              googleCalendarConnected
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+            }`}
+          >
+            <CalendarIcon className="w-3.5 h-3.5" />
+            <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Calendar Conectado' : 'Conectar Calendar'}</span>
+          </button>
 
           {/* Auto-analyze Toggle Switch */}
           <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">

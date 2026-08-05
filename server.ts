@@ -16,12 +16,14 @@ import { createWebhooksRouter } from './server/routes/webhooks';
 import { createMetaCapiRouter } from './server/routes/metaCapi';
 import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
+import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initConversationPersistence } from './server/services/conversationStore';
 import { initAgentStatusPersistence } from './server/services/agentStatus';
 import { initKnowledgeBasePersistence } from './server/services/knowledgeBaseStore';
 import { initEscalationPersistence } from './server/services/escalationStore';
 import { initQuickRepliesPersistence } from './server/services/quickRepliesStore';
+import { initGoogleCalendarPersistence } from './server/services/googleCalendar';
 
 dotenv.config();
 
@@ -38,6 +40,7 @@ async function startServer() {
   await initKnowledgeBasePersistence(config.supabaseUrl, config.supabaseKey);
   await initEscalationPersistence(config.supabaseUrl, config.supabaseKey);
   await initQuickRepliesPersistence(config.supabaseUrl, config.supabaseKey);
+  initGoogleCalendarPersistence(config.supabaseUrl, config.supabaseKey);
 
   app.use(express.json({
     limit: '50mb',
@@ -67,6 +70,12 @@ async function startServer() {
     metaPhoneNumberId: config.metaPhoneNumberId,
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
+  }));
+  app.use(createGoogleCalendarRouter({
+    authenticateToken,
+    googleClientId: config.googleClientId,
+    googleClientSecret: config.googleClientSecret,
+    googleRedirectUri: config.googleRedirectUri,
   }));
 
   // Worker em background que processa a fila de transcrição (webhook → download
