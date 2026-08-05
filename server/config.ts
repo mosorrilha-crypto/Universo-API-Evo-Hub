@@ -25,6 +25,9 @@ export interface ServerConfig {
   evoHubWebhookSecret?: string;
   /** Token do canal específico, usado pra autenticar no proxy de mídia /meta/* do Hub. */
   evoHubChannelToken?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri: string;
 }
 
 /**
@@ -90,5 +93,8 @@ export function loadConfig(): ServerConfig {
     evoHubAccountApiKey: process.env.EVO_HUB_ACCOUNT_API_KEY,
     evoHubWebhookSecret: process.env.EVO_HUB_WEBHOOK_SECRET,
     evoHubChannelToken: process.env.EVO_HUB_CHANNEL_TOKEN,
+    googleClientId: process.env.GOOGLE_CLIENT_ID,
+    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || 'https://universo-api-evo-hub.onrender.com/api/google-calendar/oauth-callback',
   };
 }
