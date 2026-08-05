@@ -115,7 +115,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
 
     totalProcessed += 1;
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
-    console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source})`);
+    console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.transcription}"`);
   } catch (err: any) {
     totalFailed += 1;
     recordResult({ job, status: 'failed', error: err.message, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
