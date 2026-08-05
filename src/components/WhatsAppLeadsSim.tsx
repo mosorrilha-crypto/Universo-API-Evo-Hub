@@ -117,6 +117,59 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Active Image Modal / Lightbox state
   const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
 
+  // Status do agente automático real (active/paused/restricted) — controla
+  // se o backend responde sozinho às mensagens recebidas (ver Epic 1.3).
+  const [agentStatus, setAgentStatusState] = useState<'active' | 'paused' | 'restricted'>('active');
+
+  useEffect(() => {
+    apiFetch('/api/agent-status')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.status) setAgentStatusState(data.status); })
+      .catch(() => {});
+  }, []);
+
+  const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
+    setAgentStatusState(status);
+    try {
+      await apiFetch('/api/agent-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+    } catch (err) {
+      console.error('Falha ao atualizar status do agente:', err);
+    }
+  };
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selectedLead) return;
+
+    const base64 = await blobToBase64(file);
+    const newMsg: ChatMessage = {
+      id: `msg-file-${Date.now()}`,
+      sender: 'agent',
+      type: file.type.startsWith('image/') ? 'image' : 'file',
+      text: `📎 ${file.name}`,
+      fileName: file.name,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    };
+    setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
+
+    try {
+      await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mimeType: file.type, filename: file.name }),
+      });
+    } catch (err) {
+      console.error('Falha ao enviar arquivo real via WhatsApp:', err);
+    }
+  };
+
   // Busca conversas reais de WhatsApp (recebidas via webhook) e mescla na
   // lista — sem substituir os leads de exemplo/simulados que já existirem.
   useEffect(() => {
@@ -736,6 +789,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span>{showRightPanel ? 'Ocultar Ficha IA' : 'Ver Ficha IA'}</span>
           </button>
 
+          {/* Status do Agente Automático Real: active / paused / restricted */}
+          <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+            {(['active', 'restricted', 'paused'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => handleChangeAgentStatus(status)}
+                title={
+                  status === 'active' ? 'Agente responde sempre' :
+                  status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                  'Agente pausado — silêncio total'
+                }
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                  agentStatus === status
+                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+              </button>
+            ))}
+          </div>
+
           {/* Auto-analyze Toggle Switch */}
           <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
             <input
@@ -1273,9 +1348,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <button type="button" className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer">
                     <Smile className="w-5 h-5" />
                   </button>
-                  <button type="button" onClick={handleSendSampleFile} className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
+                    className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                  >
                     <Paperclip className="w-5 h-5" />
                   </button>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
                   <input
                     type="text"
