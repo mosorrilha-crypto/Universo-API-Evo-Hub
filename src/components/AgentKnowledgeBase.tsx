@@ -329,6 +329,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  const handlePromoChange = (id: string, field: 'promoPrice' | 'promoUntil', value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === id ? { ...p, [field]: value || undefined } : p)),
+    }));
+  };
+
   const handleProductImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -773,6 +780,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     <h4 className="text-xs font-bold text-white pr-6">{prod.name}</h4>
                     <span className="text-xs font-extrabold text-emerald-400 block mt-1">{prod.price}</span>
                     <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">{prod.description}</p>
+                  </div>
+                  <div className="border-t border-slate-800 pt-2 space-y-1.5">
+                    <span className="text-[10px] text-amber-400 font-semibold block">Promoção (opcional, expira sozinha):</span>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Preço promo"
+                        value={prod.promoPrice || ''}
+                        onChange={(e) => handlePromoChange(prod.id, 'promoPrice', e.target.value)}
+                        className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                      />
+                      <input
+                        type="date"
+                        value={prod.promoUntil || ''}
+                        onChange={(e) => handlePromoChange(prod.id, 'promoUntil', e.target.value)}
+                        className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                      />
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 pt-1">
                     {prod.exampleImageBase64 ? (

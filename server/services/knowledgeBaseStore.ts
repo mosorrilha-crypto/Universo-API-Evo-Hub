@@ -13,6 +13,16 @@ export interface AgentProduct {
   /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
+  /** Preço promocional com vencimento — volta sozinho pro preço regular após promoUntil, sem precisar editar manualmente. */
+  promoPrice?: string;
+  promoUntil?: string; // YYYY-MM-DD
+}
+
+/** Resolve o preço vigente de um produto — promocional se dentro da validade, regular caso contrário. Mesma lógica do resolverPreco() do whatsapp-agent-monique. */
+export function resolveProductPrice(product: AgentProduct, timezone = 'America/Asuncion'): string {
+  if (!product.promoPrice || !product.promoUntil) return product.price;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
+  return today <= product.promoUntil ? product.promoPrice : product.price;
 }
 
 export interface AgentFAQ {
@@ -88,7 +98,7 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   if (kb.pricingAndPolicies) parts.push(`Políticas de preço/pagamento: ${kb.pricingAndPolicies}`);
   if (kb.businessRules?.length) parts.push(`Regras de negócio:\n- ${kb.businessRules.join('\n- ')}`);
   if (kb.products?.length) {
-    parts.push(`Catálogo de produtos/serviços:\n${kb.products.map((p) => `- ${p.name}: ${p.price}${p.description ? ` (${p.description})` : ''}`).join('\n')}`);
+    parts.push(`Catálogo de produtos/serviços:\n${kb.products.map((p) => `- ${p.name}: ${resolveProductPrice(p)}${p.description ? ` (${p.description})` : ''}`).join('\n')}`);
   }
   if (kb.faqs?.length) {
     parts.push(`Perguntas frequentes:\n${kb.faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n')}`);
