@@ -37,12 +37,17 @@ export async function sendBubbles(
   bubbles: string[],
   onBubbleSent: (text: string) => void,
   incomingMessageId?: string,
-  phase: ConversationPhase = 'informacao'
+  phase: ConversationPhase = 'informacao',
+  /** ms já gastos antes de chegar aqui (ex: chamada de roteamento) — descontado só da 1ª bolha, pra não somar a latência do router ao tempo total de resposta. */
+  preElapsedMs = 0
 ): Promise<void> {
+  let remainingCompensation = preElapsedMs;
   for (const bubble of bubbles) {
     if (!bubble.trim()) continue;
     await markAsReadAndShowTyping(phoneNumberId, accessToken, incomingMessageId);
-    await new Promise((resolve) => setTimeout(resolve, calcularAtrasoDigitacao(bubble, phase)));
+    const delay = Math.max(0, calcularAtrasoDigitacao(bubble, phase) - remainingCompensation);
+    remainingCompensation = 0; // só desconta da primeira bolha
+    await new Promise((resolve) => setTimeout(resolve, delay));
     await sendWhatsAppTextMessage(phoneNumberId, accessToken, to, bubble);
     onBubbleSent(bubble);
   }

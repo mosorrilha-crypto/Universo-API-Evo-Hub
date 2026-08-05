@@ -147,10 +147,13 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             logEscalation(message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             return;
           }
+          if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
+            logEscalation(message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
+          }
           await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, result.bubbles, (bubbleText) => {
             recordOutgoingMessage(message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
-            console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}"`);
-          }, message.messageId, result.phase);
+            console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}" (agente: ${result.agent})`);
+          }, message.messageId, result.phase, result.routerElapsedMs);
         } catch (err: any) {
           if (isGeoRestrictedError(err)) {
             markGeoRestricted(message.from, err.message);
