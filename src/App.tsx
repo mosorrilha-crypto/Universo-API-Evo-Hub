@@ -19,7 +19,7 @@ import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components
 import { EvoHubIntegration } from './components/EvoHubIntegration';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { LoginModal } from './components/LoginModal';
-import { setAuthToken } from './lib/apiClient';
+import { setAuthToken, apiFetch } from './lib/apiClient';
 
 import { INITIAL_TENANTS, SAAS_DEMO_USERS } from './data/mockTenants';
 import { INITIAL_MOCK_LEADS } from './data/mockLeads';
@@ -92,6 +92,15 @@ export const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('saas_agent_kb', JSON.stringify(knowledgeBase));
   }, [knowledgeBase]);
+
+  // Busca a base de conhecimento real salva no backend (usada pelo agente
+  // automático de verdade) e sincroniza no painel, se existir.
+  useEffect(() => {
+    apiFetch('/api/knowledge-base')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.knowledgeBase) setKnowledgeBase(data.knowledgeBase); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
@@ -303,6 +312,11 @@ export const App: React.FC = () => {
             knowledgeBase={knowledgeBase}
             onSaveKnowledgeBase={(updatedKb) => {
               setKnowledgeBase(updatedKb);
+              apiFetch('/api/knowledge-base', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ knowledgeBase: updatedKb }),
+              }).catch((err) => console.error('Falha ao salvar base de conhecimento no backend:', err));
               showToast('Base de conhecimento do Agente salva!');
             }}
             onGoToWhatsAppSim={() => setActiveTab('whatsapp')}

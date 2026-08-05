@@ -7,6 +7,7 @@ import { recordIncomingMessage, recordOutgoingMessage } from '../services/conver
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendWhatsAppTextMessage } from '../services/metaSend';
 import { isAgentPaused } from '../services/agentStatus';
+import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import type { GoogleGenAI } from '@google/genai';
 
 interface WebhooksRouterDeps {
@@ -24,7 +25,8 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // volta via Meta Cloud API, sem bloquear a resposta do webhook (fire-and-forget).
   const triggerAutoReply = (phone: string, contactName: string | undefined, text: string) => {
     if (!getAi || isAgentPaused()) return;
-    generateAutoReplyForText(getAi(), text, contactName)
+    const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
+    generateAutoReplyForText(getAi(), text, contactName, kbContext)
       .then(async (reply) => {
         if (!reply) return;
         await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, phone, reply);

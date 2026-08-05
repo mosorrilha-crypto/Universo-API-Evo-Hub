@@ -11,7 +11,8 @@ import type { GoogleGenAI } from '@google/genai';
 export async function generateAutoReplyForText(
   ai: GoogleGenAI | null,
   text: string,
-  contactName?: string
+  contactName?: string,
+  knowledgeBaseContext?: string
 ): Promise<string | null> {
   if (!ai || !text.trim()) return null;
 
@@ -20,6 +21,7 @@ export async function generateAutoReplyForText(
 Responda de forma curta (1-3 frases), natural, cordial e no mesmo idioma da mensagem do cliente.
 Não invente preços, horários ou dados específicos que você não tem — nesse caso, diga que vai confirmar e retornar em breve.
 ${contactName ? `Nome do cliente: ${contactName}.` : ''}
+${knowledgeBaseContext || ''}
 Mensagem do cliente: "${text}"
 Responda apenas com o texto da resposta, sem aspas, sem JSON, sem explicações.`;
 

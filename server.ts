@@ -19,6 +19,7 @@ import { createConversationsRouter } from './server/routes/conversations';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initConversationPersistence } from './server/services/conversationStore';
 import { initAgentStatusPersistence } from './server/services/agentStatus';
+import { initKnowledgeBasePersistence } from './server/services/knowledgeBaseStore';
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ async function startServer() {
 
   await initConversationPersistence(config.supabaseUrl, config.supabaseKey);
   await initAgentStatusPersistence(config.supabaseUrl, config.supabaseKey);
+  await initKnowledgeBasePersistence(config.supabaseUrl, config.supabaseKey);
 
   app.use(express.json({
     limit: '50mb',

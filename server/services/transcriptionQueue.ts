@@ -4,6 +4,7 @@ import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from '
 import { updateMessageText, recordOutgoingMessage } from './conversationStore';
 import { sendWhatsAppTextMessage } from './metaSend';
 import { isAgentPaused } from './agentStatus';
+import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
 export interface TranscriptionJob {
@@ -115,6 +116,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
 
     const outcome = await transcribeAudioWithGemini(deps.getAi(), audioBase64, mimeType, {
       leadName: message.contactName,
+      customInstructions: formatKnowledgeBaseForPrompt(getKnowledgeBase()),
     });
 
     totalProcessed += 1;
