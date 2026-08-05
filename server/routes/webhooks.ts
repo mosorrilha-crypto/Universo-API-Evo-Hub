@@ -15,6 +15,7 @@ import { logEscalation, isPaymentRelated } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import type { GoogleGenAI } from '@google/genai';
+import type { CalendarConfig } from '../services/googleCalendar';
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
@@ -24,9 +25,16 @@ interface WebhooksRouterDeps {
   metaPhoneNumberId?: string;
   supabaseUrl?: string;
   supabaseKey?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
+  const calendarConfig: CalendarConfig | undefined = googleRedirectUri
+    ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
+    : undefined;
+
   const router = Router();
 
   // Resposta automática pra mensagens de texto (Epic 1.3): gera e envia de
@@ -46,13 +54,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
         await markAsReadAndShowTyping(metaPhoneNumberId, metaAccessToken, messageId);
-        const result = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history);
+        const result = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history, phone, calendarConfig);
         if (!result) {
           logEscalation(phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;
         }
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-          logEscalation(phone, contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', text);
+          logEscalation(phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
         }
         await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, result.bubbles, (bubbleText) => {
           recordOutgoingMessage(phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
