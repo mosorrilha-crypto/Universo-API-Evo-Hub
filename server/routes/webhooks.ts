@@ -47,10 +47,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           logEscalation(phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;
         }
+        if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
+          logEscalation(phone, contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', text);
+        }
         await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, result.bubbles, (bubbleText) => {
           recordOutgoingMessage(phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
-          console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}"`);
-        }, messageId, result.phase);
+          console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}" (agente: ${result.agent})`);
+        }, messageId, result.phase, result.routerElapsedMs);
       } catch (err: any) {
         if (isGeoRestrictedError(err)) {
           markGeoRestricted(phone, err.message);
