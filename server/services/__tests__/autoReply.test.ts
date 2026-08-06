@@ -137,3 +137,25 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(calls.every((c) => !c.config?.tools)).toBe(true);
   });
 });
+
+describe('generateAutoReplyForText — etapa de reclamação (Epic 4.5.8)', () => {
+  function makeFakeAiReclamacao() {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'reclamacao' }) } as any;
+          // O especialista "esquece" de marcar needsHumanConfirmation — o agente força true mesmo assim.
+          return { text: JSON.stringify({ phase: 'objecao', bubbles: ['Sinto muito por isso, vou confirmar com cuidado.'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('sempre marca needsHumanConfirmation=true, mesmo se o especialista não marcou', async () => {
+    const ai = makeFakeAiReclamacao();
+    const result = await generateAutoReplyForText('tenant-a', ai, 'me machucou muito, tô com alergia', 'Cliente');
+    expect(result?.agent).toBe('reclamacao');
+    expect(result?.needsHumanConfirmation).toBe(true);
+  });
+});

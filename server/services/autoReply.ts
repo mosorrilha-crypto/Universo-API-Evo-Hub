@@ -24,13 +24,13 @@ export interface MediaSendConfig {
 }
 
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
-export type AgentType = 'triagem' | 'faq' | 'agendamento';
+export type AgentType = 'triagem' | 'faq' | 'agendamento' | 'reclamacao';
 
 export interface AutoReplyResult {
   phase: ConversationPhase;
   bubbles: string[];
   agent: AgentType;
-  /** true quando o cliente está tentando efetivamente fechar/confirmar um horário — como ainda não temos agendamento real conectado, isso deve virar escalonamento pra humano. */
+  /** true quando precisa de atenção humana: cliente tentando fechar agendamento sem confirmação automática, ou (Epic 4.5.8) qualquer reclamação — reclamação sempre escala, nunca é resolvida só pela IA. */
   needsHumanConfirmation: boolean;
   /** ms gastos na chamada de roteamento — usado pra descontar do atraso de digitação da 1ª bolha, compensando a latência extra do router. */
   routerElapsedMs: number;
@@ -70,9 +70,10 @@ async function classifyAgent(ai: GoogleGenAI, text: string, history?: { sender: 
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
 - "faq": pergunta específica sobre preço, procedimento, horário de funcionamento, política de pagamento/cancelamento.
 - "agendamento": o cliente quer marcar, confirmar, remarcar ou cancelar um horário específico.
+- "reclamacao": o cliente está insatisfeito ou reclamando de um serviço JÁ REALIZADO (resultado, dor, alergia, reação), ou claramente irritado/chateado com o negócio.
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
-Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento"}`;
+Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
 
   const response = await withTimeout(
     ai.models.generateContent({
@@ -84,7 +85,7 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento"}`;
   );
 
   const parsed = JSON.parse(response.text || '{}') as { agent?: string };
-  const valid: AgentType[] = ['triagem', 'faq', 'agendamento'];
+  const valid: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
   return valid.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
 }
 
@@ -92,6 +93,7 @@ const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
   triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente (nunca prometa mandar depois — ela já foi).`,
   faq: `Seu papel agora é FAQ/ESPECIALISTA: responda a dúvida específica (preço, procedimento, política) com precisão total usando SOMENTE o contexto do negócio abaixo. Se não tiver o dado exato, diga que vai confirmar — nunca invente. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente na resposta (ex: "manda ver a foto que te mandei ali em cima") — nunca prometa mandar uma foto que já foi enviada, e nunca diga que vai mandar se a seção mostra que a tentativa falhou.`,
   agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.`,
+  reclamacao: `Seu papel agora é RECLAMAÇÃO: o cliente está insatisfeito ou reportando um problema com um serviço JÁ REALIZADO (resultado, dor, alergia, reação) — ou claramente irritado/chateado. Acolha com empatia genuína e valide o que ela está sentindo. NUNCA discuta, nunca se justifique, nunca minimize o que ela relatou. NUNCA ofereça solução, reembolso, retoque ou qualquer tipo de compensação por conta própria — essa decisão é sempre de uma pessoa real. Se ela mencionar sintoma físico (dor forte, inchaço, alergia), diga com calma que vai confirmar isso com cuidado, e que se piorar procure atendimento médico. Nunca prometa prazo específico de retorno.`,
 };
 
 /**
@@ -591,7 +593,13 @@ export async function generateAutoReplyForText(
       }
     }
 
-    return { ...specialist, bubbles, needsHumanConfirmation: specialist.needsHumanConfirmation || forcedHumanConfirmation, agent, routerElapsedMs };
+    // Epic 4.5.8 — toda reclamação escala pra humano, sem exceção. A IA
+    // nunca resolve reclamação sozinha (nunca oferece reembolso/retoque por
+    // conta própria), então needsHumanConfirmation é sempre true aqui,
+    // independente do que o modelo tenha marcado.
+    const needsHumanConfirmation = agent === 'reclamacao' ? true : specialist.needsHumanConfirmation || forcedHumanConfirmation;
+
+    return { ...specialist, bubbles, needsHumanConfirmation, agent, routerElapsedMs };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;

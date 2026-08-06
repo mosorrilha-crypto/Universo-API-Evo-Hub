@@ -157,7 +157,9 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             return;
           }
-          if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
+          if (result.agent === 'reclamacao') {
+            await logEscalation(tenantId, message.from, message.contactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', outcome.result.transcription);
+          } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
           }
           await sendBubbles(phoneNumberId, token, message.from, result.bubbles, async (bubbleText) => {

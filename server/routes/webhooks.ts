@@ -70,7 +70,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;
         }
-        if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
+        if (result.agent === 'reclamacao') {
+          await logEscalation(tenantId, phone, contactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', text);
+        } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
           await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
         }
         await sendBubbles(phoneNumberId, token, phone, result.bubbles, async (bubbleText) => {
