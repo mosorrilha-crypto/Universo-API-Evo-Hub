@@ -408,7 +408,10 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       autoReconnectCount: 0,
       maxLeadsPerMonth: newPlan === 'enterprise' ? 20000 : newPlan === 'pro' ? 5000 : 1000,
       currentLeadsMonth: 0,
-      webhookEndpoint: `https://ais-dev-ux3whkf32bp55jsnlf7bbd-747107233461.us-east1.run.app/api/whatsapp/webhook?tenantId=tenant_${Date.now().toString().slice(-4)}`,
+      // Deriva do domínio real em uso (produção ou preview), nunca hardcoded —
+      // um domínio de dev fixo aqui faria o webhook de todo cliente novo
+      // apontar pra um ambiente que não existe mais.
+      webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_${Date.now().toString().slice(-4)}`,
       customGeminiKey: customKey ? '••••••••' : undefined,
       metaPixelId: metaPixel || undefined,
     };
@@ -494,6 +497,18 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         >
           <Sparkles className="w-4 h-4" />
           <span>Roadmap Técnico & Backlog</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('tokens_telemetry')}
+          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all cursor-pointer ${
+            activeAdminTab === 'tokens_telemetry'
+              ? 'bg-amber-600 text-slate-950 shadow-md shadow-amber-950/30'
+              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+          }`}
+        >
+          <Cpu className="w-4 h-4" />
+          <span>Telemetria de Tokens IA</span>
         </button>
       </div>
 
@@ -767,7 +782,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                       <div className="font-bold text-white text-sm flex items-center gap-1.5">
                         {t.name}
                         {isActiveTenant && (
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.2 rounded-full border border-emerald-500/30 font-semibold">
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-semibold">
                             Atual no Painel
                           </span>
                         )}
@@ -1422,6 +1437,9 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                     required
                   />
+                  <p className="text-[10px] text-amber-400 mt-1 leading-relaxed">
+                    ⚠️ Isto cadastra o usuário só neste diretório interno — ainda NÃO cria um login funcional de verdade. A pessoa não vai conseguir entrar no sistema com este e-mail/senha.
+                  </p>
                 </div>
 
                 <div>

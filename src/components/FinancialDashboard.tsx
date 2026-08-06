@@ -139,6 +139,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
   const handleCreatePaymentLink = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!amount || amount <= 0) return;
     const lead = leads.find((l) => l.id === selectedLeadId) || leads[0];
 
     const newTx: FinancialTransaction = {
@@ -224,7 +225,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
           {onClearAllTransactions && transactions.length > 0 && (
             <button
               type="button"
-              onClick={onClearAllTransactions}
+              onClick={() => {
+                if (window.confirm(`Tem certeza que deseja apagar TODAS as ${transactions.length} transações? Isso não pode ser desfeito.`)) {
+                  onClearAllTransactions();
+                }
+              }}
               className="py-2.5 px-3 bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-800/60 font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
               title="Limpar faturas fictícias"
             >
@@ -478,7 +483,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     {tx.status === 'pendente' && (
                       <button
                         type="button"
-                        onClick={() => onUpdateTransactionStatus(tx.id, 'pago')}
+                        onClick={() => onUpdateTransactionStatus?.(tx.id, 'pago')}
                         className="px-2.5 py-1 bg-emerald-950 hover:bg-emerald-800 text-emerald-300 border border-emerald-700 rounded-lg text-[10px] font-bold"
                       >
                         Confirmar Pgto
@@ -571,6 +576,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     <label className="block text-xs font-semibold text-slate-300 mb-1">Valor da Cobrança (R$)</label>
                     <input
                       type="number"
+                      min="0.01"
+                      step="0.01"
                       value={amount}
                       onChange={(e) => setAmount(Number(e.target.value))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"

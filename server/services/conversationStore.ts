@@ -173,3 +173,21 @@ export function clearConversationHistory(phone: string): StoredConversation | un
   scheduleSave();
   return conv;
 }
+
+/** Remove o contato inteiro (não só as mensagens) — usado quando o operador exclui a conversa da lista, não só "limpa" o histórico. */
+export function deleteConversation(phone: string): boolean {
+  const existed = conversations.delete(phone);
+  if (existed) scheduleSave();
+  return existed;
+}
+
+/** Remove uma única mensagem — usado quando o operador apaga um item específico do histórico. */
+export function deleteMessage(phone: string, messageId: string): boolean {
+  const conv = conversations.get(phone);
+  if (!conv) return false;
+  const before = conv.messages.length;
+  conv.messages = conv.messages.filter((m) => m.id !== messageId);
+  if (conv.messages.length === before) return false;
+  scheduleSave();
+  return true;
+}

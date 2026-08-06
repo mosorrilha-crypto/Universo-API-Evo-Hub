@@ -139,8 +139,15 @@ export const App: React.FC = () => {
   }, [currentUser]);
 
   // Handlers for Data Updates
+  // Upsert: o CRM (OperatorCRM) reaproveita este handler tanto pra editar um
+  // lead existente quanto pra inserir um novo (modal "+ Novo Lead Real") — um
+  // `.map()` puro nunca casa com um ID novo, então o lead recém-criado
+  // desaparecia em silêncio (bug real encontrado na auditoria pré-lançamento).
   const handleUpdateLead = (updatedLead: LeadInfo) => {
-    setLeads((prev) => prev.map((l) => (l.id === updatedLead.id ? updatedLead : l)));
+    setLeads((prev) => {
+      const exists = prev.some((l) => l.id === updatedLead.id);
+      return exists ? prev.map((l) => (l.id === updatedLead.id ? updatedLead : l)) : [updatedLead, ...prev];
+    });
   };
 
   const handleDeleteLead = (leadId: string) => {

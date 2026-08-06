@@ -231,9 +231,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
       const data = await response.json();
       if (data.report) {
         setAiReport(data.report);
+      } else {
+        showToast('O servidor não retornou um relatório. Tente novamente.');
       }
     } catch (err: any) {
       console.warn('Erro ao gerar relatório com IA:', err);
+      showToast('Falha ao gerar o relatório com IA — verifique sua conexão e tente novamente.');
     } finally {
       setIsGeneratingReport(false);
     }
@@ -401,7 +404,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
           >
             <Send className="w-4 h-4 text-blue-400" />
             <span>Central & Disparo Meta CAPI</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">
               {capiEventsLog.length} Eventos
             </span>
           </button>
@@ -989,7 +992,9 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               </div>
 
               <span className="text-xs font-semibold text-emerald-400 bg-emerald-950 px-3 py-1 rounded-lg border border-emerald-800">
-                Match Score: 8.8 / 10
+                Match Score: {capiEventsLog.length > 0
+                  ? (capiEventsLog.reduce((sum, l) => sum + (l.matchQualityScore || 0), 0) / capiEventsLog.length).toFixed(1)
+                  : '—'} / 10
               </span>
             </div>
 
@@ -1023,10 +1028,17 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                         ph: {log.userHash?.phoneHash?.substring(0, 12)}...
                       </td>
                       <td className="py-3 text-center">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                          <CheckCheck className="w-3 h-3 mr-1" />
-                          200 OK
-                        </span>
+                        {log.status === 'error' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-300 border border-rose-800">
+                            <AlertCircle className="w-3 h-3 mr-1" />
+                            Falhou
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                            <CheckCheck className="w-3 h-3 mr-1" />
+                            {log.status === 'simulated_ok' ? 'Simulado' : '200 OK'}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 text-right pr-2">
                         <button

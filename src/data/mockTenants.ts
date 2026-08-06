@@ -17,7 +17,7 @@ export const INITIAL_TENANTS: Tenant[] = [
     autoReconnectCount: 12,
     maxLeadsPerMonth: 5000,
     currentLeadsMonth: 1240,
-    webhookEndpoint: 'https://ais-dev-ux3whkf32bp55jsnlf7bbd-747107233461.us-east1.run.app/api/whatsapp/webhook?tenantId=tenant_001',
+    webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_001`,
     metaPixelId: '987654321012345',
   },
   {
@@ -37,7 +37,7 @@ export const INITIAL_TENANTS: Tenant[] = [
     autoReconnectCount: 0,
     maxLeadsPerMonth: 20000,
     currentLeadsMonth: 8900,
-    webhookEndpoint: 'https://ais-dev-ux3whkf32bp55jsnlf7bbd-747107233461.us-east1.run.app/api/whatsapp/webhook?tenantId=tenant_002',
+    webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_002`,
     metaPixelId: '123456789098765',
   },
   {
@@ -56,7 +56,7 @@ export const INITIAL_TENANTS: Tenant[] = [
     autoReconnectCount: 3,
     maxLeadsPerMonth: 1000,
     currentLeadsMonth: 320,
-    webhookEndpoint: 'https://ais-dev-ux3whkf32bp55jsnlf7bbd-747107233461.us-east1.run.app/api/whatsapp/webhook?tenantId=tenant_003',
+    webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_003`,
   },
   {
     id: 'tenant_004',
@@ -75,7 +75,7 @@ export const INITIAL_TENANTS: Tenant[] = [
     autoReconnectCount: 0,
     maxLeadsPerMonth: 10000,
     currentLeadsMonth: 2450,
-    webhookEndpoint: 'https://ais-dev-ux3whkf32bp55jsnlf7bbd-747107233461.us-east1.run.app/api/whatsapp/webhook?tenantId=tenant_004',
+    webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_004`,
     metaPixelId: '554433221100998',
   },
 ];

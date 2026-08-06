@@ -190,6 +190,8 @@ export interface ChatMessage {
   mimeType?: string;
   fileName?: string;
   timestamp: string;
+  /** true quando o envio real via Meta Cloud API falhou — a mensagem ficou só local, o cliente nunca recebeu. */
+  sendFailed?: boolean;
 }
 
 export interface ExtractedCRMData {

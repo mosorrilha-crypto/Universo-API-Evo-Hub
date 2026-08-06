@@ -232,16 +232,35 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
+    const previous = agentStatus;
     setAgentStatusState(status);
     try {
-      await apiFetch('/api/agent-status', {
+      const res = await apiFetch('/api/agent-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
       console.error('Falha ao atualizar status do agente:', err);
+      setAgentStatusState(previous);
+      setErrorMsg('Não foi possível atualizar o status do agente no servidor — tente de novo (o agente continua com o status anterior).');
     }
+  };
+
+  // Marca uma mensagem específica como "não entregue de verdade" — usado por
+  // todos os envios reais (texto/mídia/áudio/foto de exemplo) quando a
+  // chamada à Meta Cloud API falha. Sem isso, a mensagem ficava só no chat
+  // local parecendo entregue, e o cliente real nunca recebia nada.
+  const markMessageFailed = (leadId: string, messageId: string, errorText: string) => {
+    setLeads((prev) =>
+      prev.map((l) =>
+        l.id === leadId
+          ? { ...l, messages: (l.messages || []).map((m) => (m.id === messageId ? { ...m, sendFailed: true } : m)) }
+          : l
+      )
+    );
+    setErrorMsg(errorText);
   };
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -263,19 +282,26 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
 
     try {
-      await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base64, mimeType: file.type, filename: file.name }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
       console.error('Falha ao enviar arquivo real via WhatsApp:', err);
+      markMessageFailed(selectedLead.id, newMsg.id, `Falha ao enviar "${file.name}" pro cliente — ele NÃO recebeu este arquivo. Tente reenviar.`);
     }
   };
 
   // Gravação de voz real do operador — mesmo microfone do AudioRecorder.tsx,
   // mas enviando o áudio de verdade pro WhatsApp em vez de só transcrever.
   const [isRecordingReal, setIsRecordingReal] = useState(false);
+  // Nome do lead pra quem a gravação em andamento vai — separado de
+  // `selectedLead` de propósito: se o operador trocar de conversa no meio da
+  // gravação, o áudio ainda vai pro lead onde ela começou (correto), mas sem
+  // isso não havia nenhum aviso visual de qual conversa vai receber o áudio.
+  const [recordingForLeadName, setRecordingForLeadName] = useState<string | null>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
 
@@ -283,6 +309,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (isRecordingReal) {
       mediaRecorderRef.current?.stop();
       setIsRecordingReal(false);
+      setRecordingForLeadName(null);
       return;
     }
 
@@ -314,18 +341,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
 
         try {
-          await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
+          const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ base64, mimeType, filename: 'audio.webm' }),
           });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
         } catch (err) {
           console.error('Falha ao enviar áudio real via WhatsApp:', err);
+          markMessageFailed(selectedLead.id, newMsg.id, `Falha ao enviar o áudio pro cliente ${selectedLead.name} — ele NÃO recebeu. Tente reenviar.`);
         }
       };
 
       recorder.start();
       setIsRecordingReal(true);
+      setRecordingForLeadName(selectedLead.name);
     } catch (err) {
       console.error('Erro ao acessar microfone:', err);
       alert('Não foi possível acessar o microfone. Verifique as permissões do navegador.');
@@ -347,13 +377,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
 
     try {
-      await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-example-photo`, {
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-example-photo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productName }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
       console.error('Falha ao enviar foto de exemplo:', err);
+      markMessageFailed(selectedLead.id, newMsg.id, `Falha ao enviar a foto de exemplo pro cliente — ele NÃO recebeu. Tente reenviar.`);
     }
   };
 
@@ -431,29 +463,68 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   });
 
   // Handlers to delete conversation, clear history, or delete single message
-  const handleDeleteConversation = (leadId: string, leadName: string) => {
-    if (window.confirm(`Tem certeza que deseja excluir permanentemente a conversa com ${leadName}?`)) {
-      const remaining = leads.filter((l) => l.id !== leadId);
-      setLeads(remaining);
-      localStorage.setItem('saas_crm_leads', JSON.stringify(remaining));
-      if (onDeleteLead) {
-        onDeleteLead(leadId);
+  const handleDeleteConversation = async (leadId: string, leadName: string) => {
+    if (!window.confirm(`Tem certeza que deseja excluir permanentemente a conversa com ${leadName}?`)) return;
+
+    const lead = leads.find((l) => l.id === leadId);
+    // Numa conversa real, apaga no servidor primeiro — sem isso, o polling
+    // de /api/conversations (a cada 8s) trazia a conversa de volta sozinha,
+    // porque o contato continuava existindo no backend.
+    if ((lead as any)?.isReal) {
+      try {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(lead!.phone)}`, { method: 'DELETE' });
+        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao excluir conversa real no servidor:', err);
+        setErrorMsg('Não foi possível excluir a conversa no servidor — ela pode voltar a aparecer. Tente de novo.');
+        return;
       }
-      if (activeLeadId === leadId) {
-        setActiveLeadId(remaining.length > 0 ? remaining[0].id : null);
-      }
+    }
+
+    const remaining = leads.filter((l) => l.id !== leadId);
+    setLeads(remaining);
+    localStorage.setItem('saas_crm_leads', JSON.stringify(remaining));
+    if (onDeleteLead) {
+      onDeleteLead(leadId);
+    }
+    if (activeLeadId === leadId) {
+      setActiveLeadId(remaining.length > 0 ? remaining[0].id : null);
     }
   };
 
-  const handleClearChatMessages = (leadId: string) => {
-    if (window.confirm('Deseja apagar o histórico de mensagens desta conversa?')) {
-      setLeads((prev) =>
-        prev.map((l) => (l.id === leadId ? { ...l, messages: [], fullAnalysis: undefined } : l))
-      );
+  const handleClearChatMessages = async (leadId: string) => {
+    if (!window.confirm('Deseja apagar o histórico de mensagens desta conversa?')) return;
+
+    const lead = leads.find((l) => l.id === leadId);
+    if ((lead as any)?.isReal) {
+      try {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(lead!.phone)}/history`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao limpar histórico real no servidor:', err);
+        setErrorMsg('Não foi possível limpar o histórico no servidor — as mensagens podem voltar a aparecer. Tente de novo.');
+        return;
+      }
     }
+
+    setLeads((prev) =>
+      prev.map((l) => (l.id === leadId ? { ...l, messages: [], fullAnalysis: undefined } : l))
+    );
   };
 
-  const handleDeleteSingleMessage = (leadId: string, messageId: string) => {
+  const handleDeleteSingleMessage = async (leadId: string, messageId: string) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if ((lead as any)?.isReal) {
+      try {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(lead!.phone)}/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' });
+        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao apagar mensagem real no servidor:', err);
+        setErrorMsg('Não foi possível apagar a mensagem no servidor — ela pode voltar a aparecer.');
+        return;
+      }
+    }
+
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId
@@ -621,7 +692,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setInputMessage('');
 
     if (senderRole === 'agent' && (selectedLead as any).isReal) {
-      sendRealWhatsAppMessage(selectedLead.phone, newMsg.text!);
+      sendRealWhatsAppMessage(selectedLead.id, selectedLead.phone, newMsg.id, newMsg.text!);
     }
 
     if (autoAnalyze) {
@@ -630,15 +701,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Envia de verdade via Meta Cloud API (só quando o lead é uma conversa real, não simulada)
-  const sendRealWhatsAppMessage = async (phone: string, text: string) => {
+  const sendRealWhatsAppMessage = async (leadId: string, phone: string, messageId: string, text: string) => {
     try {
-      await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
       console.error('Falha ao enviar mensagem real via WhatsApp:', err);
+      markMessageFailed(leadId, messageId, 'Falha ao enviar a mensagem pro cliente — ele NÃO recebeu. Tente reenviar.');
     }
   };
 
@@ -661,7 +734,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
 
     if ((selectedLead as any).isReal) {
-      sendRealWhatsAppMessage(selectedLead.phone, replyText);
+      sendRealWhatsAppMessage(selectedLead.id, selectedLead.phone, newMsg.id, replyText);
     }
 
     if (autoAnalyze) {
@@ -805,7 +878,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       messages: [initialTextMsg],
     };
 
-    setLeads((prev) => [newLeadItem, ...prev]);
+    setLeads((prev) => {
+      const updated = [newLeadItem, ...prev];
+      localStorage.setItem('saas_crm_leads', JSON.stringify(updated));
+      return updated;
+    });
+    // Propaga pro state do App.tsx (usado pelo CRM/Financeiro/Atribuição) —
+    // sem isso, o lead criado aqui só existia dentro deste componente e
+    // sumia ao recarregar a página, nunca aparecendo no CRM.
+    onAddNewLead?.(newLeadItem);
     setActiveLeadId(newId);
     setShowAddLead(false);
     setNewLeadName('');
@@ -1293,7 +1374,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       {/* Language tag indicator if available */}
                       {lead.fullAnalysis?.detectedLanguage && (
                         <div className="mt-1 flex items-center gap-1">
-                          <span className="text-[9px] text-blue-300 bg-blue-950/60 px-1.5 py-0.2 rounded border border-blue-800/40 flex items-center gap-0.5">
+                          <span className="text-[9px] text-blue-300 bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/40 flex items-center gap-0.5">
                             <Globe className="w-2.5 h-2.5 text-blue-400" />
                             {lead.fullAnalysis.detectedLanguage}
                           </span>
@@ -1331,7 +1412,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <h3 className="text-xs font-bold text-[#e9edef] flex items-center gap-2">
                       {selectedLead.name}
                       {selectedLead.fullAnalysis?.detectedLanguage && (
-                        <span className="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 text-[9px] font-bold border border-blue-500/30">
+                        <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[9px] font-bold border border-blue-500/30">
                           {selectedLead.fullAnalysis.detectedLanguage}
                         </span>
                       )}
@@ -1495,6 +1576,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           {/* Regular Text Message */}
                           {msg.type === 'text' && <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>}
 
+                          {msg.sendFailed && (
+                            <div className="flex items-center gap-1 text-[10px] font-bold text-rose-300 bg-rose-950/60 border border-rose-700/60 rounded-lg px-2 py-1 mt-1">
+                              <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                              <span>Falha no envio — o cliente NÃO recebeu isto.</span>
+                            </div>
+                          )}
+
                           <div className={`flex justify-between items-center text-[9px] mt-1 gap-2 border-t border-white/5 pt-1 ${isLead ? 'text-slate-400' : 'text-emerald-200'}`}>
                             <button
                               onClick={() => handleDeleteSingleMessage(selectedLead.id, msg.id)}
@@ -1505,7 +1593,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             <div className="flex items-center gap-1">
                               <span>{msg.timestamp}</span>
-                              {!isLead && <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />}
+                              {!isLead && (msg.sendFailed ? (
+                                <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                              ) : (
+                                <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />
+                              ))}
                             </div>
                           </div>
                         </div>
@@ -1558,10 +1650,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           ? 'bg-red-500/20 border-red-500/50 text-red-300 animate-pulse'
                           : 'bg-[#111b21] hover:bg-slate-800 border-slate-800 text-emerald-400'
                       }`}
-                      title={(selectedLead as any)?.isReal ? (isRecordingReal ? 'Parar e enviar áudio' : 'Gravar áudio real') : 'Simular Envio de Áudio'}
+                      title={
+                        isRecordingReal
+                          ? `Gravando pra ${recordingForLeadName} — clique aqui (em qualquer conversa) pra parar e enviar`
+                          : (selectedLead as any)?.isReal ? 'Gravar áudio real' : 'Simular Envio de Áudio'
+                      }
                     >
                       <Mic className="w-3 h-3" />
-                      <span>{isRecordingReal ? 'Gravando... (clique p/ enviar)' : 'Áudio'}</span>
+                      <span>{isRecordingReal ? `Gravando p/ ${recordingForLeadName}...` : 'Áudio'}</span>
                     </button>
 
                     <select
@@ -1606,25 +1702,32 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       </select>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={handleSendSampleImage}
-                      className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-blue-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
-                      title="Simular Envio de Imagem"
-                    >
-                      <ImageIcon className="w-3 h-3" />
-                      <span>Foto</span>
-                    </button>
+                    {/* Botões de SIMULAÇÃO (lead/agente fake) — escondidos numa conversa
+                        real pra não confundir com o clipe de anexo real logo abaixo, que
+                        de fato envia pro cliente via Meta Cloud API. */}
+                    {!(selectedLead as any)?.isReal && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleSendSampleImage}
+                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-blue-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                          title="Simular Envio de Imagem (conversa de teste)"
+                        >
+                          <ImageIcon className="w-3 h-3" />
+                          <span>Foto</span>
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={handleSendSampleFile}
-                      className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-purple-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
-                      title="Simular Envio de PDF"
-                    >
-                      <Paperclip className="w-3 h-3" />
-                      <span>PDF</span>
-                    </button>
+                        <button
+                          type="button"
+                          onClick={handleSendSampleFile}
+                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-purple-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                          title="Simular Envio de PDF (conversa de teste)"
+                        >
+                          <Paperclip className="w-3 h-3" />
+                          <span>PDF</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 

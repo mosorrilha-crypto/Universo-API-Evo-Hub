@@ -297,10 +297,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setTimeout(() => setIsSavedToast(false), 4000);
   };
 
+  // Presets parciais (SaaS/E-commerce/Clínica) só definem alguns campos —
+  // sem resetar o resto, produtos/FAQs/documentos/regras de um preset
+  // anterior (ex: Monique Studio) continuavam misturados com o nome/tom da
+  // empresa nova, criando uma base de conhecimento contraditória (ex: um
+  // agente "Clínica de Saúde" ainda cotando preço de micropigmentação).
   const handleApplyPreset = (preset: typeof PRESET_TEMPLATES[0]) => {
     setFormData((prev) => ({
       ...prev,
-      ...preset.data
+      products: preset.data.products ?? [],
+      businessRules: preset.data.businessRules ?? [],
+      faqs: preset.data.faqs ?? [],
+      documents: preset.data.documents ?? [],
+      ...preset.data,
     }));
   };
 
@@ -401,11 +410,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  const MAX_DOC_SIZE_MB = 15;
+
   const handleSimulateFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const newDocs: AgentFileDoc[] = Array.from(files).map((f: File, i: number) => ({
+    const fileArray = Array.from(files) as File[];
+    const oversized = fileArray.filter((f) => f.size > MAX_DOC_SIZE_MB * 1024 * 1024);
+    if (oversized.length > 0) {
+      alert(`Arquivo(s) maior(es) que ${MAX_DOC_SIZE_MB}MB não foram anexados: ${oversized.map((f) => f.name).join(', ')}`);
+    }
+
+    const accepted = fileArray.filter((f) => f.size <= MAX_DOC_SIZE_MB * 1024 * 1024);
+    const newDocs: AgentFileDoc[] = accepted.map((f: File, i: number) => ({
       id: (Date.now() + i).toString(),
       fileName: f.name,
       fileSize: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
@@ -917,7 +935,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Documentos & Manuais de Treinamento
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Anexe arquivos PDF, manuais, termos de uso ou catálogos para alimentar o contexto do Gemini.
+                  Anexe arquivos PDF, manuais, termos de uso ou catálogos como referência do que a IA deve saber. ⚠️ O conteúdo do arquivo ainda NÃO é lido pelo agente automaticamente — hoje serve só como registro/checklist do que já foi entregue à equipe. Pra passar uma instrução direto pra IA, use as abas "Regras de Negócio" ou "FAQs".
                 </p>
               </div>
             </div>
