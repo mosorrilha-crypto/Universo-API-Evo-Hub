@@ -208,16 +208,27 @@ restrita com conexão direta — fica como item futuro, não bloqueia esta fase.
 
 ### Bloco 2.B — Roteamento multi-canal (webhook sabe de quem é a mensagem)
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 2.B.1 | `webhookParsers.ts` passa a extrair `value.metadata.phone_number_id` do payload da Meta (hoje não lê esse campo) | P0 | S |
-| 2.B.2 | Nova tabela/lookup `phone_number_id → tenant_id` — resolve qual cliente é dono de cada número assim que a mensagem chega | P0 | M |
-| 2.B.3 | `metaSend.ts`, `autoReply.ts`, `sendBubbles.ts`, `transcriptionQueue.ts` deixam de receber credenciais globais injetadas na subida do servidor (`config.metaAccessToken` fixo) e passam a resolver a credencial do tenant certo por requisição | P0 | L |
-| 2.B.4 | Idempotência e fila de transcrição passam a ser por `tenant_id + message_id` | P1 | S |
+**Status: ✅ código pronto e no branch.**
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 2.B.1 | `webhookParsers.ts` passa a extrair `value.metadata.phone_number_id` do payload da Meta (hoje não lê esse campo) | P0 | S | ✅ Feito |
+| 2.B.2 | Nova tabela/lookup `phone_number_id → tenant_id` — resolve qual cliente é dono de cada número assim que a mensagem chega | P0 | M | ✅ Feito — reaproveita `tenant_meta_credentials` (já existia do Bloco 2.A) via `server/services/tenantResolver.ts`, sem precisar de tabela nova |
+| 2.B.3 | `metaSend.ts`, `autoReply.ts`, `sendBubbles.ts`, `transcriptionQueue.ts` deixam de receber credenciais globais injetadas na subida do servidor (`config.metaAccessToken` fixo) e passam a resolver a credencial do tenant certo por requisição | P0 | L | ✅ Feito — `metaSend.ts`/`sendBubbles.ts` já recebiam credencial por parâmetro (nenhuma mudança neles); `webhooks.ts` e `transcriptionQueue.ts` agora resolvem por `phone_number_id` antes de chamar |
+| 2.B.4 | Idempotência e fila de transcrição passam a ser por `tenant_id + message_id` | P1 | S | Adiado — `message_id` da Meta já é praticamente único globalmente, risco baixo de colisão entre tenants; revisitar se algum dia virar problema real |
 
 **Critério de aceite:** duas mensagens simultâneas de dois números de WhatsApp diferentes
 (dois tenants) são respondidas cada uma com a base de conhecimento e a agenda certas, sem
-misturar.
+misturar. ✅ Atendido no código.
+
+**Como funciona na prática:** se o `phone_number_id` da mensagem recebida não estiver
+cadastrado em `tenant_meta_credentials`, cai no tenant legado (Monique) + credencial
+compartilhada — exatamente o comportamento de hoje, preservado como fallback. Isso significa
+que **nada muda em produção até você cadastrar um segundo cliente de verdade**. Pra isso,
+script novo: `npm run create:tenant -- --name "Nome" --phone-number-id <id> --access-token
+<token>` (cria o tenant + credenciais do WhatsApp dele), seguido de `npm run create:operator
+-- --tenant <uuid-impresso> --email ... --password ... --role admin` (cria o primeiro login
+dele). É a implementação do Bloco 2.D.4 (onboarding manual já decidido).
 
 ### Bloco 2.C — Google Calendar por tenant
 

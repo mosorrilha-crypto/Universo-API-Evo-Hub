@@ -10,6 +10,8 @@ export interface ParsedIncomingMessage {
   messageId: string;
   from: string;
   contactName?: string;
+  /** phone_number_id da Meta — o número do NEGÓCIO que recebeu a mensagem (não o do cliente). Usado pra resolver de qual tenant é essa mensagem (Bloco 2.B). Ausente em mensagens via Evolution (self-hosted, sem esse conceito). */
+  phoneNumberId?: string;
   type: 'audio' | 'text' | 'image' | 'other';
   text?: string;
   /** Presente quando type === 'audio' via Meta Cloud API. */
@@ -44,6 +46,7 @@ export function parseMetaWebhookPayload(body: any, provider: 'meta' | 'evohub' =
       for (const contact of value.contacts || []) {
         if (contact?.wa_id) contactsByWaId.set(contact.wa_id, contact.profile?.name);
       }
+      const phoneNumberId: string | undefined = value?.metadata?.phone_number_id;
 
       for (const msg of messages) {
         if (!msg?.id || !msg?.from) continue;
@@ -53,6 +56,7 @@ export function parseMetaWebhookPayload(body: any, provider: 'meta' | 'evohub' =
           messageId: msg.id,
           from: msg.from,
           contactName: contactsByWaId.get(msg.from),
+          phoneNumberId,
         };
 
         if (msg.type === 'audio' && msg.audio?.id) {

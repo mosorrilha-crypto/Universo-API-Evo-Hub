@@ -14,7 +14,7 @@ import { bufferIncomingText } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
-import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
+import { resolveTenantByPhoneNumberId, type ResolvedTenant } from '../services/tenantResolver';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
 
@@ -41,11 +41,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // Resposta automática pra mensagens de texto (Epic 1.3): gera e envia de
   // volta via Meta Cloud API, sem bloquear a resposta do webhook (fire-and-forget).
   //
-  // tenantId ainda é fixo (LEGACY_DEFAULT_TENANT_ID) — o webhook não sabe de
-  // qual cliente é cada mensagem até o Bloco 2.B extrair phone_number_id do
-  // payload da Meta e resolver o tenant dono daquele número.
-  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number) => {
-    const tenantId = LEGACY_DEFAULT_TENANT_ID;
+  // resolvedTenant vem do Bloco 2.B (server/services/tenantResolver.ts) — já
+  // é o tenant/credencial certos pra esse número, resolvidos por
+  // phone_number_id antes de chegar aqui.
+  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant) => {
+    const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
     if (!getAi) return;
     // runExclusive garante que, se a mensagem anterior desse número ainda
     // estiver gerando resposta, esta espera a vez — sem isso, uma chamada
@@ -61,7 +61,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       try {
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
-        await markAsReadAndShowTyping(metaPhoneNumberId, metaAccessToken, messageId);
+        await markAsReadAndShowTyping(phoneNumberId, token, messageId);
         const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig);
         if (!result) {
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
@@ -70,7 +70,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
           await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
         }
-        await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, result.bubbles, async (bubbleText) => {
+        await sendBubbles(phoneNumberId, token, phone, result.bubbles, async (bubbleText) => {
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
           console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}" (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
@@ -89,19 +89,20 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // Agrupa mensagens de texto picotadas (2-3 seguidas do mesmo número) antes
   // de disparar a resposta — espera ~6s de silêncio, evitando responder cada
   // fragmento separadamente (denunciaria automação na hora).
-  const handleIncomingText = (phone: string, contactName: string | undefined, text: string, messageId: string) => {
-    bufferIncomingText(phone, contactName, text, messageId, (combinedText, bufferedContactName, lastMessageId, messageCount) => {
-      triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount);
+  const handleIncomingText = (phone: string, contactName: string | undefined, text: string, messageId: string, resolvedTenant: ResolvedTenant) => {
+    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) => {
+      triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant);
     });
   };
 
-  // Extrai as mensagens em um formato comum, enfileira áudio pra transcrição
-  // (idempotente por message_id) e ignora o resto (texto/imagem por ora —
-  // ver Epic 1.3 pra resposta automática). Compartilhado entre os handlers de
-  // Meta/Evolution direto e o handler dedicado do Evo Hub. tenantId fixo até
-  // o Bloco 2.B existir (ver comentário em triggerAutoReply acima).
+  // Extrai as mensagens em um formato comum, resolve de qual tenant é cada
+  // uma (Bloco 2.B — por phone_number_id, com fallback pro tenant legado +
+  // credencial compartilhada se o número não estiver cadastrado ainda),
+  // enfileira áudio pra transcrição (idempotente por message_id) e ignora o
+  // resto (texto/imagem por ora — ver Epic 1.3 pra resposta automática).
+  // Compartilhado entre os handlers de Meta/Evolution direto e o handler
+  // dedicado do Evo Hub.
   const enqueueAudioMessages = async (parsedMessages: ParsedIncomingMessage[]) => {
-    const tenantId = LEGACY_DEFAULT_TENANT_ID;
     let enqueued = 0;
     const nowLabel = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     for (const msg of parsedMessages) {
@@ -110,20 +111,23 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         continue;
       }
 
+      const resolvedTenant = await resolveTenantByPhoneNumberId(msg.phoneNumberId, { metaAccessToken, metaPhoneNumberId });
+      const { tenantId } = resolvedTenant;
+
       if (msg.type === 'audio') {
         await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
-        enqueueTranscriptionJob(msg);
+        enqueueTranscriptionJob(msg, resolvedTenant);
         enqueued += 1;
       } else if (msg.type === 'text') {
         await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
         if (msg.text && isPaymentRelated(msg.text)) {
           await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
         }
-        if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId);
+        if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
       } else if (msg.type === 'image') {
         await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
         if (msg.metaImage) {
-          downloadMetaMedia(msg.metaImage.mediaId, metaAccessToken)
+          downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
             .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
             .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
         }
