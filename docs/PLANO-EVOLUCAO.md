@@ -1,19 +1,38 @@
 # Plano de Evolução — Transcritor WhatsApp Leads / Universo.ai
 
-> Documento vivo. Última revisão: 2026-08-04.
+> Documento vivo. Última revisão: 2026-08-06.
 > Objetivo: sair de canvas/demo (~25% produção) para SaaS operacional em fases incrementais.
 >
 > Complementar à revisão em `docs/REVISAO_E_REESTRUTURACAO.md` — as duas análises convergem
 > nos mesmos problemas centrais (auth fragmentada, segredos hardcoded, localStorage como
 > banco, monólito `server.ts`, telemetria fake), o que reforça o diagnóstico.
 
-## Direção estratégica
+## 🔴 Atualização estratégica — 06/08/2026
 
-### Visão (6 meses)
+**Contexto:** demanda real validada — reunião com um cliente novo esperando o produto pronto.
+Decisão tomada: **não** seguir pelo caminho de implantação isolada por cliente (clonar a stack
+a cada venda). Vamos direto para **multi-tenant real** (Fase 2 abaixo), porque o projeto já
+cresceu o suficiente pra justificar o investimento e a decisão já foi validada pelo dono do
+produto — evoluímos por esse caminho independente dos desafios técnicos que aparecerem.
 
-Plataforma multi-tenant onde leads chegam via WhatsApp (Meta Cloud API / Evolution), áudios
-são transcritos e analisados por Gemini, operadores gerenciam CRM/financeiro/calendário com
-dados persistidos no servidor e isolados por tenant.
+**O que isso muda no roadmap:**
+- **Fase 2 (Persistência e multi-tenant) vira a fase ativa agora**, reescrita abaixo com
+  detalhe concreto (não mais genérico) a partir de uma varredura real de todos os 8 serviços
+  do backend.
+- **Fase 3.1 (Autenticação) foi incorporada dentro da Fase 2** — login real por operador é
+  pré-requisito de multi-tenant, não algo que pode esperar uma fase depois (não dá pra isolar
+  dado por cliente sem saber com segurança quem está logado como quem).
+- Os **10 itens pendentes da auditoria pré-lançamento** (`docs/` não tinha esse relatório —
+  foi gerado nesta sessão) estão todos mapeados abaixo, cada um dentro do epic onde faz mais
+  sentido resolver, pra nada se perder solto.
+
+**Diagnóstico técnico confirmado (varredura de código, não estimativa):** hoje o backend é
+**inteiramente single-tenant**. Os 8 serviços reais (conversas, base de conhecimento,
+escalonamentos, respostas rápidas, status do agente, agendamentos, lembretes, conexão do
+Google Calendar) guardam estado numa única variável/Map global por serviço, sem `tenantId` em
+lugar nenhum. Existe **um único** número de WhatsApp, **uma única** conexão de Calendar,
+**uma única** base de conhecimento pro sistema inteiro. O painel "SaaS Admin" que parece
+gerenciar clientes é decorativo — não provisiona nada de verdade.
 
 ### Princípios de evolução
 
@@ -22,6 +41,8 @@ dados persistidos no servidor e isolados por tenant.
 - **Segurança antes de escala** — auth + rate limit nas APIs de IA desde a Fase 1.
 - **Entregas verticais** — cada fase entrega valor testável de ponta a ponta.
 - **Demo mode explícito** — mocks só com flag `DEMO_MODE=true`, nunca silencioso.
+- **Isolamento por tenant é inegociável a partir daqui** — nenhuma feature nova entra sem
+  já nascer particionada por cliente (novo princípio, pós-decisão de 06/08).
 
 ### Stack-alvo (decisões recomendadas)
 
@@ -33,344 +54,340 @@ dados persistidos no servidor e isolados por tenant.
 | Estado frontend | TanStack Query + Context mínimo | Cache server-side; eliminar duplicação |
 | Fila async | Supabase Edge Functions ou BullMQ + Redis | Processar webhooks/áudio fora do request |
 | Observabilidade | Pino + métricas tokens/tenant | Substituir telemetria fake |
+| Pagamentos (novo) | A decidir (Stripe global ou PIX/local por país) | Cobrar clientes de verdade — hoje não existe nada |
 
 ## Roadmap por fases
 
 ```
-Fase 0 ──► Fase 1 ──► Fase 2 ──► Fase 3 ──► Fase 4 ──► Fase 5
-Fundação   Core        Dados       UX/CRM      Integrações  Escala
-(1-2 sem)  WhatsApp    Persistência Refactor    Meta/CAPI    Prod
-           (2-3 sem)   (2-3 sem)    (2 sem)     (2 sem)      (contínuo)
+Fase 0 ──► Fase 1 ──► Fase 2 ──► Fase 4 ──► Fase 3 ──► Fase 5
+Fundação   Core        Multi-      Integrações  UX/CRM      Escala
+(feita)    WhatsApp    tenant      reais       Refactor    Prod
+           (quase      real        (parcial,   (componentes) (contínuo)
+           feita)      ★ ATIVA     resto após  restante
+                       AGORA       Fase 2)
 ```
+
+**Fase 2 e Fase 4 trocaram de ordem em relação à revisão anterior** — integrações reais
+(CAPI, pagamentos) só fazem sentido depois que existir mais de um tenant de verdade pra
+integrar.
 
 ---
 
 ## Fase 0 — Fundação e segurança
 
 **Duração estimada:** 1–2 semanas
-**Objetivo:** tornar o repositório deployável com segurança mínima e base técnica limpa.
+**Status:** ✅ concluída (itens P1/P2 residuais listados, não bloqueiam a Fase 2)
 
 ### Epic 0.1 — Hardening imediato do backend
 
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
-| 0.1.1 | Middleware de auth JWT em rotas sensíveis (`/api/transcribe`, `/api/analyze-conversation`, `/api/test-gemini`, `/api/telemetry/*`, `/api/analytics/ai-report`, `/api/meta-capi/send-event`, `/api/batch/lead-analysis`) | P0 | S | ✅ Feito |
-| 0.1.2 | Remover/forçar `JWT_SECRET` em produção (fail fast se ausente) | P0 | XS | ✅ Feito (mesmo padrão aplicado a `META_WEBHOOK_VERIFY_TOKEN` e `EVOHUB_API_KEY`) |
-| 0.1.3 | Rate limiting por IP/tenant nas rotas de IA (`express-rate-limit`) | P0 | S | ✅ Feito (20 req/min por IP nas rotas de IA) |
+| 0.1.1 | Middleware de auth JWT em rotas sensíveis | P0 | S | ✅ Feito |
+| 0.1.2 | `JWT_SECRET` obrigatório em produção (fail fast) | P0 | XS | ✅ Feito |
+| 0.1.3 | Rate limiting por IP nas rotas de IA | P0 | S | ✅ Feito (20 req/min) |
 | 0.1.4 | `helmet` + CORS restrito por `APP_URL` | P1 | XS | Pendente |
 | 0.1.5 | Reduzir body limit de 50MB para rota específica de transcribe | P1 | XS | Pendente |
-| 0.1.6 | Proteger `/api/test-gemini` — só `NODE_ENV=development` ou admin | P1 | XS | Pendente |
-
-**Critério de aceite:** chamada anônima a `/api/transcribe` retorna 401; rate limit dispara após N req/min.
+| 0.1.6 | Proteger `/api/test-gemini` — só dev ou admin | P1 | XS | Pendente |
+| 0.1.7 | **(novo, da auditoria)** `DEMO_MODE=true` em produção expõe senhas demo em texto claro na tela de login | **P0 🔴** | S | **Pendente — decisão do usuário: precisa confirmar que já existem contas reais no Supabase antes de desligar, senão tranca o próprio acesso** |
 
 ### Epic 0.2 — Modo demo explícito
 
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
-| 0.2.1 | Criar env `DEMO_MODE=true\|false` | P0 | XS | ✅ Feito |
-| 0.2.2 | Fallbacks mock retornam `{ source: 'fallback', success: true }` — nunca fingir Gemini | P0 | S | ✅ Feito (analyze-conversation, transcribe, analytics/ai-report) |
-| 0.2.3 | UI exibe badge "Modo Demo" quando `source !== 'gemini'` | P1 | S | Pendente |
-| 0.2.4 | Login demo (LoginModal senhas hardcoded) só funciona se `DEMO_MODE=true` | P0 | S | ✅ Feito (fora do demo mode, exige login real via Supabase) |
+| 0.2.1–0.2.4 | Env `DEMO_MODE`, fallback marcado, badge UI, login demo restrito | P0/P1 | — | ✅ Feito (badge de UI 0.2.3 ainda pendente, cosmético) |
 
 ### Epic 0.3 — Higiene do repositório
 
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
-| 0.3.1 | Atualizar README (setup, env vars, arquitetura, scripts Windows) | P1 | S | Pendente |
-| 0.3.2 | Remover ou arquivar código morto: `Login.tsx`, `auth.ts`, `whatsapp-integration.ts` (ou integrar) | P2 | S | ✅ Parcial (`auth.ts`/`whatsapp-integration.ts` removidos; `Login.tsx` mantido mas ainda não usado em `App.tsx`) |
-| 0.3.3 | Remover `firebase-admin` se não usado; resolver `vite` duplicado no `package.json` | P2 | XS | ✅ Parcial (`vite` duplicado já corrigido; `firebase-admin` ainda presente, avaliar se usado) |
-| 0.3.4 | Renomear package `"react-example"` → nome do produto | P3 | XS | Pendente |
-| 0.3.5 | Script `clean` cross-platform (`rimraf`) | P3 | XS | Pendente |
-
-**Entregável Fase 0:** app deployável com APIs protegidas e demo mode claro.
+| 0.3.1 | Atualizar README | P1 | S | Pendente |
+| 0.3.2 | Remover código morto | P2 | S | ✅ Feito (`Login.tsx`, `GoogleCalendarIntegration.tsx`+libs Firebase removidos nesta sessão) |
+| 0.3.3 | Resolver dependências duplicadas/não usadas | P2 | XS | ✅ Parcial |
+| 0.3.4 | Renomear package `"react-example"` | P3 | XS | Pendente |
 
 ---
 
 ## Fase 1 — Core WhatsApp (pipeline real)
 
-**Duração estimada:** 2–3 semanas
-**Objetivo:** webhook recebe mensagem de áudio → transcreve → cria/atualiza lead no CRM.
+**Status:** ✅ quase concluída — pipeline real rodando em produção (webhook → transcrição →
+resposta automática via agente router/especialista → envio real via Meta Cloud API).
 
 ### Epic 1.1 — Pipeline de webhook
 
-| ID | Issue | Prioridade | Esforço | Status |
-|---|---|---|---|---|
-| 1.1.1 | Extrair `services/webhook/` de `server.ts` | P0 | M | ✅ Feito (server.ts virou composition root; config/gemini/supabase/middlewares/rotas em `server/`) |
-| 1.1.2 | Parser Meta Cloud API: extrair `from`, `type`, `audio.id` | P0 | M | ✅ Feito |
-| 1.1.3 | Parser Evolution API: `MESSAGES_UPSERT` com mídia de áudio | P0 | M | ✅ Feito |
-| 1.1.4 | Download de mídia Meta (Graph API) e Evolution | P0 | L | ✅ Código feito, não validado ponta-a-ponta (sem WhatsApp real conectado ainda) |
-| 1.1.5 | Enfileirar job de transcrição (in-memory queue → Fase 2 Redis) | P0 | M | ✅ Feito (fila em memória, ver server/services/transcriptionQueue.ts) |
-| 1.1.6 | Corrigir rota `/api/webhooks/evolution_hub` → alinhar com frontend ou redirect | P2 | XS | ✅ Feito |
-| 1.1.7 | Idempotência por `message_id` (evitar reprocessar) | P1 | S | ✅ Feito (em memória; migra pra DB na Fase 2) |
-| 1.1.8 | Integração real com Evo Hub (BYO Meta App): rota dedicada `/api/webhooks/evohub`, verificação HMAC com `EVO_HUB_WEBHOOK_SECRET`, download de mídia via proxy `/meta/*` do Hub, tratamento de eventos de ciclo de vida do canal | P0 | M | ✅ Código feito (`server/routes/webhooks.ts`, `server/services/{webhookParsers,mediaDownload}.ts`), validado localmente com payloads sintéticos (assinatura HMAC ok, passthrough de mensagem ok, lifecycle event ok); falta testar com canal real conectado (ver 1.1.9) |
-| 1.1.9 | Criar canal real no Evo Hub via API (`POST /api/v1/channels`), obter link de conexão, conectar o número, validar webhook/mídia ponta-a-ponta | P0 | M | Pendente — depende do usuário concluir o cadastro do Meta App (Business Manager verificado) no painel do Evo Hub |
+| ID | Issue | Status |
+|---|---|---|
+| 1.1.1–1.1.7 | Extração de services, parsers Meta/Evolution, download de mídia, fila, idempotência | ✅ Feito, validado em produção com conversas reais |
+| 1.1.8 | Integração real com Evo Hub (BYO Meta App) — código | ✅ Feito, testado só com payloads sintéticos |
+| 1.1.9 | Criar canal real no Evo Hub, validar ponta-a-ponta | **Pendente — ação do usuário: confirmar se o Business Manager já foi verificado no painel do Evo Hub** |
 
-**Critério de aceite:** POST simulado de áudio WhatsApp cria lead com transcrição real (não TTS).
+### Epic 1.2 — Transcrição
 
-**Nota sobre ambiguidades na doc do Evo Hub (a confirmar com evento real):** (a) se o proxy `/meta/*` de mídia inclui ou não o segmento de versão da Graph API — implementado com fallback (tenta com `v23.0`, cai pra sem versão); (b) formato exato do envelope de eventos de ciclo de vida — implementado aceitando os dois formatos vistos na doc (`{event, properties}` e `{event_type, meta_connection}`).
+| ID | Issue | Status |
+|---|---|---|
+| 1.2.1, 1.2.4 | Serviço extraído, OGG/Opus nativo do WhatsApp | ✅ Feito, validado |
+| 1.2.2 | Fixar modelo Gemini estável | ✅ Feito (`gemini-3.6-flash` em produção; só `/api/test-gemini` testa modelos antigos) |
+| 1.2.3, 1.2.5 | Schema Zod, log de tokens | Pendente, baixa prioridade |
 
-### Epic 1.2 — Serviço de transcrição robusto
+### Epic 1.3 — Resposta automática
 
-| ID | Issue | Prioridade | Esforço | Status |
-|---|---|---|---|---|
-| 1.2.1 | Extrair `services/gemini/transcribe.ts` | P0 | S | ✅ Feito (`server/services/geminiTranscription.ts`, compartilhado entre `/api/transcribe` e a fila de webhook) |
-| 1.2.2 | Validar modelos Gemini (`/api/test-gemini`) e fixar modelo estável (ex.: `gemini-2.0-flash`) | P0 | S | Pendente (rotas reais já usam `gemini-3.6-flash`; só `/api/test-gemini` ainda testa modelos antigos/descontinuados) |
-| 1.2.3 | Validar resposta JSON com schema Zod | P1 | S | Pendente |
-| 1.2.4 | Suportar OGG/Opus nativo do WhatsApp (não só TTS) | P0 | M | Pendente (download de mídia já traz o áudio original; falta só confirmar com um arquivo real) |
-| 1.2.5 | Log de tokens por request (input/output) | P1 | S | Pendente |
+| ID | Issue | Status |
+|---|---|---|
+| 1.3.1–1.3.2 | Router + especialista Gemini, envio real de bolhas via Meta | ✅ Feito, com agente de agendamento usando function-calling real no Google Calendar (ver Fase 4.3) |
 
-### Epic 1.3 — Resposta automática opcional
-
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 1.3.1 | Após transcrição, gerar `suggestedReply` e enviar via Evo Hub/Meta se tenant configurado | P2 | L |
-| 1.3.2 | Respeitar `autoReplyEnabled` e `minUrgencyForAlert` do tenant | P2 | S |
-
-**Entregável Fase 1:** lead entra pelo WhatsApp real e aparece transcrito (via API, ainda sem persistência server).
+**Entregável Fase 1:** ✅ atingido e além do escopo original — inclui agendamento real, não só CRM.
 
 ---
 
-## Fase 2 — Persistência e multi-tenant
+## Fase 2 — Multi-tenant real ★ FASE ATIVA
 
-**Duração estimada:** 2–3 semanas
-**Objetivo:** substituir localStorage por banco; isolamento por tenant.
+**Duração estimada:** 3–5 semanas (revisado a partir do escopo real, não é um refactor pequeno)
+**Objetivo:** um único backend atendendo N clientes de verdade, cada um com seu próprio
+número de WhatsApp, agenda, base de conhecimento e login — com isolamento total de dados.
 
-### Epic 2.1 — Schema Supabase
+Esta fase reescreve o coração do sistema. Detalhamento por bloco, na ordem em que faz sentido
+implementar (cada bloco depende do anterior):
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 2.1.1 | Definir migrations: `tenants`, `operators`, `leads`, `messages`, `transactions`, `transcripts`, `knowledge_bases` | P0 | M |
-| 2.1.2 | Row Level Security por `tenant_id` | P0 | M |
-| 2.1.3 | Padronizar IDs tenant (`tenant_001` → UUID ou slug único) | P1 | S |
-| 2.1.4 | Seed script para dados demo (substituir mocks TS) | P2 | S |
-
-Schema mínimo sugerido:
-
-- `tenants (id, name, slug, plan, settings jsonb, ...)`
-- `operators (id, tenant_id, email, password_hash, role, ...)`
-- `leads (id, tenant_id, name, phone, crm_stage, attribution jsonb, ...)`
-- `messages (id, lead_id, sender, type, content, media_url, ...)`
-- `transcripts (id, lead_id, source, result jsonb, tokens_used, ...)`
-- `transactions (id, tenant_id, lead_id, amount, status, ...)`
-
-### Epic 2.2 — API REST de domínio
+### Bloco 2.A — Schema de tenant e persistência real (fundação de tudo)
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 2.2.1 | `GET/POST/PATCH/DELETE /api/leads` com filtro tenant | P0 | M |
-| 2.2.2 | `GET/POST /api/leads/:id/messages` | P0 | M |
-| 2.2.3 | `GET/POST /api/transcripts` | P0 | S |
-| 2.2.4 | `GET/POST/PATCH /api/transactions` | P1 | M |
-| 2.2.5 | `GET/PUT /api/tenants/:id/knowledge-base` | P1 | S |
-| 2.2.6 | Webhook resolve `tenant_id` via query param ou channel token | P0 | M |
+| 2.A.1 | Migrations Supabase Postgres: `tenants`, `operators`, `tenant_meta_credentials` (WABA/phone_number_id/access_token por tenant), `tenant_calendar_tokens` (refresh token por tenant) | P0 | M |
+| 2.A.2 | Row Level Security por `tenant_id` em todas as tabelas | P0 | M |
+| 2.A.3 | Migrar os 8 serviços de `server/services/*Store.ts` de Map/variável global em memória (+ 1 arquivo JSON por serviço no Supabase Storage) para tabelas Postgres reais chaveadas por `tenant_id`: `conversationStore`, `knowledgeBaseStore`, `escalationStore`, `quickRepliesStore`, `agentStatus`, `appointmentStore`, `reminderStore` | P0 | L |
+| 2.A.4 | Script de migração dos dados atuais da Monique pro `tenant_id` dela (não pode perder histórico de conversa real) | P0 | S |
 
-### Epic 2.3 — Migração frontend
+**Critério de aceite:** os 8 serviços aceitam `tenantId` como parâmetro obrigatório; dado de
+um tenant nunca aparece pra outro mesmo com Postgres compartilhado (RLS testado).
+
+### Bloco 2.B — Roteamento multi-canal (webhook sabe de quem é a mensagem)
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 2.3.1 | Introduzir TanStack Query para leads/transactions | P0 | M |
-| 2.3.2 | Remover duplicação de estado em `WhatsAppLeadsSim` — consumir leads do App/API | P0 | M |
-| 2.3.3 | Migrar localStorage → API com fallback read-only em demo | P0 | M |
-| 2.3.4 | Persistir `savedTranscripts` no backend | P1 | S |
+| 2.B.1 | `webhookParsers.ts` passa a extrair `value.metadata.phone_number_id` do payload da Meta (hoje não lê esse campo) | P0 | S |
+| 2.B.2 | Nova tabela/lookup `phone_number_id → tenant_id` — resolve qual cliente é dono de cada número assim que a mensagem chega | P0 | M |
+| 2.B.3 | `metaSend.ts`, `autoReply.ts`, `sendBubbles.ts`, `transcriptionQueue.ts` deixam de receber credenciais globais injetadas na subida do servidor (`config.metaAccessToken` fixo) e passam a resolver a credencial do tenant certo por requisição | P0 | L |
+| 2.B.4 | Idempotência e fila de transcrição passam a ser por `tenant_id + message_id` | P1 | S |
 
-**Critério de aceite:** refresh da página mantém leads; tenant A não vê dados do tenant B.
+**Critério de aceite:** duas mensagens simultâneas de dois números de WhatsApp diferentes
+(dois tenants) são respondidas cada uma com a base de conhecimento e a agenda certas, sem
+misturar.
 
-**Entregável Fase 2:** SaaS com dados reais e isolamento multi-tenant.
+### Bloco 2.C — Google Calendar por tenant
+
+| ID | Issue | Prioridade | Esforço |
+|---|---|---|---|
+| 2.C.1 | `googleCalendar.ts`: trocar `storedRefreshToken` (variável única global) por token por `tenant_id` | P0 | M |
+| 2.C.2 | Callback OAuth (`/api/google-calendar/oauth-callback`) precisa saber pra qual tenant está conectando — codificar `tenantId` no parâmetro `state` do fluxo OAuth | P0 | S |
+| 2.C.3 | `appointmentStore`/`reminderJob.ts` já migrados no Bloco 2.A passam a rodar o job de lembretes iterando por tenant, não uma vez só globalmente | P0 | S |
+
+### Bloco 2.D — Autenticação real e provisionamento de cliente
+
+*(Fase 3.1 da revisão anterior incorporada aqui — não faz sentido separar.)*
+
+| ID | Issue | Prioridade | Esforço |
+|---|---|---|---|
+| 2.D.1 | Login real via Supabase Auth (email/senha) por operador, com `tenant_id` vinculado — substitui os 4 usuários demo fixos | P0 | M |
+| 2.D.2 | RBAC: `operator < manager < admin < saas_admin`, `saas_admin` é o único que enxerga todos os tenants | P0 | M |
+| 2.D.3 | **(novo, da auditoria)** "Cadastrar Novo Usuário" do painel SaaS Admin passa a criar de verdade — hoje a senha digitada é descartada e a pessoa nunca consegue logar (aviso provisório já colocado na tela) | P0 | S |
+| 2.D.4 | Fluxo real de onboarding de cliente novo: admin cadastra tenant + credenciais Meta (WABA, phone_number_id, token) manualmente no painel — **decisão: começar manual (rápido) antes de investir no "Embedded Signup" oficial da Meta (auto-atendimento, mais lento de construir)** | P0 | M |
+| 2.D.5 | "Cadastrar Novo Cliente SaaS" do SaaS Admin passa a provisionar de verdade (hoje só adiciona uma linha fake no navegador) — cria o registro em `tenants`, gera credenciais de acesso pro primeiro operador | P0 | M |
+
+### Bloco 2.E — Frontend: eliminar localStorage como banco
+
+| ID | Issue | Prioridade | Esforço |
+|---|---|---|---|
+| 2.E.1 | TanStack Query pra leads/transactions/knowledge-base, substituindo os `useState` + `localStorage.setItem` espalhados em `App.tsx` e `WhatsAppLeadsSim.tsx` | P0 | M |
+| 2.E.2 | Remover o state duplicado de `leads` entre `App.tsx` e `WhatsAppLeadsSim.tsx` (hoje são dois arrays desconectados — já mitigado parcialmente nesta sessão, falta unificar de vez) | P0 | M |
+| 2.E.3 | CRM (`OperatorCRM.tsx`), Financeiro (`FinancialDashboard.tsx`) e Atribuição (`AdAttributionCAPI.tsx`) passam a ler/escrever via API real com filtro de tenant, não mais mock local | P0 | L |
+| 2.E.4 | **(novo, da auditoria)** Seletor de moeda/locale por tenant — hoje R$/pt-BR está fixo no código, mas o negócio real da Monique é em Guaraníes | P1 | S |
+
+### Bloco 2.F — Itens da auditoria que só fazem sentido resolver aqui dentro
+
+| ID | Item da auditoria | Onde entra |
+|---|---|---|
+| P-1 | Preços de planos contraditórios entre "Guia Conexão API" e "Painel SaaS Master" | Corrigir junto do Bloco 2.D (tela de planos/cadastro de tenant é reescrita de qualquer forma) — **preciso dos valores reais de venda antes de mexer** |
+| P-2 | Chave PIX configurada nunca é usada nas cobranças geradas | Fora do escopo desta fase — vira **Fase 4 (Pagamentos)**, só faz sentido com tenants reais cobrando de verdade |
+| P-3 | Upload de "Documentos" na Base de Conhecimento não alimenta a IA | Fora do escopo desta fase — é RAG real, projeto à parte; texto da UI já avisa que não funciona ainda |
+
+**Entregável Fase 2:** dois (ou mais) tenants reais rodando no mesmo backend, cada um com seu
+WhatsApp, agenda e login, sem nenhum dado vazando entre eles. Isso é o que transforma o painel
+"SaaS Admin" de decorativo em real.
 
 ---
 
-## Fase 3 — Auth unificada e refactor frontend
+## Fase 3 — Refactor de UX/frontend
 
-**Duração estimada:** 2 semanas
-**Objetivo:** um único fluxo de login; componentes menores.
-
-### Epic 3.1 — Autenticação
-
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 3.1.1 | Unificar em Supabase Auth (email/senha) + JWT para API | P0 | M |
-| 3.1.2 | Substituir `LoginModal` demo por login real; demo só em `DEMO_MODE` | P0 | M |
-| 3.1.3 | Propagar `Authorization: Bearer` em todos os `fetch` | P0 | S |
-| 3.1.4 | RBAC middleware: `operator < manager < admin < saas_admin` | P1 | M |
-| 3.1.5 | Consolidar `firebase.ts` + `googleAuth.ts` (Calendar OAuth separado) | P2 | M |
+**Duração estimada:** 2 semanas (depois da Fase 2 — autenticação já foi incorporada lá)
+**Objetivo:** codebase mantível, componentes menores.
 
 ### Epic 3.2 — Decomposição de componentes
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 3.2.1 | Quebrar `WhatsAppLeadsSim.tsx` → `ChatList`, `ChatWindow`, `LeadSidebar`, `QrModal` | P1 | L |
-| 3.2.2 | Quebrar `AdAttributionCAPI.tsx` → subcomponentes + hooks | P2 | L |
+| 3.2.1 | Quebrar `WhatsAppLeadsSim.tsx` (hoje ~2000 linhas) → `ChatList`, `ChatWindow`, `LeadSidebar`, `QrModal` | P1 | L |
+| 3.2.2 | Quebrar `AdAttributionCAPI.tsx` | P2 | L |
 | 3.2.3 | Quebrar `SaaSAdminDashboard.tsx` | P2 | L |
-| 3.2.4 | Integrar ou remover `AudioRecorder`, `FileUpload`, `TranscriptHistory` | P2 | M |
+| 3.2.4 | Integrar ou remover `AudioRecorder`, `FileUpload`, `TranscriptHistory` (ferramenta de transcrição avulsa, sem persistência de histórico) | P2 | M |
 
 ### Epic 3.3 — TypeScript rigoroso
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 3.3.1 | Habilitar `strict: true` incrementalmente | P2 | M |
-| 3.3.2 | Eliminar `any` em `server.ts` e props críticas | P2 | M |
-| 3.3.3 | Adicionar ESLint + Prettier | P3 | S |
-
-**Entregável Fase 3:** codebase mantível; auth production-grade.
+| 3.3.1–3.3.3 | `strict: true`, eliminar `any`, ESLint + Prettier | P2/P3 | M |
 
 ---
 
-## Fase 4 — Integrações reais (Meta, CAPI, Calendar)
+## Fase 4 — Integrações reais e pagamentos
 
-**Duração estimada:** 2 semanas
-**Objetivo:** substituir simulações por integrações funcionais onde aplicável.
+**Duração estimada:** 2–3 semanas (parcialmente paralelizável com o fim da Fase 2)
+**Objetivo:** substituir simulações por integrações funcionais, e cobrar clientes de verdade.
 
 ### Epic 4.1 — Meta Conversions API
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 4.1.1 | Implementar envio real para Graph API (`/api/meta-capi/send-event`) | P1 | M |
-| 4.1.2 | Hash SHA-256 de phone/email conforme spec Meta | P1 | S |
-| 4.1.3 | Persistir eventos CAPI no Supabase (substituir localStorage) | P1 | S |
-| 4.1.4 | Auto-disparo em mudança de estágio CRM (`QualifiedLead`, `Purchase`) | P2 | M |
+| 4.1.1–4.1.4 | Envio real, hash SHA-256, persistência, auto-disparo por estágio CRM | P1 | M/L |
 
-### Epic 4.2 — Evo Hub / WhatsApp outbound
+### Epic 4.2 — Evo Hub / WhatsApp outbound (facade)
 
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
-| 4.2.1 | Persistir channels/webhooks/templates no Supabase (não in-memory) | P1 | M | Pendente |
-| 4.2.2 | `/api/v1/messages/send` chamar Meta Graph API real | P1 | L | Pendente |
-| 4.2.3 | Auth Evo Hub: validar tokens contra DB, remover fallback permissivo | P0 | S | ✅ Feito nesta revisão (validação contra `EVOHUB_API_KEY`; ainda falta persistir tokens por canal em vez de uma chave global) |
+| 4.2.1–4.2.2 | Persistir channels reais, `/api/v1/messages/send` chamando Meta de verdade | P1 | M/L | Pendente — reavaliar necessidade após Fase 2 (o roteamento multi-tenant do Bloco 2.B pode tornar esse facade desnecessário) |
+| 4.2.3 | Auth Evo Hub validando contra DB | P0 | S | ✅ Feito |
 
 ### Epic 4.3 — Google Calendar
 
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 4.3.1 | Fluxo OAuth + refresh token | P2 | M | ✅ Feito (single-tenant); vira multi-tenant no Bloco 2.C |
+| 4.3.2 | Function-calling do agente de agendamento (verificar disponibilidade, criar/remarcar/cancelar) + lembretes automáticos | P0 | L | ✅ Feito nesta sessão |
+| 4.3.3 | **(novo)** Conectar de fato a conta real da Monique — o botão existe e funciona, ninguém clicou ainda | P0 | XS | **Pendente — ação do usuário** |
+
+### Epic 4.4 — Pagamentos (novo epic, nasceu da auditoria)
+
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 4.3.1 | Revisar fluxo OAuth e refresh token | P2 | M |
-| 4.3.2 | Vincular eventos a `lead_id` no banco | P2 | S |
-
-**Entregável Fase 4:** integrações críticas operando com APIs reais.
+| 4.4.1 | Decidir provedor de cobrança (Stripe pra cartão internacional? PIX/transferência local via algo como um gateway paraguaio?) — **decisão de negócio, não técnica** | P0 | — |
+| 4.4.2 | Ligar a chave PIX configurável de verdade na geração de cobrança do Financeiro (hoje decorativa) | P1 | M |
+| 4.4.3 | Cobrança recorrente dos tenants do SaaS (assinatura mensal) | P1 | L |
 
 ---
 
 ## Fase 5 — Escala, observabilidade e produção
 
 **Duração estimada:** contínuo
-**Objetivo:** operação confiável em produção.
+**Objetivo:** operação confiável com múltiplos tenants reais.
 
 ### Epic 5.1 — Fila e workers
 
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
-| 5.1.1 | Redis + BullMQ para jobs de transcrição/análise batch | P1 | L | Pendente (fila em memória feita na Fase 1, item 1.1.5 — migrar quando volume justificar) |
+| 5.1.1 | Redis + BullMQ pra jobs de transcrição/análise, agora com volume real de vários tenants | P1 | L | Pendente |
 | 5.1.2 | Retry com backoff; dead letter queue | P1 | M | Pendente |
-| 5.1.3 | Substituir telemetria fake por agregação real de tokens | P1 | M | ✅ Parcial (`/api/queue/status` já usa números reais da fila; `/api/telemetry/tokens` continua simulado até ter tenants reais) |
+| 5.1.3 | Telemetria real de tokens por tenant (painel já existe, ligado a dado fake ainda) | P1 | M | Pendente — só faz sentido depois do Bloco 2.A |
 
 ### Epic 5.2 — Testes e CI
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 5.2.1 | Vitest: unit tests `services/gemini`, parsers webhook | P1 | M |
-| 5.2.2 | Integration tests: `/api/transcribe`, `/api/leads` | P1 | M |
-| 5.2.3 | GitHub Actions: lint + test + build em PR | P1 | S |
-| 5.2.4 | Smoke test pós-deploy | P2 | S |
+| 5.2.1–5.2.4 | Vitest, testes de integração, GitHub Actions, smoke test pós-deploy | P1 | M |
 
 ### Epic 5.3 — Observabilidade
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 5.3.1 | Logger estruturado (Pino) com `tenant_id`, `request_id` | P1 | S |
-| 5.3.2 | Dashboard tokens/custo por tenant (substituir SaaSAdmin fake) | P2 | M |
-| 5.3.3 | Alertas: falha webhook, quota Gemini, fila > N | P2 | M |
+| 5.3.1–5.3.3 | Logger estruturado com `tenant_id`, dashboard custo por tenant, alertas | P1/P2 | S/M |
 
 ### Epic 5.4 — Deploy
 
 | ID | Issue | Prioridade | Esforço |
 |---|---|---|---|
-| 5.4.1 | Dockerfile multi-stage (Vite build + Node server) | P1 | M |
-| 5.4.2 | Variáveis de ambiente documentadas + validação no boot (Zod) | P1 | S |
-| 5.4.3 | Health check `/health` (DB + Gemini reachable) | P1 | S |
-
-**Entregável Fase 5:** sistema monitorável, testado e escalável.
+| 5.4.1–5.4.3 | Dockerfile, env vars validadas no boot (Zod), health check | P1 | M/S |
 
 ---
 
-## Backlog consolidado — Top 20 (ordem de implementação)
+## Pendências consolidadas da auditoria pré-lançamento (06/08/2026)
 
-| # | ID | Issue | Fase | P | Esforço | Status |
-|---|---|---|---|---|---|---|
-| 1 | 0.1.1 | Auth JWT nas APIs de IA | 0 | P0 | S | ✅ Feito |
-| 2 | 0.1.2 | JWT_SECRET obrigatório em prod | 0 | P0 | XS | ✅ Feito |
-| 3 | 0.2.2 | Flag `source: fallback` nos mocks | 0 | P0 | S | ✅ Feito |
-| 4 | 0.2.4 | Demo login só em DEMO_MODE | 0 | P0 | S | ✅ Feito |
-| 5 | 0.1.3 | Rate limiting APIs IA | 0 | P0 | S | ✅ Feito |
-| 6 | 1.1.1 | Extrair services de server.ts | 1 | P0 | M | ✅ Feito |
-| 7 | 1.1.2–3 | Parsers webhook Meta + Evolution | 1 | P0 | M | ✅ Feito |
-| 8 | 1.1.4 | Download mídia áudio WhatsApp | 1 | P0 | L | ✅ Código feito, falta validar com WhatsApp real |
-| 9 | 1.2.2 | Fixar modelo Gemini válido | 1 | P0 | S | Pendente |
-| 10 | 1.2.4 | Suporte OGG/Opus real | 1 | P0 | M | Pendente |
-| 11 | 2.1.1–2 | Schema Supabase + RLS | 2 | P0 | M | Pendente |
-| 12 | 2.2.1–3 | API REST leads/messages/transcripts | 2 | P0 | M | Pendente |
-| 13 | 2.2.6 | Tenant resolution no webhook | 2 | P0 | M | Pendente |
-| 14 | 2.3.2 | Eliminar estado duplicado leads | 2 | P0 | M | Pendente |
-| 15 | 3.1.1–3 | Auth unificada + Bearer token | 3 | P0 | M | Pendente |
-| 16 | 4.2.3 | Evo Hub auth real | 4 | P0 | S | ✅ Feito |
-| 17 | 4.1.1 | Meta CAPI real | 4 | P1 | M | Pendente |
-| 18 | 5.2.1–3 | Testes + CI | 5 | P1 | M | Pendente |
-| 19 | 5.1.1 | Fila Redis/BullMQ | 5 | P1 | L | Pendente |
-| 20 | 5.3.1 | Logging estruturado | 5 | P1 | S | Pendente |
+Lista completa dos 10 itens do relatório de auditoria, todos já mapeados nas fases acima —
+esta tabela é só o índice rápido pra não se perder:
+
+| # | Pendência | Severidade | Onde resolver |
+|---|---|---|---|
+| 1 | `DEMO_MODE=true` em produção expõe senhas na tela de login | 🔴 Crítico | Epic 0.1.7 — precisa da sua confirmação antes de mexer |
+| 2 | Preços de planos contraditórios entre telas | Decisão | Bloco 2.F (P-1) — preciso dos valores reais |
+| 3 | Moeda R$ fixa, negócio real é em Guaraníes | Decisão | Bloco 2.E.4 |
+| 4 | Chave PIX configurada nunca usada nas cobranças | Decisão | Epic 4.4.2 |
+| 5 | Isolamento multi-tenant não existe (`tenantId` sem uso) | Arquitetura | **É a Fase 2 inteira** |
+| 6 | "Cadastrar Novo Usuário" não cria login real | Decisão | Bloco 2.D.3 |
+| 7 | Upload de documentos não alimenta a IA de verdade | Decisão | Bloco 2.F (P-3) — fora de escopo por ora |
+| 8 | Evo Hub real nunca validado ponta-a-ponta | Ação sua | Epic 1.1.9 |
+| 9 | Conexão do Google Calendar ainda não autorizada | Ação sua | Epic 4.3.3 |
+| 10 | CRM/Financeiro/SaaS Admin/CAPI continuam mock | Arquitetura | Bloco 2.E |
+
+---
+
+## Backlog consolidado — próximos 15 passos (ordem de implementação)
+
+| # | ID | Issue | Fase | P | Esforço |
+|---|---|---|---|---|---|
+| 1 | 0.1.7 | Decisão + ação: `DEMO_MODE` em produção | 0 | P0 🔴 | S |
+| 2 | 2.A.1 | Migrations Supabase: tenants, operators, credenciais | 2 | P0 | M |
+| 3 | 2.A.2 | RLS por `tenant_id` | 2 | P0 | M |
+| 4 | 2.A.3 | Migrar os 8 serviços pra Postgres com `tenant_id` | 2 | P0 | L |
+| 5 | 2.A.4 | Migrar dados reais da Monique sem perder histórico | 2 | P0 | S |
+| 6 | 2.B.1–2.B.3 | Webhook resolve tenant pelo `phone_number_id`, credenciais por request | 2 | P0 | L |
+| 7 | 2.C.1–2.C.2 | Google Calendar por tenant | 2 | P0 | M |
+| 8 | 2.D.1–2.D.2 | Login real Supabase Auth + RBAC | 2 | P0 | M |
+| 9 | 2.D.4–2.D.5 | Onboarding manual de cliente novo (admin cadastra credenciais) | 2 | P0 | M |
+| 10 | 2.E.1–2.E.3 | TanStack Query + CRM/Financeiro/Atribuição via API real | 2 | P0 | L |
+| 11 | 4.3.3 | Ação: conectar o Google Calendar real da Monique | 4 | P0 | XS |
+| 12 | 1.1.9 | Ação: validar Evo Hub real ponta-a-ponta | 1 | P0 | M |
+| 13 | 4.4.1 | Decisão: provedor de pagamento | 4 | P0 | — |
+| 14 | 5.2.1–5.2.3 | Testes + CI (crítico assim que houver 2+ tenants reais) | 5 | P1 | M |
+| 15 | 5.3.1 | Logging estruturado por tenant | 5 | P1 | S |
 
 **Legenda esforço:** XS = ≤2h · S = ≤1d · M = 2–5d · L = 1–2 sem
 
-## Dependências entre fases
+## Dependências entre fases (atualizado)
 
 ```
-Fase 0 (segurança)
+Fase 0 (segurança) ✅
     │
     ▼
-Fase 1 (webhook → transcrição) ──► pode iniciar com leads em memória/JSON
+Fase 1 (webhook → transcrição → resposta automática) ✅ quase completa
     │
     ▼
-Fase 2 (persistência) ──► depende de auth básica (0.1.1)
+Fase 2 (multi-tenant real) ★ ATIVA — Blocos 2.A → 2.B → 2.C → 2.D → 2.E, nessa ordem
     │
-    ├──► Fase 3 (auth + refactor UI)
+    ├──► Fase 3 (refactor de componentes) — pode rodar em paralelo no fim da Fase 2
     │
-    └──► Fase 4 (integrações reais) ──► depende de tenants no DB
+    └──► Fase 4 (integrações reais + pagamentos) ──► depende de tenants reais no DB
               │
               ▼
-         Fase 5 (escala + CI)
+         Fase 5 (escala + CI + observabilidade por tenant)
 ```
 
-**Paralelizável:** Fase 0.3 (higiene repo) e 3.2 (refactor componentes) podem rodar em
-paralelo à Fase 1/2.
-
-## Métricas de sucesso por fase
-
-| Fase | Métrica |
-|---|---|
-| 0 | 0 endpoints IA públicos; 100% respostas mock identificadas |
-| 1 | ≥1 áudio WhatsApp real transcrito end-to-end |
-| 2 | 0 dados críticos em localStorage; RLS bloqueia cross-tenant |
-| 3 | 1 fluxo login; componentes WhatsApp < 400 linhas cada |
-| 4 | CAPI evento real aparece no Events Manager Meta |
-| 5 | CI verde; p95 transcribe < 15s; uptime monitorado |
-
-## Riscos e mitigações
+## Riscos e mitigações (atualizado)
 
 | Risco | Impacto | Mitigação |
 |---|---|---|
-| Custo Gemini descontrolado | Alto | Rate limit + quota/tenant (Fase 0 + 5) |
+| Migração de dados reais da Monique perde histórico de conversas | Alto | Script de export/import testado antes de migrar (2.A.4); manter o JSON atual como backup até confirmar |
+| Escopo da Fase 2 é grande — pode atrasar o cliente novo esperando | Alto | Onboarding manual (2.D.4) primeiro, sem esperar self-service completo — cliente novo pode entrar assim que Blocos 2.A–2.D estiverem prontos, mesmo sem 2.E terminado |
+| Custo Gemini descontrolado com mais tenants | Alto | Rate limit por tenant (não só por IP) — adicionar ao Epic 0.1.3 |
 | Meta API muda formato | Médio | Parsers isolados + testes fixture |
-| Scope creep (10 módulos UI) | Alto | Congelar features novas até Fase 2 done |
-| Migração localStorage perde dados | Médio | Script export/import JSON (já existe backup) |
-| Supabase vs Firebase indecisão | Médio | Decisão: Supabase (documentada acima) |
-| ~~Chave service_role do Supabase vazada no Git~~ | ~~Alto~~ | ✅ Resolvido 04/08/2026 — chaves legadas desativadas, migrado para `sb_secret_...` |
+| `DEMO_MODE` ligado por engano após virar multi-tenant real | Alto | Resolver item 0.1.7 antes de onboarding do segundo cliente |
+| Decisão de moeda/pagamento adiada indefinidamente | Médio | Travar decisão (4.4.1, P-2) antes de fechar o segundo cliente pagante |
 
-## Próximo passo imediato (Sprint 0 — semana 1)
+## Próximo passo imediato
 
-1. **0.1.1** — middleware auth nas rotas IA
-2. **0.1.2** — JWT_SECRET required ✅ feito nesta revisão
-3. **0.2.2 + 0.2.4** — demo mode explícito
-4. **0.1.3** — rate limit
-5. **1.1.1** — iniciar extração `server.ts` → `src/server/` ou `services/`
+1. **0.1.7** — decisão sua: já existem contas reais no Supabase pra eu desligar o modo demo com segurança?
+2. **2.A.1–2.A.2** — começar as migrations e RLS (posso iniciar já, não depende de decisão de negócio)
+3. **4.3.3** e **1.1.9** — duas ações rápidas suas que destravam validação ponta-a-ponta do que já está pronto
+4. **P-1** e **4.4.1** — preciso dos valores reais de plano e da decisão de provedor de pagamento antes de tocar nessas partes
 
-**Definition of Done Sprint 0:** PR merged; README atualizado; deploy staging com env vars;
-teste manual 401 em `/api/transcribe` sem token.
+**Definition of Done Fase 2:** um segundo tenant real (o cliente da reunião de hoje) operando
+no mesmo backend da Monique, com WhatsApp, agenda e login próprios, sem nenhum dado visível
+entre os dois.
 
 ## Template de issue (GitHub)
 
@@ -392,20 +409,3 @@ S | M | L
 - bloqueado por: #
 - desbloqueia: #
 ```
-
-## Apêndice — Mapeamento deficiência → issue
-
-| Deficiência (análise anterior) | Issues |
-|---|---|
-| APIs IA sem auth | 0.1.1, 0.1.3 |
-| localStorage como DB | 2.1.*, 2.3.* |
-| Webhook não processa áudio | 1.1.* |
-| Auth fragmentada | 3.1.*, 0.2.4 |
-| Fallback mock silencioso | 0.2.2, 0.2.3 |
-| Estado duplicado leads | 2.3.2 |
-| Monólito server.ts | 1.1.1, 1.2.1 |
-| Zero testes | 5.2.* |
-| Código morto | 0.3.2, 3.2.4 |
-| Multi-tenant só UI | 2.1.2, 2.2.6 |
-| Telemetria fake | 5.1.3, 5.3.2 |
-| TypeScript permissivo | 3.3.* |
