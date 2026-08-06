@@ -35,7 +35,7 @@ export async function sendBubbles(
   accessToken: string | undefined,
   to: string,
   bubbles: string[],
-  onBubbleSent: (text: string) => void,
+  onBubbleSent: (text: string) => void | Promise<void>,
   incomingMessageId?: string,
   phase: ConversationPhase = 'informacao',
   /** ms já gastos antes de chegar aqui (ex: chamada de roteamento) — descontado só da 1ª bolha, pra não somar a latência do router ao tempo total de resposta. */
@@ -49,6 +49,6 @@ export async function sendBubbles(
     remainingCompensation = 0; // só desconta da primeira bolha
     await new Promise((resolve) => setTimeout(resolve, delay));
     await sendWhatsAppTextMessage(phoneNumberId, accessToken, to, bubble);
-    onBubbleSent(bubble);
+    await onBubbleSent(bubble);
   }
 }

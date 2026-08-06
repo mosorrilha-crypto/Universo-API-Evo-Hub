@@ -9,7 +9,9 @@
     "start": "NODE_ENV=production node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "migrate:legacy-data": "tsx scripts/migrate-legacy-data.ts",
+    "create:operator": "tsx scripts/create-operator.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

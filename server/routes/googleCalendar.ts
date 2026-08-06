@@ -1,10 +1,13 @@
-import { Router, type RequestHandler } from 'express';
+import { Router } from 'express';
 import {
   getGoogleAuthUrl,
   handleGoogleOAuthCallback,
   isGoogleCalendarConnected,
   disconnectGoogleCalendar,
 } from '../services/googleCalendar';
+import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
+import type { AuthenticatedRequest } from '../middleware/auth';
+import type { RequestHandler } from 'express';
 
 interface GoogleCalendarRouterDeps {
   authenticateToken: RequestHandler;
@@ -18,12 +21,16 @@ interface GoogleCalendarRouterDeps {
  * público de propósito — o Google redireciona o NAVEGADOR do operador pra
  * cá direto após o consentimento, sem Bearer token nenhum; a segurança do
  * fluxo vem do "code" de uso único que só o Google emite, não de auth aqui.
+ * Por isso ele ainda não sabe pra qual tenant está conectando — encodar o
+ * tenantId no parâmetro `state` do OAuth é trabalho do Bloco 2.C. Até lá,
+ * usa o tenant legado único (LEGACY_DEFAULT_TENANT_ID).
  */
 export function createGoogleCalendarRouter({ authenticateToken, googleClientId, googleClientSecret, googleRedirectUri }: GoogleCalendarRouterDeps): Router {
   const router = Router();
 
-  router.get('/api/google-calendar/status', authenticateToken, async (req, res) => {
-    res.json({ connected: await isGoogleCalendarConnected() });
+  router.get('/api/google-calendar/status', authenticateToken, async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
+    res.json({ connected: await isGoogleCalendarConnected(tenantId) });
   });
 
   router.get('/api/google-calendar/connect', authenticateToken, (req, res) => {
@@ -46,7 +53,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     }
 
     try {
-      await handleGoogleOAuthCallback(code, googleClientId, googleClientSecret, googleRedirectUri);
+      await handleGoogleOAuthCallback(LEGACY_DEFAULT_TENANT_ID, code, googleClientId, googleClientSecret, googleRedirectUri);
       res.send('<html><body style="font-family:sans-serif;padding:2rem;text-align:center"><h2>✅ Google Calendar conectado!</h2><p>Pode fechar esta aba e voltar ao painel.</p></body></html>');
     } catch (err: any) {
       console.error('❌ [Google Calendar] Falha no callback OAuth:', err.message);
@@ -54,8 +61,9 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     }
   });
 
-  router.post('/api/google-calendar/disconnect', authenticateToken, async (req, res) => {
-    await disconnectGoogleCalendar();
+  router.post('/api/google-calendar/disconnect', authenticateToken, async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
+    await disconnectGoogleCalendar(tenantId);
     res.json({ success: true });
   });
 

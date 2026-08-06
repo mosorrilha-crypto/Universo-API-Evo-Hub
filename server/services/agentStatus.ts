@@ -1,72 +1,37 @@
 /**
- * Controle de status do agente automático (3 estados, inspirado no
- * whatsapp-agent-monique): "active" (responde sempre), "paused" (silêncio
- * total, operador assume manualmente), "restricted" (só responde fora do
- * horário comercial). Persiste no mesmo Supabase Storage usado pelas
- * conversas (server/services/conversationStore.ts), pra sobreviver a
- * redeploys.
+ * Controle de status do agente automático (3 estados): "active" (responde
+ * sempre), "paused" (silêncio total, operador assume manualmente),
+ * "restricted" (só responde fora do horário comercial). Migrado pra tabela
+ * Postgres `agent_status` (Bloco 2.A), 1 registro por tenant_id.
  */
+import { getDb } from './db';
 
 export type AgentStatus = 'active' | 'paused' | 'restricted';
 
 const TIMEZONE = 'America/Asuncion';
-const BUCKET = 'app-data';
-const OBJECT_PATH = 'agent-status.json';
 
-let currentStatus: AgentStatus = 'active';
-let persistence: { supabaseUrl: string; supabaseKey: string } | null = null;
-
-export async function initAgentStatusPersistence(supabaseUrl?: string, supabaseKey?: string) {
-  if (!supabaseUrl || !supabaseKey) return;
-  persistence = { supabaseUrl, supabaseKey };
-
-  try {
-    const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { status?: AgentStatus };
-      if (data.status) currentStatus = data.status;
-    }
-  } catch (err) {
-    console.warn('⚠️  [Agente] Falha ao carregar status persistido:', (err as Error).message);
-  }
+export async function getAgentStatus(tenantId: string): Promise<AgentStatus> {
+  const db = getDb();
+  const { data } = await db.from('agent_status').select('status').eq('tenant_id', tenantId).maybeSingle();
+  return (data?.status as AgentStatus | undefined) || 'active';
 }
 
-async function persist() {
-  if (!persistence) return;
-  try {
-    await fetch(`${persistence.supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      method: 'POST',
-      headers: {
-        apikey: persistence.supabaseKey,
-        Authorization: `Bearer ${persistence.supabaseKey}`,
-        'Content-Type': 'application/json',
-        'x-upsert': 'true',
-      },
-      body: JSON.stringify({ status: currentStatus }),
-    });
-  } catch (err) {
-    console.warn('⚠️  [Agente] Falha ao salvar status:', (err as Error).message);
-  }
-}
-
-export function getAgentStatus(): AgentStatus {
-  return currentStatus;
-}
-
-export function setAgentStatus(status: AgentStatus) {
+export async function setAgentStatus(tenantId: string, status: AgentStatus): Promise<void> {
   if (!['active', 'paused', 'restricted'].includes(status)) {
     throw new Error(`Status inválido: ${status}`);
   }
-  currentStatus = status;
-  void persist();
+  const db = getDb();
+  const { error } = await db
+    .from('agent_status')
+    .upsert({ tenant_id: tenantId, status, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  if (error) throw error;
 }
 
 /** true = não deve responder automaticamente agora. */
-export function isAgentPaused(): boolean {
-  if (currentStatus === 'paused') return true;
-  if (currentStatus === 'restricted') {
+export async function isAgentPaused(tenantId: string): Promise<boolean> {
+  const status = await getAgentStatus(tenantId);
+  if (status === 'paused') return true;
+  if (status === 'restricted') {
     const hour = Number(new Date().toLocaleString('en-US', { timeZone: TIMEZONE, hour: '2-digit', hour12: false }));
     return hour >= 8 && hour < 20; // silêncio 08:00–19:59, só responde à noite/madrugada
   }

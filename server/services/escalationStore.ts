@@ -1,12 +1,13 @@
 /**
- * Escalonamento pra atendimento humano — "isso precisa de você", inspirado
- * no lib/storage.js do whatsapp-agent-monique (logEscalation/listEscalations).
- * Sem isso, se o agente automático não souber responder (ou o envio falhar),
- * a conversa simplesmente fica parada sem avisar ninguém.
+ * Escalonamento pra atendimento humano — "isso precisa de você". Sem isso,
+ * se o agente automático não souber responder (ou o envio falhar), a
+ * conversa simplesmente fica parada sem avisar ninguém. Migrado pra tabela
+ * Postgres `escalations` (Bloco 2.A), particionada por tenant_id.
  *
  * Ordena com prioridade pra contatos do Paraguai primeiro (preferência de
  * negócio atual), depois não-resolvidos, depois mais recentes.
  */
+import { getDb } from './db';
 import { inferCountryFromPhone } from './conversationStore';
 
 export interface Escalation {
@@ -20,49 +21,28 @@ export interface Escalation {
   createdAt: string;
 }
 
-const BUCKET = 'app-data';
-const OBJECT_PATH = 'escalations.json';
+type EscalationRow = {
+  id: string;
+  phone: string;
+  contact_name: string | null;
+  reason: string;
+  last_message: string | null;
+  country: string | null;
+  resolved: boolean;
+  created_at: string;
+};
 
-const escalations = new Map<string, Escalation>();
-let persistence: { supabaseUrl: string; supabaseKey: string } | null = null;
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-export async function initEscalationPersistence(supabaseUrl?: string, supabaseKey?: string) {
-  if (!supabaseUrl || !supabaseKey) return;
-  persistence = { supabaseUrl, supabaseKey };
-  try {
-    const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as Escalation[];
-      for (const e of data) escalations.set(e.id, e);
-      console.log(`💾 [Escalonamentos] ${data.length} restaurado(s) do Supabase Storage.`);
-    }
-  } catch (err) {
-    console.warn('⚠️  [Escalonamentos] Falha ao carregar:', (err as Error).message);
-  }
-}
-
-function scheduleSave() {
-  if (!persistence) return;
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await fetch(`${persistence!.supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-        method: 'POST',
-        headers: {
-          apikey: persistence!.supabaseKey,
-          Authorization: `Bearer ${persistence!.supabaseKey}`,
-          'Content-Type': 'application/json',
-          'x-upsert': 'true',
-        },
-        body: JSON.stringify(Array.from(escalations.values())),
-      });
-    } catch (err) {
-      console.warn('⚠️  [Escalonamentos] Falha ao salvar:', (err as Error).message);
-    }
-  }, 2000);
+function toEscalation(row: EscalationRow): Escalation {
+  return {
+    id: row.id,
+    phone: row.phone,
+    contactName: row.contact_name || undefined,
+    reason: row.reason,
+    lastMessage: row.last_message || undefined,
+    country: row.country || 'Desconhecido',
+    resolved: row.resolved,
+    createdAt: row.created_at,
+  };
 }
 
 /** Detecta se uma mensagem provavelmente se refere a confirmação de pagamento — nunca deixar o agente confirmar isso sozinho. */
@@ -70,44 +50,58 @@ export function isPaymentRelated(text: string): boolean {
   return /\b(pago|se[ñn]a|transferencia|transferir|comprobante|deposito|dep[oó]sito)\b/i.test(text || '');
 }
 
-export function logEscalation(phone: string, contactName: string | undefined, reason: string, lastMessage?: string): Escalation {
+export async function logEscalation(tenantId: string, phone: string, contactName: string | undefined, reason: string, lastMessage?: string): Promise<Escalation> {
+  const db = getDb();
   const id = `esc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const entry: Escalation = {
+  const row = {
     id,
+    tenant_id: tenantId,
     phone,
-    contactName,
+    contact_name: contactName || null,
     reason,
-    lastMessage,
+    last_message: lastMessage || null,
     country: inferCountryFromPhone(phone),
     resolved: false,
-    createdAt: new Date().toISOString(),
   };
-  escalations.set(id, entry);
-  scheduleSave();
-  console.log(`🚨 [Escalonamento] ${phone} (${entry.country}): ${reason}`);
-  return entry;
+  const { error } = await db.from('escalations').insert(row);
+  if (error) throw error;
+  console.log(`🚨 [Escalonamento] ${phone} (${row.country}): ${reason}`);
+  return toEscalation({ ...row, created_at: new Date().toISOString() });
 }
 
-export function listEscalations(): Escalation[] {
-  return Array.from(escalations.values()).sort((a, b) => {
-    if (a.resolved !== b.resolved) return a.resolved ? 1 : -1;
-    const aPy = a.country === 'Paraguay' ? 0 : 1;
-    const bPy = b.country === 'Paraguay' ? 0 : 1;
-    if (aPy !== bPy) return aPy - bPy;
-    return b.createdAt.localeCompare(a.createdAt);
-  });
+export async function listEscalations(tenantId: string): Promise<Escalation[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('escalations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('resolved', { ascending: true })
+    .order('country', { ascending: true })
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  // country asc coloca "Paraguay" antes de outros alfabeticamente por acaso,
+  // não por garantia — reordena explicitamente pra manter a prioridade real.
+  return (data as EscalationRow[])
+    .map(toEscalation)
+    .sort((a, b) => {
+      if (a.resolved !== b.resolved) return a.resolved ? 1 : -1;
+      const aPy = a.country === 'Paraguay' ? 0 : 1;
+      const bPy = b.country === 'Paraguay' ? 0 : 1;
+      if (aPy !== bPy) return aPy - bPy;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
 }
 
-export function resolveEscalation(id: string): Escalation | undefined {
-  const e = escalations.get(id);
-  if (!e) return undefined;
-  e.resolved = true;
-  scheduleSave();
-  return e;
+export async function resolveEscalation(tenantId: string, id: string): Promise<Escalation | undefined> {
+  const db = getDb();
+  const { data, error } = await db.from('escalations').update({ resolved: true }).eq('tenant_id', tenantId).eq('id', id).select('*').maybeSingle();
+  if (error) throw error;
+  return data ? toEscalation(data as EscalationRow) : undefined;
 }
 
-export function deleteEscalation(id: string): boolean {
-  const existed = escalations.delete(id);
-  if (existed) scheduleSave();
-  return existed;
+export async function deleteEscalation(tenantId: string, id: string): Promise<boolean> {
+  const db = getDb();
+  const { data, error } = await db.from('escalations').delete().eq('tenant_id', tenantId).eq('id', id).select('id');
+  if (error) throw error;
+  return !!data?.length;
 }

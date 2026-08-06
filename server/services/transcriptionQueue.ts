@@ -9,6 +9,7 @@ import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { logEscalation, isPaymentRelated } from './escalationStore';
+import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
 export interface TranscriptionJob {
@@ -92,6 +93,8 @@ async function processLoop(deps: TranscriptionQueueDeps) {
 async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
   const startedAt = Date.now();
   const { message } = job;
+  // tenantId fixo até o Bloco 2.B existir (ver comentário em routes/webhooks.ts).
+  const tenantId = LEGACY_DEFAULT_TENANT_ID;
 
   try {
     let audioBase64: string | undefined;
@@ -120,16 +123,16 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
 
     const outcome = await transcribeAudioWithGemini(deps.getAi(), audioBase64, mimeType, {
       leadName: message.contactName,
-      customInstructions: formatKnowledgeBaseForPrompt(getKnowledgeBase()),
+      customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
     });
 
     totalProcessed += 1;
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
-    updateMessageText(message.from, message.messageId, outcome.result.transcription);
+    await updateMessageText(tenantId, message.from, message.messageId, outcome.result.transcription);
     console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.result.transcription}"`);
 
     if (isPaymentRelated(outcome.result.transcription)) {
-      logEscalation(message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
+      await logEscalation(tenantId, message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
     }
 
     // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
@@ -137,29 +140,30 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     // Reaproveita o mesmo motor de bolhas/humanização do caminho de texto
     // (generateAutoReplyForText), passando a transcrição como se fosse a
     // mensagem recebida — evita duplicar a lógica de estilo em dois lugares.
-    if (outcome.source === 'gemini' && !isAgentPaused()) {
+    if (outcome.source === 'gemini' && !(await isAgentPaused(tenantId))) {
       runExclusive(message.from, async () => {
-        const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
-        const history = getConversation(message.from)?.messages.slice(0, -1);
+        const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
+        const conversation = await getConversation(tenantId, message.from);
+        const history = conversation?.messages.slice(0, -1);
         try {
-          const result = await generateAutoReplyForText(deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history);
+          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history);
           if (!result) {
-            logEscalation(message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
+            await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             return;
           }
           if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-            logEscalation(message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
+            await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
           }
-          await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, result.bubbles, (bubbleText) => {
-            recordOutgoingMessage(message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+          await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, result.bubbles, async (bubbleText) => {
+            await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
             console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}" (agente: ${result.agent})`);
           }, message.messageId, result.phase, result.routerElapsedMs);
         } catch (err: any) {
           if (isGeoRestrictedError(err)) {
-            markGeoRestricted(message.from, err.message);
-            logEscalation(message.from, message.contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', outcome.result.transcription);
+            await markGeoRestricted(tenantId, message.from, err.message);
+            await logEscalation(tenantId, message.from, message.contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', outcome.result.transcription);
           } else {
-            logEscalation(message.from, message.contactName, `Falha ao responder automaticamente: ${err.message}`, outcome.result.transcription);
+            await logEscalation(tenantId, message.from, message.contactName, `Falha ao responder automaticamente: ${err.message}`, outcome.result.transcription);
           }
           console.warn('❌ [Resposta Automática] Falhou:', err.message);
         }

@@ -14,6 +14,7 @@ import { bufferIncomingText } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
+import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
 
@@ -39,39 +40,46 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
 
   // Resposta automática pra mensagens de texto (Epic 1.3): gera e envia de
   // volta via Meta Cloud API, sem bloquear a resposta do webhook (fire-and-forget).
+  //
+  // tenantId ainda é fixo (LEGACY_DEFAULT_TENANT_ID) — o webhook não sabe de
+  // qual cliente é cada mensagem até o Bloco 2.B extrair phone_number_id do
+  // payload da Meta e resolver o tenant dono daquele número.
   const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number) => {
-    if (!getAi || isAgentPaused()) return;
+    const tenantId = LEGACY_DEFAULT_TENANT_ID;
+    if (!getAi) return;
     // runExclusive garante que, se a mensagem anterior desse número ainda
     // estiver gerando resposta, esta espera a vez — sem isso, uma chamada
     // lenta ao Gemini pode terminar DEPOIS de uma mais rápida disparada por
     // uma mensagem seguinte, respondendo fora de ordem (bug real observado).
     runExclusive(phone, async () => {
-      const kbContext = formatKnowledgeBaseForPrompt(getKnowledgeBase());
+      if (await isAgentPaused(tenantId)) return;
+      const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
       // Exclui as mensagens que acabaram de ser agrupadas pelo buffer (já
       // registradas individualmente antes do flush) — o resto é histórico real.
-      const history = getConversation(phone)?.messages.slice(0, -historyExclude);
+      const conversation = await getConversation(tenantId, phone);
+      const history = conversation?.messages.slice(0, -historyExclude);
       try {
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
         await markAsReadAndShowTyping(metaPhoneNumberId, metaAccessToken, messageId);
-        const result = await generateAutoReplyForText(getAi!(), text, contactName, kbContext, history, phone, calendarConfig);
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig);
         if (!result) {
-          logEscalation(phone, contactName, 'IA não conseguiu gerar resposta automática', text);
+          await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;
         }
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-          logEscalation(phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
+          await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
         }
-        await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, result.bubbles, (bubbleText) => {
-          recordOutgoingMessage(phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+        await sendBubbles(metaPhoneNumberId, metaAccessToken, phone, result.bubbles, async (bubbleText) => {
+          await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
           console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}" (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
       } catch (err: any) {
         if (isGeoRestrictedError(err)) {
-          markGeoRestricted(phone, err.message);
-          logEscalation(phone, contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', text);
+          await markGeoRestricted(tenantId, phone, err.message);
+          await logEscalation(tenantId, phone, contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', text);
         } else {
-          logEscalation(phone, contactName, `Falha ao responder automaticamente: ${err.message}`, text);
+          await logEscalation(tenantId, phone, contactName, `Falha ao responder automaticamente: ${err.message}`, text);
         }
         console.warn('❌ [Resposta Automática] Falhou:', err.message);
       }
@@ -90,8 +98,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // Extrai as mensagens em um formato comum, enfileira áudio pra transcrição
   // (idempotente por message_id) e ignora o resto (texto/imagem por ora —
   // ver Epic 1.3 pra resposta automática). Compartilhado entre os handlers de
-  // Meta/Evolution direto e o handler dedicado do Evo Hub.
-  const enqueueAudioMessages = (parsedMessages: ParsedIncomingMessage[]) => {
+  // Meta/Evolution direto e o handler dedicado do Evo Hub. tenantId fixo até
+  // o Bloco 2.B existir (ver comentário em triggerAutoReply acima).
+  const enqueueAudioMessages = async (parsedMessages: ParsedIncomingMessage[]) => {
+    const tenantId = LEGACY_DEFAULT_TENANT_ID;
     let enqueued = 0;
     const nowLabel = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     for (const msg of parsedMessages) {
@@ -101,24 +111,24 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       }
 
       if (msg.type === 'audio') {
-        recordIncomingMessage(msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
+        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
         enqueueTranscriptionJob(msg);
         enqueued += 1;
       } else if (msg.type === 'text') {
-        recordIncomingMessage(msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
         if (msg.text && isPaymentRelated(msg.text)) {
-          logEscalation(msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
+          await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
         }
         if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId);
       } else if (msg.type === 'image') {
-        recordIncomingMessage(msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
+        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
         if (msg.metaImage) {
           downloadMetaMedia(msg.metaImage.mediaId, metaAccessToken)
             .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
             .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
         }
       } else {
-        recordIncomingMessage(msg.from, msg.contactName, { type: 'text', text: `[${msg.type}]`, timestamp: nowLabel });
+        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: `[${msg.type}]`, timestamp: nowLabel });
       }
     }
     return enqueued;
@@ -146,7 +156,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     });
   };
 
-  const handleWebhookPayload = (req: any, res: any) => {
+  const handleWebhookPayload = async (req: any, res: any) => {
     // Check HMAC signature if Meta header is present
     const signatureHeader = (req.headers['x-hub-signature-256'] || req.headers['x-hub-signature']) as string | undefined;
     const appSecret = process.env.META_APP_SECRET || process.env.META_API_TOKEN;
@@ -179,7 +189,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       const data = body.data || body;
 
       const parsedMessages = parseEvolutionWebhookPayload(body);
-      const enqueued = enqueueAudioMessages(parsedMessages);
+      const enqueued = await enqueueAudioMessages(parsedMessages);
 
       console.log(`📱 [Evolution Webhook ${instance}] Evento: ${eventName}`, data?.key ? `(Key: ${data.key.id})` : '', enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
 
@@ -200,7 +210,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       const messages = value?.messages;
 
       const parsedMessages = parseMetaWebhookPayload(body);
-      const enqueued = enqueueAudioMessages(parsedMessages);
+      const enqueued = await enqueueAudioMessages(parsedMessages);
 
       if (messages && messages.length > 0) {
         const msg = messages[0];
@@ -238,7 +248,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     });
   };
 
-  const handleEvoHubWebhook = (req: any, res: any) => {
+  const handleEvoHubWebhook = async (req: any, res: any) => {
     const signatureHeader = req.headers['x-hub-signature-256'] as string | undefined;
 
     if (evoHubWebhookSecret) {
@@ -279,7 +289,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     // estrutura oficial da Meta sem alterar).
     if (body?.object === 'whatsapp_business_account') {
       const parsedMessages = parseMetaWebhookPayload(body, 'evohub');
-      const enqueued = enqueueAudioMessages(parsedMessages);
+      const enqueued = await enqueueAudioMessages(parsedMessages);
 
       const messages = body.entry?.[0]?.changes?.[0]?.value?.messages;
       if (messages && messages.length > 0) {
