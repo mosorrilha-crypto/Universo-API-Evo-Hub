@@ -6,6 +6,11 @@
 > Complementar à revisão em `docs/REVISAO_E_REESTRUTURACAO.md` — as duas análises convergem
 > nos mesmos problemas centrais (auth fragmentada, segredos hardcoded, localStorage como
 > banco, monólito `server.ts`, telemetria fake), o que reforça o diagnóstico.
+>
+> Complementar também a `docs/AGENTE-VERTICAL-ARQUITETURA.md` — o mapa da reestruturação do
+> prompt do agente em camadas (global/segmento/tenant/dinâmico) e das integrações que faltam
+> pro script de vendas da Monique operar em 10/10 (pré-reserva, verificação de pagamento,
+> disponibilidade semanal). Consenso fechado em 06/08/2026; ainda não implementado.
 
 ## 🟢 Decisões do dono do produto — 06/08/2026 (tarde)
 
