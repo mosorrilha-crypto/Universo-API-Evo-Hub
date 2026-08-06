@@ -18,7 +18,7 @@ import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components
 import { EvoHubIntegration } from './components/EvoHubIntegration';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { LoginModal } from './components/LoginModal';
-import { setAuthToken, apiFetch } from './lib/apiClient';
+import { setAuthToken, setUnauthorizedHandler, apiFetch } from './lib/apiClient';
 
 import { INITIAL_TENANTS, SAAS_DEMO_USERS } from './data/mockTenants';
 import { INITIAL_MOCK_LEADS } from './data/mockLeads';
@@ -77,6 +77,21 @@ export const App: React.FC = () => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3500);
   };
+
+  // Se qualquer chamada autenticada voltar 401 (token expirado, inválido, ou
+  // nunca emitido de verdade por uma falha silenciosa no login), força um
+  // novo login com aviso — em vez de deixar a tela travada mostrando dados
+  // velhos com tudo quebrado em silêncio (era o que causava a sensação de
+  // "mensagens/análises não atualizam", sem nenhum erro visível pro usuário).
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setCurrentUser(null);
+      setAuthToken(null);
+      setIsLoginModalOpen(true);
+      showToast('Sessão expirada — faça login novamente.');
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   // Sync state to local storage
   useEffect(() => {

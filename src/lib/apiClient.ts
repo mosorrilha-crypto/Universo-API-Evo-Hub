@@ -25,15 +25,31 @@ export const setAuthToken = (token: string | null) => {
 
 export const getAuthToken = () => currentToken;
 
+// Callback disparado quando qualquer chamada autenticada volta 401 — App.tsx
+// registra isso pra forçar um novo login com aviso, em vez de deixar a tela
+// travada com dados velhos e falhas silenciosas (era exatamente o que
+// acontecia antes: token inválido/expirado ou nunca emitido, e cada chamada
+// falhava sem nada avisar o usuário).
+let onUnauthorized: (() => void) | null = null;
+
+export const setUnauthorizedHandler = (handler: (() => void) | null) => {
+  onUnauthorized = handler;
+};
+
 /**
  * Wrapper de fetch que anexa `Authorization: Bearer <token>` automaticamente
  * quando há um token de sessão salvo. Use no lugar de `fetch` para chamar
  * rotas protegidas do backend (/api/transcribe, /api/analyze-conversation etc).
  */
-export const apiFetch = (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+export const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
   const headers = new Headers(init.headers || {});
   if (currentToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${currentToken}`);
   }
-  return fetch(input, { ...init, headers });
+  const response = await fetch(input, { ...init, headers });
+  if (response.status === 401 && currentToken) {
+    setAuthToken(null);
+    onUnauthorized?.();
+  }
+  return response;
 };
