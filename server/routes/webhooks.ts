@@ -112,6 +112,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       }
 
       const resolvedTenant = await resolveTenantByPhoneNumberId(msg.phoneNumberId, { metaAccessToken, metaPhoneNumberId });
+      if (resolvedTenant.unknownChannel) {
+        // Canal não identificado (Bloco 2.B, revisão de segurança 06/08/2026):
+        // nunca gravar em tenant nenhum quando não dá pra provar de quem é a
+        // mensagem — evita repetir o vazamento cross-tenant que existia
+        // quando isso caía silenciosamente no tenant legado.
+        console.warn(`⚠️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} de canal desconhecido (phone_number_id="${msg.phoneNumberId}") — descartada sem gravar em nenhum tenant.`);
+        continue;
+      }
       const { tenantId } = resolvedTenant;
 
       if (msg.type === 'audio') {
