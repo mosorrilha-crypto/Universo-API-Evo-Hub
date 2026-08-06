@@ -10,6 +10,7 @@
  * redeploy toda vez que reconectar).
  */
 import { google } from 'googleapis';
+import jwt from 'jsonwebtoken';
 import { getDb } from './db';
 
 // Evita importar o tipo OAuth2Client de 'google-auth-library' diretamente —
@@ -24,8 +25,7 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 /**
  * Token por tenant, na tabela Postgres `tenant_calendar_tokens` (Bloco 2.A) —
  * substitui o único arquivo `google-calendar-token.json` global no Supabase
- * Storage. O parâmetro `state` do fluxo OAuth ainda não carrega o tenantId
- * (isso é Bloco 2.C); por ora quem chama passa o tenant explicitamente.
+ * Storage.
  */
 async function loadRefreshToken(tenantId: string): Promise<string | null> {
   const db = getDb();
@@ -48,13 +48,35 @@ function createOAuthClient(clientId?: string, clientSecret?: string, redirectUri
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
+/**
+ * Bloco 2.C — o parâmetro `state` do OAuth carrega o tenantId de quem clicou
+ * "Conectar", assinado (JWT curto, 10min) pra não dar pra forjar e roubar a
+ * conexão de calendário de outro tenant. O callback (público, sem Bearer)
+ * decodifica esse state pra saber a quem devolver o refresh token.
+ */
+export function signOAuthState(tenantId: string, jwtSecret: string): string {
+  return jwt.sign({ tenantId }, jwtSecret, { expiresIn: '10m' });
+}
+
+/** Retorna o tenantId do state, ou null se ausente/inválido/expirado. */
+export function verifyOAuthState(state: string | undefined, jwtSecret: string): string | null {
+  if (!state) return null;
+  try {
+    const payload = jwt.verify(state, jwtSecret) as { tenantId?: string };
+    return payload.tenantId || null;
+  } catch {
+    return null;
+  }
+}
+
 /** URL de consentimento — o operador clica num link que leva aqui. */
-export function getGoogleAuthUrl(clientId: string, clientSecret: string, redirectUri: string): string {
+export function getGoogleAuthUrl(clientId: string, clientSecret: string, redirectUri: string, state?: string): string {
   const client = createOAuthClient(clientId, clientSecret, redirectUri);
   return client.generateAuthUrl({
     access_type: 'offline', // necessário pra ganhar um refresh_token
     prompt: 'consent', // força reconsentimento, garantindo que o refresh_token venha mesmo em reconexões
     scope: SCOPES,
+    ...(state ? { state } : {}),
   });
 }
 
@@ -76,6 +98,14 @@ export async function handleGoogleOAuthCallback(
 
 export async function isGoogleCalendarConnected(tenantId: string): Promise<boolean> {
   return !!(await loadRefreshToken(tenantId));
+}
+
+/** Todos os tenants com um Google Calendar conectado agora — usado pelo job de lembretes (Bloco 2.C) pra iterar por tenant em vez de rodar uma vez só globalmente. */
+export async function listConnectedCalendarTenants(): Promise<string[]> {
+  const db = getDb();
+  const { data, error } = await db.from('tenant_calendar_tokens').select('tenant_id');
+  if (error) throw error;
+  return (data || []).map((row) => row.tenant_id as string);
 }
 
 export async function disconnectGoogleCalendar(tenantId: string): Promise<void> {

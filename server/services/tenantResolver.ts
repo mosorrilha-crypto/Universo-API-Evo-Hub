@@ -48,3 +48,33 @@ export async function resolveTenantByPhoneNumberId(
   }
   return { tenantId: LEGACY_DEFAULT_TENANT_ID, metaAccessToken: shared.metaAccessToken, metaPhoneNumberId: shared.metaPhoneNumberId };
 }
+
+/**
+ * Busca reversa: dado um tenantId (ex: iterando tenants no job de lembretes,
+ * Bloco 2.C), resolve a credencial Meta pra enviar mensagem em nome dele. Cai
+ * na credencial compartilhada se o tenant não tiver `tenant_meta_credentials`
+ * cadastrada ainda (ex: o tenant legado, que nunca passou pelo onboarding
+ * manual de scripts/create-tenant.ts).
+ */
+export async function resolveMetaCredentialsForTenant(
+  tenantId: string,
+  shared: SharedMetaCredentials
+): Promise<SharedMetaCredentials> {
+  try {
+    const db = getDb();
+    const { data } = await db
+      .from('tenant_meta_credentials')
+      .select('access_token, phone_number_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (data) {
+      return {
+        metaAccessToken: data.access_token || shared.metaAccessToken,
+        metaPhoneNumberId: data.phone_number_id || shared.metaPhoneNumberId,
+      };
+    }
+  } catch (err) {
+    console.warn('⚠️  [Tenant] Falha ao resolver credencial Meta do tenant, usando credencial compartilhada:', (err as Error).message);
+  }
+  return shared;
+}

@@ -76,6 +76,7 @@ async function startServer() {
     googleClientId: config.googleClientId,
     googleClientSecret: config.googleClientSecret,
     googleRedirectUri: config.googleRedirectUri,
+    jwtSecret: config.jwtSecret,
   }));
 
   // Worker em background que processa a fila de transcrição (webhook → download
