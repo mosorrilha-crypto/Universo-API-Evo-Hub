@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
@@ -462,11 +462,26 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       )
     );
   };
+  // Quantas mensagens a conversa tinha na última análise gerada, por lead —
+  // sem isso, a análise só rodava na primeira vez que a conversa era aberta
+  // e ficava "congelada" pra sempre depois (mesmo com mensagens novas
+  // chegando de verdade pelo polling de /api/conversations a cada 8s).
+  const lastAnalyzedCountRef = useRef<Record<string, number>>({});
+
   useEffect(() => {
-    if (selectedLead && !selectedLead.fullAnalysis && !isAnalyzingConversation) {
+    if (!selectedLead || !autoAnalyze || isAnalyzingConversation) return;
+    const msgCount = selectedLead.messages?.length || 0;
+    if (lastAnalyzedCountRef.current[selectedLead.id] === msgCount) return;
+
+    // Primeira análise da conversa: roda na hora. Mensagens novas chegando
+    // depois: espera um respiro de 5s, pra não reanalisar a cada mensagem
+    // picotada ou a cada rodada do polling.
+    const delay = selectedLead.fullAnalysis ? 5000 : 0;
+    const timer = setTimeout(() => {
       handleAnalyzeConversation(selectedLead);
-    }
-  }, [activeLeadId]);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [activeLeadId, selectedLead?.messages?.length, autoAnalyze, isAnalyzingConversation]);
 
   // Full Conversation Analysis API call
   const handleAnalyzeConversation = async (
@@ -511,6 +526,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setLeads((prev) =>
         prev.map((l) => (l.id === targetLead.id ? { ...l, fullAnalysis } : l))
       );
+      lastAnalyzedCountRef.current[targetLead.id] = (targetLead.messages || []).length;
     } catch (err: any) {
       console.error('Erro ao analisar conversa completa:', err);
       setErrorMsg(err.message || 'Falha ao analisar a conversa com o Gemini IA.');
