@@ -11,12 +11,18 @@
 
 1. **Segurança:** autorizado desligar `DEMO_MODE` assim que existir login real — ver ação sua
    no Bloco 2.A acima (criar operador real primeiro, senão tranca o próprio acesso).
-2. **Comercial — pendente de esclarecimento:** valores informados como "Starter R$590 / Pro
-   R$1.200 / Enterprise R$2.900", mas a moeda oficial decidida foi Guaraníes (PYG). R$ é o
-   símbolo do Real brasileiro, não de Guaraníes — **preciso saber se esses valores são em
-   PYG mesmo (só o prefixo errado) ou se são valores em BRL que precisam converter pra PYG**
-   antes de eu tocar na tela de planos (Bloco 2.F/Epic 4.4, ainda não iniciado). Schema já
-   preparado pra moeda por tenant (`tenants.currency`, default `PYG`) — não bloqueia o Bloco 2.A.
+2. **Comercial — moeda/idioma esclarecidos (ainda falta o valor exato dos planos):**
+   Paraguay é o mercado prioritário (es-PY / Guaraní, com Dólar junto — o Paraguay é
+   dolarizado na prática). Brasil vem logo atrás: tenants com vínculo brasileiro (Monique e o
+   outro cliente) recebem um par secundário pt-BR/BRL, exibido junto do principal, não no
+   lugar dele. Inglês/USD também é prioridade, não "futuro". Schema atualizado pra isso —
+   `tenants.currency`/`locale` (principal) + `secondary_currency`/`secondary_locale`,
+   restritos a PYG/BRL/USD e es-PY/pt-BR/en. Cotação automática via API de câmbio (ex:
+   open.er-api.com ou frankfurter.app, ambas gratuitas) fica anotada como diferencial de
+   baixo custo pro Bloco 2.E, quando a tela de exibição for construída — ainda não bloqueia
+   nada. **Ainda falta:** confirmar se os valores "Starter R$590 / Pro R$1.200 / Enterprise
+   R$2.900" são PYG com prefixo errado ou BRL — decisão de negócio pro Bloco 2.F/Epic 4.4,
+   não bloqueia o Bloco 2.A.
 3. **Prioridade confirmada:** Bloco 2.A executado nesta sessão — ver detalhamento abaixo.
 4. **Ação do proprietário:** Google Calendar autorizado (test user cadastrado na tela OAuth do
    Google Cloud Console) — Epic 4.3.3 resolvido. Validação do Evo Hub real (Epic 1.1.9) segue
@@ -240,7 +246,7 @@ misturar.
 | 2.E.1 | TanStack Query pra leads/transactions/knowledge-base, substituindo os `useState` + `localStorage.setItem` espalhados em `App.tsx` e `WhatsAppLeadsSim.tsx` | P0 | M |
 | 2.E.2 | Remover o state duplicado de `leads` entre `App.tsx` e `WhatsAppLeadsSim.tsx` (hoje são dois arrays desconectados — já mitigado parcialmente nesta sessão, falta unificar de vez) | P0 | M |
 | 2.E.3 | CRM (`OperatorCRM.tsx`), Financeiro (`FinancialDashboard.tsx`) e Atribuição (`AdAttributionCAPI.tsx`) passam a ler/escrever via API real com filtro de tenant, não mais mock local | P0 | L |
-| 2.E.4 | **(novo, da auditoria)** Seletor de moeda/locale por tenant — hoje R$/pt-BR está fixo no código, mas o negócio real da Monique é em Guaraníes | P1 | S |
+| 2.E.4 | Seletor de moeda/locale por tenant — hoje R$/pt-BR está fixo no código. Schema já pronto (`tenants.currency`/`locale` + `secondary_currency`/`secondary_locale`, PYG/BRL/USD × es-PY/pt-BR/en). Paraguay (Gs/USD) é o principal, Brasil (BRL/pt-BR) o secundário pra tenants com vínculo brasileiro. Diferencial opcional: cotação automática via API de câmbio gratuita (open.er-api.com, frankfurter.app) | P1 | S |
 
 ### Bloco 2.F — Itens da auditoria que só fazem sentido resolver aqui dentro
 

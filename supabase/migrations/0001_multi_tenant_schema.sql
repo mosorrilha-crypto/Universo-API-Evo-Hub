@@ -21,12 +21,22 @@
 create extension if not exists pgcrypto;
 
 -- ── tenants ────────────────────────────────────────────────────────────
+-- Paraguay é o mercado prioritário hoje (es-PY / PYG, com USD junto — o
+-- Paraguay é dolarizado na prática, preço em dólar é comum). Brasil vem
+-- logo atrás: tenants com vínculo brasileiro (ex: Monique) recebem um
+-- idioma/moeda SECUNDÁRIO (pt-BR/BRL), exibido junto do principal, não no
+-- lugar dele. Inglês/USD é prioridade também, não "futuro" — por isso
+-- currency/locale aceitam qualquer um dos 3 pares hoje. Cotação automática
+-- via API de câmbio fica documentada em docs/PLANO-EVOLUCAO.md (Bloco 2.E)
+-- como diferencial de baixo custo — não é schema, é lógica de exibição.
 create table if not exists public.tenants (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text unique,
-  currency text not null default 'PYG',
-  locale text not null default 'es-PY',
+  currency text not null default 'PYG' check (currency in ('PYG', 'BRL', 'USD')),
+  locale text not null default 'es-PY' check (locale in ('es-PY', 'pt-BR', 'en')),
+  secondary_currency text check (secondary_currency in ('PYG', 'BRL', 'USD')),
+  secondary_locale text check (secondary_locale in ('es-PY', 'pt-BR', 'en')),
   created_at timestamptz not null default now()
 );
 
@@ -175,6 +185,9 @@ create policy tenant_self on public.tenants
 -- referencia essa constante em server/services/tenantContext.ts como ponte
 -- até o roteamento multi-tenant real (Bloco 2.B) resolver o tenant por
 -- phone_number_id em vez de usar um valor fixo.
-insert into public.tenants (id, name, slug, currency, locale)
-values ('11111111-1111-1111-1111-111111111111', 'Monique — Pestañas por Monique', 'monique', 'PYG', 'es-PY')
-on conflict (id) do nothing;
+-- Negócio operado no Paraguay (fuso America/Asuncion em todo o backend),
+-- mas a Monique é brasileira e parte da clientela tem vínculo com o Brasil
+-- — por isso pt-BR/BRL como secundário, não como principal.
+insert into public.tenants (id, name, slug, currency, locale, secondary_currency, secondary_locale)
+values ('11111111-1111-1111-1111-111111111111', 'Monique — Pestañas por Monique', 'monique', 'PYG', 'es-PY', 'BRL', 'pt-BR')
+on conflict (id) do update set secondary_currency = excluded.secondary_currency, secondary_locale = excluded.secondary_locale;
