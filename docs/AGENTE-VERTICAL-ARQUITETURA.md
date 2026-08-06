@@ -17,14 +17,19 @@
 
 ## 1. Decisão de arquitetura (consenso)
 
-O agente deixa de ser "um prompt gigante por tenant" e passa a ser montado em **4 camadas**,
-nessa ordem, toda vez que uma mensagem chega:
+O agente deixa de ser "um prompt gigante por tenant" e passa a ser montado em **4 camadas de
+configuração** + **2 elementos de contexto transacional** (correção de nomenclatura — o texto
+antigo chamava de "4 camadas" listando 6 itens; a distinção evita confundir configuração do
+agente com o contexto da conversa em si), nessa ordem, toda vez que uma mensagem chega:
 
 ```
+Camadas de configuração (fixas, versionadas):
 1. Prompt Global do Agente       (fixo, nunca muda por tenant/segmento)
 2. Regras do Segmento             (fixo por segmento — ex: "beauty_studio")
 3. Base do Tenant                 (dado específico da Monique, editável sem tocar prompt)
 4. Dados Dinâmicos                (agenda real, status de pagamento — nunca "lembrado", sempre consultado)
+
+Contexto transacional (muda a cada mensagem):
 5. Histórico da conversa
 6. Mensagem atual do cliente
 ```
@@ -75,7 +80,7 @@ versão pro resto de uma conversa em andamento — evita o cenário "cliente rec
 antigo porque o agente decorou a versão de ontem" se alguém publicar uma correção no meio de
 um atendimento.
 
-## 4. As 3 integrações novas pra chegar em 10/10
+## 4. As 4 integrações novas pra chegar em 10/10
 
 Confirmado pelo dono do produto: só falta conectar isso ao sistema — o prompt já está pronto.
 
@@ -131,6 +136,12 @@ Formaliza em um lugar só o que já estava decidido espalhado pelo doc (seções
 | Confirmar agendamento pro cliente (4.3) | Bloqueado — só depois do operador liberar | |
 | Editar base de conhecimento (`draft`, seção 3) | `admin`+ | |
 | Publicar base de conhecimento (`draft`→`published`, seção 3) | `admin`+ | |
+
+**Nota de auditabilidade (07/08/2026, benchmark contra projeto similar aberto):** quando a
+Camada 1 (Global) decidir o roteamento entre fluxos/agentes internos, ela deve devolver não só
+a decisão mas `confidence` (0–1) e `reasoning` (breve explicação) junto — dá auditoria de graça
+sem custo extra de implementação, e alimenta direto o item de DoD "custos/tokens/erros/chamadas
+de ferramenta auditáveis por tenant".
 
 ## 5. O que já está pronto — e o que isso realmente significa
 
