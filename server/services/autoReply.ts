@@ -281,13 +281,27 @@ async function notifyBookingCompleted(tenantId: string, phone: string, titulo: s
   });
 }
 
+/** "YYYY-MM-DDTHH:mm:ss" -> "HH:mm", zero-padded — mesmo formato usado na validação anti-alucinação (Epic 4.5.7). */
+function extractHHmm(naiveIso: string): string {
+  return naiveIso.slice(11, 16);
+}
+
+/** Extrai todo horário no formato H:mm/HH:mm citado num texto livre, normalizado com zero à esquerda — usado pela validação anti-alucinação (Epic 4.5.7). */
+function extractCitedTimes(text: string): string[] {
+  const matches = text.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/g) || [];
+  return matches.map((m) => {
+    const [h, mm] = m.split(':');
+    return `${h.padStart(2, '0')}:${mm}`;
+  });
+}
+
 async function executeCalendarTool(
   tenantId: string,
   name: string,
   args: Record<string, any>,
   phone: string,
   cfg: CalendarConfig
-): Promise<{ response: Record<string, unknown>; summary: string }> {
+): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimeHHmm?: string }> {
   try {
     switch (name) {
       case 'verificar_disponibilidade': {
@@ -295,6 +309,7 @@ async function executeCalendarTool(
         return {
           response: { disponivel },
           summary: `Verificou disponibilidade em ${args.data_hora_inicio}–${args.data_hora_fim}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
+          confirmedTimeHHmm: disponivel ? extractHHmm(args.data_hora_inicio) : undefined,
         };
       }
       case 'criar_agendamento': {
@@ -304,6 +319,7 @@ async function executeCalendarTool(
         return {
           response: { sucesso: true, evento_id: eventId },
           summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
+          confirmedTimeHHmm: extractHHmm(args.data_hora_inicio),
         };
       }
       case 'remarcar_agendamento': {
@@ -319,6 +335,7 @@ async function executeCalendarTool(
         return {
           response: { sucesso: true },
           summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
+          confirmedTimeHHmm: extractHHmm(args.nova_data_hora_inicio),
         };
       }
       case 'cancelar_agendamento': {
@@ -355,15 +372,18 @@ async function runAgendamentoTools(
   phone: string,
   cfg: CalendarConfig,
   history?: { sender: 'lead' | 'agent'; text?: string }[]
-): Promise<{ actionsSummary: string[]; hadError: boolean }> {
+): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[] }> {
   const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
-    return { actionsSummary: [], hadError: false };
+    return { actionsSummary: [], hadError: false, confirmedTimes: [] };
   }
 
   const { naive, weekday } = getNowLocalNaive(BUSINESS_TIMEZONE);
   const historyText = buildHistoryText(history);
   const existing = await getAppointmentForPhone(tenantId, phone);
+  // O horário do agendamento ATIVO (se houver) é um fato conhecido de antemão
+  // — citar ele numa confirmação de cancelamento/remarcação não é alucinação.
+  const confirmedTimes: string[] = existing ? [extractHHmm(existing.startIso)] : [];
 
   const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
 
@@ -404,15 +424,16 @@ Regras:
 
     const responseParts: Part[] = [];
     for (const call of calls) {
-      const { response: toolResponse, summary } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg);
+      const { response: toolResponse, summary, confirmedTimeHHmm } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg);
       actionsSummary.push(summary);
       if ('erro' in toolResponse) hadError = true;
+      if (confirmedTimeHHmm) confirmedTimes.push(confirmedTimeHHmm);
       responseParts.push({ functionResponse: { name: call.name, response: toolResponse } });
     }
     contents.push({ role: 'user', parts: responseParts });
   }
 
-  return { actionsSummary, hadError };
+  return { actionsSummary, hadError, confirmedTimes };
 }
 
 const FOTO_TOOLS: FunctionDeclaration[] = [
@@ -531,13 +552,15 @@ export async function generateAutoReplyForText(
 
     let extraContext: string | undefined;
     let forcedHumanConfirmation = false;
+    let confirmedTimes: string[] = [];
 
     if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
-      const { actionsSummary, hadError } = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history);
-      if (actionsSummary.length) {
-        extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
+      const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history);
+      if (result.actionsSummary.length) {
+        extraContext = result.actionsSummary.map((s) => `- ${s}`).join('\n');
       }
-      forcedHumanConfirmation = hadError;
+      forcedHumanConfirmation = result.hadError;
+      confirmedTimes = result.confirmedTimes;
     } else if (agent !== 'agendamento' && phone && mediaConfig?.phoneNumberId && mediaConfig?.accessToken) {
       const { actionsSummary } = await runFotoTool(tenantId, ai, text, phone, mediaConfig, history);
       if (actionsSummary.length) {
@@ -551,7 +574,24 @@ export async function generateAutoReplyForText(
       return null;
     }
 
-    return { ...specialist, needsHumanConfirmation: specialist.needsHumanConfirmation || forcedHumanConfirmation, agent, routerElapsedMs };
+    // Epic 4.5.7 — anti-alucinação: se as ferramentas de agenda rodaram
+    // nesta mensagem (só faz sentido validar quando há algo real pra
+    // comparar), nenhum horário citado na resposta pode ser diferente dos
+    // horários realmente confirmados pelas ferramentas. Se o modelo citou
+    // um horário não confirmado, a resposta é substituída por uma correção
+    // segura antes de sair pro cliente — nunca deixa passar um horário
+    // inventado.
+    let bubbles = specialist.bubbles;
+    if (agent === 'agendamento' && confirmedTimes.length) {
+      const citedTimes = extractCitedTimes(bubbles.join(' '));
+      const invalidTimes = citedTimes.filter((t) => !confirmedTimes.includes(t));
+      if (invalidTimes.length) {
+        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta. Confirmados: ${confirmedTimes.join(', ')}.`);
+        bubbles = [`Deixa eu confirmar certinho com você: o horário disponível é ${confirmedTimes.join(' ou ')}. Fico assim mesmo ou prefere outro horário?`];
+      }
+    }
+
+    return { ...specialist, bubbles, needsHumanConfirmation: specialist.needsHumanConfirmation || forcedHumanConfirmation, agent, routerElapsedMs };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;
