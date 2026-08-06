@@ -376,6 +376,52 @@ CRM, lembretes automáticos, idempotência por `wa_message_id`.
 (não está no GitHub, vive só no ambiente da outra sessão) — qualquer ação de apagar/arquivar
 esse projeto precisa ser feita a partir de lá, não daqui.
 
+### Epic 4.6 — Evolution API multi-instância (QR Code Gateway, baixa barreira de entrada)
+
+**Origem:** proposta trazida pelo dono do produto (documento externo, 08/08/2026) sobre como
+reduzir a barreira de entrada comercial do SaaS — hoje, exigir Business Manager verificado pela
+Meta antes do cliente conseguir usar o produto derruba boa parte do mercado inicial (pequenos
+negócios sem CNPJ/BM verificado). Análise técnica confirmada contra o código real do Universo.
+
+**Diagnóstico técnico (confirmado, não suposição):**
+- `server/services/webhookParsers.ts` já tem `parseEvolutionWebhookPayload` — o Universo já
+  entende o formato de mensagem da Evolution API.
+- Mas `server/config.ts` só carrega Evolution como **uma única instância global**
+  (`EVOLUTION_API_URL`/`EVOLUTION_API_KEY`/`EVOLUTION_INSTANCE_NAME` — três variáveis de
+  ambiente fixas, iguais ao padrão single-tenant antigo do Meta antes do Bloco 2.B). Não existe
+  criação de instância nova, geração de QR Code, nem resolução de qual tenant é dona de qual
+  instância Evolution — a mesma lacuna que existia pro WhatsApp oficial antes do Bloco 2.B.
+- Não existe, e nunca deveria existir: um `<iframe>`/widget carregando o WhatsApp Web direto no
+  navegador do cliente — a Meta bloqueia isso via `X-Frame-Options: DENY`. Confirmado, não é uma
+  limitação de implementação, é bloqueio do lado da Meta.
+
+**Arquitetura recomendada — duas portas de entrada, unificadas no mesmo pipeline de IA:**
+
+| | Porta A — QR Code (Evolution API) | Porta B — Oficial (Evo Hub / Meta Cloud API) |
+|---|---|---|
+| Pra quem | Cliente novo, sem CNPJ/BM verificado — onboarding em segundos | Cliente que cresceu, precisa de volume/estabilidade sem risco de banimento |
+| Como conecta | Escaneia QR Code gerado pelo backend (instância "headless" do WhatsApp) | Facebook Login embutido (fluxo que o Evo Hub já cobre) |
+| Risco de banimento | Médio (não-oficial) | Zero |
+| Barreira de entrada | Nenhuma | Alta (exige BM verificado) |
+| Pro agente de IA (`autoReply.ts`) | Mesmo pipeline — o processamento não sabe nem precisa saber de qual porta a mensagem veio | Mesmo pipeline |
+
+**Estratégia comercial ("cavalo de troia"):** cliente entra de graça/barato pela Porta A
+(Evolution), começa a usar a IA imediatamente. Quando o volume de mensagens cresce a ponto do
+risco de banimento importar de verdade, oferece upgrade guiado pra Porta B (Evo Hub/Meta oficial).
+Não descontinuar o Evo Hub — ele continua sendo o produto pra cliente enterprise; a Evolution API
+é a "segunda antena" que amplia quem consegue entrar no funil no primeiro dia.
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 4.6.1 | Provisionar Evolution API multi-instância: uma instância por tenant (não mais 1 global fixa), análogo ao `tenant_meta_credentials` do Bloco 2.A — tabela `tenant_evolution_credentials` (instance_name/api_key/api_url por tenant) | P1 | M | Pendente |
+| 4.6.2 | Endpoint/fluxo de criação de instância + geração de QR Code real (chama a Evolution API pra criar a instância do tenant novo e devolve o QR Code pro painel exibir) | P1 | M | Pendente |
+| 4.6.3 | Roteamento multi-canal (Bloco 2.B) estender pra resolver tenant também por `instance_name` da Evolution, não só por `phone_number_id` da Meta | P1 | S | Pendente |
+| 4.6.4 | Envio de mensagem via Evolution API (hoje `metaSend.ts` só fala com a Meta Cloud API) — precisa de um `evolutionSend.ts` equivalente, ou abstrair os dois atrás de uma interface comum | P1 | M | Pendente |
+| 4.6.5 | Onboarding self-service no painel: cliente escolhe "Conectar agora com QR Code" (Evolution, instantâneo) ou "Conectar com Facebook/Business Manager" (Evo Hub, oficial) — hoje o onboarding é só manual via `scripts/create-tenant.ts`/API admin (Bloco 2.D.4) | P2 | L | Pendente |
+
+**Fora de escopo aqui, mantido como está:** widget/iframe carregando WhatsApp Web direto no
+navegador — tecnicamente bloqueado pela Meta, não é uma direção viável.
+
 ---
 
 ## Fase 5 — Escala, observabilidade e produção
