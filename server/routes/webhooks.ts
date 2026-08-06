@@ -15,6 +15,7 @@ import { bufferIncomingText } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
+import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
 import { resolveTenantByPhoneNumberId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import type { GoogleGenAI } from '@google/genai';
@@ -150,6 +151,18 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
             .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
             .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
         }
+        // Etapa 8 (fluxo de verificação de pagamento) — uma imagem chegando
+        // com um agendamento ativo ainda sem comprovante registrado é o
+        // caso mais comum de "cliente mandou o comprovante da seña". Nunca
+        // confirma nada sozinho: só marca pending_verification e escala pra
+        // um operador olhar de verdade (ver server/services/appointmentStore.ts).
+        getAppointmentForPhone(tenantId, msg.from)
+          .then(async (appointment) => {
+            if (!appointment || appointment.paymentStatus) return;
+            await markPaymentPendingVerification(tenantId, msg.from, msg.messageId);
+            await logEscalation(tenantId, msg.from, msg.contactName, 'Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno', '[imagem]');
+          })
+          .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
       } else {
         await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: `[${msg.type}]`, timestamp: nowLabel });
       }

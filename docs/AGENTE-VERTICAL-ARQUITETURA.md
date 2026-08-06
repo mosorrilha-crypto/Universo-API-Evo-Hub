@@ -216,7 +216,17 @@ redação de segredos/comprovantes/dados pessoais nos logs — todos entram na e
 5. Migrar o conteúdo específico da Monique pra camada 3 (tenant)
 6. Ferramenta nova: disponibilidade da semana
 7. Job de follow-up de pré-reserva (por tenant, alerta pro operador)
-8. Fluxo de verificação de transferência → confirmação de pagamento
+8. ✅ Fluxo de verificação de transferência → confirmação de pagamento — o schema e as
+   funções de `appointmentStore.ts` (`markPaymentPendingVerification`/`setPaymentVerification`/
+   `confirmPayment`) já existiam desde a Etapa 1, mas nada os chamava. Conectado: `webhooks.ts`
+   marca `pending_verification` automaticamente quando chega uma imagem com agendamento ativo
+   ainda sem comprovante; novo `POST /api/conversations/:phone/verify-payment` é onde o operador
+   marca verificado/rejeitado (a IA nunca chama isso); `runAgendamentoTools` (autoReply.ts) lê o
+   estado a cada turno — nunca confirma o turno em `pending_verification`/`rejected`, e é a única
+   parte que executa a transição `verified` → `confirmed` (sempre depois de decisão humana).
+   Testado (`autoReplyPaymentVerification.test.ts`, `conversationsVerifyPayment.test.ts`).
+   **Não incluído:** botão no painel pra marcar verificado/rejeitado — hoje só via API
+   diretamente; frontend (`ConversationAnalysisPanel.tsx` ou similar) fica pro próximo passo.
 9. Bloco 2.E (CRM real) — idealmente junto com 7-8, não depois
 ```
 
@@ -227,7 +237,7 @@ redação de segredos/comprovantes/dados pessoais nos logs — todos entram na e
       zero edição de código/prompt
 - [ ] Pré-reserva vira tarefa real no CRM, com alerta no prazo certo pro operador certo
 - [ ] Reentrega de webhook (mesmo `wa_message_id`) nunca duplica pré-reserva/CRMTask
-- [ ] Pagamento só é confirmado após verificação humana explícita, nunca pela IA sozinha
+- [x] Pagamento só é confirmado após verificação humana explícita, nunca pela IA sozinha
 - [ ] Agente consegue responder sobre disponibilidade da semana com dados reais, não estimativa
 - [ ] Base de conhecimento da Monique migrada pros documentos tipados, sem perda de conteúdo
 - [ ] Testes automatizados comprovam que tenant A não acessa dado de tenant B

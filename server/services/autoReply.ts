@@ -7,7 +7,7 @@ import {
   isGoogleCalendarConnected,
   type CalendarConfig,
 } from './googleCalendar';
-import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone } from './appointmentStore';
+import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
 import { DEFAULT_SEGMENT } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductPrice, parsePriceToNumber } from './knowledgeBaseStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
@@ -404,6 +404,22 @@ async function runAgendamentoTools(
   // — citar ele numa confirmação de cancelamento/remarcação não é alucinação.
   const confirmedTimes: string[] = existing ? [extractHHmm(existing.startIso)] : [];
 
+  // Etapa 8 (fluxo de verificação de pagamento) — o estado é sempre decidido
+  // por um operador humano (webhooks.ts marca pending_verification quando
+  // chega uma imagem; server/routes/conversations.ts, próximo passo, é onde
+  // o operador marca verified/rejected). A IA só transiciona verified ->
+  // confirmed, que é o gatilho pra ela poder dizer "confirmado" pro cliente
+  // — nunca decide "verificado" sozinha.
+  const actionsSummary: string[] = [];
+  if (existing?.paymentStatus === 'pending_verification') {
+    actionsSummary.push('Comprovante de pagamento recebido, ainda aguardando verificação de um operador — NÃO confirme o turno como pago, diga que vai verificar com cuidado.');
+  } else if (existing?.paymentStatus === 'rejected') {
+    actionsSummary.push('O comprovante enviado foi rejeitado por um operador — NÃO confirme o turno, oriente o cliente a reenviar um comprovante válido ou aguardar contato.');
+  } else if (existing?.paymentStatus === 'verified') {
+    await confirmPayment(tenantId, phone);
+    actionsSummary.push('Pagamento verificado por um operador agora mesmo — pode confirmar o turno pro cliente com segurança.');
+  }
+
   const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
 
 Data e hora ATUAL (fuso ${BUSINESS_TIMEZONE}): ${naive} (${weekday}).
@@ -419,7 +435,6 @@ Regras:
 - Pra remarcar/cancelar, você NÃO precisa saber o ID do evento — as ferramentas já resolvem isso sozinhas a partir deste contato.`;
 
   const contents: Content[] = [{ role: 'user', parts: [{ text: prompt }] }];
-  const actionsSummary: string[] = [];
   let hadError = false;
 
   for (let i = 0; i < 4; i++) {

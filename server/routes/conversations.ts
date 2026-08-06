@@ -6,6 +6,7 @@ import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseSto
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage } from '../services/mediaImageStore';
+import { setPaymentVerification } from '../services/appointmentStore';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import type { AuthenticatedRequest } from '../middleware/auth';
 
@@ -150,6 +151,27 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       console.error('❌ [Conversas] Falha ao enviar foto de exemplo:', err.message);
       res.status(502).json({ error: err.message });
     }
+  });
+
+  // Etapa 8 (fluxo de verificação de pagamento) — o operador marca aqui o
+  // comprovante que chegou (webhooks.ts já grava pending_verification
+  // automaticamente quando uma imagem chega com agendamento ativo sem
+  // comprovante ainda) como verificado (bate com o valor/seña combinado) ou
+  // rejeitado. A IA nunca chama isso — só o operador humano decide, e o
+  // agente (autoReply.ts, runAgendamentoTools) lê o resultado no próximo
+  // turno pra saber se já pode confirmar o turno pro cliente.
+  router.post('/api/conversations/:phone/verify-payment', authenticateToken, async (req: AuthenticatedRequest, res) => {
+    const { status } = req.body || {};
+    if (status !== 'verified' && status !== 'rejected') {
+      return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
+    }
+    const operatorId = req.user?.id;
+    if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });
+
+    const tenantId = tenantOf(req);
+    const updated = await setPaymentVerification(tenantId, req.params.phone, status, operatorId);
+    if (!updated) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
+    res.json({ success: true, appointment: updated });
   });
 
   // Status do agente automático (Epic 1.3 — pausar/restringir horário)
