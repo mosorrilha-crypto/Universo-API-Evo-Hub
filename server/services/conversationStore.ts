@@ -105,7 +105,8 @@ export async function recordIncomingMessage(
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone, name);
   const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null });
+  const { error } = await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null });
+  if (error) console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem RECEBIDA de ${phone} (id=${id}) — mensagem do lead perdida do histórico:`, error.message);
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
   return (await getConversation(tenantId, phone))!;
 }
@@ -114,7 +115,8 @@ export async function recordOutgoingMessage(tenantId: string, phone: string, mes
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
   const id = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'agent', type: message.type, text: message.text ?? null });
+  const { error } = await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'agent', type: message.type, text: message.text ?? null });
+  if (error) console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem ENVIADA pra ${phone} (id=${id}) — resposta do agente perdida do histórico:`, error.message);
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
   return (await getConversation(tenantId, phone))!;
 }

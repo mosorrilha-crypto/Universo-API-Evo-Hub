@@ -45,9 +45,15 @@ function toEscalation(row: EscalationRow): Escalation {
   };
 }
 
-/** Detecta se uma mensagem provavelmente se refere a confirmação de pagamento — nunca deixar o agente confirmar isso sozinho. */
+/**
+ * Detecta se uma mensagem provavelmente se refere a confirmação de pagamento
+ * — nunca deixar o agente confirmar isso sozinho. Cobre espanhol paraguaio
+ * (idioma principal do atendimento) E português (parte da clientela da
+ * Monique é brasileira — "comprovante"/"transferência" não seriam
+ * detectados só com a grafia em espanhol).
+ */
 export function isPaymentRelated(text: string): boolean {
-  return /\b(pago|se[ñn]a|transferencia|transferir|comprobante|deposito|dep[oó]sito)\b/i.test(text || '');
+  return /\b(pago|pagu[eé]i|se[ñn]a|transfer[êe]nc[ií]a|transferir|comprobante|comprovante|dep[oó]sit(o|ei))\b/i.test(text || '');
 }
 
 export async function logEscalation(tenantId: string, phone: string, contactName: string | undefined, reason: string, lastMessage?: string): Promise<Escalation> {

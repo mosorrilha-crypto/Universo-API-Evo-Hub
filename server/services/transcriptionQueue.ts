@@ -133,7 +133,9 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     await updateMessageText(tenantId, message.from, message.messageId, outcome.result.transcription);
     console.log(`✅ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): ${redactMessageForLog(outcome.result.transcription)}`);
 
-    if (isPaymentRelated(outcome.result.transcription)) {
+    if (outcome.source === 'fallback') {
+      await logEscalation(tenantId, message.from, message.contactName, 'Falha ao transcrever áudio automaticamente — operador precisa ouvir manualmente', outcome.result.transcription);
+    } else if (isPaymentRelated(outcome.result.transcription)) {
       await logEscalation(tenantId, message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
     }
 
