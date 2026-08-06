@@ -9,9 +9,18 @@ import {
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone } from './appointmentStore';
 import { DEFAULT_SEGMENT } from './tenantProfileStore';
+import { getKnowledgeBase } from './knowledgeBaseStore';
+import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
+import { recordOutgoingMessage } from './conversationStore';
 
 const GEMINI_TIMEOUT_MS = 20000;
 const BUSINESS_TIMEZONE = 'America/Asuncion';
+
+/** Credenciais Meta pra fazer o agente enviar mídia de verdade (Epic 4.5.2) — mesmo par phone_number_id/access_token já resolvido por tenant em quem chama generateAutoReplyForText. */
+export interface MediaSendConfig {
+  phoneNumberId?: string;
+  accessToken?: string;
+}
 
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
 export type AgentType = 'triagem' | 'faq' | 'agendamento';
@@ -79,9 +88,9 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento"}`;
 }
 
 const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
-  triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo.`,
-  faq: `Seu papel agora é FAQ/ESPECIALISTA: responda a dúvida específica (preço, procedimento, política) com precisão total usando SOMENTE o contexto do negócio abaixo. Se não tiver o dado exato, diga que vai confirmar — nunca invente.`,
-  agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações já executadas na agenda real" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.`,
+  triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente (nunca prometa mandar depois — ela já foi).`,
+  faq: `Seu papel agora é FAQ/ESPECIALISTA: responda a dúvida específica (preço, procedimento, política) com precisão total usando SOMENTE o contexto do negócio abaixo. Se não tiver o dado exato, diga que vai confirmar — nunca invente. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente na resposta (ex: "manda ver a foto que te mandei ali em cima") — nunca prometa mandar uma foto que já foi enviada, e nunca diga que vai mandar se a seção mostra que a tentativa falhou.`,
+  agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.`,
 };
 
 /**
@@ -154,7 +163,7 @@ async function generateSpecialistReply(
   const historyText = buildHistoryText(history);
   const systemInstruction = buildGlobalAndSegmentLayer(agent, segment);
 
-  const userContent = `${extraContext ? `Ações já executadas na agenda real:\n${extraContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
+  const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"`;
 
@@ -378,6 +387,90 @@ Regras:
   return { actionsSummary, hadError };
 }
 
+const FOTO_TOOLS: FunctionDeclaration[] = [
+  {
+    name: 'enviar_foto_exemplo',
+    description: 'Envia pro cliente, como imagem real no WhatsApp, a foto de exemplo de um serviço específico do catálogo (já cadastrada na Base de Conhecimento).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        nome_produto: { type: Type.STRING, description: 'Nome EXATO do produto/serviço, igual ao catálogo — nunca invente um nome que não está na lista.' },
+      },
+      required: ['nome_produto'],
+    },
+  },
+];
+
+/**
+ * Ferramenta nova (Epic 4.5.2, paridade com o projeto antigo da Monique):
+ * decide se a mensagem do cliente pede/justifica mandar a foto de exemplo
+ * de um serviço específico e, se sim, envia de verdade via Meta Cloud API
+ * (mesmo upload usado no envio manual do painel,
+ * `server/routes/conversations.ts` `/send-example-photo`). Chamada só uma
+ * vez por mensagem recebida (não é um loop como `runAgendamentoTools`) e
+ * executa no máximo 1 chamada de ferramenta — nunca manda mais de 1 foto
+ * pra mesma mensagem do cliente. Limite de "no máximo 1 foto por conversa
+ * inteira" é regra de segmento (camada 2, Etapa 4 — ainda não escrita),
+ * não está garantido aqui.
+ */
+async function runFotoTool(
+  tenantId: string,
+  ai: GoogleGenAI,
+  text: string,
+  phone: string,
+  mediaConfig: MediaSendConfig,
+  history?: { sender: 'lead' | 'agent'; text?: string }[]
+): Promise<{ actionsSummary: string[] }> {
+  const kb = await getKnowledgeBase(tenantId);
+  const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64);
+  if (!productsWithPhoto.length) return { actionsSummary: [] };
+
+  const historyText = buildHistoryText(history);
+  const catalogList = productsWithPhoto.map((p) => `- ${p.name}`).join('\n');
+
+  const prompt = `Produtos/serviços com foto de exemplo disponível pra enviar de verdade:
+${catalogList}
+
+${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensagem do cliente: "${text}"
+
+Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e uma foto ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
+
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        tools: [{ functionDeclarations: FOTO_TOOLS }],
+        toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+      },
+    }),
+    GEMINI_TIMEOUT_MS
+  );
+
+  const call = response.functionCalls?.[0];
+  if (!call || call.name !== 'enviar_foto_exemplo') return { actionsSummary: [] };
+
+  const nomeProduto = (call.args?.nome_produto as string) || '';
+  const product = productsWithPhoto.find((p) => p.name === nomeProduto);
+  if (!product?.exampleImageBase64) {
+    return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse produto não tem foto de exemplo cadastrada.`] };
+  }
+
+  try {
+    const mimeType = product.exampleImageMimeType || 'image/jpeg';
+    const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, product.exampleImageBase64, mimeType, `${product.name}.jpg`);
+    await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
+    await recordOutgoingMessage(tenantId, phone, {
+      type: 'image',
+      text: `📷 Foto de exemplo: ${product.name}`,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    });
+    return { actionsSummary: [`Enviou a foto de exemplo real de "${product.name}" pro cliente agora.`] };
+  } catch (err: any) {
+    return { actionsSummary: [`Tentou enviar a foto de "${product.name}" mas falhou (${err.message}) — não prometa que a foto foi enviada.`] };
+  }
+}
+
 /**
  * Orquestra router + especialista: 1ª chamada decide qual agente
  * (triagem/faq/agendamento), 2ª chamada gera a resposta especializada.
@@ -398,7 +491,8 @@ export async function generateAutoReplyForText(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   phone?: string,
   calendarConfig?: CalendarConfig,
-  segment: string = DEFAULT_SEGMENT
+  segment: string = DEFAULT_SEGMENT,
+  mediaConfig?: MediaSendConfig
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
@@ -416,6 +510,11 @@ export async function generateAutoReplyForText(
         extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
       }
       forcedHumanConfirmation = hadError;
+    } else if (agent !== 'agendamento' && phone && mediaConfig?.phoneNumberId && mediaConfig?.accessToken) {
+      const { actionsSummary } = await runFotoTool(tenantId, ai, text, phone, mediaConfig, history);
+      if (actionsSummary.length) {
+        extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
+      }
     }
 
     const specialist = await generateSpecialistReply(ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext);

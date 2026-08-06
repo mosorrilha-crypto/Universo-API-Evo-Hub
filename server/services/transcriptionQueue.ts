@@ -152,7 +152,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         const conversation = await getConversation(tenantId, message.from);
         const history = conversation?.messages.slice(0, -1);
         try {
-          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history, undefined, undefined, segment);
+          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history, message.from, undefined, segment, { phoneNumberId, accessToken: token });
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             return;
