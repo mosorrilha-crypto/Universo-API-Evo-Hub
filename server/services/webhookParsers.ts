@@ -20,6 +20,8 @@ export interface ParsedIncomingMessage {
   metaImage?: { mediaId: string; mimeType?: string };
   /** Presente quando type === 'audio' via Evolution API. */
   evolutionAudio?: { url?: string; mediaKey?: string; mimeType?: string };
+  /** Presente quando a mensagem veio de um anúncio "Clique para WhatsApp" (Meta Cloud API) — usado pra atribuição real no Meta Conversions API (Epic 4.5.6). */
+  referral?: { headline?: string; sourceId?: string; ctwaClid?: string };
 }
 
 /**
@@ -57,6 +59,9 @@ export function parseMetaWebhookPayload(body: any, provider: 'meta' | 'evohub' =
           from: msg.from,
           contactName: contactsByWaId.get(msg.from),
           phoneNumberId,
+          ...(msg.referral
+            ? { referral: { headline: msg.referral.headline, sourceId: msg.referral.source_id, ctwaClid: msg.referral.ctwa_clid } }
+            : {}),
         };
 
         if (msg.type === 'audio' && msg.audio?.id) {

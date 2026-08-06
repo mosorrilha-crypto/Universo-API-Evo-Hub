@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
@@ -124,6 +124,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         continue;
       }
       const { tenantId } = resolvedTenant;
+
+      if (msg.referral?.ctwaClid) {
+        attachAdReferralIfMissing(tenantId, msg.from, { ctwaClid: msg.referral.ctwaClid, adSourceId: msg.referral.sourceId, adHeadline: msg.referral.headline }).catch((err) =>
+          console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar ctwa_clid de ${msg.from}:`, err.message)
+        );
+      }
 
       if (msg.type === 'audio') {
         await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);

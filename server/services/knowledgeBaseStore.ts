@@ -27,6 +27,12 @@ export function resolveProductPrice(product: AgentProduct, timezone = 'America/A
   return today <= product.promoUntil ? product.promoPrice : product.price;
 }
 
+/** Converte um preço em texto (ex: "Gs 500.000") pro valor numérico (500000) — usado pra mandar `value` numérico ao Meta CAPI (Epic 4.5.6). Sem dígitos reconhecíveis, devolve 0 (nunca inventa um valor). */
+export function parsePriceToNumber(priceText: string | undefined): number {
+  if (!priceText) return 0;
+  return parseInt(priceText.replace(/\D/g, ''), 10) || 0;
+}
+
 export interface AgentFAQ {
   question: string;
   answer: string;

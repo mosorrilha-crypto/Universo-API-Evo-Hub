@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { Router, type RequestHandler } from 'express';
+import { hashUserDataField, normalizePhoneForHash } from '../services/metaCapiService';
 
 interface MetaCapiRouterDeps {
   authenticateToken: RequestHandler;
@@ -7,15 +8,7 @@ interface MetaCapiRouterDeps {
 
 const META_GRAPH_VERSION = 'v21.0';
 
-/** SHA-256 de um campo de user_data, normalizado como a Meta exige (minúsculo, sem espaço nas pontas). */
-export function hashUserDataField(value: string): string {
-  return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
-}
-
-/** Telefone só com dígitos (código do país incluso, sem "+"/espaços/traços) — formato exigido pela Meta pro campo "ph" antes do hash. */
-export function normalizePhoneForHash(phone: string): string {
-  return phone.replace(/\D/g, '');
-}
+export { hashUserDataField, normalizePhoneForHash };
 
 /**
  * Meta Conversions API (server-to-server) — Epic 4.5.1. Substitui o mock

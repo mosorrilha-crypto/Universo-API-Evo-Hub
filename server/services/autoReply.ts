@@ -9,9 +9,10 @@ import {
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone } from './appointmentStore';
 import { DEFAULT_SEGMENT } from './tenantProfileStore';
-import { getKnowledgeBase } from './knowledgeBaseStore';
+import { getKnowledgeBase, resolveProductPrice, parsePriceToNumber } from './knowledgeBaseStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
-import { recordOutgoingMessage } from './conversationStore';
+import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
+import { fireMetaCapiEventForTenant } from './metaCapiService';
 
 const GEMINI_TIMEOUT_MS = 20000;
 const BUSINESS_TIMEZONE = 'America/Asuncion';
@@ -254,6 +255,32 @@ const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
   },
 ];
 
+/**
+ * Dispara o Meta CAPI (Epic 4.5.6) quando um agendamento é criado de
+ * verdade — nunca bloqueia a confirmação pro cliente (chamado sem await,
+ * ver executeCalendarTool). Só dispara se a conversa tiver um ctwa_clid
+ * real gravado (veio de um anúncio Clique-para-WhatsApp — ver
+ * conversationStore.attachAdReferralIfMissing) e se o tenant tiver
+ * credencial de CAPI configurada; qualquer uma das duas ausente e não
+ * dispara nada, silenciosamente.
+ */
+async function notifyBookingCompleted(tenantId: string, phone: string, titulo: string): Promise<void> {
+  const ctwaClid = await getConversationCtwaClid(tenantId, phone);
+  if (!ctwaClid) return;
+
+  const kb = await getKnowledgeBase(tenantId);
+  const product = kb?.products?.find((p) => p.name === titulo);
+  const value = product ? parsePriceToNumber(resolveProductPrice(product)) : undefined;
+
+  await fireMetaCapiEventForTenant(tenantId, {
+    eventName: 'Schedule',
+    phone,
+    ctwaClid,
+    value: value || undefined,
+    contentName: titulo,
+  });
+}
+
 async function executeCalendarTool(
   tenantId: string,
   name: string,
@@ -273,6 +300,7 @@ async function executeCalendarTool(
       case 'criar_agendamento': {
         const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
         await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim });
+        notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
         return {
           response: { sucesso: true, evento_id: eventId },
           summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
