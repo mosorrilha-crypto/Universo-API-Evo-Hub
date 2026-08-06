@@ -219,6 +219,7 @@ const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
 ];
 
 async function executeCalendarTool(
+  tenantId: string,
   name: string,
   args: Record<string, any>,
   phone: string,
@@ -227,45 +228,45 @@ async function executeCalendarTool(
   try {
     switch (name) {
       case 'verificar_disponibilidade': {
-        const disponivel = await checkFreeBusy(cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+        const disponivel = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
         return {
           response: { disponivel },
           summary: `Verificou disponibilidade em ${args.data_hora_inicio}–${args.data_hora_fim}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
         };
       }
       case 'criar_agendamento': {
-        const eventId = await createCalendarEvent(cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
-        setAppointmentForPhone(phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim });
+        const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+        await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim });
         return {
           response: { sucesso: true, evento_id: eventId },
           summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
         };
       }
       case 'remarcar_agendamento': {
-        const existing = getAppointmentForPhone(phone);
+        const existing = await getAppointmentForPhone(tenantId, phone);
         if (!existing) {
           return {
             response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
             summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
           };
         }
-        await rescheduleCalendarEvent(cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
-        setAppointmentForPhone(phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
+        await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+        await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
         return {
           response: { sucesso: true },
           summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
         };
       }
       case 'cancelar_agendamento': {
-        const existing = getAppointmentForPhone(phone);
+        const existing = await getAppointmentForPhone(tenantId, phone);
         if (!existing) {
           return {
             response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
             summary: 'Tentou cancelar mas não há nenhum agendamento ativo registrado pra este contato.',
           };
         }
-        await cancelCalendarEvent(cfg, existing.eventId);
-        clearAppointmentForPhone(phone);
+        await cancelCalendarEvent(tenantId, cfg, existing.eventId);
+        await clearAppointmentForPhone(tenantId, phone);
         return { response: { sucesso: true }, summary: 'Cancelou o agendamento existente com sucesso.' };
       }
       default:
@@ -284,20 +285,21 @@ async function executeCalendarTool(
  * humanizar a resposta em cima de fatos, nunca de suposição do modelo.
  */
 async function runAgendamentoTools(
+  tenantId: string,
   ai: GoogleGenAI,
   text: string,
   phone: string,
   cfg: CalendarConfig,
   history?: { sender: 'lead' | 'agent'; text?: string }[]
 ): Promise<{ actionsSummary: string[]; hadError: boolean }> {
-  const connected = await isGoogleCalendarConnected();
+  const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
     return { actionsSummary: [], hadError: false };
   }
 
   const { naive, weekday } = getNowLocalNaive(BUSINESS_TIMEZONE);
   const historyText = buildHistoryText(history);
-  const existing = getAppointmentForPhone(phone);
+  const existing = await getAppointmentForPhone(tenantId, phone);
 
   const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
 
@@ -338,7 +340,7 @@ Regras:
 
     const responseParts: Part[] = [];
     for (const call of calls) {
-      const { response: toolResponse, summary } = await executeCalendarTool(call.name || '', call.args || {}, phone, cfg);
+      const { response: toolResponse, summary } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg);
       actionsSummary.push(summary);
       if ('erro' in toolResponse) hadError = true;
       responseParts.push({ functionResponse: { name: call.name, response: toolResponse } });
@@ -361,6 +363,7 @@ Regras:
  * pra um cliente real).
  */
 export async function generateAutoReplyForText(
+  tenantId: string,
   ai: GoogleGenAI | null,
   text: string,
   contactName?: string,
@@ -380,7 +383,7 @@ export async function generateAutoReplyForText(
     let forcedHumanConfirmation = false;
 
     if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
-      const { actionsSummary, hadError } = await runAgendamentoTools(ai, text, phone, calendarConfig, history);
+      const { actionsSummary, hadError } = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history);
       if (actionsSummary.length) {
         extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
       }

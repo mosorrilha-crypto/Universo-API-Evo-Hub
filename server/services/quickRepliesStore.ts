@@ -1,47 +1,19 @@
 /**
  * Respostas rápidas configuráveis — lista única de mensagens prontas
  * compartilhada pela equipe, pro operador inserir com um clique no painel.
- * Mesmo conceito do getRespostasRapidas/saveRespostasRapidas do
- * whatsapp-agent-monique. Persiste no mesmo Supabase Storage.
+ * Migrado pra tabela Postgres `quick_replies` (Bloco 2.A), 1 registro
+ * (jsonb) por tenant_id.
  */
-const BUCKET = 'app-data';
-const OBJECT_PATH = 'quick-replies.json';
+import { getDb } from './db';
 
-let quickReplies: string[] = [];
-let persistence: { supabaseUrl: string; supabaseKey: string } | null = null;
-
-export async function initQuickRepliesPersistence(supabaseUrl?: string, supabaseKey?: string) {
-  if (!supabaseUrl || !supabaseKey) return;
-  persistence = { supabaseUrl, supabaseKey };
-  try {
-    const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-    });
-    if (res.ok) quickReplies = (await res.json()) as string[];
-  } catch (err) {
-    console.warn('⚠️  [Respostas Rápidas] Falha ao carregar:', (err as Error).message);
-  }
+export async function getQuickReplies(tenantId: string): Promise<string[]> {
+  const db = getDb();
+  const { data } = await db.from('quick_replies').select('list').eq('tenant_id', tenantId).maybeSingle();
+  return (data?.list as string[] | undefined) || [];
 }
 
-export function getQuickReplies(): string[] {
-  return quickReplies;
-}
-
-export async function setQuickReplies(list: string[]) {
-  quickReplies = list;
-  if (!persistence) return;
-  try {
-    await fetch(`${persistence.supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      method: 'POST',
-      headers: {
-        apikey: persistence.supabaseKey,
-        Authorization: `Bearer ${persistence.supabaseKey}`,
-        'Content-Type': 'application/json',
-        'x-upsert': 'true',
-      },
-      body: JSON.stringify(list),
-    });
-  } catch (err) {
-    console.warn('⚠️  [Respostas Rápidas] Falha ao salvar:', (err as Error).message);
-  }
+export async function setQuickReplies(tenantId: string, list: string[]): Promise<void> {
+  const db = getDb();
+  const { error } = await db.from('quick_replies').upsert({ tenant_id: tenantId, list }, { onConflict: 'tenant_id' });
+  if (error) throw error;
 }

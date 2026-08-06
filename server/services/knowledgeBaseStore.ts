@@ -1,10 +1,10 @@
 /**
  * Base de conhecimento do agente (objetivo, tom de voz, regras de negócio,
  * catálogo de preços, FAQ) — usada como contexto real nos prompts do Gemini
- * pra resposta automática (server/services/autoReply.ts e
- * geminiTranscription.ts), em vez de respostas genéricas. Persiste no mesmo
- * Supabase Storage usado por conversas/status do agente.
+ * pra resposta automática. Migrado pra tabela Postgres `knowledge_base`
+ * (Bloco 2.A), 1 registro (jsonb) por tenant_id.
  */
+import { getDb } from './db';
 
 export interface AgentProduct {
   name: string;
@@ -18,7 +18,7 @@ export interface AgentProduct {
   promoUntil?: string; // YYYY-MM-DD
 }
 
-/** Resolve o preço vigente de um produto — promocional se dentro da validade, regular caso contrário. Mesma lógica do resolverPreco() do whatsapp-agent-monique. */
+/** Resolve o preço vigente de um produto — promocional se dentro da validade, regular caso contrário. */
 export function resolveProductPrice(product: AgentProduct, timezone = 'America/Asuncion'): string {
   if (!product.promoPrice || !product.promoUntil) return product.price;
   const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
@@ -41,50 +41,18 @@ export interface AgentKnowledgeBase {
   faqs?: AgentFAQ[];
 }
 
-const BUCKET = 'app-data';
-const OBJECT_PATH = 'knowledge-base.json';
-
-let knowledgeBase: AgentKnowledgeBase | null = null;
-let persistence: { supabaseUrl: string; supabaseKey: string } | null = null;
-
-export async function initKnowledgeBasePersistence(supabaseUrl?: string, supabaseKey?: string) {
-  if (!supabaseUrl || !supabaseKey) return;
-  persistence = { supabaseUrl, supabaseKey };
-
-  try {
-    const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-    });
-    if (res.ok) {
-      knowledgeBase = (await res.json()) as AgentKnowledgeBase;
-      console.log('💾 [Base de Conhecimento] Restaurada do Supabase Storage.');
-    }
-  } catch (err) {
-    console.warn('⚠️  [Base de Conhecimento] Falha ao carregar:', (err as Error).message);
-  }
+export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
+  const db = getDb();
+  const { data } = await db.from('knowledge_base').select('data').eq('tenant_id', tenantId).maybeSingle();
+  return (data?.data as AgentKnowledgeBase | undefined) || null;
 }
 
-export function getKnowledgeBase(): AgentKnowledgeBase | null {
-  return knowledgeBase;
-}
-
-export async function setKnowledgeBase(kb: AgentKnowledgeBase) {
-  knowledgeBase = kb;
-  if (!persistence) return;
-  try {
-    await fetch(`${persistence.supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      method: 'POST',
-      headers: {
-        apikey: persistence.supabaseKey,
-        Authorization: `Bearer ${persistence.supabaseKey}`,
-        'Content-Type': 'application/json',
-        'x-upsert': 'true',
-      },
-      body: JSON.stringify(kb),
-    });
-  } catch (err) {
-    console.warn('⚠️  [Base de Conhecimento] Falha ao salvar:', (err as Error).message);
-  }
+export async function setKnowledgeBase(tenantId: string, kb: AgentKnowledgeBase): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('knowledge_base')
+    .upsert({ tenant_id: tenantId, data: kb, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  if (error) throw error;
 }
 
 /** Formata a base de conhecimento como texto pra injetar direto no prompt do Gemini. */

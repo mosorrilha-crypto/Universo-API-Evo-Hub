@@ -13,6 +13,7 @@ import { listUpcomingEvents, localNaiveToUtcIso, isGoogleCalendarConnected, type
 import { listAllAppointments } from './appointmentStore';
 import { wasReminderSent, markReminderSent, type ReminderType } from './reminderStore';
 import { sendWhatsAppTextMessage } from './metaSend';
+import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -62,9 +63,12 @@ export interface ReminderJobDeps {
 }
 
 async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
+  // tenantId fixo: o job ainda roda uma única vez globalmente, não por
+  // tenant — iterar por tenant real é trabalho do Bloco 2.C.
+  const tenantId = LEGACY_DEFAULT_TENANT_ID;
   const cfg = deps.getCalendarConfig();
   if (!cfg?.clientId || !cfg?.clientSecret) return;
-  if (!(await isGoogleCalendarConnected())) return;
+  if (!(await isGoogleCalendarConnected(tenantId))) return;
 
   const today = todayDatePartsInTz();
   const tomorrow = addDays(today, 1);
@@ -77,14 +81,14 @@ async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
 
   let events;
   try {
-    events = await listUpcomingEvents(cfg, timeMin, timeMax);
+    events = await listUpcomingEvents(tenantId, cfg, timeMin, timeMax);
   } catch (err) {
     console.warn('⚠️  [Lembretes] Falha ao listar eventos do Google Calendar:', (err as Error).message);
     return;
   }
   if (!events.length) return;
 
-  const appointmentsByEventId = new Map(listAllAppointments().map((a) => [a.eventId, a]));
+  const appointmentsByEventId = new Map((await listAllAppointments(tenantId)).map((a) => [a.eventId, a]));
 
   for (const event of events) {
     const appt = appointmentsByEventId.get(event.id);
@@ -95,7 +99,7 @@ async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
     if (eventDateKey === tomorrowKey) type = 'dia_anterior';
     else if (eventDateKey === todayKey) type = 'mesmo_dia';
     if (!type) continue;
-    if (wasReminderSent(event.id, type)) continue;
+    if (await wasReminderSent(tenantId, event.id, type)) continue;
 
     const message = type === 'dia_anterior'
       ? `Oi! Passando pra lembrar que seu horário é amanhã, às ${hora} 💛 Qualquer coisa me chama por aqui!`
@@ -103,7 +107,7 @@ async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
 
     try {
       await sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, appt.phone, message);
-      markReminderSent(event.id, type);
+      await markReminderSent(tenantId, event.id, type);
       console.log(`⏰ [Lembretes] Enviado (${type}) pra ${appt.phone} — evento ${event.id}`);
     } catch (err) {
       console.warn(`⚠️  [Lembretes] Falha ao enviar pra ${appt.phone}:`, (err as Error).message);

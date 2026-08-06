@@ -10,6 +10,7 @@
  * redeploy toda vez que reconectar).
  */
 import { google } from 'googleapis';
+import { getDb } from './db';
 
 // Evita importar o tipo OAuth2Client de 'google-auth-library' diretamente —
 // o pacote 'googleapis' reexporta uma cópia própria (via googleapis-common)
@@ -18,52 +19,26 @@ import { google } from 'googleapis';
 // google.calendar({auth}) espera, não importa qual cópia é resolvida.
 type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
 
-const BUCKET = 'app-data';
-const OBJECT_PATH = 'google-calendar-token.json';
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 
-let persistence: { supabaseUrl: string; supabaseKey: string } | null = null;
-let storedRefreshToken: string | null = null;
-
-export function initGoogleCalendarPersistence(supabaseUrl?: string, supabaseKey?: string) {
-  if (!supabaseUrl || !supabaseKey) return;
-  persistence = { supabaseUrl, supabaseKey };
+/**
+ * Token por tenant, na tabela Postgres `tenant_calendar_tokens` (Bloco 2.A) —
+ * substitui o único arquivo `google-calendar-token.json` global no Supabase
+ * Storage. O parâmetro `state` do fluxo OAuth ainda não carrega o tenantId
+ * (isso é Bloco 2.C); por ora quem chama passa o tenant explicitamente.
+ */
+async function loadRefreshToken(tenantId: string): Promise<string | null> {
+  const db = getDb();
+  const { data } = await db.from('tenant_calendar_tokens').select('refresh_token').eq('tenant_id', tenantId).maybeSingle();
+  return data?.refresh_token || null;
 }
 
-async function loadRefreshToken(): Promise<string | null> {
-  if (storedRefreshToken) return storedRefreshToken;
-  if (!persistence) return null;
-  try {
-    const res = await fetch(`${persistence.supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      headers: { apikey: persistence.supabaseKey, Authorization: `Bearer ${persistence.supabaseKey}` },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { refreshToken?: string };
-    storedRefreshToken = data.refreshToken || null;
-    return storedRefreshToken;
-  } catch (err) {
-    console.warn('⚠️  [Google Calendar] Falha ao carregar token:', (err as Error).message);
-    return null;
-  }
-}
-
-async function saveRefreshToken(refreshToken: string): Promise<void> {
-  storedRefreshToken = refreshToken;
-  if (!persistence) return;
-  try {
-    await fetch(`${persistence.supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      method: 'POST',
-      headers: {
-        apikey: persistence.supabaseKey,
-        Authorization: `Bearer ${persistence.supabaseKey}`,
-        'Content-Type': 'application/json',
-        'x-upsert': 'true',
-      },
-      body: JSON.stringify({ refreshToken }),
-    });
-  } catch (err) {
-    console.warn('⚠️  [Google Calendar] Falha ao salvar token:', (err as Error).message);
-  }
+async function saveRefreshToken(tenantId: string, refreshToken: string): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('tenant_calendar_tokens')
+    .upsert({ tenant_id: tenantId, refresh_token: refreshToken, connected_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  if (error) throw error;
 }
 
 function createOAuthClient(clientId?: string, clientSecret?: string, redirectUri?: string): OAuth2Client {
@@ -85,6 +60,7 @@ export function getGoogleAuthUrl(clientId: string, clientSecret: string, redirec
 
 /** Troca o código do callback por tokens e guarda o refresh token. */
 export async function handleGoogleOAuthCallback(
+  tenantId: string,
   code: string,
   clientId: string,
   clientSecret: string,
@@ -95,21 +71,21 @@ export async function handleGoogleOAuthCallback(
   if (!tokens.refresh_token) {
     throw new Error('Google não devolveu um refresh_token — desconecte o app em myaccount.google.com/permissions e tente conectar de novo (o consentimento precisa ser "fresco").');
   }
-  await saveRefreshToken(tokens.refresh_token);
+  await saveRefreshToken(tenantId, tokens.refresh_token);
 }
 
-export async function isGoogleCalendarConnected(): Promise<boolean> {
-  return !!(await loadRefreshToken());
+export async function isGoogleCalendarConnected(tenantId: string): Promise<boolean> {
+  return !!(await loadRefreshToken(tenantId));
 }
 
-export async function disconnectGoogleCalendar(): Promise<void> {
-  await saveRefreshToken('');
-  storedRefreshToken = null;
+export async function disconnectGoogleCalendar(tenantId: string): Promise<void> {
+  const db = getDb();
+  await db.from('tenant_calendar_tokens').delete().eq('tenant_id', tenantId);
 }
 
 /** Cliente OAuth autenticado, pronto pra chamar a Calendar API — renova o access token sozinho a partir do refresh token. */
-async function getAuthorizedClient(clientId?: string, clientSecret?: string, redirectUri?: string): Promise<OAuth2Client> {
-  const refreshToken = await loadRefreshToken();
+async function getAuthorizedClient(tenantId: string, clientId?: string, clientSecret?: string, redirectUri?: string): Promise<OAuth2Client> {
+  const refreshToken = await loadRefreshToken(tenantId);
   if (!refreshToken) {
     throw new Error('Google Calendar não está conectado. Conecte no painel antes de agendar.');
   }
@@ -155,8 +131,8 @@ export function localNaiveToUtcIso(naiveLocal: string, timeZone: string): string
 }
 
 /** Verifica se um intervalo está livre na agenda primária. startIso/endIso: hora local (sem offset) no fuso `timezone`. */
-export async function checkFreeBusy(cfg: CalendarConfig, startIso: string, endIso: string, timezone = 'America/Asuncion'): Promise<boolean> {
-  const auth = await getAuthorizedClient(cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+export async function checkFreeBusy(tenantId: string, cfg: CalendarConfig, startIso: string, endIso: string, timezone = 'America/Asuncion'): Promise<boolean> {
+  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   const timeMin = localNaiveToUtcIso(startIso, timezone);
   const timeMax = localNaiveToUtcIso(endIso, timezone);
@@ -168,6 +144,7 @@ export async function checkFreeBusy(cfg: CalendarConfig, startIso: string, endIs
 }
 
 export async function createCalendarEvent(
+  tenantId: string,
   cfg: CalendarConfig,
   summary: string,
   description: string,
@@ -175,7 +152,7 @@ export async function createCalendarEvent(
   endIso: string,
   timezone = 'America/Asuncion'
 ): Promise<string> {
-  const auth = await getAuthorizedClient(cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   const res = await calendar.events.insert({
     calendarId: 'primary',
@@ -191,13 +168,14 @@ export async function createCalendarEvent(
 }
 
 export async function rescheduleCalendarEvent(
+  tenantId: string,
   cfg: CalendarConfig,
   eventId: string,
   newStartIso: string,
   newEndIso: string,
   timezone = 'America/Asuncion'
 ): Promise<void> {
-  const auth = await getAuthorizedClient(cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   await calendar.events.patch({
     calendarId: 'primary',
@@ -209,8 +187,8 @@ export async function rescheduleCalendarEvent(
   });
 }
 
-export async function cancelCalendarEvent(cfg: CalendarConfig, eventId: string): Promise<void> {
-  const auth = await getAuthorizedClient(cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+export async function cancelCalendarEvent(tenantId: string, cfg: CalendarConfig, eventId: string): Promise<void> {
+  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   await calendar.events.delete({ calendarId: 'primary', eventId });
 }
@@ -223,8 +201,8 @@ export interface UpcomingEvent {
 }
 
 /** Lista eventos entre duas datas — usado pelo job de lembretes automáticos. */
-export async function listUpcomingEvents(cfg: CalendarConfig, timeMinIso: string, timeMaxIso: string): Promise<UpcomingEvent[]> {
-  const auth = await getAuthorizedClient(cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+export async function listUpcomingEvents(tenantId: string, cfg: CalendarConfig, timeMinIso: string, timeMaxIso: string): Promise<UpcomingEvent[]> {
+  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   const res = await calendar.events.list({
     calendarId: 'primary',

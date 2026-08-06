@@ -7,6 +7,21 @@
 > nos mesmos problemas centrais (auth fragmentada, segredos hardcoded, localStorage como
 > banco, monólito `server.ts`, telemetria fake), o que reforça o diagnóstico.
 
+## 🟢 Decisões do dono do produto — 06/08/2026 (tarde)
+
+1. **Segurança:** autorizado desligar `DEMO_MODE` assim que existir login real — ver ação sua
+   no Bloco 2.A acima (criar operador real primeiro, senão tranca o próprio acesso).
+2. **Comercial — pendente de esclarecimento:** valores informados como "Starter R$590 / Pro
+   R$1.200 / Enterprise R$2.900", mas a moeda oficial decidida foi Guaraníes (PYG). R$ é o
+   símbolo do Real brasileiro, não de Guaraníes — **preciso saber se esses valores são em
+   PYG mesmo (só o prefixo errado) ou se são valores em BRL que precisam converter pra PYG**
+   antes de eu tocar na tela de planos (Bloco 2.F/Epic 4.4, ainda não iniciado). Schema já
+   preparado pra moeda por tenant (`tenants.currency`, default `PYG`) — não bloqueia o Bloco 2.A.
+3. **Prioridade confirmada:** Bloco 2.A executado nesta sessão — ver detalhamento abaixo.
+4. **Ação do proprietário:** Google Calendar autorizado (test user cadastrado na tela OAuth do
+   Google Cloud Console) — Epic 4.3.3 resolvido. Validação do Evo Hub real (Epic 1.1.9) segue
+   como próxima ação seu.
+
 ## 🔴 Atualização estratégica — 06/08/2026
 
 **Contexto:** demanda real validada — reunião com um cliente novo esperando o produto pronto.
@@ -149,15 +164,41 @@ implementar (cada bloco depende do anterior):
 
 ### Bloco 2.A — Schema de tenant e persistência real (fundação de tudo)
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 2.A.1 | Migrations Supabase Postgres: `tenants`, `operators`, `tenant_meta_credentials` (WABA/phone_number_id/access_token por tenant), `tenant_calendar_tokens` (refresh token por tenant) | P0 | M |
-| 2.A.2 | Row Level Security por `tenant_id` em todas as tabelas | P0 | M |
-| 2.A.3 | Migrar os 8 serviços de `server/services/*Store.ts` de Map/variável global em memória (+ 1 arquivo JSON por serviço no Supabase Storage) para tabelas Postgres reais chaveadas por `tenant_id`: `conversationStore`, `knowledgeBaseStore`, `escalationStore`, `quickRepliesStore`, `agentStatus`, `appointmentStore`, `reminderStore` | P0 | L |
-| 2.A.4 | Script de migração dos dados atuais da Monique pro `tenant_id` dela (não pode perder histórico de conversa real) | P0 | S |
+**Status: ✅ código pronto e no branch — falta só a ação sua descrita abaixo.**
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 2.A.1 | Migrations Supabase Postgres: `tenants`, `operators`, `tenant_meta_credentials` (WABA/phone_number_id/access_token por tenant), `tenant_calendar_tokens` (refresh token por tenant) | P0 | M | ✅ Feito — `supabase/migrations/0001_multi_tenant_schema.sql` |
+| 2.A.2 | Row Level Security por `tenant_id` em todas as tabelas | P0 | M | ✅ Feito, com ressalva — ver "Nota sobre RLS" abaixo |
+| 2.A.3 | Migrar os 8 serviços de `server/services/*Store.ts` de Map/variável global em memória (+ 1 arquivo JSON por serviço no Supabase Storage) para tabelas Postgres reais chaveadas por `tenant_id`: `conversationStore`, `knowledgeBaseStore`, `escalationStore`, `quickRepliesStore`, `agentStatus`, `appointmentStore`, `reminderStore`, `googleCalendar` | P0 | L | ✅ Feito — todos os 8 exigem `tenantId` como parâmetro obrigatório agora |
+| 2.A.4 | Script de migração dos dados atuais da Monique pro `tenant_id` dela (não pode perder histórico de conversa real) | P0 | S | ✅ Código pronto (`scripts/migrate-legacy-data.ts`) — **precisa rodar contra o Supabase real (ação sua, ver abaixo)** |
 
 **Critério de aceite:** os 8 serviços aceitam `tenantId` como parâmetro obrigatório; dado de
-um tenant nunca aparece pra outro mesmo com Postgres compartilhado (RLS testado).
+um tenant nunca aparece pra outro mesmo com Postgres compartilhado (RLS testado). ✅ Atendido
+no código — falta aplicar em produção.
+
+**tenantId ainda é um valor fixo (`LEGACY_DEFAULT_TENANT_ID`, o UUID da Monique), não
+resolvido por requisição** — isso é literalmente o trabalho do Bloco 2.B (routing por
+`phone_number_id`) e do Bloco 2.C (Google Calendar por tenant real via OAuth `state`), que
+vêm em seguida. Rotas autenticadas (`/api/conversations`, `/api/knowledge-base` etc.) já usam
+`req.user.tenantId` do JWT quando disponível; só o caminho do webhook (que ainda não sabe de
+qual cliente é a mensagem) usa o valor fixo.
+
+**Nota sobre RLS:** as políticas estão criadas e habilitadas em todas as tabelas
+(`current_setting('app.current_tenant_id')`), mas o backend fala com o Postgres pela service
+key do Supabase, que ignora RLS por padrão (`BYPASSRLS`). A isolação que protege os dados
+*hoje* é o `tenantId` obrigatório em toda função de serviço — testado, funciona. RLS reforçada
+de verdade no banco (proteção mesmo contra bug de código) exige trocar pra uma role Postgres
+restrita com conexão direta — fica como item futuro, não bloqueia esta fase.
+
+**Ação sua pra "isolamento por tenant_id funcional em produção" ficar 100% completo:**
+1. Colar `supabase/migrations/0001_multi_tenant_schema.sql` no SQL Editor do painel Supabase
+   e rodar (idempotente, seguro repetir).
+2. Rodar `SUPABASE_URL=... SUPABASE_KEY=... npm run migrate:legacy-data` uma vez, com as
+   credenciais reais de produção — migra as conversas/agenda/base de conhecimento atuais da
+   Monique (hoje em JSON no Storage) pras tabelas novas, sob o tenant dela.
+3. Rodar `SUPABASE_URL=... SUPABASE_KEY=... npm run create:operator -- --email <seu-email> --password <senha-forte> --name "<nome>" --role saas_admin` pra ter um login real de admin — é isso que destrava `DEMO_MODE=false` sem te trancar pra fora. Repita com `--role admin` pro e-mail da Monique.
+4. Aí sim: `DEMO_MODE=false` no Render.
 
 ### Bloco 2.B — Roteamento multi-canal (webhook sabe de quem é a mensagem)
 
@@ -313,7 +354,7 @@ esta tabela é só o índice rápido pra não se perder:
 
 | # | Pendência | Severidade | Onde resolver |
 |---|---|---|---|
-| 1 | `DEMO_MODE=true` em produção expõe senhas na tela de login | 🔴 Crítico | Epic 0.1.7 — precisa da sua confirmação antes de mexer |
+| 1 | `DEMO_MODE=true` em produção expõe senhas na tela de login | 🔴 Crítico | Epic 0.1.7 — autorizado; falta você criar o operador real (`npm run create:operator`) e então desligar no Render |
 | 2 | Preços de planos contraditórios entre telas | Decisão | Bloco 2.F (P-1) — preciso dos valores reais |
 | 3 | Moeda R$ fixa, negócio real é em Guaraníes | Decisão | Bloco 2.E.4 |
 | 4 | Chave PIX configurada nunca usada nas cobranças | Decisão | Epic 4.4.2 |
@@ -321,21 +362,21 @@ esta tabela é só o índice rápido pra não se perder:
 | 6 | "Cadastrar Novo Usuário" não cria login real | Decisão | Bloco 2.D.3 |
 | 7 | Upload de documentos não alimenta a IA de verdade | Decisão | Bloco 2.F (P-3) — fora de escopo por ora |
 | 8 | Evo Hub real nunca validado ponta-a-ponta | Ação sua | Epic 1.1.9 |
-| 9 | Conexão do Google Calendar ainda não autorizada | Ação sua | Epic 4.3.3 |
+| 9 | Conexão do Google Calendar ainda não autorizada | Ação sua | Epic 4.3.3 — ✅ Resolvido 06/08/2026 |
 | 10 | CRM/Financeiro/SaaS Admin/CAPI continuam mock | Arquitetura | Bloco 2.E |
 
 ---
 
 ## Backlog consolidado — próximos 15 passos (ordem de implementação)
 
-| # | ID | Issue | Fase | P | Esforço |
-|---|---|---|---|---|---|
-| 1 | 0.1.7 | Decisão + ação: `DEMO_MODE` em produção | 0 | P0 🔴 | S |
-| 2 | 2.A.1 | Migrations Supabase: tenants, operators, credenciais | 2 | P0 | M |
-| 3 | 2.A.2 | RLS por `tenant_id` | 2 | P0 | M |
-| 4 | 2.A.3 | Migrar os 8 serviços pra Postgres com `tenant_id` | 2 | P0 | L |
-| 5 | 2.A.4 | Migrar dados reais da Monique sem perder histórico | 2 | P0 | S |
-| 6 | 2.B.1–2.B.3 | Webhook resolve tenant pelo `phone_number_id`, credenciais por request | 2 | P0 | L |
+| # | ID | Issue | Fase | P | Esforço | Status |
+|---|---|---|---|---|---|---|
+| 1 | 0.1.7 | Decisão + ação: `DEMO_MODE` em produção | 0 | P0 🔴 | S | Decidido — falta ação sua (criar operador) |
+| 2 | 2.A.1 | Migrations Supabase: tenants, operators, credenciais | 2 | P0 | M | ✅ Código pronto |
+| 3 | 2.A.2 | RLS por `tenant_id` | 2 | P0 | M | ✅ Código pronto |
+| 4 | 2.A.3 | Migrar os 8 serviços pra Postgres com `tenant_id` | 2 | P0 | L | ✅ Código pronto |
+| 5 | 2.A.4 | Migrar dados reais da Monique sem perder histórico | 2 | P0 | S | ✅ Script pronto — falta você rodar |
+| 6 | 2.B.1–2.B.3 | Webhook resolve tenant pelo `phone_number_id`, credenciais por request | 2 | P0 | L | Próximo bloco de código |
 | 7 | 2.C.1–2.C.2 | Google Calendar por tenant | 2 | P0 | M |
 | 8 | 2.D.1–2.D.2 | Login real Supabase Auth + RBAC | 2 | P0 | M |
 | 9 | 2.D.4–2.D.5 | Onboarding manual de cliente novo (admin cadastra credenciais) | 2 | P0 | M |
@@ -380,10 +421,14 @@ Fase 2 (multi-tenant real) ★ ATIVA — Blocos 2.A → 2.B → 2.C → 2.D → 
 
 ## Próximo passo imediato
 
-1. **0.1.7** — decisão sua: já existem contas reais no Supabase pra eu desligar o modo demo com segurança?
-2. **2.A.1–2.A.2** — começar as migrations e RLS (posso iniciar já, não depende de decisão de negócio)
-3. **4.3.3** e **1.1.9** — duas ações rápidas suas que destravam validação ponta-a-ponta do que já está pronto
-4. **P-1** e **4.4.1** — preciso dos valores reais de plano e da decisão de provedor de pagamento antes de tocar nessas partes
+1. **Ação sua (destrava tudo o resto do Bloco 2.A em produção):** aplicar a migration SQL no
+   Supabase, rodar `npm run migrate:legacy-data` e `npm run create:operator` — passo a passo
+   no Bloco 2.A acima.
+2. **2.B** — roteamento multi-canal (webhook resolve o tenant pelo `phone_number_id`) é o
+   próximo bloco de código, assim que 2.A estiver aplicado em produção.
+3. **1.1.9** — ação sua: validar o Evo Hub real ponta-a-ponta (Google Calendar já resolvido).
+4. **P-1** e **4.4.1** — preciso confirmar se os valores de plano são PYG ou BRL, e da decisão
+   de provedor de pagamento, antes de tocar na tela de planos.
 
 **Definition of Done Fase 2:** um segundo tenant real (o cliente da reunião de hoje) operando
 no mesmo backend da Monique, com WhatsApp, agenda e login próprios, sem nenhum dado visível

@@ -1,10 +1,11 @@
 /**
- * Histórico de conversas reais de WhatsApp, em memória — alimenta a caixa de
- * mensagens do frontend (WhatsAppLeadsSim) com dados de verdade em vez do
- * mock local. Persiste opcionalmente num arquivo JSON no Supabase Storage
- * (bucket "app-data"), pra sobreviver a reinícios/redeploys do servidor —
- * sem precisar de migração de schema (ver initConversationPersistence).
+ * Histórico de conversas reais de WhatsApp — alimenta a caixa de mensagens
+ * do frontend (WhatsAppLeadsSim) com dados de verdade em vez do mock local.
+ * Migrado do Map em memória + JSON no Supabase Storage (Bloco 2.A) pras
+ * tabelas Postgres `conversations`/`messages`, particionadas por tenant_id
+ * — ver supabase/migrations/0001_multi_tenant_schema.sql.
  */
+import { getDb } from './db';
 
 export interface StoredMessage {
   id: string;
@@ -37,157 +38,152 @@ export function inferCountryFromPhone(phone: string): string {
   return 'Desconhecido';
 }
 
-const conversations = new Map<string, StoredConversation>();
+type ConversationRow = {
+  id: string;
+  phone: string;
+  name: string | null;
+  updated_at: string;
+  geo_restriction: GeoRestriction | null;
+  messages?: MessageRow[];
+};
 
-let persistence: { supabaseUrl: string; supabaseKey: string } | null = null;
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-const BUCKET = 'app-data';
-const OBJECT_PATH = 'conversations.json';
+type MessageRow = {
+  id: string;
+  sender: 'lead' | 'agent';
+  type: StoredMessage['type'];
+  text: string | null;
+  created_at: string;
+};
 
-/**
- * Liga a persistência em Supabase Storage: carrega o snapshot mais recente
- * (se existir) pra dentro do Map em memória, e cria o bucket se ainda não
- * existir. Chamar uma vez na subida do servidor (server.ts). Sem isso, o
- * store continua funcionando normalmente, só que 100% em memória.
- */
-export async function initConversationPersistence(supabaseUrl?: string, supabaseKey?: string) {
-  if (!supabaseUrl || !supabaseKey) return;
-  persistence = { supabaseUrl, supabaseKey };
+function toStoredConversation(row: ConversationRow): StoredConversation {
+  return {
+    phone: row.phone,
+    name: row.name || undefined,
+    updatedAt: row.updated_at,
+    geoRestriction: row.geo_restriction || undefined,
+    messages: (row.messages || [])
+      .slice()
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((m) => ({ id: m.id, sender: m.sender, type: m.type, text: m.text || undefined, timestamp: m.created_at })),
+  };
+}
 
-  try {
-    await fetch(`${supabaseUrl}/storage/v1/bucket`, {
-      method: 'POST',
-      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: BUCKET, name: BUCKET, public: false }),
-    });
-  } catch {
-    // bucket provavelmente já existe — ignora
-  }
+const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at)';
 
-  try {
-    const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as StoredConversation[];
-      for (const conv of data) conversations.set(conv.phone, conv);
-      console.log(`💾 [Conversas] ${data.length} conversa(s) restaurada(s) do Supabase Storage.`);
+async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string): Promise<{ id: string }> {
+  const db = getDb();
+  const { data: existing } = await db
+    .from('conversations')
+    .select('id, name')
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone)
+    .maybeSingle();
+
+  if (existing) {
+    if (name && !existing.name) {
+      await db.from('conversations').update({ name }).eq('id', existing.id);
     }
-  } catch (err) {
-    console.warn('⚠️  [Conversas] Falha ao carregar snapshot do Supabase Storage (seguindo só em memória):', (err as Error).message);
+    return existing;
   }
+
+  const { data: created, error } = await db
+    .from('conversations')
+    .insert({ tenant_id: tenantId, phone, name: name || null })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return created;
 }
 
-function scheduleSave() {
-  if (!persistence) return;
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await fetch(`${persistence!.supabaseUrl}/storage/v1/object/${BUCKET}/${OBJECT_PATH}`, {
-        method: 'POST',
-        headers: {
-          apikey: persistence!.supabaseKey,
-          Authorization: `Bearer ${persistence!.supabaseKey}`,
-          'Content-Type': 'application/json',
-          'x-upsert': 'true',
-        },
-        body: JSON.stringify(Array.from(conversations.values())),
-      });
-    } catch (err) {
-      console.warn('⚠️  [Conversas] Falha ao salvar snapshot no Supabase Storage:', (err as Error).message);
-    }
-  }, 2000);
-}
-
-function getOrCreate(phone: string, name?: string): StoredConversation {
-  let conv = conversations.get(phone);
-  if (!conv) {
-    conv = { phone, name, messages: [], updatedAt: new Date().toISOString() };
-    conversations.set(phone, conv);
-  } else if (name && !conv.name) {
-    conv.name = name;
-  }
-  return conv;
-}
-
-export function recordIncomingMessage(phone: string, name: string | undefined, message: Omit<StoredMessage, 'id' | 'sender'>, customId?: string) {
-  const conv = getOrCreate(phone, name);
+export async function recordIncomingMessage(
+  tenantId: string,
+  phone: string,
+  name: string | undefined,
+  message: Omit<StoredMessage, 'id' | 'sender'>,
+  customId?: string
+): Promise<StoredConversation> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone, name);
   const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  conv.messages.push({ id, sender: 'lead', ...message });
-  conv.updatedAt = new Date().toISOString();
-  scheduleSave();
-  return conv;
+  await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null });
+  await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
+  return (await getConversation(tenantId, phone))!;
+}
+
+export async function recordOutgoingMessage(tenantId: string, phone: string, message: Omit<StoredMessage, 'id' | 'sender'>): Promise<StoredConversation> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  const id = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'agent', type: message.type, text: message.text ?? null });
+  await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
+  return (await getConversation(tenantId, phone))!;
 }
 
 /** Atualiza o texto de uma mensagem já registrada (ex: placeholder de áudio → transcrição real). */
-export function updateMessageText(phone: string, id: string, newText: string) {
-  const conv = conversations.get(phone);
-  const msg = conv?.messages.find((m) => m.id === id);
-  if (msg) {
-    msg.text = newText;
-    conv!.updatedAt = new Date().toISOString();
-    scheduleSave();
-  }
+export async function updateMessageText(tenantId: string, phone: string, id: string, newText: string): Promise<void> {
+  const db = getDb();
+  await db.from('messages').update({ text: newText }).eq('tenant_id', tenantId).eq('id', id);
+  const { data: existing } = await db.from('conversations').select('id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  if (existing) await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
 }
 
-export function recordOutgoingMessage(phone: string, message: Omit<StoredMessage, 'id' | 'sender'>) {
-  const conv = getOrCreate(phone);
-  conv.messages.push({ id: `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, sender: 'agent', ...message });
-  conv.updatedAt = new Date().toISOString();
-  scheduleSave();
-  return conv;
+export async function listConversations(tenantId: string): Promise<StoredConversation[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('conversations')
+    .select(CONVERSATION_WITH_MESSAGES)
+    .eq('tenant_id', tenantId)
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  return (data as unknown as ConversationRow[]).map(toStoredConversation);
 }
 
-export function listConversations(): StoredConversation[] {
-  return Array.from(conversations.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+export async function getConversation(tenantId: string, phone: string): Promise<StoredConversation | undefined> {
+  const db = getDb();
+  const { data } = await db
+    .from('conversations')
+    .select(CONVERSATION_WITH_MESSAGES)
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone)
+    .maybeSingle();
+  return data ? toStoredConversation(data as unknown as ConversationRow) : undefined;
 }
 
-export function getConversation(phone: string): StoredConversation | undefined {
-  return conversations.get(phone);
-}
-
-/**
- * Limpa o histórico de mensagens de um número específico (ex: número de
- * teste), mas mantém o contato/lead (nome, telefone) — pra testes não
- * ficarem contaminados pela memória de conversas anteriores, sem perder o
- * cadastro do contato. Equivalente ao deleteHistory() do
- * whatsapp-agent-monique, mas sem apagar o registro do lead.
- */
 /**
  * Marca a conversa como bloqueada por restrição geográfica da Meta (erro
  * 130497 — negócio ainda não passou pela Verificação de Negócio). Chamado
  * quando um envio falha por esse motivo específico, pra o painel mostrar um
  * aviso visível em vez do erro ficar só no log do servidor.
  */
-export function markGeoRestricted(phone: string, reason: string) {
-  const conv = getOrCreate(phone);
-  conv.geoRestriction = { detectedAt: new Date().toISOString(), country: inferCountryFromPhone(phone), reason };
-  scheduleSave();
+export async function markGeoRestricted(tenantId: string, phone: string, reason: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  const geoRestriction: GeoRestriction = { detectedAt: new Date().toISOString(), country: inferCountryFromPhone(phone), reason };
+  await db.from('conversations').update({ geo_restriction: geoRestriction }).eq('id', conv.id);
 }
 
-export function clearConversationHistory(phone: string): StoredConversation | undefined {
-  const conv = conversations.get(phone);
-  if (!conv) return undefined;
-  conv.messages = [];
-  conv.updatedAt = new Date().toISOString();
-  scheduleSave();
-  return conv;
+/** Limpa o histórico de mensagens de um número específico, mas mantém o contato/lead (nome, telefone). */
+export async function clearConversationHistory(tenantId: string, phone: string): Promise<StoredConversation | undefined> {
+  const db = getDb();
+  const { data: existing } = await db.from('conversations').select('id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  if (!existing) return undefined;
+  await db.from('messages').delete().eq('conversation_id', existing.id);
+  await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
+  return getConversation(tenantId, phone);
 }
 
-/** Remove o contato inteiro (não só as mensagens) — usado quando o operador exclui a conversa da lista, não só "limpa" o histórico. */
-export function deleteConversation(phone: string): boolean {
-  const existed = conversations.delete(phone);
-  if (existed) scheduleSave();
-  return existed;
+/** Remove o contato inteiro (não só as mensagens) — usado quando o operador exclui a conversa da lista. */
+export async function deleteConversation(tenantId: string, phone: string): Promise<boolean> {
+  const db = getDb();
+  const { data, error } = await db.from('conversations').delete().eq('tenant_id', tenantId).eq('phone', phone).select('id');
+  if (error) throw error;
+  return !!data?.length;
 }
 
 /** Remove uma única mensagem — usado quando o operador apaga um item específico do histórico. */
-export function deleteMessage(phone: string, messageId: string): boolean {
-  const conv = conversations.get(phone);
-  if (!conv) return false;
-  const before = conv.messages.length;
-  conv.messages = conv.messages.filter((m) => m.id !== messageId);
-  if (conv.messages.length === before) return false;
-  scheduleSave();
-  return true;
+export async function deleteMessage(tenantId: string, phone: string, messageId: string): Promise<boolean> {
+  const db = getDb();
+  const { data, error } = await db.from('messages').delete().eq('tenant_id', tenantId).eq('id', messageId).select('id');
+  if (error) throw error;
+  return !!data?.length;
 }

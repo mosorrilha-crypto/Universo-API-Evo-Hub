@@ -18,14 +18,7 @@ import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
-import { initConversationPersistence } from './server/services/conversationStore';
-import { initAgentStatusPersistence } from './server/services/agentStatus';
-import { initKnowledgeBasePersistence } from './server/services/knowledgeBaseStore';
-import { initEscalationPersistence } from './server/services/escalationStore';
-import { initQuickRepliesPersistence } from './server/services/quickRepliesStore';
-import { initGoogleCalendarPersistence } from './server/services/googleCalendar';
-import { initAppointmentPersistence } from './server/services/appointmentStore';
-import { initReminderPersistence } from './server/services/reminderStore';
+import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
 
 dotenv.config();
@@ -38,14 +31,13 @@ async function startServer() {
   const authenticateToken = createAuthenticateToken(config.jwtSecret);
   const authenticateEvoHub = createAuthenticateEvoHub(config.evohubApiKey, config.isProduction);
 
-  await initConversationPersistence(config.supabaseUrl, config.supabaseKey);
-  await initAgentStatusPersistence(config.supabaseUrl, config.supabaseKey);
-  await initKnowledgeBasePersistence(config.supabaseUrl, config.supabaseKey);
-  await initEscalationPersistence(config.supabaseUrl, config.supabaseKey);
-  await initQuickRepliesPersistence(config.supabaseUrl, config.supabaseKey);
-  initGoogleCalendarPersistence(config.supabaseUrl, config.supabaseKey);
-  await initAppointmentPersistence(config.supabaseUrl, config.supabaseKey);
-  await initReminderPersistence(config.supabaseUrl, config.supabaseKey);
+  // Os 8 serviços (Bloco 2.A) leem/escrevem em tabelas Postgres reais
+  // através deste único cliente Supabase compartilhado — nada mais fica em
+  // memória ou em JSON solto no Storage.
+  initDb(supabase);
+  if (!supabase) {
+    console.warn('⚠️  SUPABASE_URL/SUPABASE_KEY ausentes — conversas, agenda, base de conhecimento e login real não vão funcionar até configurar.');
+  }
 
   app.use(express.json({
     limit: '50mb',
