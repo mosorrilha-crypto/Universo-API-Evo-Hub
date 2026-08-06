@@ -12,6 +12,7 @@
 import { google } from 'googleapis';
 import jwt from 'jsonwebtoken';
 import { getDb } from './db';
+import { getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
 
 // Evita importar o tipo OAuth2Client de 'google-auth-library' diretamente —
 // o pacote 'googleapis' reexporta uma cópia própria (via googleapis-common)
@@ -160,8 +161,47 @@ export function localNaiveToUtcIso(naiveLocal: string, timeZone: string): string
   return new Date(guessMs - offsetMs).toISOString();
 }
 
-/** Verifica se um intervalo está livre na agenda primária. startIso/endIso: hora local (sem offset) no fuso `timezone`. */
+function timeToMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * true se [startIso, endIso) (hora LOCAL naive, mesmo formato usado no
+ * resto deste arquivo) cabe inteiro dentro do expediente do tenant nesse
+ * dia da semana. `hours` null (tenant nunca configurou horário) nunca
+ * restringe — preserva o comportamento anterior a esse recurso.
+ *
+ * Achado numa auditoria comparativa (07/08/2026) contra o projeto antigo da
+ * Monique: sem essa checagem, nada impedia o agente de criar um
+ * agendamento fora do horário de atendimento, contanto que o Google
+ * Calendar mostrasse aquele horário como livre.
+ */
+export function isWithinBusinessHours(hours: BusinessHours | null, startIso: string, endIso: string): boolean {
+  if (!hours) return true;
+  const datePart = startIso.slice(0, 10);
+  if (endIso.slice(0, 10) !== datePart) return false; // sessão nunca deveria cruzar meia-noite
+  const weekday = new Date(`${datePart}T12:00:00Z`).getUTCDay();
+  const dayHours = hours[String(weekday)];
+  if (!dayHours) return false; // dia ausente do mapa = tenant não atende
+  const startMinutes = timeToMinutes(startIso.slice(11, 16));
+  const endMinutes = timeToMinutes(endIso.slice(11, 16));
+  return startMinutes >= timeToMinutes(dayHours.open) && endMinutes <= timeToMinutes(dayHours.close);
+}
+
+/** Lança se o intervalo cair fora do expediente configurado do tenant — defesa em profundidade pras ferramentas que criam/remarcam de verdade (checkFreeBusy só informa, nunca bloqueia sozinho a criação). */
+async function assertWithinBusinessHours(tenantId: string, startIso: string, endIso: string): Promise<void> {
+  const hours = await getTenantBusinessHours(tenantId);
+  if (!isWithinBusinessHours(hours, startIso, endIso)) {
+    throw new Error('HORARIO_FORA_DO_EXPEDIENTE: esse horário cai fora do horário de atendimento configurado para esse dia.');
+  }
+}
+
+/** Verifica se um intervalo está livre na agenda primária. startIso/endIso: hora local (sem offset) no fuso `timezone`. Fora do expediente do tenant conta como indisponível, sem precisar consultar o Google. */
 export async function checkFreeBusy(tenantId: string, cfg: CalendarConfig, startIso: string, endIso: string, timezone = 'America/Asuncion'): Promise<boolean> {
+  const hours = await getTenantBusinessHours(tenantId);
+  if (!isWithinBusinessHours(hours, startIso, endIso)) return false;
+
   const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   const timeMin = localNaiveToUtcIso(startIso, timezone);
@@ -182,6 +222,7 @@ export async function createCalendarEvent(
   endIso: string,
   timezone = 'America/Asuncion'
 ): Promise<string> {
+  await assertWithinBusinessHours(tenantId, startIso, endIso);
   const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   const res = await calendar.events.insert({
@@ -205,6 +246,7 @@ export async function rescheduleCalendarEvent(
   newEndIso: string,
   timezone = 'America/Asuncion'
 ): Promise<void> {
+  await assertWithinBusinessHours(tenantId, newStartIso, newEndIso);
   const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
   const calendar = google.calendar({ version: 'v3', auth });
   await calendar.events.patch({
