@@ -780,8 +780,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               {formData.products.map((prod) => (
                 <div key={prod.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
                   <button
+                    type="button"
                     onClick={() => handleDeleteProduct(prod.id)}
-                    className="absolute top-3 right-3 text-slate-500 hover:text-red-400 transition-colors cursor-pointer"
+                    className="absolute top-3 right-3 z-10 text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
                     title="Excluir produto"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -791,21 +792,21 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       type="text"
                       value={prod.name}
                       onChange={(e) => handleProductFieldChange(prod.id, 'name', e.target.value)}
-                      className="w-full pr-6 bg-transparent text-xs font-bold text-white focus:outline-none focus:bg-slate-900 rounded px-1 -mx-1 py-0.5"
+                      className="w-full pr-6 bg-transparent text-xs font-bold text-white focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar nome"
                     />
                     <input
                       type="text"
                       value={prod.price}
                       onChange={(e) => handleProductFieldChange(prod.id, 'price', e.target.value)}
-                      className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded px-1 -mx-1 py-0.5"
+                      className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar preço"
                     />
                     <textarea
                       rows={2}
                       value={prod.description}
                       onChange={(e) => handleProductFieldChange(prod.id, 'description', e.target.value)}
-                      className="w-full bg-transparent text-[11px] text-slate-400 leading-relaxed focus:outline-none focus:bg-slate-900 rounded px-1 -mx-1 py-0.5 resize-none"
+                      className="w-full bg-transparent text-[11px] text-slate-400 leading-relaxed focus:outline-none focus:bg-slate-900 rounded py-0.5 resize-none"
                       title="Editar descrição"
                     />
                   </div>
