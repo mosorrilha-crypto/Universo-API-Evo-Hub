@@ -18,19 +18,27 @@ interface LoginModalProps {
 // está em DEMO_MODE=true). O servidor valida a senha contra o cadastro fixo
 // dele mesmo (server/routes/auth.ts) — role/tenantId/email vêm de lá, nunca
 // do que mandamos aqui, então não adianta chamar isso com um id qualquer.
+//
+// Tenta de novo uma vez em caso de falha de rede (ex: 4G instável no
+// celular) antes de desistir — sem isso, uma única soneca de conexão fazia
+// o login "dar certo" na tela mas sem token nenhum, e todo o resto do painel
+// quebrava em silêncio (401 em tudo) sem o usuário entender por quê.
 const mintDemoToken = async (id: string, password: string): Promise<string | undefined> => {
-  try {
-    const res = await apiFetch('/api/auth/demo-token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, password }),
-    });
-    if (!res.ok) return undefined;
-    const data = await res.json();
-    return data.token;
-  } catch {
-    return undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await apiFetch('/api/auth/demo-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, password }),
+      });
+      if (!res.ok) return undefined; // credenciais inválidas — não adianta tentar de novo
+      const data = await res.json();
+      if (data.token) return data.token;
+    } catch {
+      // provável falha de rede — tenta mais uma vez antes de desistir
+    }
   }
+  return undefined;
 };
 
 export const LoginModal: React.FC<LoginModalProps> = ({
@@ -170,7 +178,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
+    setIsSubmitting(true);
     const token = await mintDemoToken(authenticatedUser.id, password.trim());
+    setIsSubmitting(false);
+
+    if (!token) {
+      setErrorMsg('Não foi possível confirmar sua sessão com o servidor (verifique sua conexão e tente novamente). O painel não vai funcionar direito sem isso.');
+      return;
+    }
+
     onLogin(authenticatedUser, token);
   };
 
