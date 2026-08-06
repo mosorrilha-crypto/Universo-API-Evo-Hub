@@ -78,11 +78,11 @@ export const App: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  // Se qualquer chamada autenticada voltar 401 (token expirado, inválido, ou
-  // nunca emitido de verdade por uma falha silenciosa no login), força um
-  // novo login com aviso — em vez de deixar a tela travada mostrando dados
-  // velhos com tudo quebrado em silêncio (era o que causava a sensação de
-  // "mensagens/análises não atualizam", sem nenhum erro visível pro usuário).
+  // Se o servidor rejeitar explicitamente o token da sessão (403 — token
+  // presente mas inválido/expirado), força um novo login com aviso — em vez
+  // de deixar a tela travada mostrando dados velhos com tudo quebrado em
+  // silêncio (era o que causava a sensação de "mensagens/análises não
+  // atualizam", sem nenhum erro visível pro usuário).
   useEffect(() => {
     setUnauthorizedHandler(() => {
       setCurrentUser(null);
