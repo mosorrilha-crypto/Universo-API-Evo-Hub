@@ -92,7 +92,9 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
 const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
   triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente (nunca prometa mandar depois — ela já foi).`,
   faq: `Seu papel agora é FAQ/ESPECIALISTA: responda a dúvida específica (preço, procedimento, política) com precisão total usando SOMENTE o contexto do negócio abaixo. Se não tiver o dado exato, diga que vai confirmar — nunca invente. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente na resposta (ex: "manda ver a foto que te mandei ali em cima") — nunca prometa mandar uma foto que já foi enviada, e nunca diga que vai mandar se a seção mostra que a tentativa falhou.`,
-  agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.`,
+  agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, escalado pra humano, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.
+
+DESISTÊNCIA/CANCELAMENTO: se o cliente sinalizar que quer desistir ou cancelar, ofereça reagendar UMA ÚNICA VEZ, com empatia, sem soar insistente (ex: "Sem problema! Se for por causa do horário ou da data, me conta que a gente busca outra opção que fique melhor pra você"). Se ele confirmar a desistência de novo, aceite com elegância — NUNCA insista uma segunda vez. Se a seção "Ações reais já executadas nesta mensagem" mostrar que o cancelamento foi escalado (mais de 24h de antecedência, decisão de devolução do sinal depende de humano), diga com calma que vai confirmar isso com cuidado e retornar — nunca prometa a devolução do sinal nem confirme o cancelamento como concluído nesse caso.`,
   reclamacao: `Seu papel agora é RECLAMAÇÃO: o cliente está insatisfeito ou reportando um problema com um serviço JÁ REALIZADO (resultado, dor, alergia, reação) — ou claramente irritado/chateado. Acolha com empatia genuína e valide o que ela está sentindo. NUNCA discuta, nunca se justifique, nunca minimize o que ela relatou. NUNCA ofereça solução, reembolso, retoque ou qualquer tipo de compensação por conta própria — essa decisão é sempre de uma pessoa real. Se ela mencionar sintoma físico (dor forte, inchaço, alergia), diga com calma que vai confirmar isso com cuidado, e que se piorar procure atendimento médico. Nunca prometa prazo específico de retorno.`,
 };
 
@@ -348,9 +350,24 @@ async function executeCalendarTool(
             summary: 'Tentou cancelar mas não há nenhum agendamento ativo registrado pra este contato.',
           };
         }
+        // Epic 4.5.9 — política real de sinal (ver knowledge_base/pricingAndPolicies):
+        // devolvido com 24h+ de antecedência, não devolvido com menos. Como o
+        // Universo ainda não rastreia se o sinal foi pago de fato (isso é a
+        // Etapa 8, pendente), a decisão de devolução nunca pode ser tomada
+        // sozinha pela IA — com 24h+ de antecedência, o cancelamento NÃO é
+        // executado automaticamente, só escalado pra um humano decidir. Com
+        // menos de 24h não há devolução em jogo, então a IA cancela direto.
+        const { naive: nowNaive } = getNowLocalNaive(BUSINESS_TIMEZONE);
+        const hoursUntilAppointment = (Date.parse(`${existing.startIso}Z`) - Date.parse(`${nowNaive}Z`)) / 3_600_000;
+        if (hoursUntilAppointment >= 24) {
+          return {
+            response: { escalonar: true, motivo: 'cancelamento_com_mais_de_24h_de_antecedencia' },
+            summary: `Cliente pediu cancelamento do agendamento de ${existing.startIso} — mais de 24h de antecedência, a política de devolução do sinal exige decisão humana. NÃO cancelou automaticamente; um operador precisa confirmar e cancelar manualmente se for o caso.`,
+          };
+        }
         await cancelCalendarEvent(tenantId, cfg, existing.eventId);
         await clearAppointmentForPhone(tenantId, phone);
-        return { response: { sucesso: true }, summary: 'Cancelou o agendamento existente com sucesso.' };
+        return { response: { sucesso: true }, summary: 'Cancelou o agendamento existente com sucesso (menos de 24h de antecedência — sem devolução de sinal pela política).' };
       }
       default:
         return { response: { erro: `Ferramenta desconhecida: ${name}` }, summary: `Tentou chamar uma ferramenta desconhecida (${name}).` };
@@ -428,7 +445,9 @@ Regras:
     for (const call of calls) {
       const { response: toolResponse, summary, confirmedTimeHHmm } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg);
       actionsSummary.push(summary);
-      if ('erro' in toolResponse) hadError = true;
+      // 'escalonar' (Epic 4.5.9, cancelamento com 24h+ de antecedência) reaproveita
+      // o mesmo caminho de needsHumanConfirmation que 'erro' já usa.
+      if ('erro' in toolResponse || 'escalonar' in toolResponse) hadError = true;
       if (confirmedTimeHHmm) confirmedTimes.push(confirmedTimeHHmm);
       responseParts.push({ functionResponse: { name: call.name, response: toolResponse } });
     }
