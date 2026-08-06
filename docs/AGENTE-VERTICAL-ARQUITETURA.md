@@ -8,10 +8,15 @@
 > blob de conhecimento por tenant) pro estado desenhado (camadas separadas + integrações
 > reais), sem se perder no meio do caminho.
 >
-> **Nada deste roadmap (seções 1–4, 6–8) está implementado ainda** — é o projeto antes da
-> obra, sob o embargo combinado de "não implementar até consenso 10/10". A única exceção é a
-> correção de segurança da seção 5 (fallback de canal desconhecido, PR #39): tratada à parte
-> por ser correção de um risco real em produção, não uma feature do agente vertical.
+> **Consenso fechado em 07/08/2026.** O plano passou por revisão externa (crítica de
+> segurança/arquitetura + benchmark contra um projeto multi-agente similar aberto), teve dois
+> itens absorvidos direto no código (PR #39) e no próprio mapa (seções 4.5, 5, 7, 8), e teve
+> outros pontos avaliados e conscientemente descartados (ver nota ao fim da seção 8) — não por
+> ignorados, mas por não se aplicarem ao estágio atual do projeto (um tenant real, volume baixo).
+> Com isso, a ordem de implementação da seção 7 está pronta pra execução. **Nada deste roadmap
+> (seções 1–4, 6–8) foi implementado ainda** — é o projeto antes da obra. A única exceção é a
+> correção de segurança da seção 5 (fallback de canal desconhecido, PR #39), feita fora do
+> embargo por ser correção de um risco real em produção, não feature do agente vertical.
 
 ---
 
@@ -175,14 +180,31 @@ O item "histórico do lead" da lista de integrações do dono do produto **é** 
 depois precisa ser integrada — **recomendação: fazer 2.E e essas integrações juntos**, não em
 sequência separada.
 
-## 7. Ordem de implementação sugerida
+## 7. Ordem de implementação (fechada em 07/08/2026)
+
+Uma revisão externa sugeriu inverter esta ordem — fazer o Bloco 2.E (CRM completo, saindo do
+`localStorage`) inteiro antes da base tipada e do prompt em camadas, pra não construir cima de
+um chão que ainda vai mudar. **Decisão: mantida a ordem abaixo.** Não há dependência técnica
+real entre migrar o CRM inteiro e reestruturar como o agente lê a base de conhecimento/monta o
+prompt — são trilhas independentes. `pre_reservations` (item 1) já nasce como tabela própria
+com `tenant_id`, pensada desde o início pra virar `CRMTask` (seção 4.1) — não é uma tabela solta
+que precisa de retrofit depois. Adiar a base tipada/prompt até o CRM completo estar pronto só
+empurraria o ganho real (2º tenant sem editar código) atrás de um projeto maior, sem necessidade
+técnica pra isso.
+
+O que a mesma revisão trouxe de novo e **foi incorporado** (sem trade-off, independente da
+ordem): testes de acesso cruzado entre tenants, `tenant_id` obrigatório em logs/cache, e
+redação de segredos/comprovantes/dados pessoais nos logs — todos entram na etapa 1.
 
 ```
 1. Schema: pre_reservations (com chave de idempotência wa_message_id) + estado de pagamento
-   no appointment/CRM
+   no appointment/CRM. Junto: testes automatizados de acesso cruzado entre tenants (tenant A
+   não lê dado de tenant B), tenant_id obrigatório em logs/cache, redação de segredos/
+   comprovantes/PII nos logs.
 2. Reestruturar knowledge_base em documentos tipados (Seção 3 deste doc)
 3. Separar o prompt em camadas (server/services/autoReply.ts deixa de concatenar tudo numa
-   string, monta as 4 camadas como mensagens distintas)
+   string, monta as 4 camadas como mensagens distintas; roteamento carrega confidence+reasoning
+   — seção 4.5)
 4. Escrever o conteúdo real das camadas 1 (global) e 2 (segmento beauty_studio) a partir do
    script — uma vez só, reutilizável pra qualquer tenant/segmento futuro
 5. Migrar o conteúdo específico da Monique pra camada 3 (tenant)
@@ -202,5 +224,16 @@ sequência separada.
 - [ ] Pagamento só é confirmado após verificação humana explícita, nunca pela IA sozinha
 - [ ] Agente consegue responder sobre disponibilidade da semana com dados reais, não estimativa
 - [ ] Base de conhecimento da Monique migrada pros documentos tipados, sem perda de conteúdo
+- [ ] Testes automatizados comprovam que tenant A não acessa dado de tenant B
+- [ ] Logs e cache carregam `tenant_id`; segredos/comprovantes/dados pessoais são redigidos
+      antes de logar
 - [x] Correção do fallback de canal desconhecido no roteamento de webhook (PR #39) — feito fora
       do embargo de implementação por ser correção de segurança em produção, não feature nova
+
+> Itens de outras propostas externas que **não entram** aqui, por já estarem cobertos ou fora
+> de escopo pro momento: reformular a hierarquia global→segmento→tenant→dinâmico (já é o
+> desenho da seção 1); versão/status/auditoria por documento tipado (já é a seção 3); RLS "real"
+> como pré-requisito bloqueante (tratado como defesa em profundidade futura na seção 5, não
+> bloqueia este roadmap); máquina de estados formal de lead completo (`new → interested →
+> qualified → ...`) — overkill pro volume atual de um tenant, revisar quando o Bloco 2.E
+> nascer com mais de um tenant ativo.
