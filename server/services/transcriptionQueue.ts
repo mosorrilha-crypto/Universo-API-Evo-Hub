@@ -9,11 +9,13 @@ import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { logEscalation, isPaymentRelated } from './escalationStore';
-import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
+import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
 export interface TranscriptionJob {
   message: ParsedIncomingMessage;
+  /** Tenant/credencial já resolvidos (Bloco 2.B) no momento em que o job entrou na fila. */
+  resolvedTenant: ResolvedTenant;
   createdAt: string;
 }
 
@@ -51,8 +53,8 @@ let totalProcessed = 0;
 let totalFailed = 0;
 let workerStarted = false;
 
-export function enqueueTranscriptionJob(message: ParsedIncomingMessage) {
-  queue.push({ message, createdAt: new Date().toISOString() });
+export function enqueueTranscriptionJob(message: ParsedIncomingMessage, resolvedTenant: ResolvedTenant) {
+  queue.push({ message, resolvedTenant, createdAt: new Date().toISOString() });
 }
 
 export function getQueueStats() {
@@ -92,9 +94,8 @@ async function processLoop(deps: TranscriptionQueueDeps) {
 
 async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
   const startedAt = Date.now();
-  const { message } = job;
-  // tenantId fixo até o Bloco 2.B existir (ver comentário em routes/webhooks.ts).
-  const tenantId = LEGACY_DEFAULT_TENANT_ID;
+  const { message, resolvedTenant } = job;
+  const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
 
   try {
     let audioBase64: string | undefined;
@@ -105,7 +106,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
       audioBase64 = downloaded.base64;
       mimeType = downloaded.mimeType;
     } else if (message.type === 'audio' && message.metaAudio) {
-      const downloaded = await downloadMetaMedia(message.metaAudio.mediaId, deps.metaAccessToken);
+      const downloaded = await downloadMetaMedia(message.metaAudio.mediaId, token);
       audioBase64 = downloaded.base64;
       mimeType = downloaded.mimeType;
     } else if (message.type === 'audio' && message.evolutionAudio) {
@@ -154,7 +155,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
           }
-          await sendBubbles(deps.metaPhoneNumberId, deps.metaAccessToken, message.from, result.bubbles, async (bubbleText) => {
+          await sendBubbles(phoneNumberId, token, message.from, result.bubbles, async (bubbleText) => {
             await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
             console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}" (agente: ${result.agent})`);
           }, message.messageId, result.phase, result.routerElapsedMs);
