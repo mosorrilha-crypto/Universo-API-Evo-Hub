@@ -9,6 +9,8 @@ import { getDb } from './db';
 export interface AgentProduct {
   name: string;
   price: string;
+  /** Agrupamento pro prompt (ex: "Pestañas", "Cejas") — opcional, catálogos pequenos podem ficar sem. */
+  category?: string;
   description?: string;
   /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
   exampleImageBase64?: string;
@@ -66,7 +68,17 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   if (kb.pricingAndPolicies) parts.push(`Políticas de preço/pagamento: ${kb.pricingAndPolicies}`);
   if (kb.businessRules?.length) parts.push(`Regras de negócio:\n- ${kb.businessRules.join('\n- ')}`);
   if (kb.products?.length) {
-    parts.push(`Catálogo de produtos/serviços:\n${kb.products.map((p) => `- ${p.name}: ${resolveProductPrice(p)}${p.description ? ` (${p.description})` : ''}`).join('\n')}`);
+    const line = (p: AgentProduct) => `- ${p.name}: ${resolveProductPrice(p)}${p.description ? ` — ${p.description}` : ''}`;
+    const categories = [...new Set(kb.products.map((p) => p.category).filter((c): c is string => !!c))];
+    if (categories.length) {
+      const uncategorized = kb.products.filter((p) => !p.category);
+      const grouped = categories
+        .map((cat) => `${cat}:\n${kb.products!.filter((p) => p.category === cat).map(line).join('\n')}`)
+        .concat(uncategorized.length ? [`Outros:\n${uncategorized.map(line).join('\n')}`] : []);
+      parts.push(`Catálogo de produtos/serviços:\n${grouped.join('\n\n')}`);
+    } else {
+      parts.push(`Catálogo de produtos/serviços:\n${kb.products.map(line).join('\n')}`);
+    }
   }
   if (kb.faqs?.length) {
     parts.push(`Perguntas frequentes:\n${kb.faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n')}`);
