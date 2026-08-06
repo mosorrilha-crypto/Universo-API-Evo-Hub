@@ -17,6 +17,7 @@ import { createMetaCapiRouter } from './server/routes/metaCapi';
 import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
+import { createAdminRouter } from './server/routes/admin';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
@@ -78,6 +79,7 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
     jwtSecret: config.jwtSecret,
   }));
+  app.use(createAdminRouter({ authenticateToken, supabase }));
 
   // Worker em background que processa a fila de transcrição (webhook → download
   // de mídia → Gemini). Ver server/services/transcriptionQueue.ts.

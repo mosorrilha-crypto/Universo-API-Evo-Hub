@@ -249,13 +249,17 @@ calendário conectado pra validar ponta a ponta (o primeiro é a Monique, já co
 
 *(Fase 3.1 da revisão anterior incorporada aqui — não faz sentido separar.)*
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 2.D.1 | Login real via Supabase Auth (email/senha) por operador, com `tenant_id` vinculado — substitui os 4 usuários demo fixos | P0 | M |
-| 2.D.2 | RBAC: `operator < manager < admin < saas_admin`, `saas_admin` é o único que enxerga todos os tenants | P0 | M |
-| 2.D.3 | **(novo, da auditoria)** "Cadastrar Novo Usuário" do painel SaaS Admin passa a criar de verdade — hoje a senha digitada é descartada e a pessoa nunca consegue logar (aviso provisório já colocado na tela) | P0 | S |
-| 2.D.4 | Fluxo real de onboarding de cliente novo: admin cadastra tenant + credenciais Meta (WABA, phone_number_id, token) manualmente no painel — **decisão: começar manual (rápido) antes de investir no "Embedded Signup" oficial da Meta (auto-atendimento, mais lento de construir)** | P0 | M |
-| 2.D.5 | "Cadastrar Novo Cliente SaaS" do SaaS Admin passa a provisionar de verdade (hoje só adiciona uma linha fake no navegador) — cria o registro em `tenants`, gera credenciais de acesso pro primeiro operador | P0 | M |
+**Status: backend pronto e no branch; frontend do painel SaaS Admin ainda não reconectado (ver nota abaixo).**
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 2.D.1 | Login real via tabela `operators` (email/senha, bcrypt), com `tenant_id` vinculado — substitui os 4 usuários demo fixos | P0 | M | ✅ Já existia antes desta sessão (`server/routes/auth.ts`); `DEMO_MODE=false` confirmado em produção |
+| 2.D.2 | RBAC: `operator < manager < admin < saas_admin`, `saas_admin` é o único que enxerga todos os tenants | P0 | M | ✅ Feito — `server/middleware/rbac.ts` (`requireRole`), testado (admin bloqueado de listar todos os tenants e de criar `saas_admin`, saas_admin passa) |
+| 2.D.3 | "Cadastrar Novo Usuário" do painel SaaS Admin passa a criar de verdade | P0 | S | ⚠️ Backend pronto (`POST /api/admin/operators`), **frontend (`SaaSAdminDashboard.tsx`) ainda chama só estado local/localStorage — não foi reconectado nesta sessão** |
+| 2.D.4 | Fluxo real de onboarding de cliente novo: admin cadastra tenant + credenciais Meta manualmente | P0 | M | ✅ Feito — CLI (`scripts/create-tenant.ts`) desde o Bloco 2.B, agora também via API (`POST /api/admin/tenants`) |
+| 2.D.5 | "Cadastrar Novo Cliente SaaS" do SaaS Admin passa a provisionar de verdade | P0 | M | ⚠️ Backend pronto (`POST /api/admin/tenants`), **frontend ainda não reconectado** — ver nota |
+
+**Nota sobre o frontend do SaaS Admin:** o componente (`src/components/SaaSAdminDashboard.tsx`, 1600+ linhas) guarda `Tenant`/`UserProfile` num formato (`monthlyMRR`, `whatsappEngine`, `zapiInstanceId/Token`, `evolutionInstanceName` fabricados) que diverge do schema real do Postgres (`tenants.currency/locale`, `tenant_meta_credentials.phone_number_id/access_token`). Reconectar o formulário aos endpoints novos exige primeiro decidir o que fazer com esses campos fabricados (a maioria descreve integrações que não existem de verdade — Z-API não está implementado). Ficou de fora desta sessão por ser um redesenho de tela, não só troca de chamada de API — meu próximo passo recomendado quando retomarmos isso.
 
 ### Bloco 2.E — Frontend: eliminar localStorage como banco
 
