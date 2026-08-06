@@ -1,5 +1,5 @@
 import { Router, type RequestHandler } from 'express';
-import { listConversations, getConversation, recordOutgoingMessage, clearConversationHistory, markGeoRestricted } from '../services/conversationStore';
+import { listConversations, getConversation, recordOutgoingMessage, clearConversationHistory, deleteConversation, deleteMessage, markGeoRestricted } from '../services/conversationStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
@@ -95,6 +95,21 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     const conv = clearConversationHistory(req.params.phone);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
     res.json({ success: true, conversation: conv });
+  });
+
+  // Exclui o contato inteiro (não só o histórico) — usado quando o operador
+  // apaga a conversa da lista. Diferente de /history acima, que só limpa as
+  // mensagens e mantém o contato.
+  router.delete('/api/conversations/:phone', authenticateToken, (req, res) => {
+    const existed = deleteConversation(req.params.phone);
+    if (!existed) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    res.json({ success: true });
+  });
+
+  router.delete('/api/conversations/:phone/messages/:messageId', authenticateToken, (req, res) => {
+    const existed = deleteMessage(req.params.phone, req.params.messageId);
+    if (!existed) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    res.json({ success: true });
   });
 
   // Envia a foto de exemplo cadastrada na Base de Conhecimento pro serviço

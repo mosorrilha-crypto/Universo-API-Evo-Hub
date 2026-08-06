@@ -276,7 +276,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
             <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 flex items-center">
               <Send className="w-3.5 h-3.5 mr-1" /> Disparar Evento Meta CAPI
             </span>
-            <span className="text-[9px] bg-blue-500/20 px-1.5 py-0.2 rounded text-blue-300">
+            <span className="text-[9px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">
               Otimizar Pixel
             </span>
           </div>
@@ -339,7 +339,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
                 <Languages className="w-3.5 h-3.5 text-blue-400" />
                 Tradução em Português (Para Análise do Atendente)
               </span>
-              <span className="text-[9px] bg-blue-500/20 px-1.5 py-0.2 rounded text-blue-300">
+              <span className="text-[9px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">
                 Uso Interno
               </span>
             </div>

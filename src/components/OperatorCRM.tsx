@@ -93,7 +93,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       audioDuration: 0,
       status: 'pending',
       crmStage: leadStage,
-      dealValue: Number(leadValue) || 2500,
+      dealValue: Number.isFinite(Number(leadValue)) ? Number(leadValue) : 2500,
       sampleType: leadSegment || 'Atendimento Comercial Real',
       assignedOperator: currentUser.name,
       attribution: {
@@ -275,7 +275,11 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
           {/* Clear Test Leads Button if function passed */}
           {onClearAllLeads && leads.length > 0 && (
             <button
-              onClick={onClearAllLeads}
+              onClick={() => {
+                if (window.confirm(`Tem certeza que deseja apagar TODOS os ${leads.length} leads? Isso não pode ser desfeito.`)) {
+                  onClearAllLeads();
+                }
+              }}
               className="px-3 py-2 bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-800/60 font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
               title="Limpar leads fictícios de teste"
             >
@@ -446,6 +450,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                                     e.stopPropagation();
                                     if (window.confirm(`Tem certeza que deseja excluir o lead "${lead.name}" do CRM?`)) {
                                       onDeleteLead(lead.id);
+                                      if (selectedLead?.id === lead.id) setSelectedLead(null);
                                     }
                                   }}
                                   className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/80 rounded transition-colors cursor-pointer"
@@ -584,6 +589,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                               e.stopPropagation();
                               if (window.confirm(`Tem certeza que deseja excluir o lead "${lead.name}" do CRM?`)) {
                                 onDeleteLead(lead.id);
+                                if (selectedLead?.id === lead.id) setSelectedLead(null);
                               }
                             }}
                             className="p-1.5 bg-rose-950/40 hover:bg-rose-900 border border-rose-800/60 text-rose-300 rounded-lg transition-colors inline-flex items-center cursor-pointer"

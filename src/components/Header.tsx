@@ -5,7 +5,6 @@ import {
   Code,
   Sparkles,
   CheckCircle2,
-  ShieldCheck,
   Brain,
   Target,
   Kanban,
@@ -21,7 +20,6 @@ import {
   Trash2,
   RotateCcw,
   Download,
-  AlertTriangle,
   X,
   Zap
 } from 'lucide-react';
@@ -225,7 +223,7 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Layers className="w-4 h-4 text-purple-300" />
               <span>Painel SaaS Master</span>
-              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
+              <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
                 Multi-Tenant
               </span>
             </button>
