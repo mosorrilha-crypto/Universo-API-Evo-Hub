@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "test": "vitest run",
     "migrate:legacy-data": "tsx scripts/migrate-legacy-data.ts",
     "create:operator": "tsx scripts/create-operator.ts",
     "create:tenant": "tsx scripts/create-tenant.ts"
@@ -43,6 +44,7 @@
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2"
+    "typescript": "~5.8.2",
+    "vitest": "^4.1.10"
   }
 }

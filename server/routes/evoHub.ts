@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { redactMessageForLog } from '../services/logRedaction';
 
 interface EvoHubRouterDeps {
   authenticateEvoHub: RequestHandler;
@@ -228,7 +229,7 @@ export function createEvoHubRouter({ authenticateEvoHub }: EvoHubRouterDeps): Ro
     const targetNumber = to || number || '5511999998888';
     const messageText = typeof text === 'string' ? text : text?.body || body || 'Mensagem do Evo Hub';
 
-    console.log(`📤 [Evo Hub REST API] Enviando mensagem para ${targetNumber}:`, messageText);
+    console.log(`📤 [Evo Hub REST API] Enviando mensagem para ${targetNumber}:`, redactMessageForLog(messageText));
 
     const messageId = `wamid.HBgL${Math.random().toString(36).substring(2, 10)}${Math.floor(Math.random() * 1000000)}`;
 

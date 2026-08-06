@@ -15,6 +15,7 @@ import { logEscalation, isPaymentRelated } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { resolveTenantByPhoneNumberId, type ResolvedTenant } from '../services/tenantResolver';
+import { redactMessageForLog } from '../services/logRedaction';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
 
@@ -72,7 +73,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         }
         await sendBubbles(phoneNumberId, token, phone, result.bubbles, async (bubbleText) => {
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
-          console.log(`🤖 [Resposta Automática] Enviado pra ${phone}: "${bubbleText}" (agente: ${result.agent})`);
+          console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
       } catch (err: any) {
         if (isGeoRestrictedError(err)) {
@@ -226,7 +227,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
 
       if (messages && messages.length > 0) {
         const msg = messages[0];
-        console.log(`📱 [Webhook Meta WhatsApp] Nova mensagem de ${msg.from}:`, msg.text?.body || `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+        // tenant ainda não resolvido neste ponto (resolução acontece por
+        // mensagem dentro de enqueueAudioMessages) — log de diagnóstico do
+        // payload bruto, conteúdo sempre redigido.
+        console.log(`📱 [Webhook Meta WhatsApp] Nova mensagem de ${msg.from}:`, msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
       }
 
       return res.status(200).json({
@@ -306,7 +310,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       const messages = body.entry?.[0]?.changes?.[0]?.value?.messages;
       if (messages && messages.length > 0) {
         const msg = messages[0];
-        console.log(`📱 [Webhook Evo Hub] Nova mensagem de ${msg.from}:`, msg.text?.body || `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+        console.log(`📱 [Webhook Evo Hub] Nova mensagem de ${msg.from}:`, msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
       }
 
       return res.status(200).json({ success: true, processedMessages: messages?.length || 0 });

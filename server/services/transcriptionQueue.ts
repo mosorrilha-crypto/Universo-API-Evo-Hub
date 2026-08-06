@@ -9,6 +9,7 @@ import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { logEscalation, isPaymentRelated } from './escalationStore';
+import { redactMessageForLog } from './logRedaction';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
@@ -130,7 +131,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     totalProcessed += 1;
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
     await updateMessageText(tenantId, message.from, message.messageId, outcome.result.transcription);
-    console.log(`✅ [Fila de Transcrição] ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): "${outcome.result.transcription}"`);
+    console.log(`✅ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): ${redactMessageForLog(outcome.result.transcription)}`);
 
     if (isPaymentRelated(outcome.result.transcription)) {
       await logEscalation(tenantId, message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
@@ -157,7 +158,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           }
           await sendBubbles(phoneNumberId, token, message.from, result.bubbles, async (bubbleText) => {
             await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
-            console.log(`🤖 [Resposta Automática] Enviado pra ${message.from}: "${bubbleText}" (agente: ${result.agent})`);
+            console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
           }, message.messageId, result.phase, result.routerElapsedMs);
         } catch (err: any) {
           if (isGeoRestrictedError(err)) {
@@ -173,7 +174,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
   } catch (err: any) {
     totalFailed += 1;
     recordResult({ job, status: 'failed', error: err.message, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
-    console.warn(`❌ [Fila de Transcrição] ${message.provider} ${message.messageId} falhou:`, err.message);
+    console.warn(`❌ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} falhou:`, err.message);
   }
 }
 

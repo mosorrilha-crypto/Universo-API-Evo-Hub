@@ -65,7 +65,7 @@ export async function logEscalation(tenantId: string, phone: string, contactName
   };
   const { error } = await db.from('escalations').insert(row);
   if (error) throw error;
-  console.log(`🚨 [Escalonamento] ${phone} (${row.country}): ${reason}`);
+  console.log(`🚨 [Escalonamento] tenant=${tenantId} ${phone} (${row.country}): ${reason}`);
   return toEscalation({ ...row, created_at: new Date().toISOString() });
 }
 
