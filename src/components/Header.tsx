@@ -18,7 +18,6 @@ import {
   Layers,
   Database,
   Trash2,
-  RotateCcw,
   Download,
   X,
   Zap
@@ -35,7 +34,6 @@ interface HeaderProps {
   activeTenant: Tenant;
   onSelectTenant: (tenant: Tenant) => void;
   onClearAllMockData?: () => void;
-  onLoadDemoData?: () => void;
   onExportBackup?: () => void;
   leadsCount?: number;
   transactionsCount?: number;
@@ -52,7 +50,6 @@ export const Header: React.FC<HeaderProps> = ({
   activeTenant,
   onSelectTenant,
   onClearAllMockData,
-  onLoadDemoData,
   onExportBackup,
   leadsCount = 0,
   transactionsCount = 0
@@ -388,28 +385,6 @@ export const Header: React.FC<HeaderProps> = ({
                   className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl flex-shrink-0 transition-all shadow"
                 >
                   Zerar Canvas
-                </button>
-              </div>
-
-              {/* Restore Demo Data */}
-              <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <RotateCcw className="w-4 h-4 text-emerald-400" />
-                    Restaurar Dados de Demonstração
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Carrega conversas completas e leads fictícios pré-configurados para apresentar o software a investidores ou clientes.
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    if (onLoadDemoData) onLoadDemoData();
-                    setIsDataModalOpen(false);
-                  }}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl flex-shrink-0 transition-all"
-                >
-                  Restaurar Exemplo
                 </button>
               </div>
 

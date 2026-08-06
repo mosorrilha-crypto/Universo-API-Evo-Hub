@@ -156,7 +156,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [newUserPassword, setNewUserPassword] = useState('123456');
   const [newUserRole, setNewUserRole] = useState<UserRole>('operator');
   const [newUserDept, setNewUserDept] = useState('Atendimento & Vendas');
-  const [newUserTenantId, setNewUserTenantId] = useState('tenant_001');
+  const [newUserTenantId, setNewUserTenantId] = useState(activeTenant?.id || 'tenant_004');
 
   useEffect(() => {
     localStorage.setItem('saas_users_list', JSON.stringify(usersList));

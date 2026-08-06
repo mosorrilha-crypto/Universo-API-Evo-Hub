@@ -154,16 +154,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     // Per-user password mapping for Demo / Production Preset Profiles
     const USER_PASSWORDS: Record<string, string[]> = {
       usr_monique: ['monique2026', 'admin123', '123456'],
-      usr_carlos: ['viva1234', '123456'],
-      usr_fernanda: ['meta2026', '123456'],
-      usr_ricardo: ['master2026#', 'adminMaster123'], // Enforce strict password for SaaS Master Admin
     };
 
     let isPasswordValid = false;
 
     if (useCustomLogin && customEmail) {
       // General custom password check
-      const validPasswords = ['123456', 'admin123', 'universo2024', 'mudar-senha-123', 'monique2026', 'master2026#'];
+      const validPasswords = ['123456', 'admin123', 'universo2024', 'mudar-senha-123', 'monique2026'];
       isPasswordValid = validPasswords.includes(password.trim());
     } else if (authenticatedUser) {
       const allowedForUser = USER_PASSWORDS[authenticatedUser.id] || ['123456', 'admin123'];
@@ -171,10 +168,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
 
     if (!isPasswordValid) {
-      const hint = authenticatedUser?.role === 'saas_admin'
-        ? 'Dica: A senha do SaaS Master Admin é "master2026#".'
-        : 'Verifique a senha informada para este usuário.';
-      setErrorMsg(`Senha incorreta! Acesso negado. ${hint}`);
+      setErrorMsg('Senha incorreta! Acesso negado. Verifique a senha informada para este usuário.');
       return;
     }
 
@@ -303,15 +297,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <p className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
                   <span>
                     Senha do perfil selecionado:{' '}
-                    <span className="text-emerald-400 font-mono font-bold">
-                      {selectedUserId === 'usr_ricardo'
-                        ? 'master2026#'
-                        : selectedUserId === 'usr_monique'
-                        ? 'monique2026'
-                        : selectedUserId === 'usr_fernanda'
-                        ? 'meta2026'
-                        : 'viva1234'}
-                    </span>
+                    <span className="text-emerald-400 font-mono font-bold">monique2026</span>
                   </span>
                   <span className="text-slate-500">Validação Estreita v2.0</span>
                 </p>

@@ -1,63 +1,8 @@
 import { Tenant, UserProfile } from '../types';
 
+// As 3 empresas fictícias de demonstração (Drogaria Viva, MetaLeads Imóveis,
+// FitLife) foram removidas para produção — só resta o tenant real.
 export const INITIAL_TENANTS: Tenant[] = [
-  {
-    id: 'tenant_001',
-    name: 'Drogaria & Manipulação Viva',
-    slug: 'drogaria-viva',
-    plan: 'pro',
-    monthlyMRR: 1200,
-    status: 'ativo',
-    createdAt: '15/01/2026',
-    whatsappPhone: '5511998811223',
-    whatsappStatus: 'conectado',
-    whatsappEngine: 'evolution_vps',
-    evolutionInstanceName: 'drogaria_viva_main',
-    failoverEnabled: true,
-    autoReconnectCount: 12,
-    maxLeadsPerMonth: 5000,
-    currentLeadsMonth: 1240,
-    webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_001`,
-    metaPixelId: '987654321012345',
-  },
-  {
-    id: 'tenant_002',
-    name: 'MetaLeads Imóveis Premium',
-    slug: 'metaleads-imoveis',
-    plan: 'enterprise',
-    monthlyMRR: 2900,
-    status: 'ativo',
-    createdAt: '02/02/2026',
-    whatsappPhone: '5521987654321',
-    whatsappStatus: 'conectado',
-    whatsappEngine: 'zapi_managed',
-    zapiInstanceId: '3C8B9A01-ZAPI-ENT',
-    zapiToken: '8F7D2B6A-9012-4C3D',
-    failoverEnabled: true,
-    autoReconnectCount: 0,
-    maxLeadsPerMonth: 20000,
-    currentLeadsMonth: 8900,
-    webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_002`,
-    metaPixelId: '123456789098765',
-  },
-  {
-    id: 'tenant_003',
-    name: 'FitLife Academia & Suplementos',
-    slug: 'fitlife',
-    plan: 'starter',
-    monthlyMRR: 590,
-    status: 'trial',
-    createdAt: '28/07/2026',
-    whatsappPhone: '5531976543210',
-    whatsappStatus: 'qr_pendente',
-    whatsappEngine: 'evolution_vps',
-    evolutionInstanceName: 'fitlife_starter',
-    failoverEnabled: false,
-    autoReconnectCount: 3,
-    maxLeadsPerMonth: 1000,
-    currentLeadsMonth: 320,
-    webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_003`,
-  },
   {
     id: 'tenant_004',
     name: 'Monique Sorrilha Beauty Studio',
@@ -80,6 +25,10 @@ export const INITIAL_TENANTS: Tenant[] = [
   },
 ];
 
+// Os 3 logins de demonstração (Carlos, Fernanda, Ricardo) foram removidos
+// para produção — só resta o login real da Monique. Mantido em sincronia
+// manual com server/routes/auth.ts (DEMO_USERS) e
+// src/components/LoginModal.tsx (USER_PASSWORDS).
 export const SAAS_DEMO_USERS: UserProfile[] = [
   {
     id: 'usr_monique',
@@ -89,32 +38,5 @@ export const SAAS_DEMO_USERS: UserProfile[] = [
     role: 'admin',
     avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
     department: 'Especialista em Micropigmentação & Estúdio',
-  },
-  {
-    id: 'usr_carlos',
-    tenantId: 'tenant_001',
-    name: 'Carlos Silva',
-    email: 'carlos@drogariaviva.com.br',
-    role: 'operator',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    department: 'Atendimento & Vendas Farmacêuticas',
-  },
-  {
-    id: 'usr_fernanda',
-    tenantId: 'tenant_002',
-    name: 'Fernanda Lima',
-    email: 'fernanda@metaleads.com.br',
-    role: 'manager',
-    avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-    department: 'Gerência Imobiliária & Ads',
-  },
-  {
-    id: 'usr_ricardo',
-    tenantId: 'tenant_001',
-    name: 'Ricardo Santos (SaaS Master)',
-    email: 'ricardo.master@saasplatform.com',
-    role: 'saas_admin',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    department: 'Diretoria SaaS & Infraestrutura Global',
   },
 ];

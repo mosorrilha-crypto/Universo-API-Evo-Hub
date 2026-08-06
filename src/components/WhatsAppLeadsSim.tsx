@@ -106,7 +106,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const saved = localStorage.getItem('saas_crm_leads');
     return saved ? JSON.parse(saved) : INITIAL_MOCK_LEADS;
   });
-  const [activeLeadId, setActiveLeadId] = useState<string | null>(INITIAL_MOCK_LEADS[0].id);
+  const [activeLeadId, setActiveLeadId] = useState<string | null>(INITIAL_MOCK_LEADS[0]?.id ?? null);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

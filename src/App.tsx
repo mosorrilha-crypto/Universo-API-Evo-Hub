@@ -184,13 +184,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLoadDemoData = () => {
-    setLeads(INITIAL_MOCK_LEADS);
-    setTransactions(INITIAL_TRANSACTIONS);
-    setKnowledgeBase(moniqueStudioKnowledgeBase);
-    showToast('Dados de demonstração restaurados!');
-  };
-
   const handleExportBackup = () => {
     const backupData = {
       tenants,
@@ -234,7 +227,6 @@ export const App: React.FC = () => {
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
         onClearAllMockData={handleClearAllMockData}
-        onLoadDemoData={handleLoadDemoData}
         onExportBackup={handleExportBackup}
         leadsCount={leads.length}
         transactionsCount={transactions.length}
