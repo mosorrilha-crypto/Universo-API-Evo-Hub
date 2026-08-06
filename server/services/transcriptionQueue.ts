@@ -8,6 +8,7 @@ import { generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
+import { getTenantSegment } from './tenantProfileStore';
 import { logEscalation, isPaymentRelated } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
 import type { ResolvedTenant } from './tenantResolver';
@@ -147,10 +148,11 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     if (outcome.source === 'gemini' && !(await isAgentPaused(tenantId))) {
       runExclusive(message.from, async () => {
         const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
+        const segment = await getTenantSegment(tenantId);
         const conversation = await getConversation(tenantId, message.from);
         const history = conversation?.messages.slice(0, -1);
         try {
-          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history);
+          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history, undefined, undefined, segment);
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             return;

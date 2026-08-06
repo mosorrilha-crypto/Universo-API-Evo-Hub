@@ -197,14 +197,20 @@ ordem): testes de acesso cruzado entre tenants, `tenant_id` obrigatório em logs
 redação de segredos/comprovantes/dados pessoais nos logs — todos entram na etapa 1.
 
 ```
-1. Schema: pre_reservations (com chave de idempotência wa_message_id) + estado de pagamento
+1. ✅ Schema: pre_reservations (com chave de idempotência wa_message_id) + estado de pagamento
    no appointment/CRM. Junto: testes automatizados de acesso cruzado entre tenants (tenant A
    não lê dado de tenant B), tenant_id obrigatório em logs/cache, redação de segredos/
    comprovantes/PII nos logs.
-2. Reestruturar knowledge_base em documentos tipados (Seção 3 deste doc)
-3. Separar o prompt em camadas (server/services/autoReply.ts deixa de concatenar tudo numa
-   string, monta as 4 camadas como mensagens distintas; roteamento carrega confidence+reasoning
-   — seção 4.5)
+2. Reestruturar knowledge_base em documentos tipados (Seção 3 deste doc) — adiado pro backlog
+   pós-lançamento (decisão do dono do produto); não bloqueia os itens 3+ abaixo.
+3. ✅ Separar o prompt em camadas — `server/services/autoReply.ts` não concatena mais tudo numa
+   string só: camadas 1+2 (global+segmento, fixas) vão em `systemInstruction` da chamada ao
+   Gemini, camadas 3+4 (tenant/dinâmico) + histórico vão em `contents`. `tenants.segment`
+   (migration `0003_tenant_segment.sql`) resolve qual camada 2 usar por tenant — só
+   `beauty_studio` existe hoje, sem conteúdo próprio ainda (isso é o item 4). Testado em
+   `server/services/__tests__/autoReply.test.ts` (trava a separação: system vs. user content).
+   **Não incluído nesta etapa:** roteamento carregar `confidence`+`reasoning` (seção 4.5) — é
+   melhoria de auditabilidade independente, não pré-requisito de camadas; fica pro backlog.
 4. Escrever o conteúdo real das camadas 1 (global) e 2 (segmento beauty_studio) a partir do
    script — uma vez só, reutilizável pra qualquer tenant/segmento futuro
 5. Migrar o conteúdo específico da Monique pra camada 3 (tenant)

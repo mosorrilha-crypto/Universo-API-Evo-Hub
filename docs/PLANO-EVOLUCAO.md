@@ -345,6 +345,31 @@ WhatsApp, agenda e login, sem nenhum dado vazando entre eles. Isso é o que tran
 | 4.4.2 | Ligar a chave PIX configurável de verdade na geração de cobrança do Financeiro (hoje decorativa) | P1 | M |
 | 4.4.3 | Cobrança recorrente dos tenants do SaaS (assinatura mensal) | P1 | L |
 
+### Epic 4.5 — Paridade com o projeto antigo da Monique (bloqueia descontinuar o projeto antigo)
+
+**Origem:** auditoria comparativa código-a-código feita em outra sessão contra o repositório
+antigo standalone da Monique (fora do Universo, nunca portado pro GitHub). Confirmado
+lendo os dois lados, não por inferência. O projeto antigo está em produção faturando; estes
+itens são o que falta no Universo pra ele poder ser descontinuado com segurança — todos tocam
+o caminho de conversão/receita, não são cosméticos.
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 4.5.1 | Meta Conversions API é 100% mock em `server/routes/metaCapi.ts` — `status: 'simulated_ok'`, hash de telefone fixo hardcoded, nenhum `fetch` real. O projeto antigo chama `https://graph.facebook.com/v21.0/{DATASET_ID}/events` de verdade. Sem isso, atribuição de anúncio (CAPI) não existe no Universo. | P0 | M | Pendente |
+| 4.5.2 | Agente não tem ferramenta pra enviar foto de portfólio/exemplo do serviço — `AgentProduct.exampleImageBase64` já existe no schema da KB (`knowledgeBaseStore.ts`), mas nada em `autoReply.ts`/function-calling usa esse campo pra mandar a imagem de verdade pro cliente. O projeto antigo tem essa ferramenta ligada no loop de tool-calling. | P1 | M | Pendente |
+| 4.5.3 | Confirmação de pagamento (comprovante → libera confirmação de agendamento) — schema já existe (`pre_reservations`, Etapa 1), mas o agente ainda não chama nada disso; comentário no próprio código (`autoReply.ts`) admite que hoje isso vira só escalonamento manual. | P0 | L | **Já rastreado** — é a Etapa 8 do roadmap do agente vertical (`docs/AGENTE-VERTICAL-ARQUITETURA.md` seção 7, item 8), não item novo |
+| 4.5.4 | Nota de preço promocional obsoleta hardcoded como texto solto no seed (`scripts/seed-monique-knowledge-base.ts:40`, "promoções de julho terminaram em 31/07") | P2 | XS | **Achado corrigido** — a claim original ("preço promocional virou texto estático") está errada: o mecanismo dinâmico já existe e funciona (`resolveProductPrice` em `knowledgeBaseStore.ts`, compara `promoUntil` com a data real). O problema real é só essa nota redundante/desatualizada misturada em `businessRules`; risco é confundir o agente com informação obsoleta, não falta de mecanismo. Remover a nota, deixar o campo `promoPrice`/`promoUntil` por produto ser a única fonte. |
+
+**O que NÃO é gap** (já confirmado igual ou melhor no Universo, sem ação necessária): agendamento
+via Google Calendar com function-calling real, transcrição de áudio via Gemini, persistência
+real em Postgres (vs. Google Sheets/localStorage do projeto antigo), multi-tenant, financeiro,
+CRM, lembretes automáticos, idempotência por `wa_message_id`.
+
+**Sobre descontinuar o projeto antigo:** decisão de negócio, não técnica — fica pra quando
+4.5.1–4.5.3 estiverem prontos. Este documento não tem visibilidade sobre o repositório antigo
+(não está no GitHub, vive só no ambiente da outra sessão) — qualquer ação de apagar/arquivar
+esse projeto precisa ser feita a partir de lá, não daqui.
+
 ---
 
 ## Fase 5 — Escala, observabilidade e produção

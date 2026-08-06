@@ -9,6 +9,7 @@ import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated } from '../services/escalationStore';
@@ -55,6 +56,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     runExclusive(phone, async () => {
       if (await isAgentPaused(tenantId)) return;
       const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
+      const segment = await getTenantSegment(tenantId);
       // Exclui as mensagens que acabaram de ser agrupadas pelo buffer (já
       // registradas individualmente antes do flush) — o resto é histórico real.
       const conversation = await getConversation(tenantId, phone);
@@ -63,7 +65,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
         await markAsReadAndShowTyping(phoneNumberId, token, messageId);
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig);
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment);
         if (!result) {
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;

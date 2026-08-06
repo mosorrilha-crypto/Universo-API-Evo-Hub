@@ -34,7 +34,7 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
   });
 
   router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), async (req, res) => {
-    const { name, slug, currency, locale, secondaryCurrency, secondaryLocale, phoneNumberId, accessToken, wabaId, mode } = req.body || {};
+    const { name, slug, currency, locale, secondaryCurrency, secondaryLocale, phoneNumberId, accessToken, wabaId, mode, segment } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
 
     const { data: tenant, error: tenantError } = await db()
@@ -46,6 +46,10 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
         locale: locale || 'es-PY',
         secondary_currency: secondaryCurrency || null,
         secondary_locale: secondaryLocale || null,
+        // Camada 2 do prompt do agente (docs/AGENTE-VERTICAL-ARQUITETURA.md
+        // seção 1) — default 'beauty_studio' já cobre o único segmento
+        // real hoje; passar explícito prepara pro segundo segmento.
+        segment: segment || 'beauty_studio',
       })
       .select('*')
       .single();

@@ -8,6 +8,7 @@ import {
   type CalendarConfig,
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone } from './appointmentStore';
+import { DEFAULT_SEGMENT } from './tenantProfileStore';
 
 const GEMINI_TIMEOUT_MS = 20000;
 const BUSINESS_TIMEZONE = 'America/Asuncion';
@@ -84,42 +85,37 @@ const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
 };
 
 /**
- * Gera a resposta do agente especializado (já escolhido pelo router acima),
- * fracionada em "bolhas" curtas — no estilo de atendimento humano real de
- * WhatsApp, nunca um bloco único tipo e-mail. Baseado nas diretrizes
- * consolidadas de posicionamento (fracionamento, dialeto/tom local vindo da
- * Base de Conhecimento, empatia antes de credenciais, sem "speech" de
- * vendedor).
+ * Camada 2 (segmento) — regras fixas por segmento de negócio, ver
+ * docs/AGENTE-VERTICAL-ARQUITETURA.md seção 1. Conteúdo real ainda é a
+ * Etapa 4 (pendente); hoje só existe o segmento da Monique, sem regras
+ * próprias registradas ainda — a chave existe pra o mecanismo de camadas
+ * não depender de uma segunda migração quando o conteúdo chegar.
  */
-async function generateSpecialistReply(
-  ai: GoogleGenAI,
-  agent: AgentType,
-  text: string,
-  contactName?: string,
-  knowledgeBaseContext?: string,
-  history?: { sender: 'lead' | 'agent'; text?: string }[],
-  extraContext?: string
-): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean } | null> {
-  const historyText = buildHistoryText(history);
+const SEGMENT_LAYERS: Record<string, string> = {
+  beauty_studio: '',
+};
 
-  const prompt = `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
+/**
+ * Camada 1 (global, fixa, nunca muda por tenant/segmento) + Camada 2
+ * (segmento) combinadas — vão como `systemInstruction` da chamada ao
+ * Gemini, separadas do conteúdo variável (tenant + dinâmico + histórico),
+ * que vai no `contents` da mensagem. Isso é o que a Etapa 3 do roadmap do
+ * agente vertical pede: parar de concatenar tudo numa string só.
+ */
+function buildGlobalAndSegmentLayer(agent: AgentType, segment: string): string {
+  const segmentRules = SEGMENT_LAYERS[segment];
+  return `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
 
 ${AGENT_INSTRUCTIONS[agent]}
-${extraContext ? `\nAções já executadas na agenda real:\n${extraContext}\n` : ''}
-
+${segmentRules ? `\nRegras específicas do segmento:\n${segmentRules}\n` : ''}
 REGRAS DE ESTILO (sempre aplicar):
 1. Fracione a resposta em 1 a 3 "bolhas" curtas e sequenciais (como mensagens reais de WhatsApp), nunca um bloco único tipo e-mail/panfleto.
-2. Adapte vocabulário, saudações e tom ao idioma/dialeto do cliente e ao "toneOfVoice" abaixo (se vier voseo, gírias regionais, diminutivos — use-os naturalmente).
+2. Adapte vocabulário, saudações e tom ao idioma/dialeto do cliente e ao "toneOfVoice" do contexto do negócio (se vier voseo, gírias regionais, diminutivos — use-os naturalmente).
 3. Empatia e foco no benefício primeiro — nunca abra com currículo, dados técnicos ou lista de qualificações.
 4. Prefira perguntas abertas de diálogo a despejar informação toda de uma vez.
 5. Não invente preços, horários ou dados específicos que não estão no contexto — nesse caso, diga que vai confirmar e retornar em breve.
 6. Se o histórico mostra que vocês já se falaram, NUNCA se apresente de novo — continue a conversa naturalmente, como quem lembra o que já foi dito.
 7. Pode usar leve leveza/humor quando cabível, mas sempre com segurança e sem soar debochado.
-
-${contactName ? `Nome do cliente: ${contactName}.` : ''}
-${knowledgeBaseContext || ''}
-${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
-Nova mensagem do cliente: "${text}"
 
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
@@ -130,12 +126,43 @@ Classifique também a fase atual desta conversa em UMA destas opções:
 Responda ESTRITAMENTE em JSON no formato:
 {"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false}
 Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar.`;
+}
+
+/**
+ * Gera a resposta do agente especializado (já escolhido pelo router acima),
+ * fracionada em "bolhas" curtas — no estilo de atendimento humano real de
+ * WhatsApp, nunca um bloco único tipo e-mail. Baseado nas diretrizes
+ * consolidadas de posicionamento (fracionamento, dialeto/tom local vindo da
+ * Base de Conhecimento, empatia antes de credenciais, sem "speech" de
+ * vendedor).
+ *
+ * Camadas 1+2 (global/segmento, fixas) vão em `systemInstruction`. Camadas
+ * 3+4 (tenant/dinâmico) + contexto transacional (histórico/mensagem atual)
+ * vão em `contents`, como mensagens distintas — ver
+ * docs/AGENTE-VERTICAL-ARQUITETURA.md seções 1 e 7 (Etapa 3).
+ */
+async function generateSpecialistReply(
+  ai: GoogleGenAI,
+  agent: AgentType,
+  text: string,
+  segment: string,
+  contactName?: string,
+  knowledgeBaseContext?: string,
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  extraContext?: string
+): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean } | null> {
+  const historyText = buildHistoryText(history);
+  const systemInstruction = buildGlobalAndSegmentLayer(agent, segment);
+
+  const userContent = `${extraContext ? `Ações já executadas na agenda real:\n${extraContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
+${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
+Nova mensagem do cliente: "${text}"`;
 
   const response = await withTimeout(
     ai.models.generateContent({
       model: 'gemini-3.6-flash',
-      contents: [{ text: prompt }],
-      config: { responseMimeType: 'application/json' },
+      contents: [{ text: userContent }],
+      config: { systemInstruction, responseMimeType: 'application/json' },
     }),
     GEMINI_TIMEOUT_MS
   );
@@ -370,7 +397,8 @@ export async function generateAutoReplyForText(
   knowledgeBaseContext?: string,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   phone?: string,
-  calendarConfig?: CalendarConfig
+  calendarConfig?: CalendarConfig,
+  segment: string = DEFAULT_SEGMENT
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
@@ -390,7 +418,7 @@ export async function generateAutoReplyForText(
       forcedHumanConfirmation = hadError;
     }
 
-    const specialist = await generateSpecialistReply(ai, agent, text, contactName, knowledgeBaseContext, history, extraContext);
+    const specialist = await generateSpecialistReply(ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;

@@ -15,7 +15,8 @@
  *     --name "Nome do Negócio" --slug negocio-slug \
  *     --phone-number-id 123456789012345 --access-token "EAAxxxxx..." \
  *     [--waba-id 123456789] [--mode shared|byo] \
- *     [--currency PYG] [--locale es-PY] [--secondary-currency BRL] [--secondary-locale pt-BR]
+ *     [--currency PYG] [--locale es-PY] [--secondary-currency BRL] [--secondary-locale pt-BR] \
+ *     [--segment beauty_studio]
  *
  * --phone-number-id é o "Phone number ID" do WhatsApp Business Platform
  * (Meta Business Suite > WhatsApp Manager > API Setup) desse cliente — não é
@@ -49,6 +50,7 @@ async function main() {
     locale = 'es-PY',
     'secondary-currency': secondaryCurrency,
     'secondary-locale': secondaryLocale,
+    segment = 'beauty_studio',
   } = args;
 
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -78,6 +80,7 @@ async function main() {
       locale,
       secondary_currency: secondaryCurrency || null,
       secondary_locale: secondaryLocale || null,
+      segment,
     })
     .select('id')
     .single();
