@@ -232,11 +232,18 @@ dele). É a implementação do Bloco 2.D.4 (onboarding manual já decidido).
 
 ### Bloco 2.C — Google Calendar por tenant
 
-| ID | Issue | Prioridade | Esforço |
-|---|---|---|---|
-| 2.C.1 | `googleCalendar.ts`: trocar `storedRefreshToken` (variável única global) por token por `tenant_id` | P0 | M |
-| 2.C.2 | Callback OAuth (`/api/google-calendar/oauth-callback`) precisa saber pra qual tenant está conectando — codificar `tenantId` no parâmetro `state` do fluxo OAuth | P0 | S |
-| 2.C.3 | `appointmentStore`/`reminderJob.ts` já migrados no Bloco 2.A passam a rodar o job de lembretes iterando por tenant, não uma vez só globalmente | P0 | S |
+**Status: ✅ código pronto e no branch.**
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 2.C.1 | `googleCalendar.ts`: trocar `storedRefreshToken` (variável única global) por token por `tenant_id` | P0 | M | ✅ Feito no Bloco 2.A (`tenant_calendar_tokens`) |
+| 2.C.2 | Callback OAuth (`/api/google-calendar/oauth-callback`) precisa saber pra qual tenant está conectando — codificar `tenantId` no parâmetro `state` do fluxo OAuth | P0 | S | ✅ Feito — `state` é um JWT curto (10min) assinado com `tenantId`, gerado em `/connect` e verificado no callback público; cai no tenant legado se ausente/inválido |
+| 2.C.3 | `appointmentStore`/`reminderJob.ts` já migrados no Bloco 2.A passam a rodar o job de lembretes iterando por tenant, não uma vez só globalmente | P0 | S | ✅ Feito — `listConnectedCalendarTenants()` lista quem tem calendário conectado, o job roda uma vez por tenant, resolvendo a credencial Meta de cada um (`resolveMetaCredentialsForTenant`) |
+
+**Critério de aceite:** dois tenants diferentes conectam a própria conta do Google Calendar
+de forma independente, sem um sobrescrever o token do outro, e cada um recebe lembretes só
+dos próprios agendamentos. ✅ Atendido no código — falta só um segundo tenant real ter
+calendário conectado pra validar ponta a ponta (o primeiro é a Monique, já conectada).
 
 ### Bloco 2.D — Autenticação real e provisionamento de cliente
 

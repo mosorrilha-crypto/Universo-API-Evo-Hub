@@ -9,11 +9,11 @@
  * + appointmentStore.ts) — um evento criado manualmente direto no Google
  * Calendar não tem telefone associado, então não tem como avisar por WhatsApp.
  */
-import { listUpcomingEvents, localNaiveToUtcIso, isGoogleCalendarConnected, type CalendarConfig } from './googleCalendar';
+import { listUpcomingEvents, localNaiveToUtcIso, listConnectedCalendarTenants, type CalendarConfig } from './googleCalendar';
 import { listAllAppointments } from './appointmentStore';
 import { wasReminderSent, markReminderSent, type ReminderType } from './reminderStore';
 import { sendWhatsAppTextMessage } from './metaSend';
-import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
+import { resolveMetaCredentialsForTenant } from './tenantResolver';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -62,14 +62,33 @@ export interface ReminderJobDeps {
   intervalMs?: number;
 }
 
+/** Roda o job de lembretes pra todos os tenants que têm Google Calendar conectado agora (Bloco 2.C). */
 async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
-  // tenantId fixo: o job ainda roda uma única vez globalmente, não por
-  // tenant — iterar por tenant real é trabalho do Bloco 2.C.
-  const tenantId = LEGACY_DEFAULT_TENANT_ID;
   const cfg = deps.getCalendarConfig();
   if (!cfg?.clientId || !cfg?.clientSecret) return;
-  if (!(await isGoogleCalendarConnected(tenantId))) return;
 
+  let tenantIds: string[];
+  try {
+    tenantIds = await listConnectedCalendarTenants();
+  } catch (err) {
+    console.warn('⚠️  [Lembretes] Falha ao listar tenants com calendário conectado:', (err as Error).message);
+    return;
+  }
+
+  for (const tenantId of tenantIds) {
+    const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(tenantId, {
+      metaAccessToken: deps.metaAccessToken,
+      metaPhoneNumberId: deps.metaPhoneNumberId,
+    });
+    await checkAndSendRemindersForTenant(tenantId, cfg, { metaAccessToken, metaPhoneNumberId });
+  }
+}
+
+async function checkAndSendRemindersForTenant(
+  tenantId: string,
+  cfg: CalendarConfig,
+  creds: { metaAccessToken?: string; metaPhoneNumberId?: string }
+): Promise<void> {
   const today = todayDatePartsInTz();
   const tomorrow = addDays(today, 1);
   const afterTomorrow = addDays(today, 2);
@@ -106,7 +125,7 @@ async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
       : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛 Te esperamos!`;
 
     try {
-      await sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, appt.phone, message);
+      await sendWhatsAppTextMessage(creds.metaPhoneNumberId, creds.metaAccessToken, appt.phone, message);
       await markReminderSent(tenantId, event.id, type);
       console.log(`⏰ [Lembretes] Enviado (${type}) pra ${appt.phone} — evento ${event.id}`);
     } catch (err) {
