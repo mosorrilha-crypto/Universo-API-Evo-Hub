@@ -100,12 +100,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     if (!demoMode) {
       setIsSubmitting(true);
       try {
-        const tenantId = presetUser?.tenantId || 'main-tenant';
+        // Nunca manda um tenantId adivinhado (os cards de preset acima são
+        // perfis de demonstração, com tenantId de mock tipo "tenant_004" —
+        // nunca bate com o tenant_id real/UUID de um operador de verdade no
+        // Supabase). O backend busca só por e-mail e devolve o tenant real
+        // do operador encontrado.
         const email = useCustomLogin ? customEmail : presetUser!.email;
         const res = await apiFetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tenantId, email, password }),
+          body: JSON.stringify({ email, password }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -113,7 +117,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         }
         const authenticatedUser: UserProfile = {
           id: data.operator.email,
-          tenantId,
+          tenantId: data.operator.tenantId,
           name: data.operator.name,
           email: data.operator.email,
           role: data.operator.role,

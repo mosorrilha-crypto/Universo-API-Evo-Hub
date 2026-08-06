@@ -11,7 +11,7 @@ type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
 
 class FakeQueryBuilder {
-  private filters: Array<[string, any]> = [];
+  private filters: Array<['eq' | 'ilike', string, any]> = [];
   private wantSelect = false;
 
   constructor(
@@ -22,7 +22,13 @@ class FakeQueryBuilder {
   ) {}
 
   eq(column: string, value: any) {
-    this.filters.push([column, value]);
+    this.filters.push(['eq', column, value]);
+    return this;
+  }
+
+  /** Simplificado pra caso de uso real (match exato case-insensitive, sem wildcard "%") — suficiente pros testes de login por e-mail. */
+  ilike(column: string, value: any) {
+    this.filters.push(['ilike', column, value]);
     return this;
   }
 
@@ -36,7 +42,10 @@ class FakeQueryBuilder {
   }
 
   private matches(row: Row): boolean {
-    return this.filters.every(([column, value]) => row[column] === value);
+    return this.filters.every(([kind, column, value]) => {
+      if (kind === 'ilike') return String(row[column] ?? '').toLowerCase() === String(value ?? '').toLowerCase();
+      return row[column] === value;
+    });
   }
 
   private run(): { data: Row[] | null; error: null } {
