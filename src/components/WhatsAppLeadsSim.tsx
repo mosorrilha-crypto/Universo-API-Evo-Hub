@@ -526,11 +526,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setLeads((prev) =>
         prev.map((l) => (l.id === targetLead.id ? { ...l, fullAnalysis } : l))
       );
-      lastAnalyzedCountRef.current[targetLead.id] = (targetLead.messages || []).length;
     } catch (err: any) {
       console.error('Erro ao analisar conversa completa:', err);
       setErrorMsg(err.message || 'Falha ao analisar a conversa com o Gemini IA.');
     } finally {
+      // Registra a contagem mesmo quando falha — senão a reanálise automática
+      // (debounce de 5s) tenta de novo pra sempre a cada erro, num loop que
+      // trava o painel entre "Analisando..." e erro. Numa falha, só tenta de
+      // novo quando chegar mensagem nova ou o usuário clicar "Atualizar".
+      lastAnalyzedCountRef.current[targetLead.id] = (targetLead.messages || []).length;
       setIsAnalyzingConversation(false);
     }
   };

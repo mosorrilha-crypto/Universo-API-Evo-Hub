@@ -336,6 +336,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  // Edita nome/preço/descrição de um produto já cadastrado direto no card —
+  // sem isso, a única forma de corrigir algo era apagar e recriar do zero
+  // (perdendo foto de exemplo, promoção etc. já configurados).
+  const handleProductFieldChange = (id: string, field: 'name' | 'price' | 'description', value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
+    }));
+  };
+
   const handleProductImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -776,10 +786,28 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
-                  <div>
-                    <h4 className="text-xs font-bold text-white pr-6">{prod.name}</h4>
-                    <span className="text-xs font-extrabold text-emerald-400 block mt-1">{prod.price}</span>
-                    <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">{prod.description}</p>
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      value={prod.name}
+                      onChange={(e) => handleProductFieldChange(prod.id, 'name', e.target.value)}
+                      className="w-full pr-6 bg-transparent text-xs font-bold text-white focus:outline-none focus:bg-slate-900 rounded px-1 -mx-1 py-0.5"
+                      title="Editar nome"
+                    />
+                    <input
+                      type="text"
+                      value={prod.price}
+                      onChange={(e) => handleProductFieldChange(prod.id, 'price', e.target.value)}
+                      className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded px-1 -mx-1 py-0.5"
+                      title="Editar preço"
+                    />
+                    <textarea
+                      rows={2}
+                      value={prod.description}
+                      onChange={(e) => handleProductFieldChange(prod.id, 'description', e.target.value)}
+                      className="w-full bg-transparent text-[11px] text-slate-400 leading-relaxed focus:outline-none focus:bg-slate-900 rounded px-1 -mx-1 py-0.5 resize-none"
+                      title="Editar descrição"
+                    />
                   </div>
                   <div className="border-t border-slate-800 pt-2 space-y-1.5">
                     <span className="text-[10px] text-amber-400 font-semibold block">Promoção (opcional, expira sozinha):</span>
