@@ -109,7 +109,8 @@ export interface MetaCAPIEvent {
   pixelId: string;
   status: 'sent' | 'simulated_ok' | 'error';
   testEventCode?: string;
-  matchQualityScore: number;
+  /** Meta não retorna essa métrica síncrona na resposta da Conversions API — só fica visível no Events Manager. Ausente em eventos reais. */
+  matchQualityScore?: number;
   userHash: {
     phoneHash: string;
     emailHash?: string;

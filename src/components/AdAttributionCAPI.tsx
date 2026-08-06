@@ -53,19 +53,19 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
     try {
       const saved = localStorage.getItem('meta_capi_config');
       return saved ? JSON.parse(saved) : {
-        pixelId: '891029384712039',
-        accessToken: 'EAAG1234567890_Meta_Graph_API_Token_Demo_SecretKey',
-        testEventCode: 'TEST98765',
-        autoSendOnQualification: true,
-        enabled: true,
+        pixelId: '',
+        accessToken: '',
+        testEventCode: '',
+        autoSendOnQualification: false,
+        enabled: false,
       };
     } catch {
       return {
-        pixelId: '891029384712039',
-        accessToken: 'EAAG1234567890_Meta_Graph_API_Token_Demo_SecretKey',
-        testEventCode: 'TEST98765',
-        autoSendOnQualification: true,
-        enabled: true,
+        pixelId: '',
+        accessToken: '',
+        testEventCode: '',
+        autoSendOnQualification: false,
+        enabled: false,
       };
     }
   });
@@ -191,11 +191,11 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
           leadName: targetLead.name,
           eventName: eventName,
           eventTime: data.eventTime || new Date().toISOString(),
-          pixelId: capiConfig.pixelId || '891029384712039',
+          pixelId: capiConfig.pixelId,
           status: 'sent',
           testEventCode: capiConfig.testEventCode,
-          matchQualityScore: data.matchQualityScore || 8.8,
-          userHash: data.userHash || { phoneHash: 'sha256_hashed...' },
+          matchQualityScore: data.matchQualityScore,
+          userHash: data.userHash,
           eventValue: value,
           responsePayload: data,
         };
@@ -992,9 +992,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               </div>
 
               <span className="text-xs font-semibold text-emerald-400 bg-emerald-950 px-3 py-1 rounded-lg border border-emerald-800">
-                Match Score: {capiEventsLog.length > 0
-                  ? (capiEventsLog.reduce((sum, l) => sum + (l.matchQualityScore || 0), 0) / capiEventsLog.length).toFixed(1)
-                  : '—'} / 10
+                {(() => {
+                  const scored = capiEventsLog.filter((l): l is typeof l & { matchQualityScore: number } => typeof l.matchQualityScore === 'number');
+                  return scored.length > 0
+                    ? `Match Score: ${(scored.reduce((sum, l) => sum + l.matchQualityScore, 0) / scored.length).toFixed(1)} / 10`
+                    : 'Match Score indisponível (Meta não retorna score síncrono via API)';
+                })()}
               </span>
             </div>
 
