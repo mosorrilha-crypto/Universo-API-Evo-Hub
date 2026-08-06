@@ -3,11 +3,18 @@
  * (phone_number_id da Meta) assim que uma mensagem chega, e qual credencial
  * usar pra responder por esse número.
  *
- * Se o número não estiver cadastrado em `tenant_meta_credentials` (cliente
- * ainda não onboardado — ver scripts/create-tenant.ts), cai no tenant legado
- * + credencial compartilhada (modo "shared": nosso App da Meta, configurado
- * via META_ACCESS_TOKEN/META_PHONE_NUMBER_ID) — exatamente o comportamento
- * de hoje, preservado como fallback.
+ * Regra de fallback (revisada após revisão de segurança de 06/08/2026 — ver
+ * `docs/AGENTE-VERTICAL-ARQUITETURA.md`, seção "Isolamento e riscos"):
+ *   - phone_number_id bate com `tenant_meta_credentials` → esse tenant.
+ *   - phone_number_id ausente, ou igual ao número compartilhado configurado
+ *     (META_PHONE_NUMBER_ID) → tenant legado (Monique), que é o dono real
+ *     desse número hoje.
+ *   - phone_number_id presente mas não bate com nenhum tenant conhecido nem
+ *     com o número compartilhado → **canal desconhecido**. Antes disso caía
+ *     silenciosamente no tenant legado (risco real de vazamento cross-tenant
+ *     assim que um segundo cliente existir); agora retorna `unknownChannel:
+ *     true` e nenhum dado é gravado em tenant nenhum — quem chama decide
+ *     descartar e logar pra investigação manual.
  */
 import { getDb } from './db';
 import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
@@ -16,6 +23,8 @@ export interface ResolvedTenant {
   tenantId: string;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  /** true quando o phone_number_id não bate com nenhum tenant cadastrado nem com o número compartilhado — não escrever em nenhum tenant. */
+  unknownChannel?: boolean;
 }
 
 export interface SharedMetaCredentials {
@@ -43,7 +52,12 @@ export async function resolveTenantByPhoneNumberId(
         };
       }
     } catch (err) {
-      console.warn('⚠️  [Tenant] Falha ao resolver tenant por phone_number_id, usando tenant legado:', (err as Error).message);
+      console.warn('⚠️  [Tenant] Falha ao resolver tenant por phone_number_id:', (err as Error).message);
+      return { tenantId: '', unknownChannel: true };
+    }
+    if (shared.metaPhoneNumberId && phoneNumberId !== shared.metaPhoneNumberId) {
+      console.warn(`🚫 [Tenant] phone_number_id "${phoneNumberId}" não pertence a nenhum tenant cadastrado nem ao número compartilhado — mensagem descartada como canal desconhecido, não gravada em tenant nenhum.`);
+      return { tenantId: '', unknownChannel: true };
     }
   }
   return { tenantId: LEGACY_DEFAULT_TENANT_ID, metaAccessToken: shared.metaAccessToken, metaPhoneNumberId: shared.metaPhoneNumberId };
