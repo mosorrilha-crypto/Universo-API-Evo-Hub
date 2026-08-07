@@ -148,6 +148,13 @@ export interface AgentProduct {
   exampleImageMimeType?: string;
   promoPrice?: string;
   promoUntil?: string;
+  /** Valor numérico do preço regular (Etapa 2 do roadmap) — opcional, fonte de verdade pra cálculo quando preenchido. */
+  priceAmount?: number;
+  currency?: string;
+  /** Duração real da sessão em minutos — usada pro agente calcular o fim do evento no Google Calendar em vez de um fallback fixo. */
+  durationMinutes?: number;
+  /** false = não é um serviço agendável por si só (ex: Retoque). Default true (undefined = agendável). */
+  bookable?: boolean;
 }
 
 export interface AgentFAQ {

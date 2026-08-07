@@ -23,16 +23,28 @@ export async function saveMediaImage(
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 
-  await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/media/${encodeURIComponent(messageId)}`, {
-    method: 'POST',
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`,
-      'Content-Type': mimeType,
-      'x-upsert': 'true',
-    },
-    body: buffer as any,
-  }).catch((err) => console.warn('⚠️  [Mídia] Falha ao salvar imagem recebida:', err.message));
+  // Achado numa auditoria externa: só havia .catch() pra erro de rede — uma
+  // resposta 401/403/500 do Storage (ex: bucket/policy mal configurados)
+  // "terminava com sucesso" sem logar nada. Uma foto de comprovante de
+  // pagamento podia se perder silenciosamente, sem nenhum aviso no log.
+  try {
+    const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/media/${encodeURIComponent(messageId)}`, {
+      method: 'POST',
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+        'Content-Type': mimeType,
+        'x-upsert': 'true',
+      },
+      body: buffer as any,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.warn(`⚠️  [Mídia] Falha ao salvar imagem recebida (message_id=${messageId}): HTTP ${res.status} — ${body.slice(0, 300)}`);
+    }
+  } catch (err: any) {
+    console.warn(`⚠️  [Mídia] Falha ao salvar imagem recebida (message_id=${messageId}):`, err.message);
+  }
 }
 
 export async function getMediaImage(

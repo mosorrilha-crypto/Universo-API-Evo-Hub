@@ -31,7 +31,16 @@ export const App: React.FC = () => {
   // Tenants & Active Company
   const [tenants, setTenants] = useState<Tenant[]>(() => {
     const saved = localStorage.getItem('saas_tenants');
-    return saved ? JSON.parse(saved) : INITIAL_TENANTS;
+    if (!saved) return INITIAL_TENANTS;
+    // Migração (07/08/2026): navegadores que já tinham os tenants fictícios
+    // de demonstração salvos no localStorage (Drogaria, MetaLeads, FitLife)
+    // continuariam vendo esses cards mesmo depois de removidos do código —
+    // filtra pra manter só os IDs conhecidos (o real da Monique) e cai pro
+    // INITIAL_TENANTS atual se não sobrar nenhum tenant reconhecido.
+    const parsed = JSON.parse(saved) as Tenant[];
+    const knownIds = new Set(INITIAL_TENANTS.map((t) => t.id));
+    const filtered = parsed.filter((t) => knownIds.has(t.id));
+    return filtered.length ? filtered : INITIAL_TENANTS;
   });
   const [activeTenant, setActiveTenant] = useState<Tenant>(tenants[0] || INITIAL_TENANTS[0]);
 
@@ -268,7 +277,14 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'whatsapp' && (
+        {/* Sempre montado (visibilidade controlada por CSS, não por
+            montagem/desmontagem condicional) — desmontar ao trocar de aba e
+            remontar ao voltar fazia o componente reconstruir seu estado a
+            partir do localStorage desatualizado (`saas_crm_leads`),
+            perdendo temporariamente mensagens reais recém-chegadas do
+            polling até o próximo ciclo de 8s. Bug real relatado em
+            produção: mensagem aparecia e sumia da conversa. */}
+        <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
           <WhatsAppLeadsSim
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
@@ -282,7 +298,7 @@ export const App: React.FC = () => {
             }}
             onDeleteLead={handleDeleteLead}
           />
-        )}
+        </div>
 
         {activeTab === 'crm' && (
           <OperatorCRM

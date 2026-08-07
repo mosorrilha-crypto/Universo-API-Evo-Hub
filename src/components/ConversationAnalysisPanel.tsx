@@ -126,6 +126,12 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
                   Atualizado às {analysis.lastUpdated}
                 </span>
               )}
+              {analysis.source === 'fallback' && (
+                <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[9px] font-bold border border-rose-500/30 flex items-center gap-0.5">
+                  <AlertTriangle className="w-2.5 h-2.5" />
+                  Análise indisponível
+                </span>
+              )}
               {analysis.detectedLanguage && (
                 <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[9px] font-bold border border-blue-500/30 flex items-center gap-0.5">
                   <Globe className="w-2.5 h-2.5" />
@@ -360,36 +366,45 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
         ) : null}
 
         {/* 2. Mensagem Original Pronta no Idioma do Lead para Envio no WhatsApp */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-slate-400 font-semibold flex items-center gap-1">
-              <span>Mensagem Pronta para Envio:</span>
-              <span className="text-emerald-400 font-bold">
-                ({analysis.detectedLanguage || 'Português'})
-              </span>
-            </span>
-            <button
-              onClick={handleCopyReply}
-              className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
-            >
-              <Copy className="w-3 h-3" />
-              <span>{copied ? 'Copiado!' : 'Copiar'}</span>
-            </button>
-          </div>
+        {/* Achado numa auditoria pós-lançamento: quando a análise é fallback
+            (Gemini indisponível), suggestedSmartReply vem vazio de propósito
+            — nunca mostrar a caixa de "mensagem pronta pra envio" nem o botão
+            de disparo nesse caso, pra nunca deixar o operador mandar pro
+            cliente algo que não foi gerado de verdade. */}
+        {analysis.source !== 'fallback' && analysis.suggestedSmartReply && (
+          <>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-400 font-semibold flex items-center gap-1">
+                  <span>Mensagem Pronta para Envio:</span>
+                  <span className="text-emerald-400 font-bold">
+                    ({analysis.detectedLanguage || 'Português'})
+                  </span>
+                </span>
+                <button
+                  onClick={handleCopyReply}
+                  className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{copied ? 'Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
 
-          <p className="text-xs text-slate-100 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed italic whitespace-pre-wrap">
-            "{analysis.suggestedSmartReply}"
-          </p>
-        </div>
+              <p className="text-xs text-slate-100 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed italic whitespace-pre-wrap">
+                "{analysis.suggestedSmartReply}"
+              </p>
+            </div>
 
-        {onApplySuggestedReply && (
-          <button
-            onClick={() => onApplySuggestedReply(analysis.suggestedSmartReply)}
-            className="w-full py-2 px-3 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center space-x-1.5 shadow-md transition-all cursor-pointer"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>Enviar esta resposta no Chat do WhatsApp</span>
-          </button>
+            {onApplySuggestedReply && (
+              <button
+                onClick={() => onApplySuggestedReply(analysis.suggestedSmartReply)}
+                className="w-full py-2 px-3 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center space-x-1.5 shadow-md transition-all cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Enviar esta resposta no Chat do WhatsApp</span>
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

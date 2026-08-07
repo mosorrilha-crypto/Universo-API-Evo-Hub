@@ -11,6 +11,12 @@ export interface DownloadedAudio {
   mimeType: string;
 }
 
+// Achado numa auditoria externa: nenhum fetch aqui tinha timeout, e a fila
+// de transcrição (transcriptionQueue.ts) processa um job por vez, GLOBAL pra
+// todos os tenants — uma chamada de rede travada indefinidamente bloqueava a
+// transcrição de áudio de todo mundo, não só do tenant afetado.
+const MEDIA_DOWNLOAD_TIMEOUT_MS = 20_000;
+
 /**
  * Meta Cloud API: primeiro resolve a URL temporária e assinada da mídia
  * (GET /{media-id}), depois baixa o binário dessa URL com o mesmo token.
@@ -23,6 +29,7 @@ export async function downloadMetaMedia(mediaId: string, accessToken: string | u
 
   const metaRes = await fetch(`https://graph.facebook.com/v23.0/${mediaId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(MEDIA_DOWNLOAD_TIMEOUT_MS),
   });
   if (!metaRes.ok) {
     throw new Error(`Falha ao resolver URL da mídia Meta (media_id=${mediaId}): HTTP ${metaRes.status}`);
@@ -34,6 +41,7 @@ export async function downloadMetaMedia(mediaId: string, accessToken: string | u
 
   const mediaRes = await fetch(metaInfo.url, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(MEDIA_DOWNLOAD_TIMEOUT_MS),
   });
   if (!mediaRes.ok) {
     throw new Error(`Falha ao baixar bytes da mídia Meta (media_id=${mediaId}): HTTP ${mediaRes.status}`);
@@ -66,6 +74,7 @@ export async function downloadEvolutionMedia(
       apikey: apiKey,
     },
     body: JSON.stringify({ message: { key: messageKey }, convertToMp4: false }),
+    signal: AbortSignal.timeout(MEDIA_DOWNLOAD_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -109,7 +118,7 @@ export async function downloadEvoHubMedia(
 
   let resolveRes: Response | undefined;
   for (const url of resolveUrls) {
-    resolveRes = await fetch(url, { headers });
+    resolveRes = await fetch(url, { headers, signal: AbortSignal.timeout(MEDIA_DOWNLOAD_TIMEOUT_MS) });
     if (resolveRes.ok) break;
   }
   if (!resolveRes || !resolveRes.ok) {
@@ -121,7 +130,7 @@ export async function downloadEvoHubMedia(
     throw new Error(`Resposta do Evo Hub não trouxe URL de download para media_id=${mediaId}.`);
   }
 
-  const mediaRes = await fetch(info.url, { headers });
+  const mediaRes = await fetch(info.url, { headers, signal: AbortSignal.timeout(MEDIA_DOWNLOAD_TIMEOUT_MS) });
   if (!mediaRes.ok) {
     throw new Error(`Falha ao baixar bytes da mídia via Evo Hub (media_id=${mediaId}): HTTP ${mediaRes.status}`);
   }

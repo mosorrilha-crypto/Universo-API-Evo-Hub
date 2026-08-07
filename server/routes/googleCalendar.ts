@@ -31,11 +31,25 @@ interface GoogleCalendarRouterDeps {
  * qual tenant devolver o refresh token — antes disso, todo mundo caía no
  * tenant legado único.
  */
+/**
+ * tenantId do operador autenticado. Achado numa auditoria externa: caía
+ * silenciosamente no tenant legado quando o JWT não trazia tenantId, em vez
+ * de rejeitar — mesmo padrão já corrigido no roteamento de webhook por
+ * phone_number_id (Bloco 2.B). Todo fluxo de emissão de token hoje sempre
+ * inclui tenantId, então isso não deveria disparar em uso normal.
+ */
+function tenantOf(req: AuthenticatedRequest): string {
+  if (!req.user?.tenantId) {
+    throw new Error('Sessão autenticada sem tenantId — recusado (nunca cair no tenant legado por segurança).');
+  }
+  return req.user.tenantId;
+}
+
 export function createGoogleCalendarRouter({ authenticateToken, googleClientId, googleClientSecret, googleRedirectUri, jwtSecret }: GoogleCalendarRouterDeps): Router {
   const router = Router();
 
   router.get('/api/google-calendar/status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const tenantId = req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
+    const tenantId = tenantOf(req);
     res.json({ connected: await isGoogleCalendarConnected(tenantId) });
   }));
 
@@ -43,7 +57,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     if (!googleClientId || !googleClientSecret) {
       return res.status(500).json({ error: 'GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET não configurados no servidor.' });
     }
-    const tenantId = req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
+    const tenantId = tenantOf(req);
     const state = signOAuthState(tenantId, jwtSecret);
     const url = getGoogleAuthUrl(googleClientId, googleClientSecret, googleRedirectUri, state);
     res.json({ url });
@@ -74,7 +88,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   }));
 
   router.post('/api/google-calendar/disconnect', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const tenantId = req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
+    const tenantId = tenantOf(req);
     await disconnectGoogleCalendar(tenantId);
     res.json({ success: true });
   }));

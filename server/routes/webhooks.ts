@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
-import { markProcessedIfNew } from '../services/idempotency';
+import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
@@ -66,7 +66,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
         await markAsReadAndShowTyping(phoneNumberId, token, messageId);
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, { phoneNumberId, accessToken: token });
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, { phoneNumberId, accessToken: token }, messageId);
         if (!result) {
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;
@@ -117,54 +117,66 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         continue;
       }
 
-      const resolvedTenant = await resolveTenantByPhoneNumberId(msg.phoneNumberId, { metaAccessToken, metaPhoneNumberId });
-      if (resolvedTenant.unknownChannel) {
-        // Canal não identificado (Bloco 2.B, revisão de segurança 06/08/2026):
-        // nunca gravar em tenant nenhum quando não dá pra provar de quem é a
-        // mensagem — evita repetir o vazamento cross-tenant que existia
-        // quando isso caía silenciosamente no tenant legado.
-        console.warn(`⚠️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} de canal desconhecido (phone_number_id="${msg.phoneNumberId}") — descartada sem gravar em nenhum tenant.`);
-        continue;
-      }
-      const { tenantId } = resolvedTenant;
-
-      if (msg.referral?.ctwaClid) {
-        attachAdReferralIfMissing(tenantId, msg.from, { ctwaClid: msg.referral.ctwaClid, adSourceId: msg.referral.sourceId, adHeadline: msg.referral.headline }).catch((err) =>
-          console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar ctwa_clid de ${msg.from}:`, err.message)
-        );
-      }
-
-      if (msg.type === 'audio') {
-        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
-        enqueueTranscriptionJob(msg, resolvedTenant);
-        enqueued += 1;
-      } else if (msg.type === 'text') {
-        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
-        if (msg.text && isPaymentRelated(msg.text)) {
-          await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
+      // Tudo daqui pra baixo precisa de try/catch: markProcessedIfNew já
+      // marcou essa mensagem como "vista" — se algo falhar sem desfazer
+      // isso, a mensagem do lead some pra sempre (a reentrega da Meta, que
+      // existe exatamente pra cobrir falha transitória, cai no `continue`
+      // acima na próxima tentativa e nunca é gravada). Achado numa auditoria
+      // pós-lançamento; corrigido pra sempre desmarcar em caso de erro real,
+      // permitindo a reentrega tentar de novo.
+      try {
+        const resolvedTenant = await resolveTenantByPhoneNumberId(msg.phoneNumberId, { metaAccessToken, metaPhoneNumberId });
+        if (resolvedTenant.unknownChannel) {
+          // Canal não identificado (Bloco 2.B, revisão de segurança 06/08/2026):
+          // nunca gravar em tenant nenhum quando não dá pra provar de quem é a
+          // mensagem — evita repetir o vazamento cross-tenant que existia
+          // quando isso caía silenciosamente no tenant legado.
+          console.warn(`⚠️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} de canal desconhecido (phone_number_id="${msg.phoneNumberId}") — descartada sem gravar em nenhum tenant.`);
+          continue;
         }
-        if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
-      } else if (msg.type === 'image') {
-        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
-        if (msg.metaImage) {
-          downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
-            .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
-            .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
+        const { tenantId } = resolvedTenant;
+
+        if (msg.referral?.ctwaClid) {
+          attachAdReferralIfMissing(tenantId, msg.from, { ctwaClid: msg.referral.ctwaClid, adSourceId: msg.referral.sourceId, adHeadline: msg.referral.headline }).catch((err) =>
+            console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar ctwa_clid de ${msg.from}:`, err.message)
+          );
         }
-        // Etapa 8 (fluxo de verificação de pagamento) — uma imagem chegando
-        // com um agendamento ativo ainda sem comprovante registrado é o
-        // caso mais comum de "cliente mandou o comprovante da seña". Nunca
-        // confirma nada sozinho: só marca pending_verification e escala pra
-        // um operador olhar de verdade (ver server/services/appointmentStore.ts).
-        getAppointmentForPhone(tenantId, msg.from)
-          .then(async (appointment) => {
-            if (!appointment || appointment.paymentStatus) return;
-            await markPaymentPendingVerification(tenantId, msg.from, msg.messageId);
-            await logEscalation(tenantId, msg.from, msg.contactName, 'Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno', '[imagem]');
-          })
-          .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
-      } else {
-        await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: `[${msg.type}]`, timestamp: nowLabel });
+
+        if (msg.type === 'audio') {
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
+          enqueueTranscriptionJob(msg, resolvedTenant);
+          enqueued += 1;
+        } else if (msg.type === 'text') {
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+          if (msg.text && isPaymentRelated(msg.text)) {
+            await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
+          }
+          if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
+        } else if (msg.type === 'image') {
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
+          if (msg.metaImage) {
+            downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
+              .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
+              .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
+          }
+          // Etapa 8 (fluxo de verificação de pagamento) — uma imagem chegando
+          // com um agendamento ativo ainda sem comprovante registrado é o
+          // caso mais comum de "cliente mandou o comprovante da seña". Nunca
+          // confirma nada sozinho: só marca pending_verification e escala pra
+          // um operador olhar de verdade (ver server/services/appointmentStore.ts).
+          getAppointmentForPhone(tenantId, msg.from)
+            .then(async (appointment) => {
+              if (!appointment || appointment.paymentStatus) return;
+              await markPaymentPendingVerification(tenantId, msg.from, msg.messageId);
+              await logEscalation(tenantId, msg.from, msg.contactName, 'Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno', '[imagem]');
+            })
+            .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
+        } else {
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: `[${msg.type}]`, timestamp: nowLabel });
+        }
+      } catch (err: any) {
+        unmarkProcessed(msg.messageId);
+        console.error(`❌ [Webhook ${msg.provider}] Falha ao processar mensagem ${msg.messageId} de ${msg.from} — desmarcada pra reentrega tentar de novo:`, err.message);
       }
     }
     return enqueued;
@@ -193,11 +205,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   };
 
   const handleWebhookPayload = async (req: any, res: any) => {
-    // Check HMAC signature if Meta header is present
+    // Achado numa auditoria externa: a checagem só rodava "se o header
+    // vier" — um POST sem x-hub-signature-256/x-hub-signature pulava a
+    // validação inteira e era processado como legítimo (fail-open), mesmo
+    // com o app secret configurado. Isso permitia forjar mensagens de
+    // WhatsApp inteiras só omitindo o header. Corrigido pra fail-closed,
+    // igual ao handleEvoHubWebhook já fazia: com o secret configurado, o
+    // header é obrigatório.
     const signatureHeader = (req.headers['x-hub-signature-256'] || req.headers['x-hub-signature']) as string | undefined;
     const appSecret = process.env.META_APP_SECRET || process.env.META_API_TOKEN;
 
-    if (signatureHeader && appSecret) {
+    if (appSecret) {
+      if (!signatureHeader) {
+        console.warn('❌ Webhook Meta: assinatura ausente com app secret configurado. Rejeitando requisição.');
+        return res.status(403).json({ error: 'Assinatura ausente.' });
+      }
       try {
         const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
         const hash = crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
