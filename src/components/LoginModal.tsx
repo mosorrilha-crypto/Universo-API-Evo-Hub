@@ -162,10 +162,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
 
     // Per-user password mapping for Demo / Production Preset Profiles
+    // usr_carlos/usr_fernanda removidos junto com as empresas fictícias
+    // (tenant_001/tenant_002) — ver src/data/mockTenants.ts e server/routes/auth.ts.
     const USER_PASSWORDS: Record<string, string[]> = {
       usr_monique: ['monique2026', 'admin123', '123456'],
-      usr_carlos: ['viva1234', '123456'],
-      usr_fernanda: ['meta2026', '123456'],
       usr_ricardo: ['master2026#', 'adminMaster123'], // Enforce strict password for SaaS Master Admin
     };
 
@@ -339,19 +339,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <Lock className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
               </div>
               {demoMode ? (
-                <p className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
-                  <span>
-                    Senha do perfil selecionado:{' '}
-                    <span className="text-emerald-400 font-mono font-bold">
-                      {selectedUserId === 'usr_ricardo'
-                        ? 'master2026#'
-                        : selectedUserId === 'usr_monique'
-                        ? 'monique2026'
-                        : selectedUserId === 'usr_fernanda'
-                        ? 'meta2026'
-                        : 'viva1234'}
-                    </span>
-                  </span>
+                // Achado no PLANO-EVOLUCAO.md (item 0.1.7, crítico pendente) e
+                // confirmado numa auditoria externa: mostrar a senha do perfil
+                // em texto claro na própria tela de login é uma exposição
+                // desnecessária, mesmo em modo demo — não ajuda ninguém que já
+                // não tenha acesso ao cadastro fixo, e normaliza expor senha
+                // na UI. Removido; quem precisar da senha demo consulta a
+                // documentação interna, não a tela de login.
+                <p className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                  <span>Use a senha cadastrada para este perfil de demonstração.</span>
                   <span className="text-slate-500">Validação Estreita v2.0</span>
                 </p>
               ) : (

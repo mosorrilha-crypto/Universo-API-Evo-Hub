@@ -54,7 +54,9 @@ export function createTelemetryRouter({ authenticateToken, rateLimiter }: Teleme
 
   // Status real da fila de transcrição (server/services/transcriptionQueue.ts) —
   // substitui os números fixos que existiam aqui antes (Epic 5.1.3 do roadmap).
-  router.get('/api/queue/status', (req, res) => {
+  // Achado numa auditoria externa: única rota deste arquivo sem
+  // authenticateToken, expondo métricas internas da fila sem autenticação.
+  router.get('/api/queue/status', authenticateToken, (req, res) => {
     res.json(getQueueStats());
   });
 

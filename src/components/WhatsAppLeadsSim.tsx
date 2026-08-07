@@ -463,32 +463,46 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [selectedLead?.id, (selectedLead as any)?.isReal]);
 
   // Filtered Leads according to search and WhatsApp filter tabs
-  const filteredLeads = leads.filter((lead) => {
-    const matchesSearch =
-      lead.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      lead.phone.includes(searchQuery) ||
-      lead.textContent.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredLeads = leads
+    .filter((lead) => {
+      const matchesSearch =
+        lead.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        lead.phone.includes(searchQuery) ||
+        lead.textContent.toLowerCase().includes(searchQuery.toLowerCase());
 
-    if (!matchesSearch) return false;
+      if (!matchesSearch) return false;
 
-    if (activeTabFilter === 'unread') {
-      return lead.status === 'pending';
-    }
-    if (activeTabFilter === 'hot') {
-      return (
-        lead.fullAnalysis?.dealProbability !== undefined && lead.fullAnalysis.dealProbability >= 60
-      );
-    }
-    if (activeTabFilter === 'international') {
-      return (
-        lead.phone.startsWith('+1') ||
-        lead.phone.startsWith('+34') ||
-        lead.fullAnalysis?.detectedLanguage?.toLowerCase().includes('inglês') ||
-        lead.fullAnalysis?.detectedLanguage?.toLowerCase().includes('espanhol')
-      );
-    }
-    return true;
-  });
+      if (activeTabFilter === 'unread') {
+        return lead.status === 'pending';
+      }
+      if (activeTabFilter === 'hot') {
+        return (
+          lead.fullAnalysis?.dealProbability !== undefined && lead.fullAnalysis.dealProbability >= 60
+        );
+      }
+      if (activeTabFilter === 'international') {
+        return (
+          lead.phone.startsWith('+1') ||
+          lead.phone.startsWith('+34') ||
+          lead.fullAnalysis?.detectedLanguage?.toLowerCase().includes('inglês') ||
+          lead.fullAnalysis?.detectedLanguage?.toLowerCase().includes('espanhol')
+        );
+      }
+      return true;
+    })
+    // Achado a pedido do dono do tenant: a lista não se comportava como o
+    // WhatsApp real — uma conversa recebendo mensagem nova não subia pro
+    // topo, e conversa nova entrava no fim da lista em vez do topo. Ordena
+    // pela atividade mais recente (lead.timestamp é o `updated_at` real do
+    // backend pra conversas reais). Quando o timestamp não é uma data válida
+    // (leads de demonstração com hora solta tipo "14:32", ou "Agora mesmo"),
+    // mantém a ordem relativa em vez de embaralhar a lista.
+    .sort((a, b) => {
+      const dateA = new Date(a.timestamp).getTime();
+      const dateB = new Date(b.timestamp).getTime();
+      if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
+      return dateB - dateA;
+    });
 
   // Handlers to delete conversation, clear history, or delete single message
   const handleDeleteConversation = async (leadId: string, leadName: string) => {

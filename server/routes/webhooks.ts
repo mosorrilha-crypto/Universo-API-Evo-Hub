@@ -205,11 +205,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   };
 
   const handleWebhookPayload = async (req: any, res: any) => {
-    // Check HMAC signature if Meta header is present
+    // Achado numa auditoria externa: a checagem só rodava "se o header
+    // vier" — um POST sem x-hub-signature-256/x-hub-signature pulava a
+    // validação inteira e era processado como legítimo (fail-open), mesmo
+    // com o app secret configurado. Isso permitia forjar mensagens de
+    // WhatsApp inteiras só omitindo o header. Corrigido pra fail-closed,
+    // igual ao handleEvoHubWebhook já fazia: com o secret configurado, o
+    // header é obrigatório.
     const signatureHeader = (req.headers['x-hub-signature-256'] || req.headers['x-hub-signature']) as string | undefined;
     const appSecret = process.env.META_APP_SECRET || process.env.META_API_TOKEN;
 
-    if (signatureHeader && appSecret) {
+    if (appSecret) {
+      if (!signatureHeader) {
+        console.warn('❌ Webhook Meta: assinatura ausente com app secret configurado. Rejeitando requisição.');
+        return res.status(403).json({ error: 'Assinatura ausente.' });
+      }
       try {
         const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
         const hash = crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');

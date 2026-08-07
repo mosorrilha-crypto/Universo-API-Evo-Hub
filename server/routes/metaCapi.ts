@@ -83,8 +83,9 @@ export function createMetaCapiRouter({ authenticateToken }: MetaCapiRouterDeps):
     }
   });
 
-  // Criar Conexão Canal Endpoint
-  router.post('/api/canais/criar', (req, res) => {
+  // Criar Conexão Canal Endpoint — achado numa auditoria externa: única
+  // rota deste arquivo sem authenticateToken.
+  router.post('/api/canais/criar', authenticateToken, (req, res) => {
     const { empresaId, nomeCanal } = req.body || {};
     const channel_token = `evo_tok_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     res.json({

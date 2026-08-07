@@ -162,11 +162,17 @@ Leads: ${JSON.stringify(leads || [])}`,
         }
       }
 
-      const fallbackReport = `📊 **Relatório Estratégico de Atribuição e ROAS (IA Universo)**
-
-1. **Desempenho dos Canais**: O canal **Meta Ads (Instagram & Facebook)** respondeu por 68% dos leads qualificados, com CAC médio de R$ 22,40 e ROAS estimado em 4.8x. As campanhas de retargeting no WhatsApp apresentaram 85% de conversão no estágio de proposta.
-2. **Qualidade do CAPI (Meta Cloud)**: O Match Quality Score da API de Conversões está em **8.9/10**, com sincronização de fbc, fbp e números de telefone criptografados via SHA-256.
-3. **Recomendação de Mídia**: Aumentar em 25% o orçamento nas campanhas do topo do funil no Meta Ads e ativar o disparo automático do evento **PurchaseIntention** para otimização de lances.`;
+      // Achado numa auditoria externa, mesma classe de bug já corrigida em
+      // /api/analyze-conversation: quando o Gemini falhava, esse fallback
+      // inventava métricas de negócio inteiras (68% dos leads via Meta Ads,
+      // CAC R$ 22,40, ROAS 4.8x, Match Quality Score 8.9/10) e ATÉ uma
+      // recomendação de aumentar orçamento em 25% — apresentado como se
+      // fosse um relatório real da "IA Universo", sem nenhum aviso de que
+      // era fabricado. Um operador poderia tomar decisão de investimento
+      // real em cima de números que nunca existiram. Agora o fallback nunca
+      // inventa números — só reporta que não pôde gerar, com `source:
+      // 'fallback'` pro frontend avisar visivelmente.
+      const fallbackReport = `⚠️ Não foi possível gerar o relatório de IA agora (Gemini indisponível). Tente novamente em instantes — nenhum dado abaixo é real.`;
 
       return res.json({ success: true, source: 'fallback', report: fallbackReport });
     } catch (e: any) {

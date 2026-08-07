@@ -7,7 +7,6 @@ import { listEscalations, resolveEscalation, deleteEscalation } from '../service
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage } from '../services/mediaImageStore';
 import { setPaymentVerification } from '../services/appointmentStore';
-import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 
@@ -19,9 +18,23 @@ interface ConversationsRouterDeps {
   supabaseKey?: string;
 }
 
-/** tenantId do operador autenticado — cai no tenant legado se o JWT (ex: token demo antigo) não trouxer um. */
+/**
+ * tenantId do operador autenticado. Achado numa auditoria externa: caía
+ * silenciosamente no tenant legado (dados reais da Monique) quando o JWT não
+ * trazia tenantId, em vez de rejeitar — mesmo padrão de risco que o
+ * roteamento de webhook por phone_number_id já corrigiu (Bloco 2.B, revisão
+ * de segurança 06/08/2026: "nunca gravar/ler em tenant nenhum quando não dá
+ * pra provar de quem é"). Hoje todo fluxo de emissão de token (login real e
+ * demo, server/routes/auth.ts) sempre inclui tenantId, então isso nunca
+ * deveria disparar em uso normal — mas se disparar, precisa rejeitar (todas
+ * as rotas deste arquivo passam por asyncHandler, então o throw vira 500 via
+ * o middleware de erro global, nunca um vazamento silencioso pro tenant legado).
+ */
 function tenantOf(req: AuthenticatedRequest): string {
-  return req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
+  if (!req.user?.tenantId) {
+    throw new Error('Sessão autenticada sem tenantId — recusado (nunca cair no tenant legado por segurança).');
+  }
+  return req.user.tenantId;
 }
 
 /**

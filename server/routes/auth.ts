@@ -18,7 +18,7 @@ export function createAuthRouter({ jwtSecret, demoMode, supabase }: AuthRouterDe
     res.json({ demoMode });
   });
 
-  // Cadastro fixo dos 4 perfis de demonstração — espelha exatamente
+  // Cadastro fixo dos perfis de demonstração — espelha exatamente
   // src/data/mockTenants.ts (SAAS_DEMO_USERS) e as senhas de
   // src/components/LoginModal.tsx (USER_PASSWORDS). Precisa ficar em sincronia
   // manual com esses dois arquivos caso os perfis demo mudem.
@@ -28,11 +28,14 @@ export function createAuthRouter({ jwtSecret, demoMode, supabase }: AuthRouterDe
   // {"id":"x","tenantId":"y","role":"saas_admin"} e ganhar um JWT de admin,
   // sem senha nenhuma. Agora role/tenantId/email vêm SEMPRE do cadastro fixo
   // abaixo, nunca do que o cliente mandou, e a senha é obrigatória.
+  //
+  // usr_carlos/usr_fernanda (tenant_001/tenant_002) removidos junto com as
+  // empresas fictícias de demonstração do template original
+  // (src/data/mockTenants.ts) — nunca foram clientes reais. usr_ricardo
+  // (SaaS Master) reapontado pro único tenant real (tenant_004, Monique).
   const DEMO_USERS: Record<string, { passwords: string[]; tenantId: string; role: string; email: string }> = {
     usr_monique: { passwords: ['monique2026', 'admin123', '123456'], tenantId: 'tenant_004', role: 'admin', email: 'monique@pestanaspormonique.com' },
-    usr_carlos: { passwords: ['viva1234', '123456'], tenantId: 'tenant_001', role: 'operator', email: 'carlos@drogariaviva.com.br' },
-    usr_fernanda: { passwords: ['meta2026', '123456'], tenantId: 'tenant_002', role: 'manager', email: 'fernanda@metaleads.com.br' },
-    usr_ricardo: { passwords: ['master2026#', 'adminMaster123'], tenantId: 'tenant_001', role: 'saas_admin', email: 'ricardo.master@saasplatform.com' },
+    usr_ricardo: { passwords: ['master2026#', 'adminMaster123'], tenantId: 'tenant_004', role: 'saas_admin', email: 'ricardo.master@saasplatform.com' },
   };
 
   // Emite um JWT válido pra um perfil de demonstração — só funciona com
