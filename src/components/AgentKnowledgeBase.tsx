@@ -26,7 +26,7 @@ import {
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
-  onSaveKnowledgeBase: (kb: AgentKnowledgeBase) => void;
+  onSaveKnowledgeBase: (kb: AgentKnowledgeBase) => Promise<boolean>;
   onGoToWhatsAppSim: () => void;
 }
 
@@ -260,14 +260,23 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [newFaqQuestion, setNewFaqQuestion] = useState('');
   const [newFaqAnswer, setNewFaqAnswer] = useState('');
 
-  const handleSave = () => {
+  // Achado numa auditoria: o toast "Salva com Sucesso!" aparecia sempre,
+  // mesmo quando o POST /api/knowledge-base falhava no servidor (rede,
+  // Supabase fora do ar, sessão expirada) — o App.tsx só logava o erro no
+  // console e nunca propagava a falha pra cá. A operadora achava que o preço
+  // ou a regra nova já estava valendo, mas o agente Gemini real continuava
+  // respondendo com a base de conhecimento antiga. Agora só mostra sucesso
+  // quando o salvamento no servidor de fato confirmou.
+  const handleSave = async () => {
     const updated = {
       ...formData,
       lastSaved: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     };
-    onSaveKnowledgeBase(updated);
-    setIsSavedToast(true);
-    setTimeout(() => setIsSavedToast(false), 4000);
+    const saved = await onSaveKnowledgeBase(updated);
+    if (saved) {
+      setIsSavedToast(true);
+      setTimeout(() => setIsSavedToast(false), 4000);
+    }
   };
 
   // Presets parciais (SaaS/E-commerce/Clínica) só definem alguns campos —

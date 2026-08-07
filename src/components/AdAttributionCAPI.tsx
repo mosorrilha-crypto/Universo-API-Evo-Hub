@@ -148,6 +148,21 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   const totalAdsLeads = metaAdsCount + googleAdsCount;
   const totalOrganicLeads = instagramOrgCount + googleOrgCount + directCount;
 
+  // Achado numa auditoria: o card "Event Match Quality Score" no topo mostrava
+  // sempre "8.8 / 10" fixo no código, mesmo que nenhum evento tivesse sido
+  // disparado ainda ou que o score real dos eventos fosse outro — um número de
+  // negócio inventado sendo exibido como se fosse medido de verdade. A aba
+  // "Central & Disparo Meta CAPI" já calculava a média real a partir dos
+  // eventos logados; centraliza esse cálculo aqui pra os dois lugares mostrarem
+  // o mesmo número real (ou admitir que ainda não há dado suficiente).
+  const scoredCapiEvents = capiEventsLog.filter(
+    (l): l is typeof l & { matchQualityScore: number } => typeof l.matchQualityScore === 'number'
+  );
+  const avgMatchQualityScore =
+    scoredCapiEvents.length > 0
+      ? scoredCapiEvents.reduce((sum, l) => sum + l.matchQualityScore, 0) / scoredCapiEvents.length
+      : null;
+
   // Save CAPI config
   const handleSaveCapiConfig = (e: React.FormEvent) => {
     e.preventDefault();
@@ -462,8 +477,16 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="flex items-baseline space-x-2">
-            <span className="text-2xl font-bold text-emerald-400">8.8 / 10</span>
-            <span className="text-xs font-semibold text-slate-400">Excelente</span>
+            {avgMatchQualityScore !== null ? (
+              <>
+                <span className="text-2xl font-bold text-emerald-400">{avgMatchQualityScore.toFixed(1)} / 10</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  {avgMatchQualityScore >= 8 ? 'Excelente' : avgMatchQualityScore >= 6 ? 'Bom' : 'Atenção'}
+                </span>
+              </>
+            ) : (
+              <span className="text-sm font-semibold text-slate-500">Sem eventos com score ainda</span>
+            )}
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
             Pixel ID: {capiConfig.pixelId.substring(0, 8)}...
@@ -992,12 +1015,9 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               </div>
 
               <span className="text-xs font-semibold text-emerald-400 bg-emerald-950 px-3 py-1 rounded-lg border border-emerald-800">
-                {(() => {
-                  const scored = capiEventsLog.filter((l): l is typeof l & { matchQualityScore: number } => typeof l.matchQualityScore === 'number');
-                  return scored.length > 0
-                    ? `Match Score: ${(scored.reduce((sum, l) => sum + l.matchQualityScore, 0) / scored.length).toFixed(1)} / 10`
-                    : 'Match Score indisponível (Meta não retorna score síncrono via API)';
-                })()}
+                {avgMatchQualityScore !== null
+                  ? `Match Score: ${avgMatchQualityScore.toFixed(1)} / 10`
+                  : 'Match Score indisponível (Meta não retorna score síncrono via API)'}
               </span>
             </div>
 

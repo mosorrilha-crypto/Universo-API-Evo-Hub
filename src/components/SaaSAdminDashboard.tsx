@@ -912,7 +912,12 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Strategy Overview KPIs */}
+          {/* Strategy Overview KPIs — achado numa auditoria: enquanto telemetryData
+              ainda não chegava (ou se /api/telemetry/tokens falhasse em silêncio,
+              já que fetchTelemetry engole erros), estes cards mostravam números
+              fixos no código (18970 tokens, $0.0023, 184 jobs) com a mesma
+              confiança visual de um dado real, sem nenhuma indicação de que era
+              placeholder. Mostra "—" em vez de inventar consumo/custo de Gemini. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">
               <div className="flex items-center justify-between text-xs text-slate-400">
@@ -920,7 +925,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <Cpu className="w-4 h-4 text-purple-400" />
               </div>
               <div className="text-2xl font-black text-white">
-                {(telemetryData?.summary.totalSaaSTokens || 18970).toLocaleString('pt-BR')}
+                {telemetryData ? telemetryData.summary.totalSaaSTokens.toLocaleString('pt-BR') : '—'}
               </div>
               <p className="text-[10px] text-purple-300">Medido via objeto `usageMetadata` do Gemini</p>
             </div>
@@ -931,7 +936,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <DollarSign className="w-4 h-4 text-emerald-400" />
               </div>
               <div className="text-2xl font-black text-emerald-400">
-                ${(telemetryData?.summary.totalSaaSCostUSD || 0.0023).toFixed(5)} USD
+                {telemetryData ? `$${telemetryData.summary.totalSaaSCostUSD.toFixed(5)} USD` : '—'}
               </div>
               <p className="text-[10px] text-emerald-300 font-medium">~$0.075 / 1M input • ~$0.30 / 1M output</p>
             </div>
@@ -942,7 +947,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <Zap className="w-4 h-4 text-amber-400" />
               </div>
               <div className="text-2xl font-black text-amber-400">
-                {(telemetryData?.summary.totalCachedSaved || 11200).toLocaleString('pt-BR')}
+                {telemetryData ? telemetryData.summary.totalCachedSaved.toLocaleString('pt-BR') : '—'}
               </div>
               <p className="text-[10px] text-amber-300 font-medium">Até 75% de desconto via Context Caching</p>
             </div>
@@ -953,7 +958,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <Activity className="w-4 h-4 text-blue-400" />
               </div>
               <div className="text-2xl font-black text-blue-400">
-                {queueStatus?.completedJobs || 184} Jobs Concluídos
+                {queueStatus ? `${queueStatus.completedJobs} Jobs Concluídos` : '—'}
               </div>
               <p className="text-[10px] text-slate-400">
                 {queueStatus?.backoffActive ? '⚠️ Backoff Exponencial 429 Ativo' : 'Rate Limit: 60 RPM • Retentativa Exponencial'}
@@ -999,46 +1004,36 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {(telemetryData?.tenantsTelemetry || [
-                    {
-                      tenantId: 'tenant_clinica_sorriso',
-                      tenantName: 'Clínica Sorriso Dourado',
-                      promptTokens: 14850,
-                      candidatesTokens: 4120,
-                      totalTokens: 18970,
-                      requestCount: 28,
-                      estimatedCostUSD: 0.0023,
-                      cachedTokensSaved: 11200,
-                      lastRequestAt: new Date().toISOString(),
-                    },
-                    {
-                      tenantId: 'tenant_advocacia_silva',
-                      tenantName: 'Advocacia Silva & Associados',
-                      promptTokens: 8200,
-                      candidatesTokens: 2100,
-                      totalTokens: 10300,
-                      requestCount: 14,
-                      estimatedCostUSD: 0.0012,
-                      cachedTokensSaved: 5400,
-                      lastRequestAt: new Date().toISOString(),
-                    },
-                  ]).map((tRecord) => (
-                    <tr key={tRecord.tenantId} className="hover:bg-slate-800/50">
-                      <td className="p-3 font-bold text-white">
-                        {tRecord.tenantName}
-                        <div className="text-[10px] text-slate-500 font-mono">{tRecord.tenantId}</div>
-                      </td>
-                      <td className="p-3 font-mono text-slate-300">{tRecord.promptTokens.toLocaleString()}</td>
-                      <td className="p-3 font-mono text-purple-300">{tRecord.candidatesTokens.toLocaleString()}</td>
-                      <td className="p-3 font-mono font-bold text-emerald-400">{tRecord.totalTokens.toLocaleString()}</td>
-                      <td className="p-3 font-mono text-amber-400">{tRecord.cachedTokensSaved.toLocaleString()}</td>
-                      <td className="p-3 font-mono font-bold text-emerald-300">${tRecord.estimatedCostUSD.toFixed(5)}</td>
-                      <td className="p-3 font-mono text-slate-400">{tRecord.requestCount} reqs</td>
-                      <td className="p-3 text-[10px] text-slate-500 font-mono">
-                        {new Date(tRecord.lastRequestAt).toLocaleTimeString('pt-BR')}
+                  {/* Achado numa auditoria: sem telemetria real ainda, esta tabela
+                      mostrava duas empresas inventadas ("Clínica Sorriso Dourado",
+                      "Advocacia Silva & Associados") com tokens/custos fixos no
+                      código — dado de negócio fabricado, com a mesma cara de uma
+                      medição real. Mostra um estado vazio honesto em vez disso. */}
+                  {telemetryData && telemetryData.tenantsTelemetry.length > 0 ? (
+                    telemetryData.tenantsTelemetry.map((tRecord) => (
+                      <tr key={tRecord.tenantId} className="hover:bg-slate-800/50">
+                        <td className="p-3 font-bold text-white">
+                          {tRecord.tenantName}
+                          <div className="text-[10px] text-slate-500 font-mono">{tRecord.tenantId}</div>
+                        </td>
+                        <td className="p-3 font-mono text-slate-300">{tRecord.promptTokens.toLocaleString()}</td>
+                        <td className="p-3 font-mono text-purple-300">{tRecord.candidatesTokens.toLocaleString()}</td>
+                        <td className="p-3 font-mono font-bold text-emerald-400">{tRecord.totalTokens.toLocaleString()}</td>
+                        <td className="p-3 font-mono text-amber-400">{tRecord.cachedTokensSaved.toLocaleString()}</td>
+                        <td className="p-3 font-mono font-bold text-emerald-300">${tRecord.estimatedCostUSD.toFixed(5)}</td>
+                        <td className="p-3 font-mono text-slate-400">{tRecord.requestCount} reqs</td>
+                        <td className="p-3 text-[10px] text-slate-500 font-mono">
+                          {new Date(tRecord.lastRequestAt).toLocaleTimeString('pt-BR')}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="p-6 text-center text-xs text-slate-500">
+                        {telemetryData ? 'Nenhum tenant com consumo de tokens registrado ainda.' : 'Carregando telemetria...'}
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
