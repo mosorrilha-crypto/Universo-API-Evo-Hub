@@ -139,7 +139,16 @@ export async function recordIncomingMessage(
   const conv = await getOrCreateConversationRow(tenantId, phone, name);
   const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const { error } = await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null });
-  if (error) console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem RECEBIDA de ${phone} (id=${id}) — mensagem do lead perdida do histórico:`, error.message);
+  if (error) {
+    // Achado consultando uma lead real com ctwa_clid gravado mas 0 mensagens:
+    // este erro só era logado, nunca relançado — o try/catch em webhooks.ts
+    // que desmarca a mensagem em idempotency.ts pra permitir reentrega da
+    // Meta nunca via a falha, então a mensagem do lead ficava marcada como
+    // "processada" pra sempre sem nunca ter sido de fato salva. Relança pra
+    // que a reentrega funcione de verdade.
+    console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem RECEBIDA de ${phone} (id=${id}) — mensagem do lead perdida do histórico:`, error.message);
+    throw new Error(`Falha ao gravar mensagem recebida: ${error.message}`);
+  }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
   return (await getConversation(tenantId, phone))!;
 }
@@ -149,7 +158,14 @@ export async function recordOutgoingMessage(tenantId: string, phone: string, mes
   const conv = await getOrCreateConversationRow(tenantId, phone);
   const id = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const { error } = await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'agent', type: message.type, text: message.text ?? null });
-  if (error) console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem ENVIADA pra ${phone} (id=${id}) — resposta do agente perdida do histórico:`, error.message);
+  if (error) {
+    // Mesmo bug do recordIncomingMessage (ver comentário lá): engolir o erro
+    // aqui faz o chamador (ex: triggerAutoReply em webhooks.ts) achar que a
+    // resposta do agente foi salva quando não foi — relança pra que o
+    // try/catch de quem chama trate de verdade (ex: registrar escalonamento).
+    console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem ENVIADA pra ${phone} (id=${id}) — resposta do agente perdida do histórico:`, error.message);
+    throw new Error(`Falha ao gravar mensagem enviada: ${error.message}`);
+  }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
   return (await getConversation(tenantId, phone))!;
 }
