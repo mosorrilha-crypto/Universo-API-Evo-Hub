@@ -345,6 +345,83 @@ WhatsApp, agenda e login, sem nenhum dado vazando entre eles. Isso é o que tran
 | 4.4.2 | Ligar a chave PIX configurável de verdade na geração de cobrança do Financeiro (hoje decorativa) | P1 | M |
 | 4.4.3 | Cobrança recorrente dos tenants do SaaS (assinatura mensal) | P1 | L |
 
+### Epic 4.5 — Paridade com o projeto antigo da Monique (bloqueia descontinuar o projeto antigo)
+
+**Origem:** auditoria comparativa código-a-código feita em outra sessão contra o repositório
+antigo standalone da Monique (fora do Universo, nunca portado pro GitHub). Confirmado
+lendo os dois lados, não por inferência. O projeto antigo está em produção faturando; estes
+itens são o que falta no Universo pra ele poder ser descontinuado com segurança — todos tocam
+o caminho de conversão/receita, não são cosméticos.
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 4.5.1 | Meta Conversions API é 100% mock em `server/routes/metaCapi.ts` — `status: 'simulated_ok'`, hash de telefone fixo hardcoded, nenhum `fetch` real. O projeto antigo chama `https://graph.facebook.com/v21.0/{DATASET_ID}/events` de verdade. Sem isso, atribuição de anúncio (CAPI) não existe no Universo. | P0 | M | ✅ Feito — chamada real a `graph.facebook.com/{pixelId}/events`, hash SHA-256 real do telefone (`server/routes/__tests__/metaCapi.test.ts`), sem fabricar match quality score (Meta não devolve isso síncrono). `pixelId`/`accessToken` ainda vêm do painel (localStorage) por requisição, não de credencial por tenant no banco — isso é dívida do Bloco 2.E, não resolvida aqui. Defaults fake do formulário (pixel/token/testCode de demo) removidos. |
+| 4.5.2 | Agente não tem ferramenta pra enviar foto de portfólio/exemplo do serviço — `AgentProduct.exampleImageBase64` já existe no schema da KB (`knowledgeBaseStore.ts`), mas nada em `autoReply.ts`/function-calling usa esse campo pra mandar a imagem de verdade pro cliente. O projeto antigo tem essa ferramenta ligada no loop de tool-calling. | P1 | M | ✅ Feito — tool `enviar_foto_exemplo` (function-calling do Gemini) pros agentes faq/triagem, reaproveitando o mesmo upload/envio real (`uploadWhatsAppMedia`/`sendWhatsAppMediaMessage`) já usado no envio manual do painel. No máximo 1 foto por mensagem recebida (não há limite de "1 por conversa inteira" ainda — isso é regra de segmento, Etapa 4). Testado em `server/services/__tests__/autoReply.test.ts`. |
+| 4.5.3 | Confirmação de pagamento (comprovante → libera confirmação de agendamento) — schema já existe (`pre_reservations`, Etapa 1), mas o agente ainda não chama nada disso; comentário no próprio código (`autoReply.ts`) admite que hoje isso vira só escalonamento manual. | P0 | L | ✅ Feito — Etapa 8 do roadmap do agente vertical, ver `docs/AGENTE-VERTICAL-ARQUITETURA.md` seção 7 item 8 pro detalhe completo. |
+| 4.5.4 | Nota de preço promocional obsoleta hardcoded como texto solto no seed (`scripts/seed-monique-knowledge-base.ts:40`, "promoções de julho terminaram em 31/07") | P2 | XS | **Achado corrigido** — a claim original ("preço promocional virou texto estático") está errada: o mecanismo dinâmico já existe e funciona (`resolveProductPrice` em `knowledgeBaseStore.ts`, compara `promoUntil` com a data real). O problema real é só essa nota redundante/desatualizada misturada em `businessRules`; risco é confundir o agente com informação obsoleta, não falta de mecanismo. Remover a nota, deixar o campo `promoPrice`/`promoUntil` por produto ser a única fonte. |
+| 4.5.5 | **(novo, auditoria de código completo em 07/08/2026)** Nenhum horário de funcionamento codificado — o agendamento só respeita o que o Google Calendar mostra como ocupado, sem limite de expediente. Nada impedia (em código) criar um agendamento às 22h ou num domingo fechado. O projeto antigo tem isso explícito (`HORARIO_POR_DIA` + `dentroDoExpediente`, rejeita com `HORARIO_FUERA_DE_EXPEDIENTE`). Risco real de produção, não só falta de recurso. | P0 🔴 | S | ✅ Feito — `tenants.business_hours` (jsonb por dia da semana, migration `0004_tenant_business_hours.sql`, já semeado com o horário real da Monique), checagem `isWithinBusinessHours`/`assertWithinBusinessHours` em `googleCalendar.ts`: `checkFreeBusy` devolve indisponível sem nem consultar o Google, `criar_agendamento`/`remarcar_agendamento` lançam `HORARIO_FORA_DO_EXPEDIENTE` como defesa em profundidade. Testado (`server/services/__tests__/businessHours.test.ts`). Tenant sem horário configurado não é restringido (não quebra tenants futuros que ainda não configuraram isso). |
+| 4.5.6 | **(novo)** `webhookParsers.ts` nunca lê `message.referral` (headline, `source_id`, `ctwa_clid`) que a Meta manda quando o lead vem de anúncio Clique-para-WhatsApp. Sem isso, o CAPI (4.5.1) não amarra o evento ao anúncio real — o projeto antigo **recusa** disparar o evento sem `ctwa_clid` (nunca manda atribuição incompleta) e dispara automaticamente `dispararAgendamentoConcluido` quando o evento é criado de verdade no Calendar, com `ctwa_clid` da conversa. | P0 | M | ✅ Feito — `webhookParsers.ts` captura `message.referral`; `conversations.ctwa_clid`/`ad_source_id`/`ad_headline` gravados uma única vez por conversa (`attachAdReferralIfMissing`, migration `0005_ctwa_referral_and_capi_credentials.sql`, mesma tabela ganhou `tenant_meta_credentials.capi_dataset_id/capi_access_token/capi_page_id`). Novo `server/services/metaCapiService.ts` (`fireMetaCapiEventForTenant`) dispara `Schedule` automaticamente quando `criar_agendamento` cria o evento de verdade (`autoReply.ts`) — nunca sem `ctwa_clid` real e nunca sem credencial de CAPI configurada pro tenant, sempre fire-and-forget. Testado (`server/services/__tests__/metaCapiService.test.ts`). O envio manual do painel (4.5.1) continua existindo em paralelo, sem mudança. |
+| 4.5.7 | **(novo)** Sem validação anti-alucinação de horário — o projeto antigo (`validarHorariosDotexto`) confere, depois que o modelo responde, se qualquer horário citado no texto final bate com o resultado real de `consultar_horarios_livres`; se não bater, reescreve o texto à força antes de mandar pro cliente. O Universo confia só no modelo não alucinar. | P1 | S | ✅ Feito — `generateAutoReplyForText` coleta os horários realmente confirmados pelas ferramentas nesta mensagem (`verificar_disponibilidade` com `disponivel:true`, `criar_agendamento`/`remarcar_agendamento` bem-sucedidos, e o horário do agendamento ativo se houver) e compara contra todo `HH:mm` citado na resposta final; se o modelo citar um horário não confirmado, a resposta é substituída por uma correção segura antes de sair pro cliente. Adaptado ao que o Universo já tem hoje (checagem pontual por horário, não uma lista do dia inteiro — isso é a Etapa 6, ainda não construída). Testado (`server/services/__tests__/autoReplyAntiHallucination.test.ts`). |
+| 4.5.8 | **(novo)** Sem etapa dedicada de reclamação — o projeto antigo tem um 5º modo (`reclamacao`) que nunca oferece solução/reembolso sozinho, sempre escala com contenção empática. No Universo isso cai misturado em triagem/faq. | P2 | S | ✅ Feito — 4º `AgentType` (`reclamacao`) no router e em `AGENT_INSTRUCTIONS`: acolhe com empatia, nunca oferece solução/reembolso/retoque por conta própria, `needsHumanConfirmation` sempre `true` (a IA nunca resolve reclamação sozinha) independente do que o especialista marcou. `webhooks.ts`/`transcriptionQueue.ts` escalam automaticamente. Testado. |
+| 4.5.9 | **(novo)** Sem fluxo roteirizado de cancelamento em 2 fases (sem seña vs. com seña paga, com texto de resposta definido pra cada caso e regra de "1 tentativa de reagendar, nunca insistir 2x"). A política já existe em texto na KB, mas o agente não segue um script estruturado. | P2 | S | ✅ Feito (adaptado) — como o Universo não rastreia se o sinal foi pago (isso seria a Etapa 8), a distinção virou: cancelamento com **24h+ de antecedência** nunca é executado automaticamente (a decisão de devolução do sinal precisa de humano — `cancelar_agendamento` retorna `escalonar:true`, `needsHumanConfirmation` vira `true`); com **menos de 24h**, sem devolução em jogo pela política, a IA cancela direto. Instrução de "1 tentativa empática de reagendar, nunca insistir 2x" adicionada ao prompt do agendamento. Testado (`server/services/__tests__/autoReplyCancellation.test.ts`). |
+| 4.5.10 | **(novo)** Sem alerta automático ao operador quando um pagamento fica pendente de verificação por muito tempo — o projeto antigo roda de hora em hora e manda WhatsApp pro admin se um escalonamento de pagamento passa de 2h sem resolução. | P1 | S | Pendente — a Etapa 8 (4.5.3) já está conectada (webhook marca `pending_verification`, `/api/conversations/:phone/verify-payment` pro operador resolver, agente lê o estado); falta só o job periódico de lembrete. Bloqueado por não existir ainda um "WhatsApp do admin por tenant" pra notificar — precisa desse campo antes. |
+
+**O que NÃO é gap** (já confirmado igual ou melhor no Universo, sem ação necessária): agendamento
+via Google Calendar com function-calling real, transcrição de áudio via Gemini, persistência
+real em Postgres (vs. Google Sheets/localStorage do projeto antigo), multi-tenant, financeiro,
+CRM, lembretes automáticos, idempotência por `wa_message_id`.
+
+**Sobre descontinuar o projeto antigo:** decisão de negócio, não técnica — fica pra quando
+4.5.1–4.5.3 estiverem prontos. Este documento não tem visibilidade sobre o repositório antigo
+(não está no GitHub, vive só no ambiente da outra sessão) — qualquer ação de apagar/arquivar
+esse projeto precisa ser feita a partir de lá, não daqui.
+
+### Epic 4.6 — Evolution API multi-instância (QR Code Gateway, baixa barreira de entrada)
+
+**Origem:** proposta trazida pelo dono do produto (documento externo, 08/08/2026) sobre como
+reduzir a barreira de entrada comercial do SaaS — hoje, exigir Business Manager verificado pela
+Meta antes do cliente conseguir usar o produto derruba boa parte do mercado inicial (pequenos
+negócios sem CNPJ/BM verificado). Análise técnica confirmada contra o código real do Universo.
+
+**Diagnóstico técnico (confirmado, não suposição):**
+- `server/services/webhookParsers.ts` já tem `parseEvolutionWebhookPayload` — o Universo já
+  entende o formato de mensagem da Evolution API.
+- Mas `server/config.ts` só carrega Evolution como **uma única instância global**
+  (`EVOLUTION_API_URL`/`EVOLUTION_API_KEY`/`EVOLUTION_INSTANCE_NAME` — três variáveis de
+  ambiente fixas, iguais ao padrão single-tenant antigo do Meta antes do Bloco 2.B). Não existe
+  criação de instância nova, geração de QR Code, nem resolução de qual tenant é dona de qual
+  instância Evolution — a mesma lacuna que existia pro WhatsApp oficial antes do Bloco 2.B.
+- Não existe, e nunca deveria existir: um `<iframe>`/widget carregando o WhatsApp Web direto no
+  navegador do cliente — a Meta bloqueia isso via `X-Frame-Options: DENY`. Confirmado, não é uma
+  limitação de implementação, é bloqueio do lado da Meta.
+
+**Arquitetura recomendada — duas portas de entrada, unificadas no mesmo pipeline de IA:**
+
+| | Porta A — QR Code (Evolution API) | Porta B — Oficial (Evo Hub / Meta Cloud API) |
+|---|---|---|
+| Pra quem | Cliente novo, sem CNPJ/BM verificado — onboarding em segundos | Cliente que cresceu, precisa de volume/estabilidade sem risco de banimento |
+| Como conecta | Escaneia QR Code gerado pelo backend (instância "headless" do WhatsApp) | Facebook Login embutido (fluxo que o Evo Hub já cobre) |
+| Risco de banimento | Médio (não-oficial) | Zero |
+| Barreira de entrada | Nenhuma | Alta (exige BM verificado) |
+| Pro agente de IA (`autoReply.ts`) | Mesmo pipeline — o processamento não sabe nem precisa saber de qual porta a mensagem veio | Mesmo pipeline |
+
+**Estratégia comercial ("cavalo de troia"):** cliente entra de graça/barato pela Porta A
+(Evolution), começa a usar a IA imediatamente. Quando o volume de mensagens cresce a ponto do
+risco de banimento importar de verdade, oferece upgrade guiado pra Porta B (Evo Hub/Meta oficial).
+Não descontinuar o Evo Hub — ele continua sendo o produto pra cliente enterprise; a Evolution API
+é a "segunda antena" que amplia quem consegue entrar no funil no primeiro dia.
+
+| ID | Issue | Prioridade | Esforço | Status |
+|---|---|---|---|---|
+| 4.6.1 | Provisionar Evolution API multi-instância: uma instância por tenant (não mais 1 global fixa), análogo ao `tenant_meta_credentials` do Bloco 2.A — tabela `tenant_evolution_credentials` (instance_name/api_key/api_url por tenant) | P1 | M | Pendente |
+| 4.6.2 | Endpoint/fluxo de criação de instância + geração de QR Code real (chama a Evolution API pra criar a instância do tenant novo e devolve o QR Code pro painel exibir) | P1 | M | Pendente |
+| 4.6.3 | Roteamento multi-canal (Bloco 2.B) estender pra resolver tenant também por `instance_name` da Evolution, não só por `phone_number_id` da Meta | P1 | S | Pendente |
+| 4.6.4 | Envio de mensagem via Evolution API (hoje `metaSend.ts` só fala com a Meta Cloud API) — precisa de um `evolutionSend.ts` equivalente, ou abstrair os dois atrás de uma interface comum | P1 | M | Pendente |
+| 4.6.5 | Onboarding self-service no painel: cliente escolhe "Conectar agora com QR Code" (Evolution, instantâneo) ou "Conectar com Facebook/Business Manager" (Evo Hub, oficial) — hoje o onboarding é só manual via `scripts/create-tenant.ts`/API admin (Bloco 2.D.4) | P2 | L | Pendente |
+
+**Fora de escopo aqui, mantido como está:** widget/iframe carregando WhatsApp Web direto no
+navegador — tecnicamente bloqueado pela Meta, não é uma direção viável.
+
 ---
 
 ## Fase 5 — Escala, observabilidade e produção

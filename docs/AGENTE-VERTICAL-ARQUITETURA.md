@@ -197,20 +197,36 @@ ordem): testes de acesso cruzado entre tenants, `tenant_id` obrigatório em logs
 redação de segredos/comprovantes/dados pessoais nos logs — todos entram na etapa 1.
 
 ```
-1. Schema: pre_reservations (com chave de idempotência wa_message_id) + estado de pagamento
+1. ✅ Schema: pre_reservations (com chave de idempotência wa_message_id) + estado de pagamento
    no appointment/CRM. Junto: testes automatizados de acesso cruzado entre tenants (tenant A
    não lê dado de tenant B), tenant_id obrigatório em logs/cache, redação de segredos/
    comprovantes/PII nos logs.
-2. Reestruturar knowledge_base em documentos tipados (Seção 3 deste doc)
-3. Separar o prompt em camadas (server/services/autoReply.ts deixa de concatenar tudo numa
-   string, monta as 4 camadas como mensagens distintas; roteamento carrega confidence+reasoning
-   — seção 4.5)
+2. Reestruturar knowledge_base em documentos tipados (Seção 3 deste doc) — adiado pro backlog
+   pós-lançamento (decisão do dono do produto); não bloqueia os itens 3+ abaixo.
+3. ✅ Separar o prompt em camadas — `server/services/autoReply.ts` não concatena mais tudo numa
+   string só: camadas 1+2 (global+segmento, fixas) vão em `systemInstruction` da chamada ao
+   Gemini, camadas 3+4 (tenant/dinâmico) + histórico vão em `contents`. `tenants.segment`
+   (migration `0003_tenant_segment.sql`) resolve qual camada 2 usar por tenant — só
+   `beauty_studio` existe hoje, sem conteúdo próprio ainda (isso é o item 4). Testado em
+   `server/services/__tests__/autoReply.test.ts` (trava a separação: system vs. user content).
+   **Não incluído nesta etapa:** roteamento carregar `confidence`+`reasoning` (seção 4.5) — é
+   melhoria de auditabilidade independente, não pré-requisito de camadas; fica pro backlog.
 4. Escrever o conteúdo real das camadas 1 (global) e 2 (segmento beauty_studio) a partir do
    script — uma vez só, reutilizável pra qualquer tenant/segmento futuro
 5. Migrar o conteúdo específico da Monique pra camada 3 (tenant)
 6. Ferramenta nova: disponibilidade da semana
 7. Job de follow-up de pré-reserva (por tenant, alerta pro operador)
-8. Fluxo de verificação de transferência → confirmação de pagamento
+8. ✅ Fluxo de verificação de transferência → confirmação de pagamento — o schema e as
+   funções de `appointmentStore.ts` (`markPaymentPendingVerification`/`setPaymentVerification`/
+   `confirmPayment`) já existiam desde a Etapa 1, mas nada os chamava. Conectado: `webhooks.ts`
+   marca `pending_verification` automaticamente quando chega uma imagem com agendamento ativo
+   ainda sem comprovante; novo `POST /api/conversations/:phone/verify-payment` é onde o operador
+   marca verificado/rejeitado (a IA nunca chama isso); `runAgendamentoTools` (autoReply.ts) lê o
+   estado a cada turno — nunca confirma o turno em `pending_verification`/`rejected`, e é a única
+   parte que executa a transição `verified` → `confirmed` (sempre depois de decisão humana).
+   Testado (`autoReplyPaymentVerification.test.ts`, `conversationsVerifyPayment.test.ts`).
+   **Não incluído:** botão no painel pra marcar verificado/rejeitado — hoje só via API
+   diretamente; frontend (`ConversationAnalysisPanel.tsx` ou similar) fica pro próximo passo.
 9. Bloco 2.E (CRM real) — idealmente junto com 7-8, não depois
 ```
 
@@ -221,7 +237,7 @@ redação de segredos/comprovantes/dados pessoais nos logs — todos entram na e
       zero edição de código/prompt
 - [ ] Pré-reserva vira tarefa real no CRM, com alerta no prazo certo pro operador certo
 - [ ] Reentrega de webhook (mesmo `wa_message_id`) nunca duplica pré-reserva/CRMTask
-- [ ] Pagamento só é confirmado após verificação humana explícita, nunca pela IA sozinha
+- [x] Pagamento só é confirmado após verificação humana explícita, nunca pela IA sozinha
 - [ ] Agente consegue responder sobre disponibilidade da semana com dados reais, não estimativa
 - [ ] Base de conhecimento da Monique migrada pros documentos tipados, sem perda de conteúdo
 - [ ] Testes automatizados comprovam que tenant A não acessa dado de tenant B

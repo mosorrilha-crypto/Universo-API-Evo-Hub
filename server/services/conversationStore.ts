@@ -95,6 +95,39 @@ async function getOrCreateConversationRow(tenantId: string, phone: string, name?
   return created;
 }
 
+export interface AdReferral {
+  ctwaClid?: string;
+  adSourceId?: string;
+  adHeadline?: string;
+}
+
+/**
+ * Grava o `ctwa_clid` (clique no anúncio "Clique para WhatsApp") na
+ * conversa, uma única vez — é o clique que originou a conversa, nunca deve
+ * ser sobrescrito por mensagens posteriores sem referral. Usado pelo Meta
+ * Conversions API (Epic 4.5.6) pra amarrar eventos de conversão ao anúncio
+ * real; sem isso gravado, o CAPI nunca dispara pra essa conversa (nunca
+ * manda atribuição incompleta/inventada).
+ */
+export async function attachAdReferralIfMissing(tenantId: string, phone: string, referral: AdReferral | undefined): Promise<void> {
+  if (!referral?.ctwaClid) return;
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  const { data: existing } = await db.from('conversations').select('ctwa_clid').eq('id', conv.id).maybeSingle();
+  if (existing?.ctwa_clid) return;
+  await db
+    .from('conversations')
+    .update({ ctwa_clid: referral.ctwaClid, ad_source_id: referral.adSourceId || null, ad_headline: referral.adHeadline || null })
+    .eq('id', conv.id);
+}
+
+/** ctwa_clid gravado pra essa conversa, se algum dia veio de um anúncio — null caso contrário (nunca inventar). */
+export async function getConversationCtwaClid(tenantId: string, phone: string): Promise<string | null> {
+  const db = getDb();
+  const { data } = await db.from('conversations').select('ctwa_clid').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  return data?.ctwa_clid || null;
+}
+
 export async function recordIncomingMessage(
   tenantId: string,
   phone: string,

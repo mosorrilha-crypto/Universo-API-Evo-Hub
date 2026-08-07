@@ -10,6 +10,7 @@ import {
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
+import { asyncHandler } from '../middleware/asyncHandler';
 
 interface GoogleCalendarRouterDeps {
   authenticateToken: RequestHandler;
@@ -33,10 +34,10 @@ interface GoogleCalendarRouterDeps {
 export function createGoogleCalendarRouter({ authenticateToken, googleClientId, googleClientSecret, googleRedirectUri, jwtSecret }: GoogleCalendarRouterDeps): Router {
   const router = Router();
 
-  router.get('/api/google-calendar/status', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
     res.json({ connected: await isGoogleCalendarConnected(tenantId) });
-  });
+  }));
 
   router.get('/api/google-calendar/connect', authenticateToken, (req: AuthenticatedRequest, res) => {
     if (!googleClientId || !googleClientSecret) {
@@ -48,7 +49,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     res.json({ url });
   });
 
-  router.get('/api/google-calendar/oauth-callback', async (req, res) => {
+  router.get('/api/google-calendar/oauth-callback', asyncHandler(async (req, res) => {
     const code = req.query.code as string | undefined;
     const error = req.query.error as string | undefined;
 
@@ -70,13 +71,13 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
       console.error('❌ [Google Calendar] Falha no callback OAuth:', err.message);
       res.status(500).send(`<html><body style="font-family:sans-serif;padding:2rem"><h2>Falha ao conectar</h2><p>${err.message}</p></body></html>`);
     }
-  });
+  }));
 
-  router.post('/api/google-calendar/disconnect', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  router.post('/api/google-calendar/disconnect', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = req.user?.tenantId || LEGACY_DEFAULT_TENANT_ID;
     await disconnectGoogleCalendar(tenantId);
     res.json({ success: true });
-  });
+  }));
 
   return router;
 }

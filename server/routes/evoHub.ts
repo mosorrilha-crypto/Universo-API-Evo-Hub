@@ -1,5 +1,6 @@
 import { Router, type RequestHandler } from 'express';
 import { redactMessageForLog } from '../services/logRedaction';
+import { asyncHandler } from '../middleware/asyncHandler';
 
 interface EvoHubRouterDeps {
   authenticateEvoHub: RequestHandler;
@@ -224,7 +225,7 @@ export function createEvoHubRouter({ authenticateEvoHub }: EvoHubRouterDeps): Ro
   });
 
   // 7. POST /api/v1/messages/send — Disparar mensagens de texto/mídia via canal
-  router.post('/api/v1/messages/send', authenticateEvoHub, async (req, res) => {
+  router.post('/api/v1/messages/send', authenticateEvoHub, asyncHandler(async (req, res) => {
     const { channel_id, to, number, type = 'text', text, body, media, caption } = req.body || {};
     const targetNumber = to || number || '5511999998888';
     const messageText = typeof text === 'string' ? text : text?.body || body || 'Mensagem do Evo Hub';
@@ -242,7 +243,7 @@ export function createEvoHubRouter({ authenticateEvoHub }: EvoHubRouterDeps): Ro
       channel_id: channel_id || evoChannels[0]?.id || 'ch_uuid_whatsapp_01',
       sent_at: new Date().toISOString()
     });
-  });
+  }));
 
   // 8. GET & POST /api/v1/webhooks — Gerenciar Webhooks no Evo Hub
   router.get('/api/v1/webhooks', authenticateEvoHub, (req, res) => {
