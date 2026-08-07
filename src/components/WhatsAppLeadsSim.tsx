@@ -279,6 +279,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -476,6 +477,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setSenderRole('agent');
     }
   }, [selectedLead?.id, (selectedLead as any)?.isReal]);
+
+  // Agora que a área de mensagens tem altura fixa e rola por conta própria
+  // (em vez de crescer a página inteira), precisa rolar sozinha até o fim
+  // quando chega mensagem nova ou o operador troca de conversa — igual ao
+  // WhatsApp Web real.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [selectedLead?.id, selectedLead?.messages?.length]);
 
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
@@ -1356,13 +1365,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* Main WhatsApp Web Application Frame */}
-      <div className="bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[680px]">
+      {/* Main WhatsApp Web Application Frame — altura fixa a partir do
+          breakpoint lg (igual ao WhatsApp Web/Desktop real: a página não
+          cresce, cada coluna rola por conta própria). No mobile (grid-cols-1,
+          colunas empilhadas) mantém altura mínima livre pra crescer, já que
+          não existe layout lado a lado pra comparar lá. */}
+      <div className="bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[680px] lg:h-[720px]">
         
         {/* ========================================== */}
         {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}
         {/* ========================================== */}
-        <div className={`border-r border-slate-800/80 bg-[#111b21] flex flex-col ${
+        <div className={`border-r border-slate-800/80 bg-[#111b21] flex flex-col min-h-0 ${
           showRightPanel ? 'lg:col-span-3' : 'lg:col-span-4'
         }`}>
           
@@ -1471,7 +1484,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
 
           {/* WhatsApp Web Chat List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
             {filteredLeads.length > 0 ? (
               filteredLeads.map((lead) => {
                 const isSelected = lead.id === activeLeadId;
@@ -1578,7 +1591,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* ========================================== */}
         {/* COLUMN 2: Interactive WhatsApp Chat Thread */}
         {/* ========================================== */}
-        <div className={`flex flex-col bg-[#0b141a] relative ${
+        <div className={`flex flex-col min-h-0 bg-[#0b141a] relative ${
           showRightPanel ? 'lg:col-span-5' : 'lg:col-span-8'
         }`}>
           {selectedLead ? (
@@ -1661,7 +1674,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               )}
 
               {/* WhatsApp Messages Scroll Body */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#0b141a] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] scrollbar-thin">
+              <div className="flex-1 min-h-0 p-4 overflow-y-auto space-y-3 bg-[#0b141a] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] scrollbar-thin">
                 
                 {/* WhatsApp Floating Date Badge */}
                 <div className="flex justify-center my-2">
@@ -1889,6 +1902,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     Nenhuma mensagem registrada nesta conversa.
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* WhatsApp Web Bottom Simulation Control & Input Bar */}
