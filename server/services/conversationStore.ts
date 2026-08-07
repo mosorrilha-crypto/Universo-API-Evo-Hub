@@ -46,6 +46,8 @@ export interface StoredConversation {
   messages: StoredMessage[];
   updatedAt: string;
   geoRestriction?: GeoRestriction;
+  /** Quantidade de mensagens do lead recebidas depois da última vez que o operador abriu esta conversa (ver markConversationRead). */
+  unreadCount: number;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -63,6 +65,7 @@ type ConversationRow = {
   name: string | null;
   updated_at: string;
   geo_restriction: GeoRestriction | null;
+  last_read_at: string;
   messages?: MessageRow[];
 };
 
@@ -78,12 +81,18 @@ type MessageRow = {
   reactions: MessageReaction[] | null;
 };
 
+/** Conta mensagens do lead chegadas depois de lastReadAt — extraída à parte pra ser testável sem depender do formato de embed relacional do Supabase. */
+export function countUnreadMessages(messages: Pick<MessageRow, 'sender' | 'created_at'>[], lastReadAt: string): number {
+  return messages.filter((m) => m.sender === 'lead' && m.created_at > lastReadAt).length;
+}
+
 function toStoredConversation(row: ConversationRow): StoredConversation {
   return {
     phone: row.phone,
     name: row.name || undefined,
     updatedAt: row.updated_at,
     geoRestriction: row.geo_restriction || undefined,
+    unreadCount: countUnreadMessages(row.messages || [], row.last_read_at),
     messages: (row.messages || [])
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -102,6 +111,21 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
 }
 
 const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, edited_at, reactions)';
+
+/**
+ * Marca a conversa como lida agora — mensagens do lead recebidas antes deste
+ * instante deixam de contar em unreadCount. Chamado quando o operador abre a
+ * conversa no painel (WhatsAppLeadsSim). Sem-op silencioso se a conversa
+ * ainda não existir (nada pra marcar como lido).
+ */
+export async function markConversationRead(tenantId: string, phone: string): Promise<void> {
+  const db = getDb();
+  await db
+    .from('conversations')
+    .update({ last_read_at: new Date().toISOString() })
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone);
+}
 
 async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string): Promise<{ id: string }> {
   const db = getDb();

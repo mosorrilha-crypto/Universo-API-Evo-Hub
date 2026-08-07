@@ -10,6 +10,7 @@ import {
   forwardMessage,
   reactToMessage,
   editMessage,
+  markConversationRead,
 } from '../services/conversationStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
@@ -74,6 +75,14 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     const conv = await getConversation(tenantOf(req), req.params.phone);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
     res.json({ conversation: conv });
+  }));
+
+  // Marca a conversa como lida — chamado quando o operador abre a conversa
+  // no painel. Zera unreadCount pra frente (mensagens do lead já recebidas
+  // até agora); não afeta mensagens que ainda vão chegar.
+  router.post('/api/conversations/:phone/read', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    await markConversationRead(tenantOf(req), req.params.phone);
+    res.json({ success: true });
   }));
 
   router.post('/api/conversations/:phone/send', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
