@@ -17,7 +17,7 @@ const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO] }))
 
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
-vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase }));
+vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
 

@@ -33,6 +33,8 @@ vi.mock('../knowledgeBaseStore', () => ({
   getKnowledgeBase: vi.fn(async () => null),
   resolveProductPrice: vi.fn(),
   parsePriceToNumber: vi.fn(() => 0),
+  resolveProductPriceAmount: vi.fn(() => 0),
+  isNonBookableProduct: vi.fn(() => false),
 }));
 
 const { generateAutoReplyForText } = await import('../autoReply');

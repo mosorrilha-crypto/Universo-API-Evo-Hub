@@ -9,7 +9,8 @@ import {
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
 import { DEFAULT_SEGMENT } from './tenantProfileStore';
-import { getKnowledgeBase, resolveProductPrice, parsePriceToNumber } from './knowledgeBaseStore';
+import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, type AgentKnowledgeBase } from './knowledgeBaseStore';
+import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
@@ -257,6 +258,18 @@ const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
     description: 'Cancela o agendamento ATIVO deste contato (já identificado pelo telefone da conversa).',
     parameters: { type: Type.OBJECT, properties: {} },
   },
+  {
+    name: 'criar_pre_reserva',
+    description: 'Registra uma pré-reserva REAL (visível pra qualquer operador, não só uma promessa em texto) quando a cliente se compromete expressamente com uma data específica pra transferir a seña, mas ainda não pagou. NÃO cria evento na agenda nem reserva o horário de verdade — só um lembrete de follow-up. Nunca chame sem a cliente ter dado uma data específica.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        servico: { type: Type.STRING, description: 'Nome do serviço combinado, igual ao catálogo.' },
+        data_combinada: { type: Type.STRING, description: 'Data em que a cliente disse que vai transferir a seña, formato "YYYY-MM-DD".' },
+      },
+      required: ['servico', 'data_combinada'],
+    },
+  },
 ];
 
 /**
@@ -274,7 +287,7 @@ async function notifyBookingCompleted(tenantId: string, phone: string, titulo: s
 
   const kb = await getKnowledgeBase(tenantId);
   const product = kb?.products?.find((p) => p.name === titulo);
-  const value = product ? parsePriceToNumber(resolveProductPrice(product)) : undefined;
+  const value = product ? resolveProductPriceAmount(product) : undefined;
 
   await fireMetaCapiEventForTenant(tenantId, {
     eventName: 'Schedule',
@@ -304,7 +317,10 @@ async function executeCalendarTool(
   name: string,
   args: Record<string, any>,
   phone: string,
-  cfg: CalendarConfig
+  cfg: CalendarConfig,
+  kb: AgentKnowledgeBase | null,
+  contactName?: string,
+  messageId?: string
 ): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimeHHmm?: string }> {
   try {
     switch (name) {
@@ -317,6 +333,17 @@ async function executeCalendarTool(
         };
       }
       case 'criar_agendamento': {
+        // Etapa 2 — achado no catálogo real: itens como "Retoque" só devem
+        // ser marcados depois da Monique avaliar o resultado, nunca por
+        // pedido direto do cliente. bookable:false no produto bloqueia isso
+        // aqui, na ferramenta real, em vez de depender só do modelo seguir a
+        // regra em texto.
+        if (isNonBookableProduct(kb, args.titulo)) {
+          return {
+            response: { erro: `"${args.titulo}" não é um serviço agendável diretamente — só Monique decide isso depois de avaliar o resultado. Explique pro cliente e encaminhe pra atendimento humano, nunca crie esse agendamento.` },
+            summary: `Tentou agendar "${args.titulo}" diretamente, mas esse item não é agendável por si só (precisa de avaliação humana antes) — recusado.`,
+          };
+        }
         // Achado numa auditoria pós-lançamento: sem essa checagem, um
         // segundo criar_agendamento pro mesmo telefone sobrescrevia
         // silenciosamente o eventId rastreado do primeiro (a tabela é
@@ -382,6 +409,31 @@ async function executeCalendarTool(
         await clearAppointmentForPhone(tenantId, phone);
         return { response: { sucesso: true }, summary: 'Cancelou o agendamento existente com sucesso (menos de 24h de antecedência — sem devolução de sinal pela política).' };
       }
+      case 'criar_pre_reserva': {
+        // Etapa 2 — achado numa auditoria: antes disso a IA só "prometia em
+        // texto" ("te dejo pre-reservado"), sem registrar nada real em
+        // nenhum lugar — nenhum operador via essa promessa, e não existia
+        // job de follow-up possível porque não havia dado nenhum pra
+        // consultar. Agora vira uma linha real em pre_reservations (Etapa 1),
+        // idempotente por wa_message_id.
+        if (!messageId) {
+          return {
+            response: { erro: 'Não foi possível registrar a pré-reserva agora — identificador de mensagem ausente.' },
+            summary: 'Tentou criar pré-reserva mas faltou o identificador da mensagem — não registrada, não prometa a pré-reserva pro cliente.',
+          };
+        }
+        const preReservation = await createPreReservation(tenantId, {
+          phone,
+          contactName,
+          serviceName: args.servico,
+          committedDate: args.data_combinada,
+          waMessageId: messageId,
+        });
+        return {
+          response: { sucesso: true, pre_reserva_id: preReservation.id },
+          summary: `Registrou pré-reserva de "${args.servico}" com data combinada ${args.data_combinada} — confirmação definitiva ainda depende da transferência da seña.`,
+        };
+      }
       default:
         return { response: { erro: `Ferramenta desconhecida: ${name}` }, summary: `Tentou chamar uma ferramenta desconhecida (${name}).` };
     }
@@ -403,7 +455,9 @@ async function runAgendamentoTools(
   text: string,
   phone: string,
   cfg: CalendarConfig,
-  history?: { sender: 'lead' | 'agent'; text?: string }[]
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  contactName?: string,
+  messageId?: string
 ): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[] }> {
   const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
@@ -413,6 +467,15 @@ async function runAgendamentoTools(
   const { naive, weekday } = getNowLocalNaive(BUSINESS_TIMEZONE);
   const historyText = buildHistoryText(history);
   const existing = await getAppointmentForPhone(tenantId, phone);
+  const kb = await getKnowledgeBase(tenantId);
+  // Etapa 2 — achado numa auditoria: antes disso TODO agendamento caía num
+  // fallback fixo de "90 minutos" no prompt, mesmo pra serviços de 30min
+  // (Diseño con Henna) ou 180min (Combo Triple) — bloqueando a agenda real
+  // errado. Agora usa a duração real cadastrada por serviço quando existir.
+  const durationsList = (kb?.products || [])
+    .filter((p) => p.durationMinutes)
+    .map((p) => `- ${p.name}: ${p.durationMinutes}min`)
+    .join('\n');
   // O horário do agendamento ATIVO (se houver) é um fato conhecido de antemão
   // — citar ele numa confirmação de cancelamento/remarcação não é alucinação.
   const confirmedTimes: string[] = existing ? [extractHHmm(existing.startIso)] : [];
@@ -440,11 +503,14 @@ ${existing ? `Este contato já tem um agendamento ativo: "${existing.summary}" c
 ${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}
 Mensagem do cliente: "${text}"
 
+Duração real de cada serviço (use pra calcular data_hora_fim — nunca invente uma duração diferente da cadastrada):
+${durationsList || '(nenhuma duração cadastrada pra nenhum serviço — pergunte a duração pra cliente ou use 90 minutos como estimativa)'}
+
 Regras:
 - Sempre passe datas/horas no formato "YYYY-MM-DDTHH:mm:ss" (hora local, SEM offset), fuso ${BUSINESS_TIMEZONE}.
 - Se faltar informação essencial pra agir (dia/horário desejado), NÃO chame nenhuma ferramenta.
 - Antes de criar um agendamento novo, verifique disponibilidade primeiro; só crie se estiver livre.
-- Duração padrão de uma sessão, se o cliente não especificar: 90 minutos.
+- Se a cliente se comprometer com uma data específica pra transferir a seña mas ainda não pagou, chame criar_pre_reserva — isso NUNCA substitui criar_agendamento, é só um registro de follow-up.
 - Pra remarcar/cancelar, você NÃO precisa saber o ID do evento — as ferramentas já resolvem isso sozinhas a partir deste contato.`;
 
   const contents: Content[] = [{ role: 'user', parts: [{ text: prompt }] }];
@@ -471,7 +537,7 @@ Regras:
 
     const responseParts: Part[] = [];
     for (const call of calls) {
-      const { response: toolResponse, summary, confirmedTimeHHmm } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg);
+      const { response: toolResponse, summary, confirmedTimeHHmm } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg, kb, contactName, messageId);
       actionsSummary.push(summary);
       // 'escalonar' (Epic 4.5.9, cancelamento com 24h+ de antecedência) reaproveita
       // o mesmo caminho de needsHumanConfirmation que 'erro' já usa.
@@ -590,7 +656,9 @@ export async function generateAutoReplyForText(
   phone?: string,
   calendarConfig?: CalendarConfig,
   segment: string = DEFAULT_SEGMENT,
-  mediaConfig?: MediaSendConfig
+  mediaConfig?: MediaSendConfig,
+  /** ID da mensagem do WhatsApp que disparou esta resposta — idempotência de criar_pre_reserva (Etapa 2), nunca duplica por reentrega de webhook. */
+  messageId?: string
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
@@ -612,7 +680,7 @@ export async function generateAutoReplyForText(
     let agendamentoToolsRan = false;
 
     if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
-      const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history);
+      const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId);
       if (result.actionsSummary.length) {
         extraContext = result.actionsSummary.map((s) => `- ${s}`).join('\n');
       }

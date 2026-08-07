@@ -94,31 +94,33 @@ const knowledgeBase: AgentKnowledgeBase = {
   // businessRules, que fica obsoleta sozinha depois que a promoção passa.
   products: [
     // PESTAÑAS
-    { name: 'Lash Lift', price: 'Gs 140.000', category: 'Pestañas', description: 'Curva e realça as próprias pestañas, sem extensões. Efeito natural que dura semanas. Sessão ~90min.' },
-    { name: 'Efecto 30+', price: 'Gs 350.000', category: 'Pestañas', description: 'Extensões técnica brasileira, retenção de até 30 dias, máximo volume. Sessão ~120min.' },
-    { name: 'Efecto Delineado', price: 'Gs 220.000', category: 'Pestañas', description: 'Extensões concentradas na linha das pestañas, efeito delineado sutil. Sessão ~120min.' },
-    { name: 'Efecto Rímel', price: 'Gs 220.000', category: 'Pestañas', description: 'Volume leve e natural, como rímel todos os dias. Sessão ~120min.' },
-    { name: 'Efecto Volumen Brasileño', price: 'Gs 200.000', category: 'Pestañas', description: 'Técnica clássica do estúdio, volume marcado sem perder naturalidade. Sessão ~90min.' },
-    { name: 'Marrones', price: 'Gs 200.000', category: 'Pestañas', description: 'Extensões em tom marrom, look diário discreto. Sessão ~90min.' },
-    { name: 'Efecto Foxy', price: 'Gs 200.000', category: 'Pestañas', description: 'Extensões personalizadas conforme o visagismo dos olhos e formato do rosto. Sessão ~120min.' },
+    { name: 'Lash Lift', price: 'Gs 140.000', priceAmount: 140000, currency: 'PYG', durationMinutes: 90, category: 'Pestañas', description: 'Curva e realça as próprias pestañas, sem extensões. Efeito natural que dura semanas.' },
+    { name: 'Efecto 30+', price: 'Gs 350.000', priceAmount: 350000, currency: 'PYG', durationMinutes: 120, category: 'Pestañas', description: 'Extensões técnica brasileira, retenção de até 30 dias, máximo volume.' },
+    { name: 'Efecto Delineado', price: 'Gs 220.000', priceAmount: 220000, currency: 'PYG', durationMinutes: 120, category: 'Pestañas', description: 'Extensões concentradas na linha das pestañas, efeito delineado sutil.' },
+    { name: 'Efecto Rímel', price: 'Gs 220.000', priceAmount: 220000, currency: 'PYG', durationMinutes: 120, category: 'Pestañas', description: 'Volume leve e natural, como rímel todos os dias.' },
+    { name: 'Efecto Volumen Brasileño', price: 'Gs 200.000', priceAmount: 200000, currency: 'PYG', durationMinutes: 90, category: 'Pestañas', description: 'Técnica clássica do estúdio, volume marcado sem perder naturalidade.' },
+    { name: 'Marrones', price: 'Gs 200.000', priceAmount: 200000, currency: 'PYG', durationMinutes: 90, category: 'Pestañas', description: 'Extensões em tom marrom, look diário discreto.' },
+    { name: 'Efecto Foxy', price: 'Gs 200.000', priceAmount: 200000, currency: 'PYG', durationMinutes: 120, category: 'Pestañas', description: 'Extensões personalizadas conforme o visagismo dos olhos e formato do rosto.' },
     // CEJAS
-    { name: 'Microshading', price: 'Gs 500.000', category: 'Cejas', description: 'Sombreado em pó, efeito de cejas maquiadas todos os dias. Sessão ~120min.' },
-    { name: 'Pelo a Pelo', price: 'Gs 500.000', category: 'Cejas', description: 'Desenho traço a traço hiper-realista, imitando cada fio. Sessão ~120min.' },
-    { name: 'Diseño con Henna', price: 'Gs 80.000', category: 'Cejas', description: 'Desenho temporal, ideal pra testar formato antes de algo permanente. Sessão ~30min.' },
-    { name: 'Diseño Tradicional con Hilo', price: 'Gs 60.000', category: 'Cejas', description: 'Depilação de precisão com linha. Sessão ~30min.' },
-    { name: 'Browlamination', price: 'Gs 100.000', category: 'Cejas', description: 'Penteia e fixa os fios pra cima, efeito full por ~1 semana. Sessão ~90min.' },
-    { name: 'Coloración', price: 'Gs 80.000', category: 'Cejas', description: 'Tinta que empareja a cor dos fios. Sessão ~30min.' },
-    { name: 'Browlamination + Coloración', price: 'Gs 150.000', category: 'Cejas', description: 'Combina penteado dos fios com cor mais pareja. Sessão ~90min.' },
+    { name: 'Microshading', price: 'Gs 500.000', priceAmount: 500000, currency: 'PYG', durationMinutes: 120, category: 'Cejas', description: 'Sombreado em pó, efeito de cejas maquiadas todos os dias.' },
+    { name: 'Pelo a Pelo', price: 'Gs 500.000', priceAmount: 500000, currency: 'PYG', durationMinutes: 120, category: 'Cejas', description: 'Desenho traço a traço hiper-realista, imitando cada fio.' },
+    { name: 'Diseño con Henna', price: 'Gs 80.000', priceAmount: 80000, currency: 'PYG', durationMinutes: 30, category: 'Cejas', description: 'Desenho temporal, ideal pra testar formato antes de algo permanente.' },
+    { name: 'Diseño Tradicional con Hilo', price: 'Gs 60.000', priceAmount: 60000, currency: 'PYG', durationMinutes: 30, category: 'Cejas', description: 'Depilação de precisão com linha.' },
+    { name: 'Browlamination', price: 'Gs 100.000', priceAmount: 100000, currency: 'PYG', durationMinutes: 90, category: 'Cejas', description: 'Penteia e fixa os fios pra cima, efeito full por ~1 semana.' },
+    { name: 'Coloración', price: 'Gs 80.000', priceAmount: 80000, currency: 'PYG', durationMinutes: 30, category: 'Cejas', description: 'Tinta que empareja a cor dos fios.' },
+    { name: 'Browlamination + Coloración', price: 'Gs 150.000', priceAmount: 150000, currency: 'PYG', durationMinutes: 90, category: 'Cejas', description: 'Combina penteado dos fios com cor mais pareja.' },
     // LABIOS
-    { name: 'Microlips', price: 'Gs 500.000', category: 'Labios', description: 'Cor natural e definida, sem depender tanto do batom. Sessão ~120min.' },
-    { name: 'Neutralización', price: 'Gs 450.000', category: 'Labios', description: 'Corrige tons indesejados de uma micropigmentação labial anterior. Sessão ~120min.' },
+    { name: 'Microlips', price: 'Gs 500.000', priceAmount: 500000, currency: 'PYG', durationMinutes: 120, category: 'Labios', description: 'Cor natural e definida, sem depender tanto do batom.' },
+    { name: 'Neutralización', price: 'Gs 450.000', priceAmount: 450000, currency: 'PYG', durationMinutes: 120, category: 'Labios', description: 'Corrige tons indesejados de uma micropigmentação labial anterior.' },
     // COMBOS
-    { name: 'Combo Cejas + Labios', price: 'Gs 800.000', category: 'Combos', description: 'Sessão ~180min.' },
-    { name: 'Combo Cejas + Pestañas', price: 'Gs 600.000', category: 'Combos', description: 'Sessão ~180min.' },
-    { name: 'Combo Triple: Cejas + Labios + Pestañas', price: 'Gs 1.000.000', category: 'Combos', description: 'Sessão ~180min.' },
-    { name: 'Combo Pestañas + Labios', price: 'Gs 650.000', category: 'Combos', description: 'Sessão ~210min.' },
-    // RETOQUE (não é um serviço agendável por si só — listado pra o agente nunca inventar o preço)
-    { name: 'Retoque', price: 'Gs 150.000', category: 'Outros', description: 'NÃO incluso no valor inicial, não é necessário pra todas as clientes — só quando Monique recomenda após avaliar o resultado.' },
+    { name: 'Combo Cejas + Labios', price: 'Gs 800.000', priceAmount: 800000, currency: 'PYG', durationMinutes: 180, category: 'Combos', description: 'Cejas e labios na mesma sessão.' },
+    { name: 'Combo Cejas + Pestañas', price: 'Gs 600.000', priceAmount: 600000, currency: 'PYG', durationMinutes: 180, category: 'Combos', description: 'Cejas e pestañas na mesma sessão.' },
+    { name: 'Combo Triple: Cejas + Labios + Pestañas', price: 'Gs 1.000.000', priceAmount: 1000000, currency: 'PYG', durationMinutes: 180, category: 'Combos', description: 'Cejas, labios e pestañas na mesma sessão.' },
+    { name: 'Combo Pestañas + Labios', price: 'Gs 650.000', priceAmount: 650000, currency: 'PYG', durationMinutes: 210, category: 'Combos', description: 'Pestañas e labios na mesma sessão.' },
+    // RETOQUE — não é agendável por si só (bookable:false): a IA nunca deve
+    // criar_agendamento pra este item, só Monique decide depois de avaliar o
+    // resultado. Listado no catálogo só pra ela nunca inventar o preço.
+    { name: 'Retoque', price: 'Gs 150.000', priceAmount: 150000, currency: 'PYG', category: 'Outros', bookable: false, description: 'NÃO incluso no valor inicial, não é necessário pra todas as clientes — só quando Monique recomenda após avaliar o resultado.' },
   ],
 
   faqs: [
