@@ -7,12 +7,31 @@
  */
 import { getDb } from './db';
 
+/**
+ * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
+ * Cloud API não expõe reagir a mensagem já enviada do jeito que o app
+ * WhatsApp faz). Upsert por ator: reagir de novo troca a reação anterior do
+ * mesmo ator, nunca acumula.
+ */
+export interface MessageReaction {
+  emoji: string;
+  by: 'agent' | 'lead';
+  at: string;
+}
+
 export interface StoredMessage {
   id: string;
   sender: 'lead' | 'agent';
   type: 'text' | 'audio' | 'image' | 'file';
   text?: string;
   timestamp: string;
+  /** id de outra mensagem desta conversa que esta responde (quote) — metadado só do painel. */
+  replyToMessageId?: string;
+  /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
+  forwardedFromMessageId?: string;
+  /** presente quando o texto foi editado depois de enviado — só mensagens do agente/operador podem ser editadas. */
+  editedAt?: string;
+  reactions?: MessageReaction[];
 }
 
 export interface GeoRestriction {
@@ -53,6 +72,10 @@ type MessageRow = {
   type: StoredMessage['type'];
   text: string | null;
   created_at: string;
+  reply_to_message_id: string | null;
+  forwarded_from_message_id: string | null;
+  edited_at: string | null;
+  reactions: MessageReaction[] | null;
 };
 
 function toStoredConversation(row: ConversationRow): StoredConversation {
@@ -64,11 +87,21 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     messages: (row.messages || [])
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
-      .map((m) => ({ id: m.id, sender: m.sender, type: m.type, text: m.text || undefined, timestamp: m.created_at })),
+      .map((m) => ({
+        id: m.id,
+        sender: m.sender,
+        type: m.type,
+        text: m.text || undefined,
+        timestamp: m.created_at,
+        replyToMessageId: m.reply_to_message_id || undefined,
+        forwardedFromMessageId: m.forwarded_from_message_id || undefined,
+        editedAt: m.edited_at || undefined,
+        reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
+      })),
   };
 }
 
-const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at)';
+const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, edited_at, reactions)';
 
 async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string): Promise<{ id: string }> {
   const db = getDb();
@@ -149,12 +182,15 @@ export async function recordIncomingMessage(
   phone: string,
   name: string | undefined,
   message: Omit<StoredMessage, 'id' | 'sender'>,
-  customId?: string
+  customId?: string,
+  replyToMessageId?: string
 ): Promise<StoredConversation> {
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone, name);
   const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const { error } = await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null });
+  const { error } = await db
+    .from('messages')
+    .insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'lead', type: message.type, text: message.text ?? null, reply_to_message_id: replyToMessageId || null });
   if (error) {
     // Achado consultando uma lead real com ctwa_clid gravado mas 0 mensagens:
     // este erro só era logado, nunca relançado — o try/catch em webhooks.ts
@@ -169,11 +205,28 @@ export async function recordIncomingMessage(
   return (await getConversation(tenantId, phone))!;
 }
 
-export async function recordOutgoingMessage(tenantId: string, phone: string, message: Omit<StoredMessage, 'id' | 'sender'>): Promise<StoredConversation> {
+export async function recordOutgoingMessage(
+  tenantId: string,
+  phone: string,
+  message: Omit<StoredMessage, 'id' | 'sender'>,
+  replyToMessageId?: string,
+  forwardedFromMessageId?: string
+): Promise<StoredConversation> {
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
   const id = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const { error } = await db.from('messages').insert({ id, tenant_id: tenantId, conversation_id: conv.id, sender: 'agent', type: message.type, text: message.text ?? null });
+  const { error } = await db
+    .from('messages')
+    .insert({
+      id,
+      tenant_id: tenantId,
+      conversation_id: conv.id,
+      sender: 'agent',
+      type: message.type,
+      text: message.text ?? null,
+      reply_to_message_id: replyToMessageId || null,
+      forwarded_from_message_id: forwardedFromMessageId || null,
+    });
   if (error) {
     // Mesmo bug do recordIncomingMessage (ver comentário lá): engolir o erro
     // aqui faz o chamador (ex: triggerAutoReply em webhooks.ts) achar que a
@@ -184,6 +237,60 @@ export async function recordOutgoingMessage(tenantId: string, phone: string, mes
   }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
   return (await getConversation(tenantId, phone))!;
+}
+
+/**
+ * Encaminha uma mensagem existente pra outro contato — sempre dentro do
+ * MESMO tenant, nunca cross-tenant: tanto a busca da mensagem original
+ * quanto o destino (toPhone) são resolvidos com o tenantId do JWT, nunca
+ * com um id vindo do body. Grava como nova mensagem enviada (sender=
+ * 'agent'), com forwarded_from_message_id apontando pra original —
+ * metadado só do painel, não reflete no WhatsApp real via Meta Cloud API.
+ */
+export async function forwardMessage(tenantId: string, messageId: string, toPhone: string): Promise<StoredConversation> {
+  const db = getDb();
+  const { data: original } = await db.from('messages').select('id, type, text').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
+  if (!original) throw new Error('Mensagem original não encontrada.');
+  return recordOutgoingMessage(
+    tenantId,
+    toPhone,
+    { type: original.type, text: original.text ?? undefined, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
+    undefined,
+    original.id
+  );
+}
+
+/**
+ * Reage a uma mensagem com um emoji — upsert por ator: reagir de novo troca
+ * a reação anterior do mesmo ator, nunca acumula infinito. Metadado só do
+ * painel (a Meta Cloud API não expõe reagir a mensagem já enviada).
+ */
+export async function reactToMessage(tenantId: string, messageId: string, emoji: string, by: 'agent' | 'lead'): Promise<MessageReaction[]> {
+  const db = getDb();
+  const { data: existing } = await db.from('messages').select('id, reactions').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
+  if (!existing) throw new Error('Mensagem não encontrada.');
+  const reactions: MessageReaction[] = ((existing.reactions as MessageReaction[]) || []).filter((r) => r.by !== by);
+  reactions.push({ emoji, by, at: new Date().toISOString() });
+  await db.from('messages').update({ reactions }).eq('id', existing.id);
+  return reactions;
+}
+
+export type EditMessageResult = { ok: true } | { ok: false; reason: 'not_found' | 'forbidden' };
+
+/**
+ * Edita o texto de uma mensagem já enviada — só permite mensagem do
+ * agente/operador (sender='agent'); editar mensagem do lead seria
+ * falsificar o que o cliente disse de verdade. Marca edited_at, pro
+ * frontend mostrar "(editado)" igual ao WhatsApp real. Metadado só do
+ * painel, não reflete no WhatsApp real via Meta Cloud API.
+ */
+export async function editMessage(tenantId: string, messageId: string, newText: string): Promise<EditMessageResult> {
+  const db = getDb();
+  const { data: existing } = await db.from('messages').select('id, sender').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
+  if (!existing) return { ok: false, reason: 'not_found' };
+  if (existing.sender !== 'agent') return { ok: false, reason: 'forbidden' };
+  await db.from('messages').update({ text: newText, edited_at: new Date().toISOString() }).eq('id', existing.id);
+  return { ok: true };
 }
 
 /** Atualiza o texto de uma mensagem já registrada (ex: placeholder de áudio → transcrição real). */

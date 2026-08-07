@@ -46,7 +46,10 @@ import {
   ShieldCheck,
   Activity,
   Trash2,
-  Settings
+  Settings,
+  Reply,
+  Forward,
+  Pencil
 } from 'lucide-react';
 
 interface WhatsAppLeadsSimProps {
@@ -155,6 +158,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Active Image Modal / Lightbox state
   const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
+
+  // Ações de mensagem — responder (quote), encaminhar, reagir, editar.
+  // Metadados só do painel (não refletem no WhatsApp real via Meta Cloud API).
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  const scrollToMessage = (messageId: string) => {
+    document.getElementById(`msg-anchor-${messageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   // Status do agente automático real (active/paused/restricted) — controla
   // se o backend responde sozinho às mensagens recebidas (ver Epic 1.3).
@@ -717,12 +732,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (e) e.preventDefault();
     if (!inputMessage.trim() || !selectedLead) return;
 
+    if (editingMessageId) {
+      await handleSaveEditedMessage(editingMessageId, inputMessage.trim());
+      return;
+    }
+
+    const replyToMessageId = replyingTo?.id;
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       sender: senderRole,
       type: 'text',
       text: inputMessage.trim(),
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      replyToMessageId,
     };
 
     const updatedLead = {
@@ -732,9 +754,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
     setInputMessage('');
+    setReplyingTo(null);
 
     if (senderRole === 'agent' && (selectedLead as any).isReal) {
-      sendRealWhatsAppMessage(selectedLead.id, selectedLead.phone, newMsg.id, newMsg.text!);
+      sendRealWhatsAppMessage(selectedLead.id, selectedLead.phone, newMsg.id, newMsg.text!, replyToMessageId);
     }
 
     if (autoAnalyze) {
@@ -743,18 +766,136 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Envia de verdade via Meta Cloud API (só quando o lead é uma conversa real, não simulada)
-  const sendRealWhatsAppMessage = async (leadId: string, phone: string, messageId: string, text: string) => {
+  const sendRealWhatsAppMessage = async (leadId: string, phone: string, messageId: string, text: string, replyToMessageId?: string) => {
     try {
       const res = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, ...(replyToMessageId ? { replyToMessageId } : {}) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
       console.error('Falha ao enviar mensagem real via WhatsApp:', err);
       markMessageFailed(leadId, messageId, 'Falha ao enviar a mensagem pro cliente — ele NÃO recebeu. Tente reenviar.');
     }
+  };
+
+  const handleReplyToMessage = (msg: ChatMessage) => {
+    setEditingMessageId(null);
+    setReplyingTo(msg);
+  };
+
+  const handleStartEditMessage = (msg: ChatMessage) => {
+    setReplyingTo(null);
+    setEditingMessageId(msg.id);
+    setInputMessage(msg.text || '');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setInputMessage('');
+  };
+
+  // Edita o texto de uma mensagem já enviada — só mensagens do agente/
+  // operador (o botão de editar só aparece nelas), nunca do lead (seria
+  // falsificar o que o cliente disse). Metadado só do painel.
+  const handleSaveEditedMessage = async (messageId: string, newText: string) => {
+    if (!selectedLead) return;
+    if ((selectedLead as any).isReal) {
+      try {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(messageId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: newText }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao editar mensagem real no servidor:', err);
+        setErrorMsg('Não foi possível editar a mensagem no servidor. Tente de novo.');
+        return;
+      }
+    }
+
+    setLeads((prev) =>
+      prev.map((l) =>
+        l.id === selectedLead.id
+          ? { ...l, messages: (l.messages || []).map((m) => (m.id === messageId ? { ...m, text: newText, editedAt: new Date().toISOString() } : m)) }
+          : l
+      )
+    );
+    setEditingMessageId(null);
+    setInputMessage('');
+  };
+
+  // Encaminha uma mensagem existente pra outro contato — metadado só do
+  // painel, não reflete no WhatsApp real via Meta Cloud API.
+  const handleForwardMessage = async (toLead: LeadInfo) => {
+    if (!forwardingMessage || !selectedLead) return;
+    if ((selectedLead as any).isReal) {
+      try {
+        const res = await apiFetch(
+          `/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(forwardingMessage.id)}/forward`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toPhone: toLead.phone }) }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao encaminhar mensagem no servidor:', err);
+        setErrorMsg('Não foi possível encaminhar a mensagem. Tente de novo.');
+        return;
+      }
+    }
+
+    const forwardedMsg: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      sender: 'agent',
+      type: forwardingMessage.type,
+      text: forwardingMessage.text,
+      mediaUrl: forwardingMessage.mediaUrl,
+      fileName: forwardingMessage.fileName,
+      audioDuration: forwardingMessage.audioDuration,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      forwardedFromMessageId: forwardingMessage.id,
+    };
+
+    setLeads((prev) =>
+      prev.map((l) => (l.id === toLead.id ? { ...l, messages: [...(l.messages || []), forwardedMsg] } : l))
+    );
+    setForwardingMessage(null);
+  };
+
+  // Reage a uma mensagem com um emoji — upsert por ator: reagir de novo
+  // troca a reação anterior do mesmo operador, nunca acumula.
+  const handleReactToMessage = async (msg: ChatMessage, emoji: string) => {
+    if (!selectedLead) return;
+    setReactionPickerFor(null);
+    if ((selectedLead as any).isReal) {
+      try {
+        const res = await apiFetch(
+          `/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(msg.id)}/react`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emoji }) }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao reagir à mensagem no servidor:', err);
+        setErrorMsg('Não foi possível reagir à mensagem. Tente de novo.');
+        return;
+      }
+    }
+
+    setLeads((prev) =>
+      prev.map((l) =>
+        l.id === selectedLead.id
+          ? {
+              ...l,
+              messages: (l.messages || []).map((m) =>
+                m.id === msg.id
+                  ? { ...m, reactions: [...(m.reactions || []).filter((r) => r.by !== 'agent'), { emoji, by: 'agent' as const, at: new Date().toISOString() }] }
+                  : m
+              ),
+            }
+          : l
+      )
+    );
   };
 
   // Apply Smart Reply suggested by AI directly into the chat
@@ -1532,11 +1673,73 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 {selectedLead.messages && selectedLead.messages.length > 0 ? (
                   selectedLead.messages.map((msg) => {
                     const isLead = msg.sender === 'lead';
+                    const quotedMessage = msg.replyToMessageId
+                      ? selectedLead.messages?.find((m) => m.id === msg.replyToMessageId)
+                      : undefined;
                     return (
                       <div
                         key={msg.id}
-                        className={`flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
+                        id={`msg-anchor-${msg.id}`}
+                        className={`group relative flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
                       >
+                        {/* Hover Action Toolbar — Responder, Encaminhar, Reagir, Editar (só agente) */}
+                        <div
+                          className={`absolute -top-6 ${isLead ? 'left-0' : 'right-0'} hidden group-hover:flex items-center gap-0.5 bg-[#233138] border border-slate-700 rounded-lg px-1 py-0.5 shadow-lg z-10`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleReplyToMessage(msg)}
+                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                            title="Responder"
+                          >
+                            <Reply className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setForwardingMessage(msg)}
+                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                            title="Encaminhar"
+                          >
+                            <Forward className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReactionPickerFor(reactionPickerFor === msg.id ? null : msg.id)}
+                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                            title="Reagir"
+                          >
+                            <Smile className="w-3 h-3" />
+                          </button>
+                          {!isLead && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditMessage(msg)}
+                              className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                              title="Editar"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Reaction Emoji Picker */}
+                        {reactionPickerFor === msg.id && (
+                          <div
+                            className={`absolute -top-16 ${isLead ? 'left-0' : 'right-0'} flex items-center gap-1 bg-[#233138] border border-slate-700 rounded-full px-2 py-1 shadow-lg z-20`}
+                          >
+                            {REACTION_EMOJIS.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => handleReactToMessage(msg, emoji)}
+                                className="text-sm hover:scale-125 transition-transform cursor-pointer"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
                         <div
                           className={`max-w-[85%] rounded-xl p-2.5 shadow-md space-y-1 text-xs relative ${
                             isLead
@@ -1544,6 +1747,38 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               : 'bg-[#005c4b] text-white rounded-tr-none shadow-emerald-950/40'
                           }`}
                         >
+                          {msg.forwardedFromMessageId && (
+                            <div className="flex items-center gap-1 text-[9px] italic opacity-60">
+                              <Forward className="w-2.5 h-2.5" /> Encaminhada
+                            </div>
+                          )}
+
+                          {quotedMessage && (
+                            <button
+                              type="button"
+                              onClick={() => scrollToMessage(quotedMessage.id)}
+                              className={`block w-full text-left rounded-lg px-2 py-1 border-l-4 cursor-pointer ${
+                                isLead ? 'bg-slate-800/60 border-emerald-500' : 'bg-black/20 border-emerald-300'
+                              }`}
+                            >
+                              <div className="text-[9px] font-bold text-emerald-400">
+                                {quotedMessage.sender === 'lead' ? selectedLead.name : 'Você'}
+                              </div>
+                              <div className="text-[10px] opacity-80 truncate">
+                                {quotedMessage.text ||
+                                  (quotedMessage.type === 'image' ? '📷 Imagem' : quotedMessage.type === 'audio' ? '🎤 Áudio' : quotedMessage.type === 'file' ? '📎 Arquivo' : '')}
+                              </div>
+                            </button>
+                          )}
+
+                          {msg.reactions && msg.reactions.length > 0 && (
+                            <div
+                              className={`absolute -bottom-2.5 ${isLead ? 'left-2' : 'right-2'} bg-[#233138] border border-slate-700 rounded-full px-1.5 py-0.5 text-[10px] shadow-md`}
+                            >
+                              {msg.reactions.map((r) => r.emoji).join(' ')}
+                            </div>
+                          )}
+
                           {/* Audio Message Type */}
                           {msg.type === 'audio' && (
                             <div className="space-y-2 min-w-[220px]">
@@ -1634,7 +1869,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Trash2 className="w-3 h-3" />
                             </button>
                             <div className="flex items-center gap-1">
-                              <span>{msg.timestamp}</span>
+                              <span>
+                                {msg.timestamp}
+                                {msg.editedAt && <span className="italic opacity-70"> (editado)</span>}
+                              </span>
                               {!isLead && (msg.sendFailed ? (
                                 <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
                               ) : (
@@ -1782,6 +2020,29 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 </div>
 
+                {/* Reply / Edit Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido/editado acima do campo de texto */}
+                {(replyingTo || editingMessageId) && (
+                  <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-[#00a884] rounded-lg px-3 py-1.5">
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-bold text-[#00a884]">
+                        {editingMessageId ? 'Editando mensagem' : `Respondendo a: ${replyingTo?.sender === 'lead' ? selectedLead.name : 'Você'}`}
+                      </div>
+                      <div className="text-[11px] text-slate-300 truncate">
+                        {editingMessageId
+                          ? selectedLead.messages?.find((m) => m.id === editingMessageId)?.text
+                          : replyingTo?.text || (replyingTo?.type === 'image' ? '📷 Imagem' : replyingTo?.type === 'audio' ? '🎤 Áudio' : replyingTo?.type === 'file' ? '📎 Arquivo' : '')}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={editingMessageId ? handleCancelEdit : () => setReplyingTo(null)}
+                      className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer flex-shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {/* WhatsApp Style Text Input Form */}
                 <form onSubmit={handleSendTextMessage} className="flex items-center space-x-2">
                   <button type="button" className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer">
@@ -1841,6 +2102,53 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
         )}
       </div>
+
+      {/* Forward Message Modal — escolher outro lead da lista pra encaminhar */}
+      {forwardingMessage && (
+        <div
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setForwardingMessage(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-4 max-w-sm w-full shadow-2xl space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Forward className="w-4 h-4 text-emerald-400" />
+                Encaminhar mensagem
+              </h3>
+              <button onClick={() => setForwardingMessage(null)} className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 truncate">"{forwardingMessage.text || 'Mídia'}"</p>
+            <div className="max-h-64 overflow-y-auto space-y-1 scrollbar-thin">
+              {leads.filter((l) => l.id !== selectedLead?.id).length === 0 && (
+                <p className="text-xs text-slate-500 text-center py-4">Nenhum outro contato disponível.</p>
+              )}
+              {leads
+                .filter((l) => l.id !== selectedLead?.id)
+                .map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => handleForwardMessage(l)}
+                    className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-800 text-left transition-colors cursor-pointer"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
+                      {l.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-white truncate">{l.name}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{l.phone}</div>
+                    </div>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Lightbox Modal for Image Preview */}
       {viewImageUrl && (
