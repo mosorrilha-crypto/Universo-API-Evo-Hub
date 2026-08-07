@@ -24,6 +24,23 @@ import { startReminderJob } from './server/services/reminderJob';
 
 dotenv.config();
 
+// Rede de segurança de nível de processo — SEM isso, um erro não tratado em
+// QUALQUER handler async de rota (Express 4 não captura rejeição de promise
+// de handler async sozinho) vira um "unhandled rejection", e por padrão o
+// Node 22+ mata o processo inteiro. Isso derruba o servidor pra TODOS os
+// tenants de uma vez só (não só a requisição que falhou) — foi exatamente
+// a causa raiz de uma queda real em produção (502 generalizado) rastreada
+// numa auditoria de código, reproduzida localmente antes desta correção.
+// Loga e mantém o processo vivo; o middleware de erro global (abaixo, em
+// startServer) cuida de devolver uma resposta HTTP decente pra quem
+// disparou o erro, quando a rota usa asyncHandler.
+process.on('unhandledRejection', (reason) => {
+  console.error('🔥 [unhandledRejection] Erro não tratado — processo continua vivo:', reason instanceof Error ? reason.stack || reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('🔥 [uncaughtException] Erro não tratado — processo continua vivo:', err.stack || err.message);
+});
+
 async function startServer() {
   const config = loadConfig();
   const app = express();
@@ -80,6 +97,19 @@ async function startServer() {
     jwtSecret: config.jwtSecret,
   }));
   app.use(createAdminRouter({ authenticateToken, supabase }));
+
+  // Middleware de erro global do Express — precisa vir DEPOIS de todas as
+  // rotas de API acima (é assim que o Express decide quem trata um
+  // `next(err)`) e ANTES do fallback estático/SPA abaixo. Junto com
+  // asyncHandler (server/middleware/asyncHandler.ts), é o que transforma um
+  // erro de rota numa resposta 500 normal em vez de travar a requisição sem
+  // resposta (ver process.on('unhandledRejection') acima pro contexto
+  // completo do bug que isso corrige).
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(err);
+    console.error(`❌ [Erro não tratado] ${req.method} ${req.path}:`, err?.stack || err?.message || err);
+    res.status(500).json({ error: 'Erro interno do servidor.' });
+  });
 
   // Worker em background que processa a fila de transcrição (webhook → download
   // de mídia → Gemini). Ver server/services/transcriptionQueue.ts.

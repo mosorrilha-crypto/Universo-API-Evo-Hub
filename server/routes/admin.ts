@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireRole, isSaasAdmin } from '../middleware/rbac';
 import type { AuthenticatedRequest } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -27,13 +28,13 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
   // ── Tenants ──────────────────────────────────────────────────────────
   // Só saas_admin cria/lista tenants — são os clientes do SaaS, não algo
   // que um admin de um tenant específico deveria conseguir fazer.
-  router.get('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), async (req, res) => {
+  router.get('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
     const { data, error } = await db().from('tenants').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ tenants: data });
-  });
+  }));
 
-  router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), async (req, res) => {
+  router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
     const { name, slug, currency, locale, secondaryCurrency, secondaryLocale, phoneNumberId, accessToken, wabaId, mode, segment } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
 
@@ -68,12 +69,12 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
     }
 
     res.status(201).json({ tenant });
-  });
+  }));
 
   // ── Operators ────────────────────────────────────────────────────────
   // admin cria operador só dentro do próprio tenant; saas_admin pode
   // escolher qualquer tenant.
-  router.get('/api/admin/operators', authenticateToken, requireRole('admin'), async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/operators', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     let query = db().from('operators').select('id, tenant_id, email, name, role, created_at');
     if (!isSaasAdmin(req)) {
       query = query.eq('tenant_id', req.user?.tenantId);
@@ -81,9 +82,9 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
     const { data, error } = await query.order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ operators: data });
-  });
+  }));
 
-  router.post('/api/admin/operators', authenticateToken, requireRole('admin'), async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/operators', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { email, password, name, role, tenantId: bodyTenantId } = req.body || {};
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Campos "email", "password" e "name" são obrigatórios.' });
@@ -110,9 +111,9 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
       .single();
     if (error) return res.status(500).json({ error: error.message });
     res.status(201).json({ operator: data });
-  });
+  }));
 
-  router.delete('/api/admin/operators/:id', authenticateToken, requireRole('admin'), async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/admin/operators/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     let query = db().from('operators').delete().eq('id', req.params.id);
     if (!isSaasAdmin(req)) {
       query = query.eq('tenant_id', req.user?.tenantId);
@@ -121,7 +122,7 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
     if (error) return res.status(500).json({ error: error.message });
     if (!data?.length) return res.status(404).json({ error: 'Operador não encontrado.' });
     res.json({ success: true });
-  });
+  }));
 
   return router;
 }
