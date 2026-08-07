@@ -187,6 +187,12 @@ export interface AgentKnowledgeBase {
 export type MessageSender = 'lead' | 'agent' | 'system';
 export type MessageType = 'text' | 'audio' | 'image' | 'file';
 
+export interface MessageReaction {
+  emoji: string;
+  by: 'agent' | 'lead';
+  at: string;
+}
+
 export interface ChatMessage {
   id: string;
   sender: MessageSender;
@@ -200,6 +206,13 @@ export interface ChatMessage {
   timestamp: string;
   /** true quando o envio real via Meta Cloud API falhou — a mensagem ficou só local, o cliente nunca recebeu. */
   sendFailed?: boolean;
+  /** id de outra mensagem desta conversa que esta responde (quote) — metadado só do painel, não reflete no WhatsApp real. */
+  replyToMessageId?: string;
+  /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
+  forwardedFromMessageId?: string;
+  /** presente quando o texto foi editado depois de enviado. */
+  editedAt?: string;
+  reactions?: MessageReaction[];
 }
 
 export interface ExtractedCRMData {

@@ -1,5 +1,16 @@
 import { Router, type RequestHandler } from 'express';
-import { listConversations, getConversation, recordOutgoingMessage, clearConversationHistory, deleteConversation, deleteMessage, markGeoRestricted } from '../services/conversationStore';
+import {
+  listConversations,
+  getConversation,
+  recordOutgoingMessage,
+  clearConversationHistory,
+  deleteConversation,
+  deleteMessage,
+  markGeoRestricted,
+  forwardMessage,
+  reactToMessage,
+  editMessage,
+} from '../services/conversationStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
@@ -66,7 +77,7 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
   }));
 
   router.post('/api/conversations/:phone/send', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { text } = req.body || {};
+    const { text, replyToMessageId } = req.body || {};
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ error: 'Campo "text" é obrigatório.' });
     }
@@ -74,11 +85,16 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
 
     try {
       await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, text.trim());
-      const conv = await recordOutgoingMessage(tenantId, req.params.phone, {
-        type: 'text',
-        text: text.trim(),
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      });
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        req.params.phone,
+        {
+          type: 'text',
+          text: text.trim(),
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        typeof replyToMessageId === 'string' ? replyToMessageId : undefined
+      );
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
@@ -143,6 +159,46 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     const existed = await deleteMessage(tenantOf(req), req.params.phone, req.params.messageId);
     if (!existed) return res.status(404).json({ error: 'Mensagem não encontrada.' });
     res.json({ success: true });
+  }));
+
+  // Encaminha uma mensagem existente pra outro contato (sempre do mesmo
+  // tenant — forwardMessage nunca resolve messageId/toPhone fora do
+  // tenantId do JWT). Metadado só do painel, não reflete no WhatsApp real.
+  router.post('/api/conversations/:phone/messages/:messageId/forward', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { toPhone } = req.body || {};
+    if (!toPhone || typeof toPhone !== 'string' || !toPhone.trim()) {
+      return res.status(400).json({ error: 'Campo "toPhone" é obrigatório.' });
+    }
+    const conv = await forwardMessage(tenantOf(req), req.params.messageId, toPhone.trim());
+    res.json({ success: true, conversation: conv });
+  }));
+
+  // Reage a uma mensagem com um emoji — upsert por ator (reagir de novo
+  // troca a reação anterior do mesmo operador, não acumula).
+  router.post('/api/conversations/:phone/messages/:messageId/react', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { emoji } = req.body || {};
+    if (!emoji || typeof emoji !== 'string') {
+      return res.status(400).json({ error: 'Campo "emoji" é obrigatório.' });
+    }
+    const reactions = await reactToMessage(tenantOf(req), req.params.messageId, emoji, 'agent');
+    res.json({ success: true, reactions });
+  }));
+
+  // Edita o texto de uma mensagem já enviada — só mensagem do agente/
+  // operador (sender='agent'); editar mensagem do lead seria falsificar o
+  // que o cliente disse de verdade.
+  router.patch('/api/conversations/:phone/messages/:messageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { text } = req.body || {};
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ error: 'Campo "text" é obrigatório.' });
+    }
+    const result = await editMessage(tenantOf(req), req.params.messageId, text.trim());
+    if (result.ok === false) {
+      if (result.reason === 'not_found') return res.status(404).json({ error: 'Mensagem não encontrada.' });
+      return res.status(403).json({ error: 'Só é possível editar mensagens enviadas pelo agente/operador.' });
+    }
+    const conv = await getConversation(tenantOf(req), req.params.phone);
+    res.json({ success: true, conversation: conv });
   }));
 
   // Envia a foto de exemplo cadastrada na Base de Conhecimento pro serviço
