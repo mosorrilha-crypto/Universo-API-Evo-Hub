@@ -66,6 +66,11 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('REGRAS DE ESTILO');
     expect(systemInstruction).not.toContain(KB_MARKER);
 
+    // Etapa 4: conteúdo real das camadas 1 (global) e 2 (segmento) precisa
+    // estar sendo injetado de verdade, não só a seção fixa de estilo.
+    expect(systemInstruction).toContain('Nunca finja escassez');
+    expect(systemInstruction).toContain('Fotos de referência');
+
     // Camadas 3+4 (tenant/dinâmico) + histórico: nunca a instrução fixa.
     expect(userContent).toContain(KB_MARKER);
     expect(userContent).toContain('quanto custa o retoque?');
