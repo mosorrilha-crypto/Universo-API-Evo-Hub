@@ -49,7 +49,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 }) => {
   const [selectedUserId, setSelectedUserId] = useState<string>(DEMO_USERS[0].id);
   const [password, setPassword] = useState<string>('');
-  const [customEmail, setCustomEmail] = useState<string>(DEMO_USERS[0].email);
+  const [customEmail, setCustomEmail] = useState<string>('');
   const [useCustomLogin, setUseCustomLogin] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -98,14 +98,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     // Fora do modo demo, as senhas fixas abaixo não valem nada — a validação
     // é sempre feita de verdade contra o backend/Supabase.
     if (!demoMode) {
+      if (!customEmail || !customEmail.trim()) {
+        setErrorMsg('Por favor, informe o seu e-mail de acesso.');
+        return;
+      }
       setIsSubmitting(true);
       try {
-        // Nunca manda um tenantId adivinhado (os cards de preset acima são
-        // perfis de demonstração, com tenantId de mock tipo "tenant_004" —
-        // nunca bate com o tenant_id real/UUID de um operador de verdade no
-        // Supabase). O backend busca só por e-mail e devolve o tenant real
-        // do operador encontrado.
-        const email = useCustomLogin ? customEmail : presetUser!.email;
+        // Nunca manda um tenantId adivinhado (os cards de preset acima —
+        // quando aparecem, só em modo demo — são perfis de demonstração,
+        // com tenantId de mock tipo "tenant_004", que nunca bate com o
+        // tenant_id real/UUID de um operador de verdade no Supabase). O
+        // backend busca só por e-mail e devolve o tenant real do operador
+        // encontrado. Fora do modo demo, o e-mail é sempre o que o
+        // operador digitou (não existe seleção de perfil fixo).
+        const email = customEmail.trim();
         const res = await apiFetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -241,47 +247,75 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
           )}
 
-          {/* User Select Preset Cards */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-2">
-              1. Selecione o Usuário / Operador:
-            </label>
-            <div className="grid grid-cols-1 gap-2">
-              {DEMO_USERS.map((usr) => {
-                const isSelected = !useCustomLogin && selectedUserId === usr.id;
-                return (
-                  <button
-                    key={usr.id}
-                    type="button"
-                    onClick={() => handleSelectUser(usr)}
-                    className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left cursor-pointer ${
-                      isSelected
-                        ? 'bg-emerald-950/50 border-emerald-500 text-white shadow-lg ring-1 ring-emerald-500/50'
-                        : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <img
-                        src={usr.avatar}
-                        alt={usr.name}
-                        className="w-9 h-9 rounded-full object-cover border border-slate-700"
-                      />
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-xs text-white">{usr.name}</span>
-                          {getRoleBadge(usr.role)}
+          {/* User Select Preset Cards — só em modo demo. Fora do modo demo não
+              existe "escolher um perfil fixo": o operador digita o próprio
+              e-mail real, cadastrado de verdade no Supabase (ver campo de
+              e-mail logo abaixo). */}
+          {demoMode && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-2">
+                1. Selecione o Usuário / Operador:
+              </label>
+              <div className="grid grid-cols-1 gap-2">
+                {DEMO_USERS.map((usr) => {
+                  const isSelected = !useCustomLogin && selectedUserId === usr.id;
+                  return (
+                    <button
+                      key={usr.id}
+                      type="button"
+                      onClick={() => handleSelectUser(usr)}
+                      className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-950/50 border-emerald-500 text-white shadow-lg ring-1 ring-emerald-500/50'
+                          : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <img
+                          src={usr.avatar}
+                          alt={usr.name}
+                          className="w-9 h-9 rounded-full object-cover border border-slate-700"
+                        />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-xs text-white">{usr.name}</span>
+                            {getRoleBadge(usr.role)}
+                          </div>
+                          <p className="text-[11px] text-slate-400">{usr.email}</p>
                         </div>
-                        <p className="text-[11px] text-slate-400">{usr.email}</p>
                       </div>
-                    </div>
-                    <div className="flex items-center">
-                      <UserCheck className={`w-4 h-4 ${isSelected ? 'text-emerald-400' : 'text-slate-600'}`} />
-                    </div>
-                  </button>
-                );
-              })}
+                      <div className="flex items-center">
+                        <UserCheck className={`w-4 h-4 ${isSelected ? 'text-emerald-400' : 'text-slate-600'}`} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
+
+          {!demoMode && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                1. Digite o seu E-mail:
+              </label>
+              <div className="relative">
+                <input
+                  type="email"
+                  value={customEmail}
+                  onChange={(e) => {
+                    setCustomEmail(e.target.value);
+                    setErrorMsg(null);
+                  }}
+                  placeholder="seu-email@exemplo.com"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 pl-9"
+                  autoFocus
+                  autoComplete="username"
+                />
+                <User className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
+              </div>
+            </div>
+          )}
 
           {/* Password Form */}
           <form onSubmit={handleSubmit} className="space-y-4 pt-2 border-t border-slate-800">
@@ -299,7 +333,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   }}
                   placeholder="Ex: 123456 ou admin123"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 pl-9"
-                  autoFocus
+                  autoFocus={demoMode}
+                  autoComplete="current-password"
                 />
                 <Lock className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
               </div>
