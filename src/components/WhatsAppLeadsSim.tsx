@@ -316,9 +316,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (!selectedLead) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Achado numa investigação do "botão de áudio não funciona": a Meta
+      // Cloud API só aceita audio/aac, audio/mp4, audio/mpeg, audio/amr e
+      // audio/ogg (opus) como mensagem de voz — audio/webm (o formato que o
+      // MediaRecorder do Chrome prefere por padrão) NÃO está na lista. O
+      // código gravava sempre em webm, o upload pra Meta era rejeitado, e o
+      // áudio nunca chegava no cliente (falha silenciosa, só visível no
+      // console e no estado "falhou" da bolha). Agora prioriza formatos
+      // aceitos pela Meta; webm só entra como último recurso, quando o
+      // navegador não sabe gravar em nenhum dos outros.
       let mimeType = 'audio/webm';
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus';
+      if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+      else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) mimeType = 'audio/ogg;codecs=opus';
       else if (MediaRecorder.isTypeSupported('audio/ogg')) mimeType = 'audio/ogg';
+      else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) mimeType = 'audio/webm;codecs=opus';
 
       audioChunksRef.current = [];
       const recorder = new MediaRecorder(stream, { mimeType });
@@ -341,15 +352,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
 
         try {
+          const extension = mimeType.startsWith('audio/mp4') ? 'mp4' : mimeType.startsWith('audio/ogg') ? 'ogg' : 'webm';
           const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64, mimeType, filename: 'audio.webm' }),
+            body: JSON.stringify({ base64, mimeType, filename: `audio.${extension}` }),
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        } catch (err) {
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.error || `HTTP ${res.status}`);
+          }
+        } catch (err: any) {
           console.error('Falha ao enviar áudio real via WhatsApp:', err);
-          markMessageFailed(selectedLead.id, newMsg.id, `Falha ao enviar o áudio pro cliente ${selectedLead.name} — ele NÃO recebeu. Tente reenviar.`);
+          markMessageFailed(selectedLead.id, newMsg.id, err?.message || `Falha ao enviar o áudio pro cliente ${selectedLead.name} — ele NÃO recebeu. Tente reenviar.`);
         }
       };
 
@@ -433,6 +448,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, []);
 
   const selectedLead = leads.find((l) => l.id === activeLeadId) || leads[0];
+
+  // Achado a pedido do dono do tenant: numa conversa real, "Enviar como:
+  // Cliente" não faz sentido nenhum — não existe como forjar uma mensagem
+  // de entrada de um cliente de verdade no WhatsApp, só resta atendente.
+  // Esse toggle é resquício do modo demo (simular os dois lados de uma
+  // conversa de teste); trava sempre em 'agent' assim que a conversa
+  // selecionada é real, pra nunca ficar num estado que não bate com o que
+  // o botão de enviar realmente faz.
+  useEffect(() => {
+    if ((selectedLead as any)?.isReal && senderRole !== 'agent') {
+      setSenderRole('agent');
+    }
+  }, [selectedLead?.id, (selectedLead as any)?.isReal]);
 
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads.filter((lead) => {
@@ -1616,29 +1644,38 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 
                 {/* Sender Role Switcher & Attachments Toolbar */}
                 <div className="flex items-center justify-between text-xs px-1">
-                  <div className="flex items-center space-x-1 bg-[#111b21] p-1 rounded-xl border border-slate-800">
-                    <span className="text-[10px] text-slate-400 font-bold px-1">Enviar como:</span>
-                    <button
-                      type="button"
-                      onClick={() => setSenderRole('lead')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                        senderRole === 'lead' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <User className="w-3 h-3 inline mr-1" />
-                      Cliente
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSenderRole('agent')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                        senderRole === 'agent' ? 'bg-[#00a884] text-slate-950' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <UserCheck className="w-3 h-3 inline mr-1" />
-                      Atendente
-                    </button>
-                  </div>
+                  {/* Numa conversa real não existe "enviar como Cliente" — o
+                      toggle só faz sentido em conversas de teste/demo, onde
+                      dá pra simular os dois lados. Escondido em conversas
+                      reais pra não sobrar vestígio de modo demo na tela que
+                      a operadora usa todo dia. */}
+                  {!(selectedLead as any)?.isReal ? (
+                    <div className="flex items-center space-x-1 bg-[#111b21] p-1 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 font-bold px-1">Enviar como:</span>
+                      <button
+                        type="button"
+                        onClick={() => setSenderRole('lead')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                          senderRole === 'lead' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <User className="w-3 h-3 inline mr-1" />
+                        Cliente
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSenderRole('agent')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                          senderRole === 'agent' ? 'bg-[#00a884] text-slate-950' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <UserCheck className="w-3 h-3 inline mr-1" />
+                        Atendente
+                      </button>
+                    </div>
+                  ) : (
+                    <div />
+                  )}
 
                   {/* Attachment Quick Actions */}
                   <div className="flex items-center space-x-1">

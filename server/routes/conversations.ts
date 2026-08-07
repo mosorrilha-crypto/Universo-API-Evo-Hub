@@ -80,6 +80,15 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     if (!base64 || !mimeType) {
       return res.status(400).json({ error: 'Campos "base64" e "mimeType" são obrigatórios.' });
     }
+    // A Meta Cloud API só aceita audio/aac, audio/mp4, audio/mpeg, audio/amr
+    // e audio/ogg (opus) como mensagem de voz — audio/webm (o que o
+    // MediaRecorder do navegador grava por padrão em alguns casos) é
+    // rejeitado pela Meta. Sem essa checagem, o upload falhava com um erro
+    // HTTP genérico da Meta, difícil de diagnosticar ("o botão de áudio não
+    // funciona" sem nenhuma pista do porquê).
+    if (typeof mimeType === 'string' && mimeType.startsWith('audio/webm')) {
+      return res.status(400).json({ error: 'Este navegador gravou o áudio num formato que o WhatsApp não aceita (audio/webm). Tente em outro navegador (Chrome/Edge atualizados) ou grave novamente.' });
+    }
     const tenantId = tenantOf(req);
 
     try {
