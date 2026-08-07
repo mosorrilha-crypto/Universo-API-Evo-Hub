@@ -462,7 +462,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       </div>
 
       {/* Admin Navigation Tabs */}
-      <div className="flex items-center space-x-2 border-b border-slate-800 pb-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
         <button
           onClick={() => setActiveAdminTab('tenants')}
           className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all ${
