@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run lint*)",
+      "Bash(npx tsc --noEmit*)",
+      "Bash(npx vitest run*)",
+      "Bash(git fetch*)",
+      "mcp__Google_Drive__search_files",
+      "mcp__github__pull_request_read",
+      "mcp__Trello__trelloReadCard",
+      "mcp__Claude_Code_Remote__list_repos",
+      "mcp__Google_Drive__read_file_content"
+    ]
+  }
+}
