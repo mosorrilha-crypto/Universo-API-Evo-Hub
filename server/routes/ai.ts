@@ -94,28 +94,37 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
         }
       }
 
-      // Fallback preset analysis
+      // Achado numa auditoria pós-lançamento: esse fallback inventava dados de
+      // vendas fictícios (orçamento, objeções, "10% de desconto via PIX" —
+      // PIX nem existe no Paraguai) e uma resposta pronta pra enviar direto
+      // no WhatsApp, sem nenhum aviso pro operador de que não era uma análise
+      // real. Se o operador clicasse "Enviar esta resposta", um desconto
+      // inventado e sem autorização ia pro cliente de verdade. Um lead real
+      // (595981828280) chegou a ativar exatamente esse fallback e mostrou o
+      // texto fabricado como se fosse análise de IA. Agora o fallback nunca
+      // inventa números/promessas — só reporta que a análise não pôde ser
+      // gerada, com o `source: 'fallback'` que o frontend usa pra avisar o
+      // operador visivelmente.
       const msgCount = Array.isArray(messages) ? messages.length : 0;
-      const lastMsgText = Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].text || '' : '';
 
       const fallbackAnalysis = {
-        leadStage: msgCount > 4 ? 'negociacao' : msgCount > 2 ? 'proposta' : 'contato',
-        dealProbability: Math.min(95, 45 + msgCount * 10),
-        overallSentiment: lastMsgText.toLowerCase().includes('desconto') || lastMsgText.toLowerCase().includes('pix') ? 'Urgente' : 'Positivo',
-        urgencyLevel: 4,
-        detectedLanguage: 'Português (Brasil)',
-        conversationSummary: `Lead ${leadInfo?.name || 'Cliente'} trocou ${msgCount} mensagem(ns). Demonstrou alto interesse comercial nas soluções e tirou dúvidas sobre contratação.`,
+        leadStage: 'contato',
+        dealProbability: 0,
+        overallSentiment: 'Neutro',
+        urgencyLevel: 0,
+        detectedLanguage: undefined,
+        conversationSummary: `Não foi possível gerar a análise de IA agora (${msgCount} mensagem(ns) na conversa). Tente novamente em instantes — nenhum dado abaixo é real.`,
         extractedCRMData: {
-          budget: 'R$ 590 - 2.500',
-          timeline: 'Imediata (esta semana)',
-          productsOfInterest: [leadInfo?.sampleType || 'Plano Pro SaaS / Automação'],
-          keyObjections: ['Consulta de condições para pagamento à vista'],
-          decisionCriteria: 'Agilidade no atendimento e suporte 24/7'
+          budget: 'Não disponível',
+          timeline: 'Não disponível',
+          productsOfInterest: [],
+          keyObjections: [],
+          decisionCriteria: 'Não disponível',
         },
-        keyTopicsDiscussed: ['Planos e Condições', 'Pagamento PIX', 'Atendimento Humanizado'],
-        multiModalInsights: ['Interação com áudios e mensagens de texto com alto engajamento.'],
-        recommendedNextAction: 'Enviar link de pagamento PIX com 10% de desconto e agendar onboarding.',
-        suggestedSmartReply: `Olá ${leadInfo?.name ? leadInfo.name.split(' ')[0] : ''}! Verifiquei sua solicitação e conseguimos liberar 10% de desconto adicional para fechamento via PIX hoje. Posso gerar o seu link exclusivo?`
+        keyTopicsDiscussed: [],
+        multiModalInsights: [],
+        recommendedNextAction: 'Análise indisponível no momento — revise a conversa manualmente antes de responder.',
+        suggestedSmartReply: '',
       };
 
       return res.json({ success: true, source: 'fallback', analysis: fallbackAnalysis });

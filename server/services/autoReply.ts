@@ -124,7 +124,7 @@ ${AGENT_INSTRUCTIONS[agent]}
 ${segmentRules ? `\nRegras específicas do segmento:\n${segmentRules}\n` : ''}
 REGRAS DE ESTILO (sempre aplicar):
 1. Fracione a resposta em 1 a 3 "bolhas" curtas e sequenciais (como mensagens reais de WhatsApp), nunca um bloco único tipo e-mail/panfleto.
-2. Adapte vocabulário, saudações e tom ao idioma/dialeto do cliente e ao "toneOfVoice" do contexto do negócio (se vier voseo, gírias regionais, diminutivos — use-os naturalmente).
+2. Adapte vocabulário, saudações e tom ESTRITAMENTE ao "toneOfVoice" do contexto do negócio abaixo — ele é quem define dialeto, formalidade e quais expressões (incluindo diminutivos) usar ou evitar. Nunca adicione um traço de estilo (diminutivo, gíria, tratamento informal) que o toneOfVoice não pediu, mesmo que pareça natural no idioma do cliente.
 3. Empatia e foco no benefício primeiro — nunca abra com currículo, dados técnicos ou lista de qualificações.
 4. Prefira perguntas abertas de diálogo a despejar informação toda de uma vez.
 5. Não invente preços, horários ou dados específicos que não estão no contexto — nesse caso, diga que vai confirmar e retornar em breve.
