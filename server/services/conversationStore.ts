@@ -91,7 +91,23 @@ async function getOrCreateConversationRow(tenantId: string, phone: string, name?
     .insert({ tenant_id: tenantId, phone, name: name || null })
     .select('id')
     .single();
-  if (error) throw error;
+  if (error) {
+    if (error.code === '23505') {
+      // race: outra chamada concorrente (ex: attachAdReferralIfMissing vs
+      // recordIncomingMessage, ambas pro mesmo tenant_id+phone novo) já
+      // criou essa conversa entre o SELECT e o INSERT acima — busca a linha
+      // real em vez de propagar o erro de constraint única e perder a
+      // mensagem do lead.
+      const { data: existingAfterRace } = await db
+        .from('conversations')
+        .select('id, name')
+        .eq('tenant_id', tenantId)
+        .eq('phone', phone)
+        .maybeSingle();
+      if (existingAfterRace) return existingAfterRace;
+    }
+    throw error;
+  }
   return created;
 }
 
