@@ -31,7 +31,16 @@ export const App: React.FC = () => {
   // Tenants & Active Company
   const [tenants, setTenants] = useState<Tenant[]>(() => {
     const saved = localStorage.getItem('saas_tenants');
-    return saved ? JSON.parse(saved) : INITIAL_TENANTS;
+    if (!saved) return INITIAL_TENANTS;
+    // Migração (07/08/2026): navegadores que já tinham os tenants fictícios
+    // de demonstração salvos no localStorage (Drogaria, MetaLeads, FitLife)
+    // continuariam vendo esses cards mesmo depois de removidos do código —
+    // filtra pra manter só os IDs conhecidos (o real da Monique) e cai pro
+    // INITIAL_TENANTS atual se não sobrar nenhum tenant reconhecido.
+    const parsed = JSON.parse(saved) as Tenant[];
+    const knownIds = new Set(INITIAL_TENANTS.map((t) => t.id));
+    const filtered = parsed.filter((t) => knownIds.has(t.id));
+    return filtered.length ? filtered : INITIAL_TENANTS;
   });
   const [activeTenant, setActiveTenant] = useState<Tenant>(tenants[0] || INITIAL_TENANTS[0]);
 
