@@ -150,19 +150,20 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsTenantMenuOpen((open) => !open)}
-                  className="flex items-center space-x-2 bg-slate-950 border border-slate-800 p-1.5 px-3 rounded-xl text-slate-200 cursor-pointer hover:border-emerald-500/50 transition-all"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer transition-all"
+                  title={`Empresa ativa: ${activeTenant.name} — clique pra trocar`}
                 >
-                  <Building2 className="w-4 h-4 text-emerald-400" />
-                  <div className="text-left">
-                    <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Empresa Ativa</div>
-                    <div className="font-bold text-white text-xs truncate max-w-[140px]">{activeTenant.name}</div>
-                  </div>
-                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isTenantMenuOpen ? 'rotate-180' : ''}`} />
+                  <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                  <span className="font-semibold text-xs truncate max-w-[140px]">{activeTenant.name}</span>
+                  <ChevronDown className={`w-3 h-3 text-slate-500 flex-shrink-0 transition-transform ${isTenantMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
 
-                {/* Dropdown menu */}
+                {/* Dropdown menu — ancora pela esquerda no mobile (o botão fica perto
+                    da borda esquerda no layout empilhado) e pela direita no desktop
+                    (linha única, botão perto da borda direita) — evita vazar pra fora
+                    da tela nos dois casos. */}
                 {isTenantMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 w-64 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50">
+                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50">
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 border-b border-slate-800 mb-1">
                       Alternar Cliente (Tenant)
                     </div>
@@ -192,12 +193,9 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               </div>
             ) : (
-              <div className="flex items-center space-x-2 bg-slate-950 border border-slate-800 p-1.5 px-3 rounded-xl text-slate-200">
-                <Building2 className="w-4 h-4 text-emerald-400" />
-                <div className="text-left">
-                  <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Empresa</div>
-                  <div className="font-bold text-white text-xs truncate max-w-[140px]">{activeTenant.name}</div>
-                </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-300" title={activeTenant.name}>
+                <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                <span className="font-semibold text-xs truncate max-w-[140px]">{activeTenant.name}</span>
               </div>
             )}
 
