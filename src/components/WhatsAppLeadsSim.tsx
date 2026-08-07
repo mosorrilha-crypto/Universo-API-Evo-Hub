@@ -1882,10 +1882,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onSubmit={(e) => {
                 e.preventDefault();
                 setIsSavingConfig(true);
+                // Achado numa auditoria: este formulário só atualizava state local
+                // (nunca chamava o backend — não existe rota /api/... pra isso ainda)
+                // mas o alerta dizia "salvos com sucesso! O sistema está pronto para
+                // produção", levando o operador a acreditar que o número/API real
+                // já estava ativo quando nada foi persistido. Mantém o preenchimento
+                // local (útil pra pré-visualizar os campos), mas para de afirmar que
+                // isso configurou algo de verdade.
                 setTimeout(() => {
                   setIsSavingConfig(false);
                   setIsConfigModalOpen(false);
-                  alert(`Número de WhatsApp +${realPhone} e API salvos com sucesso! O sistema está pronto para produção.`);
+                  alert(`Número +${realPhone} preenchido localmente. Esta tela ainda NÃO envia a configuração para o servidor — a conexão real do WhatsApp continua sendo a já configurada para este tenant.`);
                 }, 800);
               }}
               className="space-y-4"

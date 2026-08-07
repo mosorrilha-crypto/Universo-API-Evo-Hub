@@ -346,14 +346,22 @@ export const App: React.FC = () => {
         {activeTab === 'knowledge' && (
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
-            onSaveKnowledgeBase={(updatedKb) => {
+            onSaveKnowledgeBase={async (updatedKb) => {
               setKnowledgeBase(updatedKb);
-              apiFetch('/api/knowledge-base', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ knowledgeBase: updatedKb }),
-              }).catch((err) => console.error('Falha ao salvar base de conhecimento no backend:', err));
-              showToast('Base de conhecimento do Agente salva!');
+              try {
+                const res = await apiFetch('/api/knowledge-base', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ knowledgeBase: updatedKb }),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                showToast('Base de conhecimento do Agente salva!');
+                return true;
+              } catch (err) {
+                console.error('Falha ao salvar base de conhecimento no backend:', err);
+                showToast('Não foi possível salvar no servidor — o agente pode continuar respondendo com a base antiga. Tente novamente.');
+                return false;
+              }
             }}
             onGoToWhatsAppSim={() => setActiveTab('whatsapp')}
           />
