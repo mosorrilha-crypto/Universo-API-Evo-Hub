@@ -12,7 +12,7 @@ import {
   Cell
 } from 'recharts';
 import { Tenant, TenantPlan, TenantStatus, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus } from '../types';
-import { INITIAL_TENANTS, SAAS_DEMO_USERS } from '../data/mockTenants';
+import { INITIAL_TENANTS } from '../data/mockTenants';
 import { apiFetch } from '../lib/apiClient';
 
 const PLAN_DISTRIBUTION = [
@@ -146,7 +146,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   // User Management State
   const [usersList, setUsersList] = useState<UserProfile[]>(() => {
     const saved = localStorage.getItem('saas_users_list');
-    return saved ? JSON.parse(saved) : SAAS_DEMO_USERS;
+    return saved ? JSON.parse(saved) : [];
   });
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<string>('all');

@@ -20,9 +20,23 @@ import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch } from './lib/apiClient';
 
-import { INITIAL_TENANTS, SAAS_DEMO_USERS } from './data/mockTenants';
+import { INITIAL_TENANTS } from './data/mockTenants';
 import { INITIAL_MOCK_LEADS } from './data/mockLeads';
 import { INITIAL_TRANSACTIONS } from './data/mockTransactions';
+
+// Placeholder usado só como prop enquanto a tela de login (bloqueante,
+// isForcedLogin={!currentUser} logo abaixo) está aberta por cima do painel —
+// evita quebrar componentes que ainda exigem currentUser não-nulo, sem
+// representar nenhuma conta real ou de demonstração.
+const GUEST_USER: UserProfile = {
+  id: 'guest',
+  tenantId: '',
+  name: 'Convidado',
+  email: '',
+  role: 'operator',
+  avatar: '',
+  department: '',
+};
 
 export const App: React.FC = () => {
   // Navigation & View State
@@ -273,7 +287,7 @@ export const App: React.FC = () => {
               if (activeTenant.id === updatedT.id) setActiveTenant(updatedT);
               showToast('Empresa atualizada');
             }}
-            currentUser={currentUser || SAAS_DEMO_USERS[0]}
+            currentUser={currentUser || GUEST_USER}
           />
         )}
 
@@ -309,7 +323,7 @@ export const App: React.FC = () => {
               setLeads([]);
               showToast('Leads limpos do CRM');
             }}
-            currentUser={currentUser || SAAS_DEMO_USERS[0]}
+            currentUser={currentUser || GUEST_USER}
             onNavigateToFinancial={handleNavigateToFinancial}
           />
         )}
@@ -325,7 +339,7 @@ export const App: React.FC = () => {
               showToast('Faturas limpas');
             }}
             leads={leads}
-            currentUser={currentUser || SAAS_DEMO_USERS[0]}
+            currentUser={currentUser || GUEST_USER}
             initialSelectedLead={financialPreselectedLead}
           />
         )}

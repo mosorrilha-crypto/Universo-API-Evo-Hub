@@ -30,7 +30,7 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use(createAuthRouter({ jwtSecret: 'test-secret', demoMode: false, supabase }));
+  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase }));
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, resolve);
