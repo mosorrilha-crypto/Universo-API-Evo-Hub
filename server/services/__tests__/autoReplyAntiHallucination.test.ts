@@ -89,4 +89,21 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
 
     expect(result?.bubbles).toEqual(['Perfeito, ficou marcado para as 10:00!']);
   });
+
+  it('corrige mesmo quando a ferramenta só confirmou horário OCUPADO (sem nenhum horário livre confirmado) e o modelo sugere uma "alternativa" nunca checada', async () => {
+    // Achado numa auditoria pós-lançamento: checkFreeBusy=false não gera
+    // nenhum confirmedTimeHHmm — antes da correção, isso desligava a
+    // validação inteira (gate era confirmedTimes.length), deixando passar
+    // qualquer "sugestão" inventada pelo modelo sem checar a agenda real.
+    checkFreeBusy.mockResolvedValue(false);
+    const ai = makeFakeAi('Que pena, 10:00 já está ocupado! Que tal às 16:00?'); // 16:00 nunca foi verificado
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'quero marcar às 10h de amanhã', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.bubbles.join(' ')).not.toContain('16:00');
+  });
 });

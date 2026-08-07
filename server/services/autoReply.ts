@@ -317,6 +317,19 @@ async function executeCalendarTool(
         };
       }
       case 'criar_agendamento': {
+        // Achado numa auditoria pós-lançamento: sem essa checagem, um
+        // segundo criar_agendamento pro mesmo telefone sobrescrevia
+        // silenciosamente o eventId rastreado do primeiro (a tabela é
+        // chaveada por tenant_id+phone) — o evento antigo ficava órfão na
+        // agenda real (continua ocupando o horário, mas remarcar_agendamento/
+        // cancelar_agendamento/o job de lembretes só enxergam o novo).
+        const existingBeforeCreate = await getAppointmentForPhone(tenantId, phone);
+        if (existingBeforeCreate) {
+          return {
+            response: { erro: 'Este contato já tem um agendamento ativo — use remarcar_agendamento pra mudar o horário, nunca criar_agendamento de novo.' },
+            summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate.summary}" em ${existingBeforeCreate.startIso}) — precisa remarcar em vez de criar outro.`,
+          };
+        }
         const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
         await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim });
         notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
@@ -589,6 +602,14 @@ export async function generateAutoReplyForText(
     let extraContext: string | undefined;
     let forcedHumanConfirmation = false;
     let confirmedTimes: string[] = [];
+    // Epic 4.5.7 — precisa ser "as ferramentas rodaram de verdade nesta
+    // mensagem", não "confirmaram algum horário livre". Achado numa
+    // auditoria pós-lançamento: gatear só por confirmedTimes.length deixava
+    // a validação inteira desligada bem no caso mais perigoso — cliente pede
+    // um horário, verificar_disponibilidade confirma OCUPADO (não gera
+    // nenhum confirmedTimeHHmm), e o modelo é livre pra "sugerir uma
+    // alternativa" que nunca foi checada de verdade contra a agenda real.
+    let agendamentoToolsRan = false;
 
     if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
       const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history);
@@ -597,6 +618,7 @@ export async function generateAutoReplyForText(
       }
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
+      agendamentoToolsRan = result.actionsSummary.length > 0;
     } else if (agent !== 'agendamento' && phone && mediaConfig?.phoneNumberId && mediaConfig?.accessToken) {
       const { actionsSummary } = await runFotoTool(tenantId, ai, text, phone, mediaConfig, history);
       if (actionsSummary.length) {
@@ -618,12 +640,14 @@ export async function generateAutoReplyForText(
     // segura antes de sair pro cliente — nunca deixa passar um horário
     // inventado.
     let bubbles = specialist.bubbles;
-    if (agent === 'agendamento' && confirmedTimes.length) {
+    if (agent === 'agendamento' && agendamentoToolsRan) {
       const citedTimes = extractCitedTimes(bubbles.join(' '));
       const invalidTimes = citedTimes.filter((t) => !confirmedTimes.includes(t));
       if (invalidTimes.length) {
-        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta. Confirmados: ${confirmedTimes.join(', ')}.`);
-        bubbles = [`Deixa eu confirmar certinho com você: o horário disponível é ${confirmedTimes.join(' ou ')}. Fico assim mesmo ou prefere outro horário?`];
+        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta. Confirmados: ${confirmedTimes.join(', ') || '(nenhum)'}.`);
+        bubbles = confirmedTimes.length
+          ? [`Deixa eu confirmar certinho com você: o horário disponível é ${confirmedTimes.join(' ou ')}. Fico assim mesmo ou prefere outro horário?`]
+          : ['Deixa eu confirmar certinho esse horário na agenda antes de te dar certeza — só um instante e já te retorno.'];
       }
     }
 

@@ -71,6 +71,14 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   if (kb.companyName) parts.push(`Empresa: ${kb.companyName}`);
   if (kb.agentGoal) parts.push(`Objetivo do atendimento: ${kb.agentGoal}`);
   if (kb.toneOfVoice) parts.push(`Tom de voz: ${kb.toneOfVoice}`);
+  // Achado numa auditoria pós-lançamento: este campo (endereço, horário de
+  // funcionamento em texto, Instagram) nunca era lido aqui — o único lugar
+  // que guardava esse dado nunca chegava no prompt do Gemini. Perguntas
+  // reais de cliente tipo "a que horas vocês abrem?"/"onde fica?" ficavam
+  // sem resposta (o agente segue a regra de nunca inventar, então o efeito
+  // era uma resposta genérica de "vou confirmar", não uma alucinação — mas
+  // ainda assim quebrava uma das perguntas mais comuns de FAQ).
+  if (kb.businessModel) parts.push(`Sobre o negócio (endereço, horário, posicionamento): ${kb.businessModel}`);
   if (kb.pricingAndPolicies) parts.push(`Políticas de preço/pagamento: ${kb.pricingAndPolicies}`);
   if (kb.businessRules?.length) parts.push(`Regras de negócio:\n- ${kb.businessRules.join('\n- ')}`);
   if (kb.products?.length) {

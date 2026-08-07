@@ -25,3 +25,16 @@ export function markProcessedIfNew(messageId: string): boolean {
   seenMessageIds.add(messageId);
   return true;
 }
+
+/**
+ * Desfaz a marcação de "já processada" — chamado quando o processamento
+ * dessa mensagem falhou de verdade (ex: erro ao gravar no Postgres) ANTES
+ * de terminar com sucesso. Sem isso, uma falha transitória marcava a
+ * mensagem como "vista" pra sempre; a reentrega da Meta/Evolution (que
+ * existe exatamente pra esse cenário) caía no `return false` e a mensagem
+ * do lead sumia de vez — nunca era gravada, nunca virava resposta
+ * automática, sem nenhum aviso pro operador.
+ */
+export function unmarkProcessed(messageId: string): void {
+  seenMessageIds.delete(messageId);
+}

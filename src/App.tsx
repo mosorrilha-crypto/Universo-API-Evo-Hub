@@ -268,7 +268,14 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'whatsapp' && (
+        {/* Sempre montado (visibilidade controlada por CSS, não por
+            montagem/desmontagem condicional) — desmontar ao trocar de aba e
+            remontar ao voltar fazia o componente reconstruir seu estado a
+            partir do localStorage desatualizado (`saas_crm_leads`),
+            perdendo temporariamente mensagens reais recém-chegadas do
+            polling até o próximo ciclo de 8s. Bug real relatado em
+            produção: mensagem aparecia e sumia da conversa. */}
+        <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
           <WhatsAppLeadsSim
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
@@ -282,7 +289,7 @@ export const App: React.FC = () => {
             }}
             onDeleteLead={handleDeleteLead}
           />
-        )}
+        </div>
 
         {activeTab === 'crm' && (
           <OperatorCRM
