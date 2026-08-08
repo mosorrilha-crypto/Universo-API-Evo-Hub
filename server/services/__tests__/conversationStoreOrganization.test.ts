@@ -91,4 +91,19 @@ describe('organização de conversas — arquivar, fixar, silenciar, não lida',
     [conv] = await listConversations(TENANT_A);
     expect(conv.name).toBe('Claudia Souza');
   });
+
+  it('bloqueia e desbloqueia a IA pra um lead específico (lead não qualificado/insistente)', async () => {
+    await recordIncomingMessage(TENANT_A, '595981111111', 'Cliente A', { type: 'text', text: 'oi', timestamp: '10:00' });
+
+    let [conv] = await listConversations(TENANT_A);
+    expect(conv.aiBlockedAt).toBeUndefined();
+
+    await updateConversationState(TENANT_A, '595981111111', { aiBlocked: true });
+    [conv] = await listConversations(TENANT_A);
+    expect(conv.aiBlockedAt).toBeTruthy();
+
+    await updateConversationState(TENANT_A, '595981111111', { aiBlocked: false });
+    [conv] = await listConversations(TENANT_A);
+    expect(conv.aiBlockedAt).toBeUndefined();
+  });
 });

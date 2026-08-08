@@ -274,6 +274,8 @@ export interface LeadInfo {
   pinnedAt?: string;
   muted?: boolean;
   manuallyUnread?: boolean;
+  /** Lead não qualificado/insistente — IA para de responder só pra esse número (ver server/services/conversationStore.ts). */
+  aiBlockedAt?: string;
 }
 
 export interface TranscriptionResult {

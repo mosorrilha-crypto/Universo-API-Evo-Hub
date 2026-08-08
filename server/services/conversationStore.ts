@@ -56,6 +56,8 @@ export interface StoredConversation {
   manuallyUnread?: boolean;
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver attachAdReferralIfMissing) — undefined se a conversa não veio de um anúncio. */
   adHeadline?: string;
+  /** Lead não qualificado/insistente — IA para de responder automaticamente só pra esse número (ver isConversationAiBlocked). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
+  aiBlockedAt?: string;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -78,6 +80,7 @@ type ConversationRow = {
   muted: boolean | null;
   manually_unread: boolean | null;
   ad_headline: string | null;
+  ai_blocked_at: string | null;
   messages?: MessageRow[];
 };
 
@@ -104,6 +107,7 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     muted: !!row.muted,
     manuallyUnread: !!row.manually_unread,
     adHeadline: row.ad_headline || undefined,
+    aiBlockedAt: row.ai_blocked_at || undefined,
     messages: (row.messages || [])
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -390,6 +394,8 @@ export interface ConversationStatePatch {
   unread?: boolean;
   /** Identifica o lead — troca/adiciona o nome de exibição do contato (a Meta só manda o nome do perfil de WhatsApp quando o cliente define um; muitos leads chegam só com o número). Sempre uma ação explícita do operador, nunca sobrescrita automaticamente. */
   name?: string;
+  /** Lead não qualificado/insistente ("assediando") — true pausa a IA só pra esse número (agentStatus.ts continua controlando o resto do tenant normalmente). O operador pode responder manualmente à vontade; só a resposta automática para. */
+  aiBlocked?: boolean;
 }
 
 /**
@@ -410,6 +416,7 @@ export async function updateConversationState(tenantId: string, phone: string, p
   if (patch.muted !== undefined) update.muted = patch.muted;
   if (patch.unread !== undefined) update.manually_unread = patch.unread;
   if (patch.name !== undefined) update.name = patch.name;
+  if (patch.aiBlocked !== undefined) update.ai_blocked_at = patch.aiBlocked ? new Date().toISOString() : null;
 
   if (Object.keys(update).length > 0) {
     await db.from('conversations').update(update).eq('id', existing.id);

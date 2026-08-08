@@ -165,9 +165,13 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     // mensagem recebida — evita duplicar a lógica de estilo em dois lugares.
     if (outcome.source === 'gemini' && !(await isAgentPaused(tenantId))) {
       runExclusive(message.from, async () => {
+        const conversation = await getConversation(tenantId, message.from);
+        // Mesmo bloqueio por lead individual do caminho de texto (ver
+        // webhooks.ts triggerAutoReply) — um lead bloqueado não deve
+        // receber resposta automática nem quando manda áudio.
+        if (conversation?.aiBlockedAt) return;
         const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
         const segment = await getTenantSegment(tenantId);
-        const conversation = await getConversation(tenantId, message.from);
         const history = conversation?.messages.slice(0, -1);
         try {
           const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history, message.from, undefined, segment, isEvolution ? undefined : { phoneNumberId, accessToken: token });
