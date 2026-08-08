@@ -65,7 +65,7 @@ async function startServer() {
   }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, demoMode: config.demoMode, supabase }));
+  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createWebhooksRouter({

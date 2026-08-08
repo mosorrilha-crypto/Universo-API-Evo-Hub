@@ -3,7 +3,6 @@ import crypto from 'crypto';
 export interface ServerConfig {
   port: number;
   isProduction: boolean;
-  demoMode: boolean;
   jwtSecret: string;
   supabaseUrl?: string;
   supabaseKey?: string;
@@ -49,13 +48,6 @@ export function loadConfig(): ServerConfig {
     console.warn('⚠️  JWT_SECRET não configurada — usando um segredo temporário só para esta execução (dev only).');
   }
 
-  // DEMO_MODE: fora de produção, ligado por padrão (facilita testar sem backend
-  // completo). Em produção, desligado por padrão — só liga com DEMO_MODE=true
-  // explícito. Controla o login com senhas fixas e o endpoint de token demo.
-  const demoMode = process.env.DEMO_MODE === 'true' ? true
-    : process.env.DEMO_MODE === 'false' ? false
-    : !isProduction;
-
   let metaWebhookVerifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
   if (!metaWebhookVerifyToken) {
     if (isProduction) {
@@ -77,7 +69,6 @@ export function loadConfig(): ServerConfig {
   return {
     port,
     isProduction,
-    demoMode,
     jwtSecret,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseKey: process.env.SUPABASE_KEY,

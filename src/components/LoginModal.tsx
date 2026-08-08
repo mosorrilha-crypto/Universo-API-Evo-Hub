@@ -1,11 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { UserProfile, UserRole } from '../types';
-import { SAAS_DEMO_USERS } from '../data/mockTenants';
-import { ShieldCheck, UserCheck, Lock, Sparkles, LogIn, Key, Building2, User, Layers, AlertCircle, Flame } from 'lucide-react';
+import React, { useState } from 'react';
+import { UserProfile } from '../types';
+import { ShieldCheck, Lock, LogIn, User, AlertCircle } from 'lucide-react';
 import { loginWithGoogle } from '../lib/firebase';
 import { apiFetch } from '../lib/apiClient';
-
-export const DEMO_USERS: UserProfile[] = SAAS_DEMO_USERS;
 
 interface LoginModalProps {
   onLogin: (user: UserProfile, token?: string) => void;
@@ -14,75 +11,18 @@ interface LoginModalProps {
   isForcedLogin?: boolean;
 }
 
-// Emite um Bearer token de verdade pro perfil (só funciona quando o backend
-// está em DEMO_MODE=true). O servidor valida a senha contra o cadastro fixo
-// dele mesmo (server/routes/auth.ts) — role/tenantId/email vêm de lá, nunca
-// do que mandamos aqui, então não adianta chamar isso com um id qualquer.
-//
-// Tenta de novo uma vez em caso de falha de rede (ex: 4G instável no
-// celular) antes de desistir — sem isso, uma única soneca de conexão fazia
-// o login "dar certo" na tela mas sem token nenhum, e todo o resto do painel
-// quebrava em silêncio (401 em tudo) sem o usuário entender por quê.
-const mintDemoToken = async (id: string, password: string): Promise<string | undefined> => {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await apiFetch('/api/auth/demo-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, password }),
-      });
-      if (!res.ok) return undefined; // credenciais inválidas — não adianta tentar de novo
-      const data = await res.json();
-      if (data.token) return data.token;
-    } catch {
-      // provável falha de rede — tenta mais uma vez antes de desistir
-    }
-  }
-  return undefined;
-};
-
 export const LoginModal: React.FC<LoginModalProps> = ({
   onLogin,
   isOpen,
   onClose,
   isForcedLogin = false,
 }) => {
-  const [selectedUserId, setSelectedUserId] = useState<string>(DEMO_USERS[0].id);
   const [password, setPassword] = useState<string>('');
   const [customEmail, setCustomEmail] = useState<string>('');
-  const [useCustomLogin, setUseCustomLogin] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  // Assume true (comportamento atual) até a config real chegar do backend, pra
-  // não travar a tela de login por causa de uma requisição lenta/falha.
-  const [demoMode, setDemoMode] = useState<boolean>(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/public/config')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data && typeof data.demoMode === 'boolean') {
-          setDemoMode(data.demoMode);
-        }
-      })
-      .catch(() => {
-        // Mantém o valor otimista em caso de falha de rede.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   if (!isOpen) return null;
-
-  const handleSelectUser = (user: UserProfile) => {
-    setUseCustomLogin(false);
-    setSelectedUserId(user.id);
-    setCustomEmail(user.email);
-    setPassword('');
-    setErrorMsg(null);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,124 +32,40 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setErrorMsg('Por favor, informe a sua senha de acesso.');
       return;
     }
-
-    const presetUser = useCustomLogin ? null : (DEMO_USERS.find((u) => u.id === selectedUserId) || DEMO_USERS[0]);
-
-    // Fora do modo demo, as senhas fixas abaixo não valem nada — a validação
-    // é sempre feita de verdade contra o backend/Supabase.
-    if (!demoMode) {
-      if (!customEmail || !customEmail.trim()) {
-        setErrorMsg('Por favor, informe o seu e-mail de acesso.');
-        return;
-      }
-      setIsSubmitting(true);
-      try {
-        // Nunca manda um tenantId adivinhado (os cards de preset acima —
-        // quando aparecem, só em modo demo — são perfis de demonstração,
-        // com tenantId de mock tipo "tenant_004", que nunca bate com o
-        // tenant_id real/UUID de um operador de verdade no Supabase). O
-        // backend busca só por e-mail e devolve o tenant real do operador
-        // encontrado. Fora do modo demo, o e-mail é sempre o que o
-        // operador digitou (não existe seleção de perfil fixo).
-        const email = customEmail.trim();
-        const res = await apiFetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Falha na autenticação');
-        }
-        const authenticatedUser: UserProfile = {
-          id: data.operator.email,
-          tenantId: data.operator.tenantId,
-          name: data.operator.name,
-          email: data.operator.email,
-          role: data.operator.role,
-          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-          department: 'Operador',
-        };
-        onLogin(authenticatedUser, data.token);
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao fazer login.');
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-
-    // --- Modo demo (DEMO_MODE=true no backend) ---
-    let authenticatedUser: UserProfile | null = null;
-
-    if (useCustomLogin && customEmail) {
-      const foundDemo = DEMO_USERS.find((u) => u.email.toLowerCase() === customEmail.toLowerCase());
-      if (foundDemo) {
-        authenticatedUser = foundDemo;
-      } else {
-        authenticatedUser = {
-          id: `usr_${Date.now()}`,
-          name: customEmail.split('@')[0].toUpperCase(),
-          email: customEmail,
-          role: 'operator',
-          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-          department: 'Atendimento Geral',
-          tenantId: 'tenant-1',
-        };
-      }
-    } else {
-      authenticatedUser = presetUser;
-    }
-
-    // Per-user password mapping for Demo / Production Preset Profiles
-    // usr_carlos/usr_fernanda removidos junto com as empresas fictícias
-    // (tenant_001/tenant_002) — ver src/data/mockTenants.ts e server/routes/auth.ts.
-    const USER_PASSWORDS: Record<string, string[]> = {
-      usr_monique: ['monique2026', 'admin123', '123456'],
-      usr_ricardo: ['master2026#', 'adminMaster123'], // Enforce strict password for SaaS Master Admin
-    };
-
-    let isPasswordValid = false;
-
-    if (useCustomLogin && customEmail) {
-      // General custom password check
-      const validPasswords = ['123456', 'admin123', 'universo2024', 'mudar-senha-123', 'monique2026', 'master2026#'];
-      isPasswordValid = validPasswords.includes(password.trim());
-    } else if (authenticatedUser) {
-      const allowedForUser = USER_PASSWORDS[authenticatedUser.id] || ['123456', 'admin123'];
-      isPasswordValid = allowedForUser.includes(password.trim());
-    }
-
-    if (!isPasswordValid) {
-      const hint = authenticatedUser?.role === 'saas_admin'
-        ? 'Dica: A senha do SaaS Master Admin é "master2026#".'
-        : 'Verifique a senha informada para este usuário.';
-      setErrorMsg(`Senha incorreta! Acesso negado. ${hint}`);
+    if (!customEmail || !customEmail.trim()) {
+      setErrorMsg('Por favor, informe o seu e-mail de acesso.');
       return;
     }
 
     setIsSubmitting(true);
-    const token = await mintDemoToken(authenticatedUser.id, password.trim());
-    setIsSubmitting(false);
-
-    if (!token) {
-      setErrorMsg('Não foi possível confirmar sua sessão com o servidor (verifique sua conexão e tente novamente). O painel não vai funcionar direito sem isso.');
-      return;
-    }
-
-    onLogin(authenticatedUser, token);
-  };
-
-  const getRoleBadge = (role: UserRole) => {
-    switch (role) {
-      case 'saas_admin':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">SaaS Master Admin</span>;
-      case 'admin':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/80">Administrador / CFO</span>;
-      case 'manager':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/80">Gerente Comercial</span>;
-      default:
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/80">Operador de Vendas</span>;
+    try {
+      // Busca só por e-mail — o backend nunca aceita um tenantId sugerido pelo
+      // cliente, sempre devolve o tenant real do operador encontrado (ver
+      // server/routes/auth.ts).
+      const email = customEmail.trim();
+      const res = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Falha na autenticação');
+      }
+      const authenticatedUser: UserProfile = {
+        id: data.operator.email,
+        tenantId: data.operator.tenantId,
+        name: data.operator.name,
+        email: data.operator.email,
+        role: data.operator.role,
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        department: 'Operador',
+      };
+      onLogin(authenticatedUser, data.token);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao fazer login.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -230,7 +86,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Digite a senha do usuário cadastrado para prosseguir
+                Digite o e-mail e a senha do operador cadastrado para prosseguir
               </p>
             </div>
           </div>
@@ -238,7 +94,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
         {/* Form Body */}
         <div className="p-6 space-y-5">
-          
+
           {/* Error Message Alert */}
           {errorMsg && (
             <div className="p-3 bg-rose-950/80 border border-rose-500/50 rounded-xl text-rose-200 text-xs flex items-center gap-2.5 animate-shake">
@@ -247,75 +103,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
           )}
 
-          {/* User Select Preset Cards — só em modo demo. Fora do modo demo não
-              existe "escolher um perfil fixo": o operador digita o próprio
-              e-mail real, cadastrado de verdade no Supabase (ver campo de
-              e-mail logo abaixo). */}
-          {demoMode && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-2">
-                1. Selecione o Usuário / Operador:
-              </label>
-              <div className="grid grid-cols-1 gap-2">
-                {DEMO_USERS.map((usr) => {
-                  const isSelected = !useCustomLogin && selectedUserId === usr.id;
-                  return (
-                    <button
-                      key={usr.id}
-                      type="button"
-                      onClick={() => handleSelectUser(usr)}
-                      className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-left cursor-pointer ${
-                        isSelected
-                          ? 'bg-emerald-950/50 border-emerald-500 text-white shadow-lg ring-1 ring-emerald-500/50'
-                          : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <img
-                          src={usr.avatar}
-                          alt={usr.name}
-                          className="w-9 h-9 rounded-full object-cover border border-slate-700"
-                        />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-xs text-white">{usr.name}</span>
-                            {getRoleBadge(usr.role)}
-                          </div>
-                          <p className="text-[11px] text-slate-400">{usr.email}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center">
-                        <UserCheck className={`w-4 h-4 ${isSelected ? 'text-emerald-400' : 'text-slate-600'}`} />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              1. Digite o seu E-mail:
+            </label>
+            <div className="relative">
+              <input
+                type="email"
+                value={customEmail}
+                onChange={(e) => {
+                  setCustomEmail(e.target.value);
+                  setErrorMsg(null);
+                }}
+                placeholder="seu-email@exemplo.com"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 pl-9"
+                autoFocus
+                autoComplete="username"
+              />
+              <User className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
             </div>
-          )}
-
-          {!demoMode && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                1. Digite o seu E-mail:
-              </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  value={customEmail}
-                  onChange={(e) => {
-                    setCustomEmail(e.target.value);
-                    setErrorMsg(null);
-                  }}
-                  placeholder="seu-email@exemplo.com"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 pl-9"
-                  autoFocus
-                  autoComplete="username"
-                />
-                <User className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
-              </div>
-            </div>
-          )}
+          </div>
 
           {/* Password Form */}
           <form onSubmit={handleSubmit} className="space-y-4 pt-2 border-t border-slate-800">
@@ -331,30 +138,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setPassword(e.target.value);
                     setErrorMsg(null);
                   }}
-                  placeholder="Ex: 123456 ou admin123"
+                  placeholder="Digite sua senha"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 pl-9"
-                  autoFocus={demoMode}
                   autoComplete="current-password"
                 />
                 <Lock className="w-4 h-4 text-emerald-400 absolute left-3 top-3" />
               </div>
-              {demoMode ? (
-                // Achado no PLANO-EVOLUCAO.md (item 0.1.7, crítico pendente) e
-                // confirmado numa auditoria externa: mostrar a senha do perfil
-                // em texto claro na própria tela de login é uma exposição
-                // desnecessária, mesmo em modo demo — não ajuda ninguém que já
-                // não tenha acesso ao cadastro fixo, e normaliza expor senha
-                // na UI. Removido; quem precisar da senha demo consulta a
-                // documentação interna, não a tela de login.
-                <p className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
-                  <span>Use a senha cadastrada para este perfil de demonstração.</span>
-                  <span className="text-slate-500">Validação Estreita v2.0</span>
-                </p>
-              ) : (
-                <p className="text-[10px] text-amber-400 mt-1">
-                  Modo de demonstração desativado neste ambiente — informe a senha real do operador.
-                </p>
-              )}
             </div>
 
             <button
@@ -367,7 +156,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </button>
           </form>
 
-          {/* Alternative Google / Firebase Login */}
+          {/* Alternative Google / Firebase Login — ainda não emite um Bearer
+              token de backend (ver PARTE 1 do card "[AUTH] Login real com
+              Google" no Trello, bloqueada por falta de credencial do Firebase
+              Admin). Rotas protegidas continuam corretamente bloqueadas (401)
+              até esse login virar um JWT de verdade. */}
           <div className="pt-3 border-t border-slate-800">
             <button
               type="button"
@@ -390,10 +183,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     tenantId: 'tenant_004',
                   };
                   // Login Google não emite Bearer token de backend: não temos como
-                  // provar que esse e-mail corresponde a um dos 4 perfis fixos de
-                  // demo (nem a um operador real do Supabase), então as rotas
-                  // protegidas continuam corretamente bloqueadas (401) até haver um
-                  // login de verdade (senha demo ou operador real cadastrado).
+                  // provar que esse e-mail corresponde a um operador real do
+                  // Supabase, então as rotas protegidas continuam corretamente
+                  // bloqueadas (401) até haver um login de verdade (senha real do
+                  // operador cadastrado).
                   onLogin(authenticatedUser, undefined);
                 } catch (err: any) {
                   setErrorMsg(`Erro ao autenticar via Google: ${err.message || 'Falha no login'}`);
