@@ -268,6 +268,12 @@ export interface LeadInfo {
    * que é do estágio único do CRM (OperatorCRM.tsx, ainda só localStorage).
    */
   conversationLabels?: string[];
+  // Organização de conversas (arquivar, fixar, silenciar, não lida manual) —
+  // metadados só do painel, ver server/services/conversationStore.ts.
+  archivedAt?: string;
+  pinnedAt?: string;
+  muted?: boolean;
+  manuallyUnread?: boolean;
 }
 
 export interface TranscriptionResult {

@@ -24,6 +24,8 @@ export interface PreReservation {
   waMessageId: string;
   createdAt: string;
   updatedAt: string;
+  /** Quando o operador foi alertado (Etapa 7 — job de follow-up) que a data combinada chegou e a pré-reserva ainda está pending. undefined = ainda não alertado. */
+  followupAlertedAt?: string;
 }
 
 type PreReservationRow = {
@@ -37,6 +39,7 @@ type PreReservationRow = {
   wa_message_id: string;
   created_at: string;
   updated_at: string;
+  followup_alerted_at: string | null;
 };
 
 function toPreReservation(row: PreReservationRow): PreReservation {
@@ -51,6 +54,7 @@ function toPreReservation(row: PreReservationRow): PreReservation {
     waMessageId: row.wa_message_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    followupAlertedAt: row.followup_alerted_at || undefined,
   };
 }
 
@@ -119,4 +123,24 @@ export async function updatePreReservationStatus(tenantId: string, id: string, s
     .maybeSingle();
   if (error) throw error;
   return data ? toPreReservation(data as PreReservationRow) : undefined;
+}
+
+/** Marca que o operador já foi alertado sobre esta pré-reserva vencida (Etapa 7) — idempotência do job de follow-up, nunca duplica o alerta. */
+export async function markFollowUpAlerted(tenantId: string, id: string): Promise<void> {
+  const db = getDb();
+  await db.from('pre_reservations').update({ followup_alerted_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', id);
+}
+
+/**
+ * Todos os tenant_id distintos com ao menos uma pré-reserva pending — pré-
+ * reserva não depende de Google Calendar conectado (diferente de lembretes
+ * de agendamento, que precisam do evento real no Calendar), então o job de
+ * follow-up itera por essa lista em vez de listConnectedCalendarTenants().
+ */
+export async function listTenantIdsWithPendingPreReservations(): Promise<string[]> {
+  const db = getDb();
+  const { data, error } = await db.from('pre_reservations').select('tenant_id').eq('status', 'pending');
+  if (error) throw error;
+  const ids = new Set(((data || []) as { tenant_id: string }[]).map((row) => row.tenant_id));
+  return Array.from(ids);
 }
