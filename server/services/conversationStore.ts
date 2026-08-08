@@ -54,6 +54,8 @@ export interface StoredConversation {
   pinnedAt?: string;
   muted?: boolean;
   manuallyUnread?: boolean;
+  /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver attachAdReferralIfMissing) — undefined se a conversa não veio de um anúncio. */
+  adHeadline?: string;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -75,6 +77,7 @@ type ConversationRow = {
   pinned_at: string | null;
   muted: boolean | null;
   manually_unread: boolean | null;
+  ad_headline: string | null;
   messages?: MessageRow[];
 };
 
@@ -100,6 +103,7 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     pinnedAt: row.pinned_at || undefined,
     muted: !!row.muted,
     manuallyUnread: !!row.manually_unread,
+    adHeadline: row.ad_headline || undefined,
     messages: (row.messages || [])
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))

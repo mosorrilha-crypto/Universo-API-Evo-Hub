@@ -91,6 +91,40 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
   });
 });
 
+describe('generateAutoReplyForText — menção ao anúncio na abertura', () => {
+  // Achado real em produção: todo lead vinha de anúncio ("Técnica brasileña
+  // en Luque") mas a IA nunca sabia disso — toda saudação inicial saía
+  // genérica e quase idêntica entre clientes diferentes. ad_headline já era
+  // gravado (attachAdReferralIfMissing, pro CAPI), só nunca chegava ao prompt.
+  it('menciona o anúncio no contents quando é o primeiro contato (histórico vazio)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'oi', 'Cliente Teste', undefined, [], undefined, undefined, 'beauty_studio', undefined, undefined,
+      'Técnica brasileña en Luque'
+    );
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).toContain('Técnica brasileña en Luque');
+  });
+
+  it('NUNCA repete a menção ao anúncio quando já existe histórico (evita virar outro tique repetitivo)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'oi de novo', 'Cliente Teste', undefined, [{ sender: 'lead', text: 'oi' }], undefined, undefined, 'beauty_studio', undefined, undefined,
+      'Técnica brasileña en Luque'
+    );
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).not.toContain('Técnica brasileña en Luque');
+  });
+
+  it('não quebra quando não há ad_headline (conversa não veio de anúncio)', async () => {
+    const { ai, calls } = makeFakeAi();
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', 'Cliente Teste', undefined, [], undefined, undefined, 'beauty_studio');
+    expect(result).not.toBeNull();
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).not.toContain('anúncio');
+  });
+});
+
 describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)', () => {
   function makeFakeAiWithPhotoTool(shouldCallTool: boolean) {
     const calls: any[] = [];

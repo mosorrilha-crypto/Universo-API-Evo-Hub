@@ -201,12 +201,13 @@ async function generateSpecialistReply(
   contactName?: string,
   knowledgeBaseContext?: string,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
-  extraContext?: string
+  extraContext?: string,
+  adContext?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = buildGlobalAndSegmentLayer(agent, segment);
 
-  const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
+  const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"`;
 
@@ -737,7 +738,9 @@ export async function generateAutoReplyForText(
   segment: string = DEFAULT_SEGMENT,
   mediaConfig?: MediaSendConfig,
   /** ID da mensagem do WhatsApp que disparou esta resposta — idempotência de criar_pre_reserva (Etapa 2), nunca duplica por reentrega de webhook. */
-  messageId?: string
+  messageId?: string,
+  /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver conversationStore.attachAdReferralIfMissing) — usado só na abertura (histórico vazio) pra saudação soar como continuação natural do anúncio, nunca repetido depois. */
+  adHeadline?: string
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
@@ -773,7 +776,14 @@ export async function generateAutoReplyForText(
       }
     }
 
-    const specialist = await generateSpecialistReply(ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext);
+    // Só faz sentido mencionar o anúncio na saudação inicial (histórico
+    // vazio) — repetir isso mensagem após mensagem soaria tão robótico
+    // quanto o problema que essa personalização tenta resolver.
+    const adContext = adHeadline && (!history || history.length === 0)
+      ? `Este é o primeiro contato desta conversa. O cliente clicou num anúncio "Clique para WhatsApp" com o tema "${adHeadline}" pra chegar até aqui — se fizer sentido, deixe a saudação inicial soar como continuação natural desse anúncio (ex: mencionar brevemente esse tema), sem forçar nem soar automático. Nunca repita essa menção em mensagens seguintes.`
+      : undefined;
+
+    const specialist = await generateSpecialistReply(ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext, adContext);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
