@@ -18,7 +18,7 @@ import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/ag
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
-import { getMediaImage } from '../services/mediaImageStore';
+import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { setPaymentVerification } from '../services/appointmentStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -127,11 +127,27 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, base64, mimeType, filename || 'arquivo');
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, caption);
       const msgType = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'file';
-      const conv = await recordOutgoingMessage(tenantId, req.params.phone, {
-        type: msgType,
-        text: msgType === 'audio' ? '🎤 Áudio enviado' : (caption || `📎 ${filename || 'Arquivo enviado'}`),
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      });
+      // Achado real em produção ("o áudio não fica na conversa"): a Meta
+      // recebe o áudio/imagem de verdade, mas nós nunca guardávamos uma
+      // cópia — só o texto placeholder ("🎤 Áudio enviado") ficava salvo, e
+      // o painel não tinha como tocar de novo depois de recarregar. Gera o
+      // id da mensagem ANTES de gravar pra poder salvar a mídia real sob o
+      // mesmo id (mesmo bucket/rota já usados pra imagem recebida do
+      // cliente, GET /api/media/:messageId).
+      const messageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        req.params.phone,
+        {
+          type: msgType,
+          text: msgType === 'audio' ? '🎤 Áudio enviado' : (caption || `📎 ${filename || 'Arquivo enviado'}`),
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        undefined,
+        undefined,
+        messageId
+      );
+      await saveMediaImage(supabaseUrl, supabaseKey, messageId, base64, mimeType);
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
