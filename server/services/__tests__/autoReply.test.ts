@@ -89,6 +89,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const systemInstruction: string = calls[1].config.systemInstruction;
     expect(systemInstruction).toContain('Nunca use parênteses nem dois-pontos explicativos dentro da mensagem');
   });
+
+  it('reforça a regra anti-repetição de pergunta já respondida (achado real em produção: agente perguntava "cejas, pestañas o labios?" de novo logo depois do cliente responder "Las cejas")', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('nunca repita uma pergunta que o cliente já respondeu');
+    expect(systemInstruction).toContain('UM ÚNICO pensamento contínuo');
+  });
 });
 
 describe('generateAutoReplyForText — menção ao anúncio na abertura', () => {
