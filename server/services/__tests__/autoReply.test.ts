@@ -89,6 +89,29 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const systemInstruction: string = calls[1].config.systemInstruction;
     expect(systemInstruction).toContain('Nunca use parênteses nem dois-pontos explicativos dentro da mensagem');
   });
+
+  it('reforça a regra anti-repetição de pergunta já respondida (achado real em produção: agente perguntava "cejas, pestañas o labios?" de novo logo depois do cliente responder "Las cejas")', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('nunca repita uma pergunta/informação que o cliente já respondeu');
+    expect(systemInstruction).toContain('UM ÚNICO pensamento contínuo');
+  });
+
+  it('reforça a regra anti-repetição do que o PRÓPRIO agente já disse (achado real em produção: mesma conversa da claudia🥰 — "voy a pasar tu caso a Monique... ¿sí?" repetido quase palavra por palavra 2x em 23s, e o pedido de foto repetido 3x)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('nunca repita algo que VOCÊ MESMO já disse antes nesta conversa');
+  });
+
+  it('reforça a regra anti-alucinação de nome do cliente (achado real em produção: agente chamou uma lead de "Maricela" sem esse nome existir em nenhum lugar do contexto — nem no campo "Nome do cliente" nem gravado no banco)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('nome do cliente');
+    expect(systemInstruction).toContain('Nunca chame o cliente por um nome que não apareceu');
+  });
 });
 
 describe('generateAutoReplyForText — menção ao anúncio na abertura', () => {

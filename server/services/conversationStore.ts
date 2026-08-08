@@ -230,11 +230,13 @@ export async function recordOutgoingMessage(
   phone: string,
   message: Omit<StoredMessage, 'id' | 'sender'>,
   replyToMessageId?: string,
-  forwardedFromMessageId?: string
+  forwardedFromMessageId?: string,
+  /** ID pré-gerado pra essa mensagem — usado quando quem chama precisa saber o id ANTES de gravar (ex: pra salvar a mídia real sob o mesmo id em mediaImageStore, ver /send-media em conversations.ts). Sem isso, o id só existia dentro desta função e ninguém conseguia associar o áudio/imagem enviado à mensagem gravada. */
+  customId?: string
 ): Promise<StoredConversation> {
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
-  const id = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const { error } = await db
     .from('messages')
     .insert({

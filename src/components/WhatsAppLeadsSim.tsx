@@ -60,7 +60,8 @@ import {
   BellOff,
   Mail,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  ArrowLeft
 } from 'lucide-react';
 
 // Paleta de cores dos chips de etiqueta — a cor de cada etiqueta vem de um
@@ -157,6 +158,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   });
   type PanelLead = (typeof leads)[number];
   const [activeLeadId, setActiveLeadId] = useState<string | null>(INITIAL_MOCK_LEADS[0].id);
+  // No mobile (abaixo do breakpoint lg), lista e conversa não cabem lado a
+  // lado como no desktop — achado real do Lucas: com a lista cheia, o
+  // operador tinha que rolar por dezenas de conversas até chegar na caixa de
+  // mensagem, porque as duas colunas sempre ficavam empilhadas e montadas ao
+  // mesmo tempo (grid-cols-1). Alterna via classe CSS (não desmonta nenhuma
+  // coluna) qual das duas aparece no mobile, igual ao WhatsApp mobile real;
+  // no desktop (lg:flex fixo) as duas colunas continuam sempre visíveis.
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -180,6 +189,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (window.confirm('Tem certeza que deseja remover todos os leads de teste/exemplo e iniciar uma lista limpa para produção?')) {
       setLeads([]);
       setActiveLeadId(null);
+      setMobileThreadOpen(false);
     }
   };
 
@@ -207,6 +217,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [inputMessage, setInputMessage] = useState('');
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
+  // na conversa") — antes o botão só disparava speechSynthesis lendo o
+  // texto/transcrição da mensagem, nunca tocava o áudio de verdade. Cache
+  // evita rebaixar o mesmo clipe do servidor a cada clique.
+  const realAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const audioObjectUrlCacheRef = React.useRef<Map<string, string>>(new Map());
 
   // New Lead Modal state
   const [showAddLead, setShowAddLead] = useState(false);
@@ -720,6 +736,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
     if (activeLeadId === leadId) {
       setActiveLeadId(remaining.length > 0 ? remaining[0].id : null);
+      // Volta pra lista no mobile — a próxima conversa não foi uma escolha
+      // do operador, então não faz sentido abrir a thread dela sozinha.
+      setMobileThreadOpen(false);
     }
   };
 
@@ -1249,6 +1268,44 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Toca o áudio real (recebido do cliente ou gravado pelo operador),
+  // buscado via rota autenticada (GET /api/media/:messageId) — corrige um
+  // achado real em produção: o "player" de áudio nunca tocava o áudio de
+  // verdade, só lia o texto/transcrição em voz sintetizada
+  // (handlePlayAudioMessage acima), porque o áudio real nunca era salvo em
+  // lugar nenhum. Só vale pra conversa real (isReal); leads de demonstração
+  // continuam no fallback de speechSynthesis.
+  const handlePlayRealAudioMessage = async (messageId: string) => {
+    const audioEl = realAudioRef.current;
+    if (!audioEl) return;
+
+    if (playingAudioId === messageId) {
+      audioEl.pause();
+      setPlayingAudioId(null);
+      return;
+    }
+
+    try {
+      let url = audioObjectUrlCacheRef.current.get(messageId);
+      if (!url) {
+        const res = await apiFetch(`/api/media/${encodeURIComponent(messageId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        url = URL.createObjectURL(blob);
+        audioObjectUrlCacheRef.current.set(messageId, url);
+      }
+      audioEl.src = url;
+      audioEl.onended = () => setPlayingAudioId(null);
+      audioEl.onerror = () => setPlayingAudioId(null);
+      await audioEl.play();
+      setPlayingAudioId(messageId);
+    } catch (err) {
+      console.error('Falha ao tocar áudio real:', err);
+      setPlayingAudioId(null);
+      setErrorMsg('Não foi possível tocar esse áudio — ele pode ainda não ter sido salvo (aguarde alguns segundos após enviar) ou o arquivo se perdeu.');
+    }
+  };
+
   // Modal handler for creating new mock lead
   const handleAddNewLead = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1287,6 +1344,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // sumia ao recarregar a página, nunca aparecendo no CRM.
     onAddNewLead?.(newLeadItem);
     setActiveLeadId(newId);
+    setMobileThreadOpen(true);
     setShowAddLead(false);
     setNewLeadName('');
     setNewLeadPhone('');
@@ -1337,6 +1395,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         key={lead.id}
         onClick={() => {
           setActiveLeadId(lead.id);
+          setMobileThreadOpen(true);
           if ((lead as any).isReal && isManuallyUnread) {
             handleUpdateConversationState(lead.id, { unread: false });
           }
@@ -1756,7 +1815,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* ========================================== */}
         {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}
         {/* ========================================== */}
-        <div className={`border-r border-slate-800/80 bg-[#111b21] flex flex-col min-h-0 ${
+        <div className={`border-r border-slate-800/80 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
           showRightPanel ? 'lg:col-span-3' : 'lg:col-span-4'
         }`}>
           
@@ -1914,7 +1973,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* ========================================== */}
         {/* COLUMN 2: Interactive WhatsApp Chat Thread */}
         {/* ========================================== */}
-        <div className={`flex flex-col min-h-0 bg-[#0b141a] relative ${
+        <div className={`${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
           showRightPanel ? 'lg:col-span-5' : 'lg:col-span-8'
         }`}>
           {selectedLead ? (
@@ -1922,6 +1981,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               {/* WhatsApp Web Chat Header */}
               <div className="p-3 bg-[#202c33] border-b border-slate-800 flex items-center justify-between z-10 shadow-md">
                 <div className="flex items-center space-x-3">
+                  {/* Botão "voltar pra lista" — só no mobile (lg:hidden), onde
+                      lista e conversa nunca ficam visíveis ao mesmo tempo. */}
+                  <button
+                    onClick={() => setMobileThreadOpen(false)}
+                    className="lg:hidden p-1.5 -ml-1.5 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                    title="Voltar pra lista de conversas"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
                   <img
                     src={selectedLead.avatarUrl}
                     alt={selectedLead.name}
@@ -2202,7 +2270,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="space-y-2 min-w-[220px]">
                               <div className="flex items-center space-x-2 bg-slate-950/40 p-2 rounded-lg border border-white/10">
                                 <button
-                                  onClick={() => handlePlayAudioMessage(msg.id, msg.text || '')}
+                                  onClick={() => ((selectedLead as any)?.isReal ? handlePlayRealAudioMessage(msg.id) : handlePlayAudioMessage(msg.id, msg.text || ''))}
                                   className="w-8 h-8 rounded-full bg-[#00a884] hover:bg-emerald-400 text-slate-950 flex items-center justify-center flex-shrink-0 transition-transform cursor-pointer"
                                 >
                                   {playingAudioId === msg.id ? (
@@ -2308,6 +2376,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
                 <div ref={messagesEndRef} />
+                <audio ref={realAudioRef} className="hidden" />
               </div>
 
               {/* WhatsApp Web Bottom Simulation Control & Input Bar */}
