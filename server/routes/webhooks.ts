@@ -82,7 +82,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // Ferramenta de envio de foto (Epic 4.5.2) fala só com a Meta hoje —
         // sem mediaConfig ela fica desativada (ver autoReply.ts), o que é o
         // comportamento certo pra um tenant conectado via Evolution.
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, isEvolution ? undefined : { phoneNumberId, accessToken: token }, messageId);
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, isEvolution ? undefined : { phoneNumberId, accessToken: token }, messageId, conversation?.adHeadline);
         if (!result) {
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;
