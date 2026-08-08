@@ -11,6 +11,7 @@ import type { GoogleGenAI } from '@google/genai';
 
 const checkFreeBusy = vi.fn(async () => true);
 const createCalendarEvent = vi.fn(async () => 'evt-1');
+const findWeeklyAvailability = vi.fn(async () => [] as any[]);
 
 vi.mock('../googleCalendar', () => ({
   isGoogleCalendarConnected: vi.fn(async () => true),
@@ -18,6 +19,7 @@ vi.mock('../googleCalendar', () => ({
   createCalendarEvent,
   rescheduleCalendarEvent: vi.fn(),
   cancelCalendarEvent: vi.fn(),
+  findWeeklyAvailability,
 }));
 vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone: vi.fn(async () => null),
@@ -34,6 +36,7 @@ vi.mock('../knowledgeBaseStore', () => ({
   parsePriceToNumber: vi.fn(() => 0),
   resolveProductPriceAmount: vi.fn(() => 0),
   isNonBookableProduct: vi.fn(() => false),
+  findProductDurationMinutes: vi.fn(() => undefined),
 }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
@@ -107,5 +110,44 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
 
     expect(result).not.toBeNull();
     expect(result?.bubbles.join(' ')).not.toContain('16:00');
+  });
+
+  it('Etapa 6 — corrige quando o modelo cita um horário fora dos que consultar_disponibilidade_semana realmente devolveu', async () => {
+    findWeeklyAvailability.mockResolvedValue([
+      { date: '2026-08-10', slots: [{ start: '09:00', end: '10:00' }, { start: '14:00', end: '15:00' }] },
+    ]);
+    let toolCallCount = 0;
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents?.[0]?.text?.includes('Classifique a intenção principal')) {
+            return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          }
+          if (req.config?.tools) {
+            toolCallCount++;
+            if (toolCallCount === 1) {
+              const call = { name: 'consultar_disponibilidade_semana', args: {} };
+              return {
+                functionCalls: [call],
+                candidates: [{ content: { role: 'model', parts: [{ functionCall: call }] } }],
+              } as any;
+            }
+            return { functionCalls: [] } as any;
+          }
+          // 11:00 nunca esteve na lista devolvida pela ferramenta (só 09:00 e 14:00) — alucinação.
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Temos as 11:00 livre essa semana!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'quais horários vocês têm essa semana?', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.bubbles.join(' ')).not.toContain('11:00');
+    // A correção deve oferecer um dos horários realmente confirmados.
+    expect(result?.bubbles.join(' ')).toMatch(/09:00|14:00/);
   });
 });
