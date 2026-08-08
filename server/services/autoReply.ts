@@ -324,15 +324,15 @@ const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
 ];
 
 /**
- * Dispara o Meta CAPI (Epic 4.5.6) quando um agendamento é criado de
- * verdade — nunca bloqueia a confirmação pro cliente (chamado sem await,
- * ver executeCalendarTool). Só dispara se a conversa tiver um ctwa_clid
- * real gravado (veio de um anúncio Clique-para-WhatsApp — ver
- * conversationStore.attachAdReferralIfMissing) e se o tenant tiver
- * credencial de CAPI configurada; qualquer uma das duas ausente e não
- * dispara nada, silenciosamente.
+ * Dispara o Meta CAPI (Epic 4.5.6 — evento "Schedule" ao criar agendamento;
+ * [TRÁFEGO] CAPI — evento "Purchase" quando a seña é verificada) — nunca
+ * bloqueia o fluxo do agente (sempre chamado sem await pelo chamador). Só
+ * dispara se a conversa tiver um ctwa_clid real gravado (veio de um anúncio
+ * Clique-para-WhatsApp — ver conversationStore.attachAdReferralIfMissing) e
+ * se o tenant tiver credencial de CAPI configurada; qualquer uma das duas
+ * ausente e não dispara nada, silenciosamente.
  */
-async function notifyBookingCompleted(tenantId: string, phone: string, titulo: string): Promise<void> {
+async function notifyMetaCapiEvent(tenantId: string, phone: string, eventName: string, titulo: string): Promise<void> {
   const ctwaClid = await getConversationCtwaClid(tenantId, phone);
   if (!ctwaClid) return;
 
@@ -341,12 +341,16 @@ async function notifyBookingCompleted(tenantId: string, phone: string, titulo: s
   const value = product ? resolveProductPriceAmount(product) : undefined;
 
   await fireMetaCapiEventForTenant(tenantId, {
-    eventName: 'Schedule',
+    eventName,
     phone,
     ctwaClid,
     value: value || undefined,
     contentName: titulo,
   });
+}
+
+async function notifyBookingCompleted(tenantId: string, phone: string, titulo: string): Promise<void> {
+  return notifyMetaCapiEvent(tenantId, phone, 'Schedule', titulo);
 }
 
 /** "YYYY-MM-DDTHH:mm:ss" -> "HH:mm", zero-padded — mesmo formato usado na validação anti-alucinação (Epic 4.5.7). */
@@ -558,7 +562,16 @@ async function runAgendamentoTools(
   } else if (existing?.paymentStatus === 'rejected') {
     actionsSummary.push('O comprovante enviado foi rejeitado por um operador — NÃO confirme o turno, oriente o cliente a reenviar um comprovante válido ou aguardar contato.');
   } else if (existing?.paymentStatus === 'verified') {
-    await confirmPayment(tenantId, phone);
+    // [TRÁFEGO] CAPI: a Meta deve otimizar pra "cliente pagou", não só pra
+    // "conseguiu agendar" (o único evento existente até aqui era Schedule,
+    // disparado na criação do agendamento — risco de agendamento fantasma
+    // conforme o volume de anúncio crescer). Só dispara quando confirmPayment
+    // realmente efetuou a transição agora (evita duplicar se essa checagem
+    // rodar de novo numa corrida e a linha já não estiver mais 'verified').
+    const confirmed = await confirmPayment(tenantId, phone);
+    if (confirmed) {
+      notifyMetaCapiEvent(tenantId, phone, 'Purchase', confirmed.summary).catch(() => {});
+    }
     actionsSummary.push('Pagamento verificado por um operador agora mesmo — pode confirmar o turno pro cliente com segurança.');
   }
 
