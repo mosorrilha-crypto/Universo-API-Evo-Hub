@@ -527,7 +527,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               timestamp: new Date(conv.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
               status: 'transcribed',
               textContent: lastText,
-              messages: conv.messages,
+              // Mesmo achado do timestamp da lista (ISO cru em vez de só o
+              // horário) também acontecia em CADA bolha de mensagem dentro
+              // da conversa — msg.timestamp vem de created_at (Postgres) sem
+              // nenhuma formatação, diferente das mensagens mock/locais que
+              // já nascem formatadas via toLocaleTimeString.
+              messages: conv.messages.map((m) => ({
+                ...m,
+                timestamp: new Date(m.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              })),
               isReal: true,
               geoRestriction: conv.geoRestriction,
               // Etiquetas e estado de organização vêm sempre do servidor
