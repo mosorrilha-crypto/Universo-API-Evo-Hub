@@ -3,7 +3,7 @@ import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './gemini
 import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
 import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
-import { sendBubbles } from './sendBubbles';
+import { sendBubbles, type OutboundChannel } from './sendBubbles';
 import { isGeoRestrictedError } from './metaSend';
 import { generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
@@ -101,6 +101,10 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
   const startedAt = Date.now();
   const { message, resolvedTenant } = job;
   const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
+  const isEvolution = resolvedTenant.provider === 'evolution';
+  const channel: OutboundChannel = isEvolution
+    ? { provider: 'evolution', evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
+    : { provider: 'meta', phoneNumberId, accessToken: token };
 
   try {
     let audioBase64: string | undefined;
@@ -115,11 +119,13 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
       audioBase64 = downloaded.base64;
       mimeType = downloaded.mimeType;
     } else if (message.type === 'audio' && message.evolutionAudio) {
+      // Instância/URL/API key já vêm resolvidas por tenant (resolveTenantByEvolutionInstance,
+      // Epic 4.6) — não mais a instância global única fixa em deps.*.
       const downloaded = await downloadEvolutionMedia(
         { id: message.messageId, remoteJid: `${message.from}@s.whatsapp.net` },
-        deps.evolutionInstanceName,
-        deps.evolutionApiUrl,
-        deps.evolutionApiKey
+        resolvedTenant.evolutionInstanceName,
+        resolvedTenant.evolutionApiUrl,
+        resolvedTenant.evolutionApiKey
       );
       audioBase64 = downloaded.base64;
       mimeType = downloaded.mimeType;
@@ -164,7 +170,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         const conversation = await getConversation(tenantId, message.from);
         const history = conversation?.messages.slice(0, -1);
         try {
-          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history, message.from, undefined, segment, { phoneNumberId, accessToken: token });
+          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history, message.from, undefined, segment, isEvolution ? undefined : { phoneNumberId, accessToken: token });
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             return;
@@ -174,7 +180,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
           }
-          await sendBubbles(phoneNumberId, token, message.from, result.bubbles, async (bubbleText) => {
+          await sendBubbles(channel, message.from, result.bubbles, async (bubbleText) => {
             await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
             console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
           }, message.messageId, result.phase, result.routerElapsedMs);

@@ -1,0 +1,58 @@
+/**
+ * Epic 4.6 — envio real de texto via Evolution API (equivalente ao
+ * metaSend.ts pra Meta Cloud API), seguindo a mesma convenção de chamada já
+ * usada em mediaDownload.ts (downloadEvolutionMedia): `{apiUrl}/{endpoint}/{instance}`
+ * com header `apikey`.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sendEvolutionTextMessage, showEvolutionTyping } from '../evolutionSend';
+
+const realFetch = global.fetch;
+
+afterEach(() => {
+  global.fetch = realFetch;
+});
+
+describe('sendEvolutionTextMessage', () => {
+  it('chama POST {apiUrl}/message/sendText/{instance} com apikey e o texto', async () => {
+    const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as any;
+
+    await sendEvolutionTextMessage('inst-1', 'https://evo.example.com/', 'key-1', '595981234567', 'Oi!');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://evo.example.com/message/sendText/inst-1');
+    expect((options as any).headers.apikey).toBe('key-1');
+    expect(JSON.parse((options as any).body)).toEqual({ number: '595981234567', text: 'Oi!' });
+  });
+
+  it('lança erro quando a Evolution API responde com falha', async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) })) as any;
+    await expect(sendEvolutionTextMessage('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'Oi!')).rejects.toThrow(/HTTP 500/);
+  });
+
+  it('lança erro quando falta instância/URL/chave', async () => {
+    await expect(sendEvolutionTextMessage(undefined, undefined, undefined, '595981234567', 'Oi!')).rejects.toThrow();
+  });
+});
+
+describe('showEvolutionTyping', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  it('nunca lança mesmo se a chamada falhar (melhor esforço)', async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error('rede fora');
+    }) as any;
+    await expect(showEvolutionTyping('inst-1', 'https://evo.example.com', 'key-1')).resolves.toBeUndefined();
+  });
+
+  it('não chama fetch quando faltam credenciais', async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as any;
+    await showEvolutionTyping(undefined, undefined, undefined);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

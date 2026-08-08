@@ -12,6 +12,8 @@ export interface ParsedIncomingMessage {
   contactName?: string;
   /** phone_number_id da Meta — o número do NEGÓCIO que recebeu a mensagem (não o do cliente). Usado pra resolver de qual tenant é essa mensagem (Bloco 2.B). Ausente em mensagens via Evolution (self-hosted, sem esse conceito). */
   phoneNumberId?: string;
+  /** Nome da instância Evolution API (`body.instance`) — equivalente ao phoneNumberId acima, mas pra Porta A (Epic 4.6, self-hosted/QR Code). Ausente em mensagens via Meta/Evo Hub. */
+  instanceName?: string;
   type: 'audio' | 'text' | 'image' | 'other';
   /** Tipo bruto do WhatsApp quando type==='other' (ex: "sticker", "video", "location", "contacts") — usado pra mostrar um rótulo específico no painel em vez de "[other]" genérico. Ver friendlyLabelForOtherType. */
   rawType?: string;
@@ -135,7 +137,7 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   const contactName: string | undefined = data.pushName;
   const message = data.message || {};
 
-  const base: Omit<ParsedIncomingMessage, 'type'> = { provider: 'evolution', messageId, from, contactName };
+  const base: Omit<ParsedIncomingMessage, 'type'> = { provider: 'evolution', messageId, from, contactName, instanceName: body.instance };
 
   if (message.audioMessage) {
     return [{

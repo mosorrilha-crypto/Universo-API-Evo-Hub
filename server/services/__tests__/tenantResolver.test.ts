@@ -6,16 +6,19 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
-import { resolveTenantByPhoneNumberId } from '../tenantResolver';
+import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance } from '../tenantResolver';
 import { LEGACY_DEFAULT_TENANT_ID } from '../tenantContext';
 
 const SHARED_PHONE_NUMBER_ID = 'shared-number-123';
+const SHARED_EVOLUTION_INSTANCE = 'universo-shared';
 const TENANT_B = '22222222-2222-2222-2222-222222222222';
+const TENANT_C = '33333333-3333-3333-3333-333333333333';
 
 beforeEach(() => {
   initDb(
     createFakeSupabase({
       tenant_meta_credentials: [{ tenant_id: TENANT_B, phone_number_id: 'cadastrado-tenant-b', access_token: 'token-b' }],
+      tenant_evolution_credentials: [{ tenant_id: TENANT_C, instance_name: 'instancia-tenant-c', api_url: 'https://evo.example.com', api_key: 'key-c' }],
     })
   );
 });
@@ -40,6 +43,41 @@ describe('resolveTenantByPhoneNumberId', () => {
 
   it('NUNCA cai no tenant legado quando o número é desconhecido — retorna unknownChannel', async () => {
     const resolved = await resolveTenantByPhoneNumberId('numero-totalmente-desconhecido', { metaPhoneNumberId: SHARED_PHONE_NUMBER_ID });
+    expect(resolved.unknownChannel).toBe(true);
+    expect(resolved.tenantId).not.toBe(LEGACY_DEFAULT_TENANT_ID);
+  });
+});
+
+/**
+ * Epic 4.6 (Porta A — Evolution API, QR Code): mesma regra de segurança do
+ * Bloco 2.B acima, agora resolvendo por instance_name em vez de
+ * phone_number_id — instância desconhecida nunca cai silenciosamente no
+ * tenant legado.
+ */
+describe('resolveTenantByEvolutionInstance', () => {
+  it('resolve pro tenant cadastrado quando a instância bate, usando a api_key/api_url salvas', async () => {
+    const resolved = await resolveTenantByEvolutionInstance('instancia-tenant-c', { evolutionInstanceName: SHARED_EVOLUTION_INSTANCE });
+    expect(resolved.tenantId).toBe(TENANT_C);
+    expect(resolved.provider).toBe('evolution');
+    expect(resolved.evolutionApiUrl).toBe('https://evo.example.com');
+    expect(resolved.evolutionApiKey).toBe('key-c');
+    expect(resolved.unknownChannel).toBeFalsy();
+  });
+
+  it('cai no tenant legado quando a instância é exatamente a compartilhada configurada', async () => {
+    const resolved = await resolveTenantByEvolutionInstance(SHARED_EVOLUTION_INSTANCE, { evolutionInstanceName: SHARED_EVOLUTION_INSTANCE, evolutionApiUrl: 'https://shared.example.com', evolutionApiKey: 'shared-key' });
+    expect(resolved.tenantId).toBe(LEGACY_DEFAULT_TENANT_ID);
+    expect(resolved.provider).toBe('evolution');
+    expect(resolved.evolutionApiKey).toBe('shared-key');
+  });
+
+  it('cai no tenant legado quando não há instância no payload', async () => {
+    const resolved = await resolveTenantByEvolutionInstance(undefined, { evolutionInstanceName: SHARED_EVOLUTION_INSTANCE });
+    expect(resolved.tenantId).toBe(LEGACY_DEFAULT_TENANT_ID);
+  });
+
+  it('NUNCA cai no tenant legado quando a instância é desconhecida — retorna unknownChannel', async () => {
+    const resolved = await resolveTenantByEvolutionInstance('instancia-totalmente-desconhecida', { evolutionInstanceName: SHARED_EVOLUTION_INSTANCE });
     expect(resolved.unknownChannel).toBe(true);
     expect(resolved.tenantId).not.toBe(LEGACY_DEFAULT_TENANT_ID);
   });

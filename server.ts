@@ -75,6 +75,9 @@ async function startServer() {
     getAi: () => getGeminiClient(config),
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
     googleClientId: config.googleClientId,
@@ -97,7 +100,7 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
     jwtSecret: config.jwtSecret,
   }));
-  app.use(createAdminRouter({ authenticateToken, supabase }));
+  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey }));
 
   // Middleware de erro global do Express — precisa vir DEPOIS de todas as
   // rotas de API acima (é assim que o Express decide quem trata um
