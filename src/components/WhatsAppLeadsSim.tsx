@@ -2609,7 +2609,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* COLUMN 3: Right Side Panel (WhatsApp Contact Info & IA Intelligence Panel) */}
         {/* ========================================== */}
         {showRightPanel && (
-          <div className="lg:col-span-4 border-l border-slate-800/80 bg-[#111b21] flex flex-col p-3 space-y-3 overflow-y-auto max-h-[720px] scrollbar-thin">
+          // Achado real em produção: essa coluna nunca teve o toggle
+          // hidden/flex por mobileThreadOpen que as colunas 1 e 2 têm — no
+          // mobile (grid-cols-1) ela sempre empilhava atrás da lista/thread
+          // visível, e virou sobreposição visual real depois que o frame
+          // ganhou altura fixa (h-[85dvh]). Escondida no mobile por ora
+          // (resumo — % de probabilidade e idioma detectado — continua
+          // visível na lista e no cabeçalho da conversa); o painel
+          // detalhado completo fica só desktop até ter espaço próprio
+          // dedicado no mobile (fora do escopo deste fix pontual).
+          <div className="hidden lg:flex lg:col-span-4 border-l border-slate-800/80 bg-[#111b21] flex-col p-3 space-y-3 overflow-y-auto max-h-[720px] scrollbar-thin">
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
