@@ -82,6 +82,13 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
     expect(calls[1].config.systemInstruction).toBeTruthy();
   });
+
+  it('reforça a regra anti-parênteses/dois-pontos na camada Global (achado real em produção)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('Nunca use parênteses nem dois-pontos explicativos dentro da mensagem');
+  });
 });
 
 describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)', () => {
