@@ -5,11 +5,12 @@ import {
   rescheduleCalendarEvent,
   cancelCalendarEvent,
   isGoogleCalendarConnected,
+  findWeeklyAvailability,
   type CalendarConfig,
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
 import { DEFAULT_SEGMENT } from './tenantProfileStore';
-import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, type AgentKnowledgeBase } from './knowledgeBaseStore';
+import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
@@ -242,6 +243,9 @@ function getNowLocalNaive(timeZone: string): { naive: string; weekday: string } 
 
 const DATA_HORA_PARAM_DESCRIPTION = `Data e hora LOCAL (fuso ${BUSINESS_TIMEZONE}), formato "YYYY-MM-DDTHH:mm:ss", SEM offset UTC. Ex: "2026-08-06T15:00:00".`;
 
+/** Usada só quando consultar_disponibilidade_semana é chamada sem um serviço reconhecido no catálogo (sem durationMinutes cadastrado) — valor conservador (1h), nunca 0 nem um número inventado maior. */
+const DEFAULT_SLOT_DURATION_MINUTES = 60;
+
 /**
  * Ferramentas reais de agenda expostas ao agente de agendamento via
  * function-calling do Gemini. Nenhuma delas recebe um "evento_id" do
@@ -250,6 +254,17 @@ const DATA_HORA_PARAM_DESCRIPTION = `Data e hora LOCAL (fuso ${BUSINESS_TIMEZONE
  * pra nunca depender do modelo "lembrar" ou inventar um ID.
  */
 const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
+  {
+    name: 'consultar_disponibilidade_semana',
+    description: 'Descobre TODOS os horários realmente livres nos próximos 7 dias, respeitando o horário de atendimento do negócio e a agenda real do Google Calendar — use isso ANTES de oferecer um horário específico ao cliente, em vez de verificar_disponibilidade um horário por vez adivinhado. Se não vier nenhum dia na resposta, é porque não há disponibilidade configurada ou livre nessa semana — nunca invente um horário fora do que essa ferramenta retornou.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        servico: { type: Type.STRING, description: 'Nome EXATO do serviço/procedimento, igual ao catálogo — usado pra calcular a duração real de cada horário. Se omitido, usa uma duração padrão conservadora.' },
+      },
+      required: [],
+    },
+  },
   {
     name: 'verificar_disponibilidade',
     description: 'Verifica se um intervalo de horário está livre na agenda real do negócio, antes de tentar criar um agendamento.',
@@ -356,15 +371,30 @@ async function executeCalendarTool(
   kb: AgentKnowledgeBase | null,
   contactName?: string,
   messageId?: string
-): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimeHHmm?: string }> {
+): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimesHHmm?: string[] }> {
   try {
     switch (name) {
+      case 'consultar_disponibilidade_semana': {
+        // Duração real do serviço (Etapa 2) quando reconhecido no catálogo;
+        // caso contrário, duração padrão conservadora — nunca um número
+        // maior inventado, que poderia esconder slots livres de verdade.
+        const durationMinutes = (args.servico && findProductDurationMinutes(kb, args.servico)) || DEFAULT_SLOT_DURATION_MINUTES;
+        const days = await findWeeklyAvailability(tenantId, cfg, durationMinutes, BUSINESS_TIMEZONE);
+        const allTimes = days.flatMap((d) => d.slots.map((s) => s.start));
+        return {
+          response: { dias_disponiveis: days },
+          summary: days.length
+            ? `Consultou disponibilidade da semana (duração ${durationMinutes}min): ${days.map((d) => `${d.date} (${d.slots.length} horário(s))`).join(', ')}.`
+            : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum horário livre encontrado.`,
+          confirmedTimesHHmm: allTimes.length ? allTimes : undefined,
+        };
+      }
       case 'verificar_disponibilidade': {
         const disponivel = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
         return {
           response: { disponivel },
           summary: `Verificou disponibilidade em ${args.data_hora_inicio}–${args.data_hora_fim}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
-          confirmedTimeHHmm: disponivel ? extractHHmm(args.data_hora_inicio) : undefined,
+          confirmedTimesHHmm: disponivel ? [extractHHmm(args.data_hora_inicio)] : undefined,
         };
       }
       case 'criar_agendamento': {
@@ -398,7 +428,7 @@ async function executeCalendarTool(
         return {
           response: { sucesso: true, evento_id: eventId },
           summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
-          confirmedTimeHHmm: extractHHmm(args.data_hora_inicio),
+          confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
         };
       }
       case 'remarcar_agendamento': {
@@ -414,7 +444,7 @@ async function executeCalendarTool(
         return {
           response: { sucesso: true },
           summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
-          confirmedTimeHHmm: extractHHmm(args.nova_data_hora_inicio),
+          confirmedTimesHHmm: [extractHHmm(args.nova_data_hora_inicio)],
         };
       }
       case 'cancelar_agendamento': {
@@ -572,12 +602,12 @@ Regras:
 
     const responseParts: Part[] = [];
     for (const call of calls) {
-      const { response: toolResponse, summary, confirmedTimeHHmm } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg, kb, contactName, messageId);
+      const { response: toolResponse, summary, confirmedTimesHHmm } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg, kb, contactName, messageId);
       actionsSummary.push(summary);
       // 'escalonar' (Epic 4.5.9, cancelamento com 24h+ de antecedência) reaproveita
       // o mesmo caminho de needsHumanConfirmation que 'erro' já usa.
       if ('erro' in toolResponse || 'escalonar' in toolResponse) hadError = true;
-      if (confirmedTimeHHmm) confirmedTimes.push(confirmedTimeHHmm);
+      if (confirmedTimesHHmm) confirmedTimes.push(...confirmedTimesHHmm);
       responseParts.push({ functionResponse: { name: call.name, response: toolResponse } });
     }
     contents.push({ role: 'user', parts: responseParts });
@@ -710,7 +740,7 @@ export async function generateAutoReplyForText(
     // auditoria pós-lançamento: gatear só por confirmedTimes.length deixava
     // a validação inteira desligada bem no caso mais perigoso — cliente pede
     // um horário, verificar_disponibilidade confirma OCUPADO (não gera
-    // nenhum confirmedTimeHHmm), e o modelo é livre pra "sugerir uma
+    // nenhum confirmedTimesHHmm), e o modelo é livre pra "sugerir uma
     // alternativa" que nunca foi checada de verdade contra a agenda real.
     let agendamentoToolsRan = false;
 

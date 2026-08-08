@@ -166,6 +166,12 @@ function timeToMinutes(hhmm: string): number {
   return h * 60 + m;
 }
 
+function minutesToTime(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+  const m = (totalMinutes % 60).toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
 /**
  * true se [startIso, endIso) (hora LOCAL naive, mesmo formato usado no
  * resto deste arquivo) cabe inteiro dentro do expediente do tenant nesse
@@ -211,6 +217,95 @@ export async function checkFreeBusy(tenantId: string, cfg: CalendarConfig, start
   });
   const busy = res.data.calendars?.primary?.busy || [];
   return busy.length === 0;
+}
+
+export interface WeeklyAvailabilitySlot {
+  start: string; // "HH:mm"
+  end: string; // "HH:mm"
+}
+
+export interface WeeklyAvailabilityDay {
+  date: string; // "YYYY-MM-DD"
+  slots: WeeklyAvailabilitySlot[];
+}
+
+/**
+ * Disponibilidade real dos próximos 7 dias (hoje + 6), respeitando o
+ * horário de atendimento configurado do tenant e a agenda real do Google
+ * Calendar — pra Etapa 6 (seção 22 do script: "essa semana só tenho sexta
+ * às 9h" precisa ser verdade, não estimativa).
+ *
+ * Sem horário configurado (`getTenantBusinessHours` retorna null), NUNCA
+ * inventa um expediente padrão — devolve lista vazia. Diferente de
+ * isWithinBusinessHours (que só VALIDA um horário específico que o cliente
+ * já pediu, e por isso pode ser permissivo quando não há configuração),
+ * aqui estamos SUGERINDO horários proativamente — chutar "08:00-18:00" pra
+ * um negócio que talvez nem funcione nesse horário seria inventar dado de
+ * negócio não configurado.
+ *
+ * Faz UMA chamada de freebusy.query pro range da semana inteira (em vez de
+ * uma por slot candidato) — o Google devolve os intervalos ocupados dentro
+ * do range pedido, e a interseção com cada slot candidato é calculada
+ * localmente. Evita estourar rate limit do Google numa semana com muitos
+ * horários candidatos (granularidade de 30min).
+ */
+export async function findWeeklyAvailability(
+  tenantId: string,
+  cfg: CalendarConfig,
+  durationMinutes: number,
+  timezone = 'America/Asuncion'
+): Promise<WeeklyAvailabilityDay[]> {
+  const hours = await getTenantBusinessHours(tenantId);
+  if (!hours) return [];
+
+  type Candidate = { startMin: number; endMin: number };
+  const candidatesByDate = new Map<string, Candidate[]>();
+  const SLOT_STEP_MINUTES = 30;
+  const now = new Date();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
+    const dateStr = d.toISOString().slice(0, 10);
+    const weekday = new Date(`${dateStr}T12:00:00Z`).getUTCDay();
+    const dayHours = hours[String(weekday)];
+    if (!dayHours) continue; // tenant não atende nesse dia
+
+    const openMin = timeToMinutes(dayHours.open);
+    const closeMin = timeToMinutes(dayHours.close);
+    const dayCandidates: Candidate[] = [];
+    for (let start = openMin; start + durationMinutes <= closeMin; start += SLOT_STEP_MINUTES) {
+      dayCandidates.push({ startMin: start, endMin: start + durationMinutes });
+    }
+    if (dayCandidates.length > 0) candidatesByDate.set(dateStr, dayCandidates);
+  }
+  if (candidatesByDate.size === 0) return [];
+
+  const dates = Array.from(candidatesByDate.keys());
+  const firstDate = dates[0];
+  const lastDate = dates[dates.length - 1];
+
+  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+  const calendar = google.calendar({ version: 'v3', auth });
+  const timeMin = localNaiveToUtcIso(`${firstDate}T00:00:00`, timezone);
+  const timeMax = localNaiveToUtcIso(`${lastDate}T23:59:59`, timezone);
+  const res = await calendar.freebusy.query({
+    requestBody: { timeMin, timeMax, items: [{ id: 'primary' }] },
+  });
+  const busy = (res.data.calendars?.primary?.busy || [])
+    .filter((b) => b.start && b.end)
+    .map((b) => ({ startMs: new Date(b.start!).getTime(), endMs: new Date(b.end!).getTime() }));
+
+  const result: WeeklyAvailabilityDay[] = [];
+  for (const [date, candidates] of candidatesByDate) {
+    const freeSlots: WeeklyAvailabilitySlot[] = [];
+    for (const c of candidates) {
+      const slotStartMs = new Date(localNaiveToUtcIso(`${date}T${minutesToTime(c.startMin)}:00`, timezone)).getTime();
+      const slotEndMs = new Date(localNaiveToUtcIso(`${date}T${minutesToTime(c.endMin)}:00`, timezone)).getTime();
+      const isFree = !busy.some((b) => slotStartMs < b.endMs && b.startMs < slotEndMs);
+      if (isFree) freeSlots.push({ start: minutesToTime(c.startMin), end: minutesToTime(c.endMin) });
+    }
+    if (freeSlots.length > 0) result.push({ date, slots: freeSlots });
+  }
+  return result;
 }
 
 export async function createCalendarEvent(
