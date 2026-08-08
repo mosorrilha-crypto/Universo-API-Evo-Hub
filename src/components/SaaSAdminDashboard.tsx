@@ -429,36 +429,24 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* SaaS Admin Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2">
-            <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-              <Layers className="w-5 h-5 text-emerald-400" />
-              Gestão SaaS Multi-Tenant (Master Control)
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
-              Master Admin
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Painel do proprietário da plataforma: controle de empresas assinantes, receitas MRR/ARR, instâncias do WhatsApp e cotas de IA Gemini.
-          </p>
-        </div>
+      {/* SaaS Admin Banner — achado real em produção: repetia "Painel SaaS
+          Master" (a aba logo acima já diz isso) e "Empresa Selecionada no
+          Painel" duplicava o nome do tenant que já aparece no topo da
+          página (Header.tsx). Reduzido a só o que agrega: descrição curta
+          do que esse painel controla + a ação real (onboarding). */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <p className="text-xs text-slate-400 flex items-center gap-2">
+          <Layers className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          Controle de empresas assinantes, receitas MRR/ARR, instâncias do WhatsApp e cotas de IA Gemini.
+        </p>
 
-        <div className="flex items-center space-x-3">
-          <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300">
-            Empresa Selecionada no Painel: <strong className="text-emerald-400">{activeTenant.name}</strong>
-          </div>
-
-          <button
-            onClick={() => setIsNewTenantModalOpen(true)}
-            className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center space-x-2 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Onboarding Novo Cliente SaaS</span>
-          </button>
-        </div>
+        <button
+          onClick={() => setIsNewTenantModalOpen(true)}
+          className="py-2 px-3.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all flex-shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Onboarding Novo Cliente</span>
+        </button>
       </div>
 
       {/* Admin Navigation Tabs */}
