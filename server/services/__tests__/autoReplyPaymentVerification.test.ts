@@ -8,7 +8,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GoogleGenAI } from '@google/genai';
 
-const confirmPayment = vi.fn(async () => undefined);
+const confirmPayment = vi.fn<(tenantId: string, phone: string) => Promise<{ eventId: string; summary: string; startIso: string; endIso: string } | undefined>>(async () => undefined);
+const getConversationCtwaClid = vi.fn(async () => null as string | null);
+const fireMetaCapiEventForTenant = vi.fn(async () => undefined);
 let mockAppointment: { eventId: string; summary: string; startIso: string; endIso: string; paymentStatus?: string } | null = null;
 
 vi.mock('../googleCalendar', () => ({
@@ -25,7 +27,7 @@ vi.mock('../appointmentStore', () => ({
   confirmPayment,
 }));
 vi.mock('../conversationStore', () => ({
-  getConversationCtwaClid: vi.fn(async () => null),
+  getConversationCtwaClid,
   recordOutgoingMessage: vi.fn(async () => ({}) as any),
 }));
 vi.mock('../knowledgeBaseStore', () => ({
@@ -35,6 +37,7 @@ vi.mock('../knowledgeBaseStore', () => ({
   resolveProductPriceAmount: vi.fn(() => 0),
   isNonBookableProduct: vi.fn(() => false),
 }));
+vi.mock('../metaCapiService', () => ({ fireMetaCapiEventForTenant }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
 
@@ -78,6 +81,37 @@ describe('generateAutoReplyForText — consciência de payment_status (Etapa 8)'
 
     expect(confirmPayment).toHaveBeenCalledWith('tenant-a', '595981234567');
     expect(captured.join(' ')).toContain('pode confirmar o turno');
+  });
+
+  it('[TRÁFEGO] CAPI: verified com confirmPayment bem-sucedido e ctwa_clid real dispara evento "Purchase"', async () => {
+    mockAppointment = { eventId: 'evt-1', summary: 'Microlips', startIso: '2026-08-10T10:00:00', endIso: '2026-08-10T11:30:00', paymentStatus: 'verified' };
+    confirmPayment.mockClear();
+    confirmPayment.mockResolvedValue({ eventId: 'evt-1', summary: 'Microlips', startIso: '2026-08-10T10:00:00', endIso: '2026-08-10T11:30:00' });
+    getConversationCtwaClid.mockClear();
+    getConversationCtwaClid.mockResolvedValue('clid-real');
+    fireMetaCapiEventForTenant.mockClear();
+
+    await generateAutoReplyForText('tenant-a', makeFakeAiCapturingUserContent([]), 'já confirmaram meu pagamento?', 'Cliente', undefined, undefined, '595981234567', CALENDAR_CONFIG);
+
+    expect(fireMetaCapiEventForTenant).toHaveBeenCalledWith('tenant-a', expect.objectContaining({
+      eventName: 'Purchase',
+      phone: '595981234567',
+      ctwaClid: 'clid-real',
+      contentName: 'Microlips',
+    }));
+  });
+
+  it('[TRÁFEGO] CAPI: se confirmPayment não confirmar nada (corrida — já não estava mais "verified"), não dispara o evento', async () => {
+    mockAppointment = { eventId: 'evt-1', summary: 'Microlips', startIso: '2026-08-10T10:00:00', endIso: '2026-08-10T11:30:00', paymentStatus: 'verified' };
+    confirmPayment.mockClear();
+    confirmPayment.mockResolvedValue(undefined);
+    getConversationCtwaClid.mockClear();
+    getConversationCtwaClid.mockResolvedValue('clid-real');
+    fireMetaCapiEventForTenant.mockClear();
+
+    await generateAutoReplyForText('tenant-a', makeFakeAiCapturingUserContent([]), 'já confirmaram meu pagamento?', 'Cliente', undefined, undefined, '595981234567', CALENDAR_CONFIG);
+
+    expect(fireMetaCapiEventForTenant).not.toHaveBeenCalled();
   });
 
   it('rejected: avisa pra não confirmar e pedir novo comprovante', async () => {

@@ -50,7 +50,10 @@ export function createMetaCapiRouter({ authenticateToken }: MetaCapiRouterDeps):
           event_time: eventTime,
           action_source: 'system_generated',
           user_data: { ph: [phoneHash] },
-          ...(typeof eventValue === 'number' ? { custom_data: { value: eventValue, currency: 'USD' } } : {}),
+          // PYG (Guarani), moeda real do negócio — o fluxo automático
+          // (metaCapiService.ts) já usa PYG; esta rota manual do painel
+          // estava fixa em USD por engano.
+          ...(typeof eventValue === 'number' ? { custom_data: { value: eventValue, currency: 'PYG' } } : {}),
         },
       ],
       ...(testEventCode ? { test_event_code: testEventCode } : {}),
