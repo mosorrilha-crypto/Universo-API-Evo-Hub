@@ -6,6 +6,7 @@
  * — ver supabase/migrations/0001_multi_tenant_schema.sql.
  */
 import { getDb } from './db';
+import { listLabels, listLabelsByConversationId } from './conversationLabelStore';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -46,6 +47,8 @@ export interface StoredConversation {
   messages: StoredMessage[];
   updatedAt: string;
   geoRestriction?: GeoRestriction;
+  /** Etiquetas livres (tipo WhatsApp Business) — ver conversationLabelStore.ts. */
+  labels?: string[];
   /** Organização da conversa no painel — arquivar, fixar, silenciar, não lida manual (ver updateConversationState). */
   archivedAt?: string;
   pinnedAt?: string;
@@ -338,7 +341,11 @@ export async function listConversations(tenantId: string, opts: { includeArchive
     .eq('tenant_id', tenantId)
     .order('updated_at', { ascending: false });
   if (error) throw error;
-  const all = (data as unknown as ConversationRow[]).map(toStoredConversation);
+  const rows = data as unknown as ConversationRow[];
+  // Uma query só pras etiquetas de todas as conversas do tenant, em vez de
+  // N+1 (uma por conversa) — agrupa por conversation_id em memória.
+  const labelsByConversationId = await listLabelsByConversationId(tenantId);
+  const all = rows.map((row) => ({ ...toStoredConversation(row), labels: labelsByConversationId.get(row.id) || [] }));
   const visible = opts.includeArchived ? all : all.filter((c) => !c.archivedAt);
   return visible.sort(sortConversations);
 }
@@ -351,7 +358,10 @@ export async function getConversation(tenantId: string, phone: string): Promise<
     .eq('tenant_id', tenantId)
     .eq('phone', phone)
     .maybeSingle();
-  return data ? toStoredConversation(data as unknown as ConversationRow) : undefined;
+  if (!data) return undefined;
+  const conv = toStoredConversation(data as unknown as ConversationRow);
+  conv.labels = await listLabels(tenantId, phone);
+  return conv;
 }
 
 /**

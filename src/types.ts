@@ -262,6 +262,12 @@ export interface LeadInfo {
   crmNotes?: CRMOperatorNote[];
   crmTasks?: CRMTask[];
   tags?: string[];
+  /**
+   * Etiquetas livres da conversa (tipo WhatsApp Business, ver
+   * server/services/conversationLabelStore.ts) — diferente de `tags` acima,
+   * que é do estágio único do CRM (OperatorCRM.tsx, ainda só localStorage).
+   */
+  conversationLabels?: string[];
   // Organização de conversas (arquivar, fixar, silenciar, não lida manual) —
   // metadados só do painel, ver server/services/conversationStore.ts.
   archivedAt?: string;
