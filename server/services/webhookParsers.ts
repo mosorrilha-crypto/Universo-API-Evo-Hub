@@ -13,6 +13,8 @@ export interface ParsedIncomingMessage {
   /** phone_number_id da Meta — o número do NEGÓCIO que recebeu a mensagem (não o do cliente). Usado pra resolver de qual tenant é essa mensagem (Bloco 2.B). Ausente em mensagens via Evolution (self-hosted, sem esse conceito). */
   phoneNumberId?: string;
   type: 'audio' | 'text' | 'image' | 'other';
+  /** Tipo bruto do WhatsApp quando type==='other' (ex: "sticker", "video", "location", "contacts") — usado pra mostrar um rótulo específico no painel em vez de "[other]" genérico. Ver friendlyLabelForOtherType. */
+  rawType?: string;
   text?: string;
   /** Presente quando type === 'audio' via Meta Cloud API. */
   metaAudio?: { mediaId: string; mimeType?: string };
@@ -71,13 +73,44 @@ export function parseMetaWebhookPayload(body: any, provider: 'meta' | 'evohub' =
         } else if (msg.type === 'image' && msg.image?.id) {
           parsed.push({ ...base, type: 'image', metaImage: { mediaId: msg.image.id, mimeType: msg.image.mime_type } });
         } else {
-          parsed.push({ ...base, type: 'other' });
+          parsed.push({ ...base, type: 'other', rawType: msg.type });
         }
       }
     }
   }
 
   return parsed;
+}
+
+/**
+ * Rótulo amigável pro painel quando a mensagem é de um tipo que não geramos
+ * resposta automática (sticker, vídeo/gif, localização, contato etc.) — sem
+ * isso o operador via só "[sticker]"/"[video]" cru na lista de conversas.
+ * Achado real em produção: lead mandou um sticker/reação e a conversa
+ * mostrava um placeholder sem sentido nenhum.
+ */
+export function friendlyLabelForOtherType(rawType: string | undefined): string {
+  switch (rawType) {
+    case 'sticker':
+      return '🏷️ Figurinha recebida';
+    case 'video':
+      // WhatsApp não tem um tipo "gif" próprio — um GIF enviado pelo cliente
+      // chega como video (mp4 curto em loop).
+      return '🎬 Vídeo/GIF recebido';
+    case 'location':
+      return '📍 Localização recebida';
+    case 'contacts':
+      return '👤 Contato recebido';
+    case 'reaction':
+      return '❤️ Reagiu a uma mensagem';
+    case 'button':
+    case 'interactive':
+      return '👆 Resposta de botão recebida';
+    case 'document':
+      return '📎 Documento recebido';
+    default:
+      return `[${rawType || 'other'}]`;
+  }
 }
 
 /**
@@ -124,7 +157,20 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
     return [{ ...base, type: 'image' }];
   }
 
-  return [{ ...base, type: 'other' }];
+  const rawType = message.stickerMessage
+    ? 'sticker'
+    : message.videoMessage
+    ? 'video'
+    : message.locationMessage
+    ? 'location'
+    : message.contactMessage
+    ? 'contacts'
+    : message.reactionMessage
+    ? 'reaction'
+    : message.documentMessage
+    ? 'document'
+    : undefined;
+  return [{ ...base, type: 'other', rawType }];
 }
 
 /**

@@ -123,6 +123,8 @@ async function startServer() {
     evoHubApiUrl: config.evoHubApiUrl,
     evoHubChannelToken: config.evoHubChannelToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    supabaseUrl: config.supabaseUrl,
+    supabaseKey: config.supabaseKey,
   });
 
   // Job em background que verifica a agenda real e manda lembretes de

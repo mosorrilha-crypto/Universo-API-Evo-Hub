@@ -207,6 +207,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [inputMessage, setInputMessage] = useState('');
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
+  // na conversa") — antes o botão só disparava speechSynthesis lendo o
+  // texto/transcrição da mensagem, nunca tocava o áudio de verdade. Cache
+  // evita rebaixar o mesmo clipe do servidor a cada clique.
+  const realAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const audioObjectUrlCacheRef = React.useRef<Map<string, string>>(new Map());
 
   // New Lead Modal state
   const [showAddLead, setShowAddLead] = useState(false);
@@ -1249,6 +1255,44 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Toca o áudio real (recebido do cliente ou gravado pelo operador),
+  // buscado via rota autenticada (GET /api/media/:messageId) — corrige um
+  // achado real em produção: o "player" de áudio nunca tocava o áudio de
+  // verdade, só lia o texto/transcrição em voz sintetizada
+  // (handlePlayAudioMessage acima), porque o áudio real nunca era salvo em
+  // lugar nenhum. Só vale pra conversa real (isReal); leads de demonstração
+  // continuam no fallback de speechSynthesis.
+  const handlePlayRealAudioMessage = async (messageId: string) => {
+    const audioEl = realAudioRef.current;
+    if (!audioEl) return;
+
+    if (playingAudioId === messageId) {
+      audioEl.pause();
+      setPlayingAudioId(null);
+      return;
+    }
+
+    try {
+      let url = audioObjectUrlCacheRef.current.get(messageId);
+      if (!url) {
+        const res = await apiFetch(`/api/media/${encodeURIComponent(messageId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        url = URL.createObjectURL(blob);
+        audioObjectUrlCacheRef.current.set(messageId, url);
+      }
+      audioEl.src = url;
+      audioEl.onended = () => setPlayingAudioId(null);
+      audioEl.onerror = () => setPlayingAudioId(null);
+      await audioEl.play();
+      setPlayingAudioId(messageId);
+    } catch (err) {
+      console.error('Falha ao tocar áudio real:', err);
+      setPlayingAudioId(null);
+      setErrorMsg('Não foi possível tocar esse áudio — ele pode ainda não ter sido salvo (aguarde alguns segundos após enviar) ou o arquivo se perdeu.');
+    }
+  };
+
   // Modal handler for creating new mock lead
   const handleAddNewLead = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2202,7 +2246,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="space-y-2 min-w-[220px]">
                               <div className="flex items-center space-x-2 bg-slate-950/40 p-2 rounded-lg border border-white/10">
                                 <button
-                                  onClick={() => handlePlayAudioMessage(msg.id, msg.text || '')}
+                                  onClick={() => ((selectedLead as any)?.isReal ? handlePlayRealAudioMessage(msg.id) : handlePlayAudioMessage(msg.id, msg.text || ''))}
                                   className="w-8 h-8 rounded-full bg-[#00a884] hover:bg-emerald-400 text-slate-950 flex items-center justify-center flex-shrink-0 transition-transform cursor-pointer"
                                 >
                                   {playingAudioId === msg.id ? (
@@ -2308,6 +2352,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
                 <div ref={messagesEndRef} />
+                <audio ref={realAudioRef} className="hidden" />
               </div>
 
               {/* WhatsApp Web Bottom Simulation Control & Input Bar */}

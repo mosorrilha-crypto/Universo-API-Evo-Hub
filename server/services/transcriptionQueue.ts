@@ -2,6 +2,7 @@ import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
 import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted } from './conversationStore';
+import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles } from './sendBubbles';
 import { isGeoRestrictedError } from './metaSend';
 import { generateAutoReplyForText } from './autoReply';
@@ -39,6 +40,8 @@ export interface TranscriptionQueueDeps {
   evoHubApiUrl?: string;
   evoHubChannelToken?: string;
   metaPhoneNumberId?: string;
+  supabaseUrl?: string;
+  supabaseKey?: string;
 }
 
 /**
@@ -123,6 +126,15 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     } else {
       throw new Error(`Mensagem tipo "${message.type}" não é áudio — nada a transcrever.`);
     }
+
+    // Achado real em produção ("o áudio não fica na conversa"): o download
+    // acima existia só pra alimentar a transcrição — os bytes reais nunca
+    // eram guardados em lugar nenhum, então o painel nunca conseguia tocar
+    // de volta o áudio original do cliente, só ler a transcrição em texto.
+    // Mesmo bucket/rota já usados pra imagem recebida (GET
+    // /api/media/:messageId), indexado pelo mesmo message_id da mensagem já
+    // gravada (recordIncomingMessage em webhooks.ts).
+    await saveMediaImage(deps.supabaseUrl, deps.supabaseKey, message.messageId, audioBase64!, mimeType || 'audio/ogg');
 
     const outcome = await transcribeAudioWithGemini(deps.getAi(), audioBase64, mimeType, {
       leadName: message.contactName,

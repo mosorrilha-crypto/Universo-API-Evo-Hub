@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Router } from 'express';
-import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, type ParsedIncomingMessage } from '../services/webhookParsers';
+import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing } from '../services/conversationStore';
@@ -172,7 +172,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
             })
             .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
         } else {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: `[${msg.type}]`, timestamp: nowLabel });
+          // Tipo de mensagem que não geramos resposta automática (sticker,
+          // vídeo/gif, localização, reação, contato etc.) — grava com um
+          // rótulo que descreve o que realmente chegou, em vez do
+          // "[sticker]"/"[video]" cru de antes (achado real em produção).
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel });
         }
       } catch (err: any) {
         unmarkProcessed(msg.messageId);
