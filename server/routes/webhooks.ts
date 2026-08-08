@@ -7,6 +7,7 @@ import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoR
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
+import { showEvolutionTyping } from '../services/evolutionSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { getTenantSegment } from '../services/tenantProfileStore';
@@ -16,7 +17,7 @@ import { logEscalation, isPaymentRelated } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
-import { resolveTenantByPhoneNumberId, type ResolvedTenant } from '../services/tenantResolver';
+import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
@@ -27,6 +28,10 @@ interface WebhooksRouterDeps {
   getAi?: () => GoogleGenAI | null;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  /** Instância/URL/API key compartilhadas (fallback), mesmo papel de metaAccessToken/metaPhoneNumberId acima pra Porta A (Epic 4.6). */
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  evolutionInstanceName?: string;
   supabaseUrl?: string;
   supabaseKey?: string;
   googleClientId?: string;
@@ -34,7 +39,7 @@ interface WebhooksRouterDeps {
   googleRedirectUri?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri
     ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
     : undefined;
@@ -49,6 +54,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // phone_number_id antes de chegar aqui.
   const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant) => {
     const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
+    const isEvolution = resolvedTenant.provider === 'evolution';
+    const channel = isEvolution
+      ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
+      : { provider: 'meta' as const, phoneNumberId, accessToken: token };
     if (!getAi) return;
     // runExclusive garante que, se a mensagem anterior desse número ainda
     // estiver gerando resposta, esta espera a vez — sem isso, uma chamada
@@ -65,8 +74,15 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       try {
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
-        await markAsReadAndShowTyping(phoneNumberId, token, messageId);
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, { phoneNumberId, accessToken: token }, messageId);
+        if (isEvolution) {
+          await showEvolutionTyping(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey);
+        } else {
+          await markAsReadAndShowTyping(phoneNumberId, token, messageId);
+        }
+        // Ferramenta de envio de foto (Epic 4.5.2) fala só com a Meta hoje —
+        // sem mediaConfig ela fica desativada (ver autoReply.ts), o que é o
+        // comportamento certo pra um tenant conectado via Evolution.
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, isEvolution ? undefined : { phoneNumberId, accessToken: token }, messageId);
         if (!result) {
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
           return;
@@ -76,7 +92,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
           await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
         }
-        await sendBubbles(phoneNumberId, token, phone, result.bubbles, async (bubbleText) => {
+        await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
           console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
@@ -125,7 +141,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       // pós-lançamento; corrigido pra sempre desmarcar em caso de erro real,
       // permitindo a reentrega tentar de novo.
       try {
-        const resolvedTenant = await resolveTenantByPhoneNumberId(msg.phoneNumberId, { metaAccessToken, metaPhoneNumberId });
+        // Epic 4.6 — mensagem da Evolution API (Porta A) resolve o tenant
+        // pela instância, não pelo phone_number_id (conceito que só existe
+        // na Meta Cloud API/Porta B).
+        const resolvedTenant = msg.provider === 'evolution'
+          ? await resolveTenantByEvolutionInstance(msg.instanceName, { evolutionApiUrl, evolutionApiKey, evolutionInstanceName })
+          : await resolveTenantByPhoneNumberId(msg.phoneNumberId, { metaAccessToken, metaPhoneNumberId });
         if (resolvedTenant.unknownChannel) {
           // Canal não identificado (Bloco 2.B, revisão de segurança 06/08/2026):
           // nunca gravar em tenant nenhum quando não dá pra provar de quem é a

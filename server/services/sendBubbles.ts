@@ -1,5 +1,21 @@
 import { sendWhatsAppTextMessage, markAsReadAndShowTyping } from './metaSend';
+import { sendEvolutionTextMessage, showEvolutionTyping } from './evolutionSend';
 import type { ConversationPhase } from './autoReply';
+
+/**
+ * Canal de saída pra essa conversa — Porta A (Evolution, self-hosted/QR
+ * Code) ou Porta B (Meta Cloud API oficial, Epic 4.6). `provider` ausente ou
+ * `'meta'` preserva o comportamento de sempre (compatibilidade com quem já
+ * montava esse objeto só com phoneNumberId/accessToken).
+ */
+export interface OutboundChannel {
+  provider?: 'meta' | 'evolution';
+  phoneNumberId?: string;
+  accessToken?: string;
+  evolutionInstanceName?: string;
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+}
 
 /**
  * Multiplicador de atraso por fase da conversa — pensado pra conversão:
@@ -31,8 +47,7 @@ function calcularAtrasoDigitacao(texto: string, phase: ConversationPhase): numbe
  * então uma resposta com várias bolhas precisa renová-lo a cada uma).
  */
 export async function sendBubbles(
-  phoneNumberId: string | undefined,
-  accessToken: string | undefined,
+  channel: OutboundChannel,
   to: string,
   bubbles: string[],
   onBubbleSent: (text: string) => void | Promise<void>,
@@ -41,14 +56,23 @@ export async function sendBubbles(
   /** ms já gastos antes de chegar aqui (ex: chamada de roteamento) — descontado só da 1ª bolha, pra não somar a latência do router ao tempo total de resposta. */
   preElapsedMs = 0
 ): Promise<void> {
+  const isEvolution = channel.provider === 'evolution';
   let remainingCompensation = preElapsedMs;
   for (const bubble of bubbles) {
     if (!bubble.trim()) continue;
-    await markAsReadAndShowTyping(phoneNumberId, accessToken, incomingMessageId);
+    if (isEvolution) {
+      await showEvolutionTyping(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey);
+    } else {
+      await markAsReadAndShowTyping(channel.phoneNumberId, channel.accessToken, incomingMessageId);
+    }
     const delay = Math.max(0, calcularAtrasoDigitacao(bubble, phase) - remainingCompensation);
     remainingCompensation = 0; // só desconta da primeira bolha
     await new Promise((resolve) => setTimeout(resolve, delay));
-    await sendWhatsAppTextMessage(phoneNumberId, accessToken, to, bubble);
+    if (isEvolution) {
+      await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, to, bubble);
+    } else {
+      await sendWhatsAppTextMessage(channel.phoneNumberId, channel.accessToken, to, bubble);
+    }
     await onBubbleSent(bubble);
   }
 }

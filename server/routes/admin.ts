@@ -8,6 +8,9 @@ import { asyncHandler } from '../middleware/asyncHandler';
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
   supabase: SupabaseClient | null;
+  /** Credencial "admin" da Evolution API (servidor self-hosted) usada só pra provisionar instância nova — depois de criada, cada instância tem sua própria linha em tenant_evolution_credentials (Epic 4.6). */
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
 }
 
 /**
@@ -17,7 +20,7 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
-export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDeps): Router {
+export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey }: AdminRouterDeps): Router {
   const router = Router();
 
   function db() {
@@ -122,6 +125,91 @@ export function createAdminRouter({ authenticateToken, supabase }: AdminRouterDe
     if (error) return res.status(500).json({ error: error.message });
     if (!data?.length) return res.status(404).json({ error: 'Operador não encontrado.' });
     res.json({ success: true });
+  }));
+
+  // ── Evolution API multi-instância (Epic 4.6 — Porta A, QR Code) ────────
+  // Onboarding "sem barreira de entrada": cria uma instância nova na
+  // Evolution API self-hosted em nome do tenant e devolve o QR Code pro
+  // painel exibir. Só saas_admin cria (provisionamento ainda é manual — o
+  // self-service completo, 4.6.5, fica pra depois).
+  router.post('/api/admin/tenants/:id/evolution-instance', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (!evolutionApiUrl || !evolutionApiKey) {
+      return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível provisionar instância nova.' });
+    }
+    const { data: tenant, error: tenantError } = await db().from('tenants').select('id, slug, name').eq('id', req.params.id).maybeSingle();
+    if (tenantError) return res.status(500).json({ error: tenantError.message });
+    if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
+
+    const requestedName: string | undefined = req.body?.instanceName;
+    // Nome estável e único: slug do tenant (ou prefixo do id) + sufixo curto
+    // aleatório, pra nunca colidir com uma instância já existente na mesma
+    // Evolution API mesmo se o slug se repetir.
+    const baseName = (requestedName || tenant.slug || tenant.id.slice(0, 8)).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const instanceName = `${baseName}-${Math.random().toString(36).slice(2, 8)}`;
+
+    let created: any;
+    try {
+      const createRes = await fetch(`${evolutionApiUrl.replace(/\/$/, '')}/instance/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey },
+        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+        signal: AbortSignal.timeout(20000),
+      });
+      created = await createRes.json().catch(() => ({}));
+      if (!createRes.ok) {
+        return res.status(502).json({ error: `Falha ao criar instância na Evolution API: HTTP ${createRes.status} — ${JSON.stringify(created).slice(0, 300)}` });
+      }
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+    }
+
+    // A resposta de /instance/create varia por versão do servidor Evolution
+    // — tenta os formatos conhecidos antes de desistir. A instância em si já
+    // foi criada do lado da Evolution mesmo se não conseguirmos ler o QR
+    // daqui; por isso devolve um aviso em vez de erro puro nesse caso.
+    const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey;
+    const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
+
+    const { error: credError } = await db()
+      .from('tenant_evolution_credentials')
+      .insert({ tenant_id: tenant.id, instance_name: instanceName, api_url: evolutionApiUrl, api_key: instanceApiKey });
+    if (credError) {
+      return res.status(500).json({ error: `Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}` });
+    }
+
+    res.status(201).json({
+      instanceName,
+      qrCodeBase64,
+      warning: qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.',
+    });
+  }));
+
+  // Reconecta/renova o QR Code de uma instância já criada — o QR do
+  // /instance/create expira rápido, e o operador pode reabrir a tela de
+  // onboarding depois desse tempo.
+  router.get('/api/admin/tenants/:id/evolution-instance/qrcode', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { data: cred, error: credError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key')
+      .eq('tenant_id', req.params.id)
+      .maybeSingle();
+    if (credError) return res.status(500).json({ error: credError.message });
+    if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+
+    try {
+      const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
+        headers: { apikey: cred.api_key },
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await connectRes.json().catch(() => ({}));
+      if (!connectRes.ok) {
+        return res.status(502).json({ error: `Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
+      }
+      const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
+      res.json({ instanceName: cred.instance_name, qrCodeBase64 });
+    } catch (err: any) {
+      res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+    }
   }));
 
   return router;
