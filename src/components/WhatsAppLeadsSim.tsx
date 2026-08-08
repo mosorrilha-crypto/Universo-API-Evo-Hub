@@ -5,18 +5,16 @@ import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch } from '../lib/apiClient';
 import { TranscriptionCard } from './TranscriptionCard';
 import { ConversationAnalysisPanel } from './ConversationAnalysisPanel';
-import { 
-  MessageSquare, 
-  Play, 
-  Sparkles, 
-  Loader2, 
-  Phone, 
-  User, 
-  Clock, 
-  CheckCircle2, 
-  PlusCircle, 
-  Send, 
-  AlertCircle, 
+import {
+  Play,
+  Sparkles,
+  Loader2,
+  Phone,
+  User,
+  Clock,
+  PlusCircle,
+  Send,
+  AlertCircle,
   RefreshCw,
   Image as ImageIcon,
   Calendar as CalendarIcon,
@@ -41,12 +39,7 @@ import {
   MessageSquarePlus,
   Video,
   Info,
-  QrCode,
-  Building2,
-  ShieldCheck,
-  Activity,
   Trash2,
-  Settings,
   Reply,
   Forward,
   Pencil,
@@ -170,20 +163,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Client QR Code & Config Modal state
-  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-
-  // Environment Mode State: 'production' | 'sandbox'
-  const [appEnvironment, setAppEnvironment] = useState<'production' | 'sandbox'>('production');
-
-  // Real WhatsApp Credentials state
-  const [realPhone, setRealPhone] = useState(activeTenant?.whatsappPhone || '5511998887777');
-  const [realEngine, setRealEngine] = useState(activeTenant?.whatsappEngine || 'evolution_vps');
-  const [realApiUrl, setRealApiUrl] = useState('https://vps-evolution.minhaempresa.com.br');
-  const [realApiKey, setRealApiKey] = useState('sk_live_evo_983274298');
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   // Handler to clear all mock/test examples
   const handleClearMockData = () => {
@@ -1602,147 +1581,45 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
-      {/* Environment Mode Switcher Bar */}
-      <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
-        <div className="flex items-center space-x-2 w-full sm:w-auto">
-          <span className="text-xs font-bold text-slate-400 pl-2 hidden md:inline">Ambiente:</span>
-          <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center space-x-1 w-full sm:w-auto">
-            <button
-              onClick={() => setAppEnvironment('production')}
-              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                appEnvironment === 'production'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-300" />
-              <span>⚡ Operação Real (Produção)</span>
-            </button>
-
-            <button
-              onClick={() => setAppEnvironment('sandbox')}
-              className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                appEnvironment === 'sandbox'
-                  ? 'bg-purple-600 text-white shadow-md shadow-purple-950'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5 text-purple-300" />
-              <span>🧪 Sandbox (Testes de Implementação)</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="text-[11px] text-slate-400 px-2 text-center sm:text-right">
-          {appEnvironment === 'production' ? (
-            <span className="text-emerald-400 font-semibold flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Modo Ativo: Webhooks & Mensagens do WhatsApp (+{realPhone}) em tempo real
-            </span>
-          ) : (
-            <span className="text-purple-300 font-semibold flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-              Modo Ativo: Simulação isolada para homologar áudios e prompts sem afetar clientes
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Active Client / Tenant Connection & Instance Banner */}
-      {activeTenant && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-white tracking-wide">
-                  {activeTenant.name}
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
-                  Plano {activeTenant.plan.toUpperCase()}
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1">
-                  <Activity className="w-3 h-3 text-emerald-400 animate-pulse" /> Instância Online
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 mt-0.5">
-                <span>Motor: <strong className="text-slate-200">{realEngine === 'evolution_vps' ? 'Evolution API (VPS Docker)' : 'Z-API Managed'}</strong></span>
-                <span>•</span>
-                <span>WhatsApp: <strong className="text-emerald-400">+{realPhone}</strong></span>
-                {activeTenant.failoverEnabled && (
-                  <>
-                    <span>•</span>
-                    <span className="text-purple-300 flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3 text-purple-400" /> Failover Ativo
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 border-slate-800 pt-3 md:pt-0">
-            {/* Quota Progress */}
-            <div className="text-right text-[11px] mr-2 hidden sm:block">
-              <div className="text-slate-400">Leads no Mês</div>
-              <div className="font-bold text-white">
-                {activeTenant.currentLeadsMonth} / {activeTenant.maxLeadsPerMonth}
-              </div>
-            </div>
-
-            {/* Configure Real Number & API */}
-            <button
-              onClick={() => setIsConfigModalOpen(true)}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <Settings className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Número Real & API</span>
-            </button>
-
-            {/* QR Code Button */}
-            <button
-              onClick={() => setIsQrModalOpen(true)}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white flex items-center gap-1.5 shadow-md shadow-purple-950 transition-all cursor-pointer"
-            >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>Ver QR Code</span>
-            </button>
-
-            {/* Clear Mock Data Button */}
-            <button
-              onClick={handleClearMockData}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Limpar todos os contatos de teste/exemplo"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
-              <span>Limpar Testes</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Explanation Banner & Controls */}
+      {/* Controls Bar — achado real em produção: as duas barras acima disso
+          (seletor "Ambiente" produção/sandbox e o card "Instância Online" /
+          "Motor: Z-API Managed" / "Failover Ativo" / botões "Número Real &
+          API" e "Ver QR Code") eram inteiramente decorativas — vinham de
+          campos mock do Tenant local (nunca sincronizados com o backend
+          real), o alerta do próprio modal de config já admitia "esta tela
+          ainda NÃO envia a configuração pro servidor", e o QR Code era um
+          padrão de quadrados fixo, nunca gerado de verdade (a geração real
+          já existe em server/routes/admin.ts, Epic 4.6, sem UI ligada a
+          ela ainda). Removidas — poluíam a tela com informação falsa sobre
+          o estado da conexão real (que é sempre a resolvida pelo JWT/
+          phone_number_id no backend, nunca essa seleção local). "Limpar
+          Testes" era o único botão real desse trecho — preservado abaixo. */}
       <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center space-x-3.5">
           <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
             <Bot className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              Painel de Atendimento WhatsApp IA & Inteligência Comercial
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40">
-                Versão Produção v2.0
-              </span>
+            <h2 className="text-sm font-bold text-white">
+              Atendimento WhatsApp
             </h2>
-            <p className="text-[11px] text-slate-300 mt-0.5 max-w-2xl">
-              Interface completa integrada ao Gemini 3.6 Flash. Cada mensagem de voz, texto, foto ou arquivo recebido atualiza em tempo real a qualificação do CRM e dispara os eventos do Meta Conversions API (CAPI).
-            </p>
+            {activeTenant && (
+              <p className="text-[11px] text-slate-400 mt-0.5">{activeTenant.name}</p>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center space-x-2.5 self-end md:self-auto flex-shrink-0">
+        <div className="flex items-center space-x-2.5 self-end md:self-auto flex-shrink-0 flex-wrap gap-y-2">
+          {/* Clear Mock Data Button */}
+          <button
+            onClick={handleClearMockData}
+            className="px-3 py-1.5 rounded-xl text-xs font-medium bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+            title="Limpar todos os leads/conversas da tela (não apaga nada no servidor — conversas reais voltam no próximo carregamento)"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+            <span>Limpar Testes</span>
+          </button>
+
           {/* Toggle Right Panel */}
           <button
             onClick={() => setShowRightPanel(!showRightPanel)}
@@ -2715,205 +2592,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span className="absolute top-2 right-2 text-white bg-slate-900/80 px-3 py-1 rounded-xl text-xs font-bold border border-slate-700">
               Clique em qualquer lugar para fechar
             </span>
-          </div>
-        </div>
-      )}
-
-      {/* Real WhatsApp Configuration Modal */}
-      {isConfigModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Settings className="w-4 h-4 text-emerald-400" />
-                Configurar Número Real & API WhatsApp
-              </h3>
-              <button
-                onClick={() => setIsConfigModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setIsSavingConfig(true);
-                // Achado numa auditoria: este formulário só atualizava state local
-                // (nunca chamava o backend — não existe rota /api/... pra isso ainda)
-                // mas o alerta dizia "salvos com sucesso! O sistema está pronto para
-                // produção", levando o operador a acreditar que o número/API real
-                // já estava ativo quando nada foi persistido. Mantém o preenchimento
-                // local (útil pra pré-visualizar os campos), mas para de afirmar que
-                // isso configurou algo de verdade.
-                setTimeout(() => {
-                  setIsSavingConfig(false);
-                  setIsConfigModalOpen(false);
-                  alert(`Número +${realPhone} preenchido localmente. Esta tela ainda NÃO envia a configuração para o servidor — a conexão real do WhatsApp continua sendo a já configurada para este tenant.`);
-                }, 800);
-              }}
-              className="space-y-4"
-            >
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Número de WhatsApp Oficial (com DDD e DDI)
-                </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    value={realPhone}
-                    onChange={(e) => setRealPhone(e.target.value.replace(/\D/g, ''))}
-                    placeholder="Ex: 5511999998888"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                    required
-                  />
-                </div>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Número que enviará e receberá as mensagens automáticas no WhatsApp.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Motor de Integração
-                </label>
-                <select
-                  value={realEngine}
-                  onChange={(e) => setRealEngine(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="evolution_vps">Evolution API (VPS Docker / Auto-Hospedado)</option>
-                  <option value="zapi">Z-API (Gerenciado)</option>
-                  <option value="meta_cloud">Meta Cloud API Oficial</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  URL da Instância / Endpoint API
-                </label>
-                <input
-                  type="url"
-                  value={realApiUrl}
-                  onChange={(e) => setRealApiUrl(e.target.value)}
-                  placeholder="https://vps-evolution.suaempresa.com.br"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Token / API Key de Autenticação
-                </label>
-                <input
-                  type="password"
-                  value={realApiKey}
-                  onChange={(e) => setRealApiKey(e.target.value)}
-                  placeholder="sk_live_..."
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
-                  required
-                />
-              </div>
-
-              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
-                <div className="font-bold text-slate-200 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Endpoint de Webhook Ativo:
-                </div>
-                <code className="block p-1.5 bg-slate-900 rounded text-[10px] text-emerald-300 break-all border border-slate-800">
-                  https://seu-dominio.com/api/webhooks/whatsapp
-                </code>
-              </div>
-
-              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsConfigModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingConfig}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2 shadow cursor-pointer disabled:opacity-50"
-                >
-                  {isSavingConfig ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                  <span>Salvar Número & Credenciais</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Client QR Code Modal */}
-      {isQrModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-center">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-purple-400" />
-                Conectar WhatsApp do Cliente
-              </h3>
-              <button
-                onClick={() => setIsQrModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-3 bg-white rounded-2xl inline-block shadow-inner mx-auto border-4 border-slate-800">
-              {/* Simulated QR Code Pattern */}
-              <div className="w-48 h-48 bg-slate-950 p-2 rounded-xl flex items-center justify-center relative overflow-hidden group">
-                <div className="grid grid-cols-6 gap-1.5 w-full h-full p-2">
-                  <div className="bg-white rounded-sm col-span-2 row-span-2"></div>
-                  <div className="bg-emerald-400 rounded-sm"></div>
-                  <div className="bg-white rounded-sm"></div>
-                  <div className="bg-white rounded-sm col-span-2 row-span-2"></div>
-                  <div className="bg-white rounded-sm"></div>
-                  <div className="bg-emerald-400 rounded-sm"></div>
-                  <div className="bg-white rounded-sm"></div>
-                  <div className="bg-emerald-400 rounded-sm"></div>
-                  <div className="bg-white rounded-sm col-span-2 row-span-2"></div>
-                  <div className="bg-white rounded-sm"></div>
-                  <div className="bg-white rounded-sm"></div>
-                  <div className="bg-emerald-400 rounded-sm"></div>
-                  <div className="bg-white rounded-sm"></div>
-                  <div className="bg-white rounded-sm"></div>
-                  <div className="bg-emerald-400 rounded-sm"></div>
-                </div>
-                <div className="absolute inset-0 bg-emerald-500/10 flex items-center justify-center">
-                  <MessageSquare className="w-8 h-8 text-emerald-400 drop-shadow" />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-1 text-left bg-slate-950 p-3 rounded-xl border border-slate-800">
-              <div className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Como Parear:
-              </div>
-              <ol className="text-[10px] text-slate-400 space-y-1 list-decimal list-inside pl-1">
-                <li>Abra o WhatsApp no smartphone corporativo</li>
-                <li>Vá em <strong>Aparelhos Conectados</strong></li>
-                <li>Toque em <strong>Conectar um aparelho</strong> e aponte a câmera</li>
-              </ol>
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
-                <Activity className="w-3 h-3 animate-pulse" /> Status: Aguardando Leitura
-              </span>
-              <button
-                onClick={() => setIsQrModalOpen(false)}
-                className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer"
-              >
-                Concluído
-              </button>
-            </div>
           </div>
         </div>
       )}
