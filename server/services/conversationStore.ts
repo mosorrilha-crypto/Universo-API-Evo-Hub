@@ -46,6 +46,11 @@ export interface StoredConversation {
   messages: StoredMessage[];
   updatedAt: string;
   geoRestriction?: GeoRestriction;
+  /** Organização da conversa no painel — arquivar, fixar, silenciar, não lida manual (ver updateConversationState). */
+  archivedAt?: string;
+  pinnedAt?: string;
+  muted?: boolean;
+  manuallyUnread?: boolean;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -63,6 +68,10 @@ type ConversationRow = {
   name: string | null;
   updated_at: string;
   geo_restriction: GeoRestriction | null;
+  archived_at: string | null;
+  pinned_at: string | null;
+  muted: boolean | null;
+  manually_unread: boolean | null;
   messages?: MessageRow[];
 };
 
@@ -84,6 +93,10 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     name: row.name || undefined,
     updatedAt: row.updated_at,
     geoRestriction: row.geo_restriction || undefined,
+    archivedAt: row.archived_at || undefined,
+    pinnedAt: row.pinned_at || undefined,
+    muted: !!row.muted,
+    manuallyUnread: !!row.manually_unread,
     messages: (row.messages || [])
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -301,7 +314,23 @@ export async function updateMessageText(tenantId: string, phone: string, id: str
   if (existing) await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
 }
 
-export async function listConversations(tenantId: string): Promise<StoredConversation[]> {
+/**
+ * Ordena conversas fixadas primeiro (mais recentemente fixada primeiro),
+ * depois pela última atividade — mesma regra pra ativas e arquivadas.
+ */
+function sortConversations(a: StoredConversation, b: StoredConversation): number {
+  if (a.pinnedAt && b.pinnedAt) return b.pinnedAt.localeCompare(a.pinnedAt);
+  if (a.pinnedAt) return -1;
+  if (b.pinnedAt) return 1;
+  return b.updatedAt.localeCompare(a.updatedAt);
+}
+
+/**
+ * Por padrão, exclui conversas arquivadas da lista principal — pra elas
+ * aparecerem, passe includeArchived (usado pela seção "Arquivadas" do
+ * painel). Testado em conversationStoreOrganization.test.ts.
+ */
+export async function listConversations(tenantId: string, opts: { includeArchived?: boolean } = {}): Promise<StoredConversation[]> {
   const db = getDb();
   const { data, error } = await db
     .from('conversations')
@@ -309,7 +338,9 @@ export async function listConversations(tenantId: string): Promise<StoredConvers
     .eq('tenant_id', tenantId)
     .order('updated_at', { ascending: false });
   if (error) throw error;
-  return (data as unknown as ConversationRow[]).map(toStoredConversation);
+  const all = (data as unknown as ConversationRow[]).map(toStoredConversation);
+  const visible = opts.includeArchived ? all : all.filter((c) => !c.archivedAt);
+  return visible.sort(sortConversations);
 }
 
 export async function getConversation(tenantId: string, phone: string): Promise<StoredConversation | undefined> {
@@ -334,6 +365,37 @@ export async function markGeoRestricted(tenantId: string, phone: string, reason:
   const conv = await getOrCreateConversationRow(tenantId, phone);
   const geoRestriction: GeoRestriction = { detectedAt: new Date().toISOString(), country: inferCountryFromPhone(phone), reason };
   await db.from('conversations').update({ geo_restriction: geoRestriction }).eq('id', conv.id);
+}
+
+export interface ConversationStatePatch {
+  archived?: boolean;
+  pinned?: boolean;
+  muted?: boolean;
+  unread?: boolean;
+}
+
+/**
+ * Atualiza os estados de organização da conversa (arquivar, fixar, silenciar,
+ * marcar como não lida) — sempre uma ação explícita do operador no painel
+ * (menu ⋮ da lista), nunca automática. archived_at/pinned_at guardam quando
+ * cada estado foi ativado (null quando desativado), pra dar pra ordenar por
+ * "há quanto tempo foi fixado" sem precisar de outra coluna.
+ */
+export async function updateConversationState(tenantId: string, phone: string, patch: ConversationStatePatch): Promise<StoredConversation | undefined> {
+  const db = getDb();
+  const { data: existing } = await db.from('conversations').select('id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  if (!existing) return undefined;
+
+  const update: Record<string, any> = {};
+  if (patch.archived !== undefined) update.archived_at = patch.archived ? new Date().toISOString() : null;
+  if (patch.pinned !== undefined) update.pinned_at = patch.pinned ? new Date().toISOString() : null;
+  if (patch.muted !== undefined) update.muted = patch.muted;
+  if (patch.unread !== undefined) update.manually_unread = patch.unread;
+
+  if (Object.keys(update).length > 0) {
+    await db.from('conversations').update(update).eq('id', existing.id);
+  }
+  return getConversation(tenantId, phone);
 }
 
 /** Limpa o histórico de mensagens de um número específico, mas mantém o contato/lead (nome, telefone). */

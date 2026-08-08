@@ -10,6 +10,7 @@ import {
   forwardMessage,
   reactToMessage,
   editMessage,
+  updateConversationState,
 } from '../services/conversationStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
@@ -67,7 +68,8 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
   }));
 
   router.get('/api/conversations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    res.json({ conversations: await listConversations(tenantOf(req)) });
+    const includeArchived = req.query.archived === 'true';
+    res.json({ conversations: await listConversations(tenantOf(req), { includeArchived }) });
   }));
 
   router.get('/api/conversations/:phone', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
@@ -198,6 +200,25 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       return res.status(403).json({ error: 'Só é possível editar mensagens enviadas pelo agente/operador.' });
     }
     const conv = await getConversation(tenantOf(req), req.params.phone);
+    res.json({ success: true, conversation: conv });
+  }));
+
+  // Organização da lista de conversas — arquivar, fixar no topo, silenciar
+  // notificações, marcar como não lida manualmente (menu ⋮ de cada
+  // conversa no painel). Uma rota só pra tudo, em vez de 4 endpoints quase
+  // idênticos — cada campo do body é opcional, só atualiza o que veio.
+  router.patch('/api/conversations/:phone/state', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { archived, pinned, muted, unread } = req.body || {};
+    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean } = {};
+    if (typeof archived === 'boolean') patch.archived = archived;
+    if (typeof pinned === 'boolean') patch.pinned = pinned;
+    if (typeof muted === 'boolean') patch.muted = muted;
+    if (typeof unread === 'boolean') patch.unread = unread;
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: 'Informe ao menos um campo booleano: archived, pinned, muted ou unread.' });
+    }
+    const conv = await updateConversationState(tenantOf(req), req.params.phone, patch);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
     res.json({ success: true, conversation: conv });
   }));
 

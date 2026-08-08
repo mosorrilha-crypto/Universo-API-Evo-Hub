@@ -49,7 +49,16 @@ import {
   Settings,
   Reply,
   Forward,
-  Pencil
+  Pencil,
+  Pin,
+  PinOff,
+  Archive,
+  ArchiveRestore,
+  Bell,
+  BellOff,
+  Mail,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 
 interface WhatsAppLeadsSimProps {
@@ -109,6 +118,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const saved = localStorage.getItem('saas_crm_leads');
     return saved ? JSON.parse(saved) : INITIAL_MOCK_LEADS;
   });
+  type PanelLead = (typeof leads)[number];
   const [activeLeadId, setActiveLeadId] = useState<string | null>(INITIAL_MOCK_LEADS[0].id);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
@@ -143,6 +153,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'hot' | 'international'>('all');
   const [showRightPanel, setShowRightPanel] = useState(true);
+
+  // Organização de conversas — arquivar, fixar, silenciar, não lida manual.
+  // Metadados só do painel (ver server/services/conversationStore.ts).
+  const [showArchived, setShowArchived] = useState(false);
+  const [openMenuForLeadId, setOpenMenuForLeadId] = useState<string | null>(null);
 
   // Message Sending State
   const [inputMessage, setInputMessage] = useState('');
@@ -427,10 +442,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     const fetchRealConversations = async () => {
       try {
-        const response = await apiFetch('/api/conversations');
+        // ?archived=true traz também as conversas arquivadas — a seção
+        // "Arquivadas" do painel precisa delas, e não vale a pena um segundo
+        // request/polling só pra isso (poucas conversas no volume atual).
+        const response = await apiFetch('/api/conversations?archived=true');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string } }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean }[] = data.conversations || [];
 
         setLeads((prev) => {
           const byId = new Map(prev.map((l) => [l.id, l]));
@@ -449,6 +467,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               messages: conv.messages,
               isReal: true,
               geoRestriction: conv.geoRestriction,
+              // Estado de organização vem sempre do servidor (fonte da
+              // verdade), igual ao geoRestriction acima — sobrescreve
+              // qualquer valor otimista local a cada rodada do polling.
+              archivedAt: conv.archivedAt,
+              pinnedAt: conv.pinnedAt,
+              muted: !!conv.muted,
+              manuallyUnread: !!conv.manuallyUnread,
             } as any);
           }
           return Array.from(byId.values());
@@ -486,18 +511,26 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [selectedLead?.id, selectedLead?.messages?.length]);
 
+  // Conversas arquivadas saem da lista principal e ficam numa seção própria,
+  // colapsável — igual à seção "Arquivadas" do WhatsApp Web real.
+  const archivedLeads = leads.filter((lead) => !!lead.archivedAt);
+
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
     .filter((lead) => {
+      if (lead.archivedAt) return false;
+
+      const query = searchQuery.toLowerCase();
       const matchesSearch =
-        lead.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        lead.name.toLowerCase().includes(query) ||
         lead.phone.includes(searchQuery) ||
-        lead.textContent.toLowerCase().includes(searchQuery.toLowerCase());
+        lead.textContent.toLowerCase().includes(query) ||
+        (lead.messages || []).some((m) => m.text?.toLowerCase().includes(query));
 
       if (!matchesSearch) return false;
 
       if (activeTabFilter === 'unread') {
-        return lead.status === 'pending';
+        return lead.manuallyUnread || lead.status === 'pending';
       }
       if (activeTabFilter === 'hot') {
         return (
@@ -522,6 +555,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // (leads de demonstração com hora solta tipo "14:32", ou "Agora mesmo"),
     // mantém a ordem relativa em vez de embaralhar a lista.
     .sort((a, b) => {
+      // Fixadas sempre primeiro (a mais recentemente fixada primeiro),
+      // igual ao WhatsApp Web real — só depois disso desempata por atividade.
+      if (a.pinnedAt || b.pinnedAt) {
+        if (a.pinnedAt && b.pinnedAt) return b.pinnedAt.localeCompare(a.pinnedAt);
+        return a.pinnedAt ? -1 : 1;
+      }
       const dateA = new Date(a.timestamp).getTime();
       const dateB = new Date(b.timestamp).getTime();
       if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
@@ -556,6 +595,48 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (activeLeadId === leadId) {
       setActiveLeadId(remaining.length > 0 ? remaining[0].id : null);
     }
+  };
+
+  // Arquivar/fixar/silenciar/marcar como não lida — menu ⋮ de cada conversa.
+  // Metadados só do painel (server/services/conversationStore.ts), nunca
+  // refletem no WhatsApp real. Leads de demonstração (sem backend) só
+  // atualizam o estado local, igual ao padrão de handleSaveEditedMessage.
+  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean }) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (!lead) return;
+
+    if ((lead as any).isReal) {
+      try {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(lead.phone)}/state`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setLeads((prev) => prev.map((l) => (l.id === leadId ? {
+          ...l,
+          archivedAt: data.conversation?.archivedAt,
+          pinnedAt: data.conversation?.pinnedAt,
+          muted: !!data.conversation?.muted,
+          manuallyUnread: !!data.conversation?.manuallyUnread,
+        } : l)));
+      } catch (err) {
+        console.error('Falha ao atualizar organização da conversa no servidor:', err);
+        setErrorMsg('Não foi possível salvar essa ação no servidor. Tente de novo.');
+      }
+      return;
+    }
+
+    setLeads((prev) => prev.map((l) => {
+      if (l.id !== leadId) return l;
+      const updated: PanelLead = { ...l };
+      if (patch.archived !== undefined) updated.archivedAt = patch.archived ? new Date().toISOString() : undefined;
+      if (patch.pinned !== undefined) updated.pinnedAt = patch.pinned ? new Date().toISOString() : undefined;
+      if (patch.muted !== undefined) updated.muted = patch.muted;
+      if (patch.unread !== undefined) updated.manuallyUnread = patch.unread;
+      return updated;
+    }));
   };
 
   const handleClearChatMessages = async (leadId: string) => {
@@ -1114,6 +1195,166 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Uma linha da lista de conversas — usada tanto na lista principal quanto
+  // na seção "Arquivadas" colapsável, pra não duplicar o JSX.
+  const renderLeadRow = (lead: PanelLead) => {
+    const isSelected = lead.id === activeLeadId;
+    const lastMsg = lead.messages && lead.messages.length > 0 ? lead.messages[lead.messages.length - 1] : null;
+    const isPinned = !!lead.pinnedAt;
+    const isMuted = !!lead.muted;
+    const isArchived = !!lead.archivedAt;
+    const isManuallyUnread = !!lead.manuallyUnread;
+    const isMenuOpen = openMenuForLeadId === lead.id;
+
+    return (
+      <div
+        key={lead.id}
+        onClick={() => {
+          setActiveLeadId(lead.id);
+          if ((lead as any).isReal && isManuallyUnread) {
+            handleUpdateConversationState(lead.id, { unread: false });
+          }
+        }}
+        className={`p-3 transition-colors cursor-pointer relative flex items-start space-x-3 ${
+          isSelected
+            ? 'bg-[#2a3942] border-l-4 border-[#00a884]'
+            : 'hover:bg-[#202c33]'
+        }`}
+      >
+        <div className="relative flex-shrink-0">
+          <img
+            src={lead.avatarUrl}
+            alt={lead.name}
+            className="w-11 h-11 rounded-full object-cover border border-slate-700"
+          />
+          <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#111b21]" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-[#e9edef] truncate flex items-center gap-1">
+              {isPinned && <Pin className="w-3 h-3 text-slate-400 flex-shrink-0" />}
+              <span className="truncate">{lead.name}</span>
+            </h4>
+            <div className="flex items-center space-x-1">
+              {isMuted && <BellOff className="w-3 h-3 text-slate-500 flex-shrink-0" title="Silenciada" />}
+              <span className={`text-[10px] ${isSelected ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
+                {lead.timestamp}
+              </span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenMenuForLeadId(isMenuOpen ? null : lead.id);
+                }}
+                className="p-1 text-slate-400 hover:text-white hover:bg-slate-700/60 rounded transition-colors cursor-pointer"
+                title="Mais opções"
+              >
+                <MoreVertical className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Message Preview */}
+          <div className="flex items-center justify-between mt-1">
+            <p className="text-[11px] text-slate-400 truncate flex items-center pr-2">
+              {lastMsg ? (
+                <>
+                  {lastMsg.sender === 'agent' && (
+                    <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb] mr-1 flex-shrink-0" />
+                  )}
+                  {lastMsg.type === 'audio' && <Mic className="w-3 h-3 text-emerald-400 mr-1 flex-shrink-0" />}
+                  {lastMsg.type === 'image' && <ImageIcon className="w-3 h-3 text-blue-400 mr-1 flex-shrink-0" />}
+                  {lastMsg.type === 'file' && <FileText className="w-3 h-3 text-purple-400 mr-1 flex-shrink-0" />}
+                  <span className="truncate">
+                    {lastMsg.type === 'audio'
+                      ? 'Áudio do WhatsApp'
+                      : lastMsg.type === 'image'
+                      ? 'Foto'
+                      : lastMsg.type === 'file'
+                      ? 'Documento PDF'
+                      : lastMsg.text}
+                  </span>
+                </>
+              ) : (
+                lead.textContent
+              )}
+            </p>
+
+            {/* Unread badge or Stage tag */}
+            {(isManuallyUnread || lead.status === 'pending') ? (
+              <span className="w-5 h-5 rounded-full bg-[#00a884] text-slate-950 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0">
+                1
+              </span>
+            ) : lead.fullAnalysis ? (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/60 flex-shrink-0">
+                {lead.fullAnalysis.dealProbability}%
+              </span>
+            ) : null}
+          </div>
+
+          {/* Language tag indicator if available */}
+          {lead.fullAnalysis?.detectedLanguage && (
+            <div className="mt-1 flex items-center gap-1">
+              <span className="text-[9px] text-blue-300 bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/40 flex items-center gap-0.5">
+                <Globe className="w-2.5 h-2.5 text-blue-400" />
+                {lead.fullAnalysis.detectedLanguage}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {isMenuOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={(e) => { e.stopPropagation(); setOpenMenuForLeadId(null); }}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute right-2 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs"
+            >
+              <button
+                onClick={() => { handleUpdateConversationState(lead.id, { pinned: !isPinned }); setOpenMenuForLeadId(null); }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+              >
+                {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                <span>{isPinned ? 'Desafixar conversa' : 'Fixar conversa'}</span>
+              </button>
+              <button
+                onClick={() => { handleUpdateConversationState(lead.id, { unread: !isManuallyUnread }); setOpenMenuForLeadId(null); }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>{isManuallyUnread ? 'Marcar como lida' : 'Marcar como não lida'}</span>
+              </button>
+              <button
+                onClick={() => { handleUpdateConversationState(lead.id, { muted: !isMuted }); setOpenMenuForLeadId(null); }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+              >
+                {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+                <span>{isMuted ? 'Ativar notificações' : 'Silenciar notificações'}</span>
+              </button>
+              <button
+                onClick={() => { handleUpdateConversationState(lead.id, { archived: !isArchived }); setOpenMenuForLeadId(null); }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+              >
+                {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                <span>{isArchived ? 'Desarquivar conversa' : 'Arquivar conversa'}</span>
+              </button>
+              <button
+                onClick={() => { setOpenMenuForLeadId(null); handleDeleteConversation(lead.id, lead.name); }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer border-t border-slate-700"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir conversa</span>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
       {/* Environment Mode Switcher Bar */}
@@ -1446,7 +1687,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                Tudo ({leads.length})
+                Tudo ({leads.length - archivedLeads.length})
               </button>
               <button
                 onClick={() => setActiveTabFilter('unread')}
@@ -1485,101 +1726,29 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
           {/* WhatsApp Web Chat List */}
           <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
-            {filteredLeads.length > 0 ? (
-              filteredLeads.map((lead) => {
-                const isSelected = lead.id === activeLeadId;
-                const lastMsg = lead.messages && lead.messages.length > 0 ? lead.messages[lead.messages.length - 1] : null;
-
-                return (
-                  <div
-                    key={lead.id}
-                    onClick={() => setActiveLeadId(lead.id)}
-                    className={`p-3 transition-colors cursor-pointer relative flex items-start space-x-3 ${
-                      isSelected
-                        ? 'bg-[#2a3942] border-l-4 border-[#00a884]'
-                        : 'hover:bg-[#202c33]'
-                    }`}
-                  >
-                    <div className="relative flex-shrink-0">
-                      <img
-                        src={lead.avatarUrl}
-                        alt={lead.name}
-                        className="w-11 h-11 rounded-full object-cover border border-slate-700"
-                      />
-                      <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#111b21]" />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-[#e9edef] truncate">{lead.name}</h4>
-                        <div className="flex items-center space-x-1">
-                          <span className={`text-[10px] ${isSelected ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
-                            {lead.timestamp}
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteConversation(lead.id, lead.name);
-                            }}
-                            className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/80 rounded transition-colors cursor-pointer"
-                            title="Excluir conversa"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {/* Message Preview */}
-                      <div className="flex items-center justify-between mt-1">
-                        <p className="text-[11px] text-slate-400 truncate flex items-center pr-2">
-                          {lastMsg ? (
-                            <>
-                              {lastMsg.sender === 'agent' && (
-                                <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb] mr-1 flex-shrink-0" />
-                              )}
-                              {lastMsg.type === 'audio' && <Mic className="w-3 h-3 text-emerald-400 mr-1 flex-shrink-0" />}
-                              {lastMsg.type === 'image' && <ImageIcon className="w-3 h-3 text-blue-400 mr-1 flex-shrink-0" />}
-                              {lastMsg.type === 'file' && <FileText className="w-3 h-3 text-purple-400 mr-1 flex-shrink-0" />}
-                              <span className="truncate">
-                                {lastMsg.type === 'audio'
-                                  ? 'Áudio do WhatsApp'
-                                  : lastMsg.type === 'image'
-                                  ? 'Foto'
-                                  : lastMsg.type === 'file'
-                                  ? 'Documento PDF'
-                                  : lastMsg.text}
-                              </span>
-                            </>
-                          ) : (
-                            lead.textContent
-                          )}
-                        </p>
-
-                        {/* Unread badge or Stage tag */}
-                        {lead.status === 'pending' ? (
-                          <span className="w-5 h-5 rounded-full bg-[#00a884] text-slate-950 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0">
-                            1
-                          </span>
-                        ) : lead.fullAnalysis ? (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/60 flex-shrink-0">
-                            {lead.fullAnalysis.dealProbability}%
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {/* Language tag indicator if available */}
-                      {lead.fullAnalysis?.detectedLanguage && (
-                        <div className="mt-1 flex items-center gap-1">
-                          <span className="text-[9px] text-blue-300 bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/40 flex items-center gap-0.5">
-                            <Globe className="w-2.5 h-2.5 text-blue-400" />
-                            {lead.fullAnalysis.detectedLanguage}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+            {/* Seção "Arquivadas" — colapsável, fixa no topo da lista, igual ao WhatsApp Web real */}
+            {archivedLeads.length > 0 && (
+              <div className="border-b border-slate-800/40">
+                <button
+                  onClick={() => setShowArchived((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-slate-300 hover:bg-[#202c33] transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2 text-xs font-medium">
+                    <Archive className="w-3.5 h-3.5 text-slate-400" />
+                    Arquivadas · {archivedLeads.length}
+                  </span>
+                  {showArchived ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+                {showArchived && (
+                  <div className="divide-y divide-slate-800/40">
+                    {archivedLeads.map((lead) => renderLeadRow(lead))}
                   </div>
-                );
-              })
+                )}
+              </div>
+            )}
+
+            {filteredLeads.length > 0 ? (
+              filteredLeads.map((lead) => renderLeadRow(lead))
             ) : (
               <div className="p-8 text-center text-xs text-slate-500">
                 Nenhuma conversa encontrada com os filtros selecionados.
