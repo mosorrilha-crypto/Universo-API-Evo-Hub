@@ -21,6 +21,7 @@ import { createAdminRouter } from './server/routes/admin';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
+import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 
 dotenv.config();
 
@@ -135,6 +136,11 @@ async function startServer() {
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
   });
+
+  // Job em background que alerta o operador quando uma pré-reserva vence
+  // (data combinada chegou e ainda está pending) — nunca confirma/libera
+  // nada sozinho. Ver server/services/preReservationFollowUpJob.ts.
+  startPreReservationFollowUpJob();
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
   if (!config.isProduction) {
