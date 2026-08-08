@@ -521,7 +521,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               id,
               name: conv.name || conv.phone,
               phone: conv.phone,
-              timestamp: conv.updatedAt,
+              // Achado real em produção: a lista mostrava o ISO cru
+              // ("2026-08-08T22:21:05.751+00:00") em vez de só o horário —
+              // mesmo formato usado em todo o resto do painel (toLocaleTimeString).
+              timestamp: new Date(conv.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
               status: 'transcribed',
               textContent: lastText,
               messages: conv.messages,
@@ -746,7 +749,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
   // atualizam o estado local, igual ao padrão de handleSaveEditedMessage.
-  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean }) => {
+  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string }) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
 
@@ -761,6 +764,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const data = await res.json();
         setLeads((prev) => prev.map((l) => (l.id === leadId ? {
           ...l,
+          name: data.conversation?.name || l.phone,
           archivedAt: data.conversation?.archivedAt,
           pinnedAt: data.conversation?.pinnedAt,
           muted: !!data.conversation?.muted,
@@ -780,8 +784,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       if (patch.pinned !== undefined) updated.pinnedAt = patch.pinned ? new Date().toISOString() : undefined;
       if (patch.muted !== undefined) updated.muted = patch.muted;
       if (patch.unread !== undefined) updated.manuallyUnread = patch.unread;
+      if (patch.name !== undefined) updated.name = patch.name;
       return updated;
     }));
+  };
+
+  // Identifica o lead — troca/adiciona o nome do contato. Achado real em
+  // produção: leads chegam só com o número (595985407441) porque a Meta só
+  // manda o nome de perfil de WhatsApp quando o cliente tem um definido; o
+  // operador precisa poder anotar o nome de verdade do cliente.
+  const handleRenameLead = (leadId: string, currentName: string) => {
+    const input = window.prompt('Nome do contato:', currentName);
+    if (input === null) return;
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    handleUpdateConversationState(leadId, { name: trimmed });
   };
 
   const handleClearChatMessages = async (leadId: string) => {
@@ -1513,6 +1530,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               className="absolute right-2 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs"
             >
               <button
+                onClick={() => { setOpenMenuForLeadId(null); handleRenameLead(lead.id, lead.name); }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>Editar nome do contato</span>
+              </button>
+              <button
                 onClick={() => { handleUpdateConversationState(lead.id, { pinned: !isPinned }); setOpenMenuForLeadId(null); }}
                 className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
               >
@@ -1805,12 +1829,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* Main WhatsApp Web Application Frame — altura fixa a partir do
-          breakpoint lg (igual ao WhatsApp Web/Desktop real: a página não
-          cresce, cada coluna rola por conta própria). No mobile (grid-cols-1,
-          colunas empilhadas) mantém altura mínima livre pra crescer, já que
-          não existe layout lado a lado pra comparar lá. */}
-      <div className="bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[680px] lg:h-[720px]">
+      {/* Main WhatsApp Web Application Frame — altura fixa em todo breakpoint
+          (igual ao WhatsApp Web/Desktop real: a página não cresce, cada
+          coluna rola por conta própria). Achado real em produção: a correção
+          anterior só trocava qual coluna fica visível no mobile
+          (mobileThreadOpen), mas o frame continuava só com min-h — sem altura
+          MÁXIMA, a coluna visível cresce livremente com o conteúdo (todos os
+          leads ou todas as mensagens) em vez de rolar por dentro, e o campo
+          de digitar mensagem (fixo no fim da coluna) acaba empurrado pra
+          baixo de tudo, exigindo rolar a página inteira até ele. `dvh` (não
+          `vh`) porque no mobile a barra de endereço do navegador
+          recolhe/expande — `vh` mediria a altura errada (com a barra
+          expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
+      <div className="bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[85dvh] lg:h-[720px]">
         
         {/* ========================================== */}
         {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}

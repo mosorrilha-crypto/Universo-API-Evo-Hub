@@ -388,14 +388,16 @@ export interface ConversationStatePatch {
   pinned?: boolean;
   muted?: boolean;
   unread?: boolean;
+  /** Identifica o lead — troca/adiciona o nome de exibição do contato (a Meta só manda o nome do perfil de WhatsApp quando o cliente define um; muitos leads chegam só com o número). Sempre uma ação explícita do operador, nunca sobrescrita automaticamente. */
+  name?: string;
 }
 
 /**
  * Atualiza os estados de organização da conversa (arquivar, fixar, silenciar,
- * marcar como não lida) — sempre uma ação explícita do operador no painel
- * (menu ⋮ da lista), nunca automática. archived_at/pinned_at guardam quando
- * cada estado foi ativado (null quando desativado), pra dar pra ordenar por
- * "há quanto tempo foi fixado" sem precisar de outra coluna.
+ * marcar como não lida, nome de exibição) — sempre uma ação explícita do
+ * operador no painel (menu ⋮ da lista), nunca automática. archived_at/pinned_at
+ * guardam quando cada estado foi ativado (null quando desativado), pra dar
+ * pra ordenar por "há quanto tempo foi fixado" sem precisar de outra coluna.
  */
 export async function updateConversationState(tenantId: string, phone: string, patch: ConversationStatePatch): Promise<StoredConversation | undefined> {
   const db = getDb();
@@ -407,6 +409,7 @@ export async function updateConversationState(tenantId: string, phone: string, p
   if (patch.pinned !== undefined) update.pinned_at = patch.pinned ? new Date().toISOString() : null;
   if (patch.muted !== undefined) update.muted = patch.muted;
   if (patch.unread !== undefined) update.manually_unread = patch.unread;
+  if (patch.name !== undefined) update.name = patch.name;
 
   if (Object.keys(update).length > 0) {
     await db.from('conversations').update(update).eq('id', existing.id);

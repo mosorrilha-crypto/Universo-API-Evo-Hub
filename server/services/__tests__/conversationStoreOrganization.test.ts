@@ -76,4 +76,19 @@ describe('organização de conversas — arquivar, fixar, silenciar, não lida',
     const result = await updateConversationState(TENANT_A, '000000000', { pinned: true });
     expect(result).toBeUndefined();
   });
+
+  it('identifica o lead: nome pode ser adicionado/trocado depois da conversa criada só com o telefone', async () => {
+    await recordIncomingMessage(TENANT_A, '595981111111', undefined, { type: 'text', text: 'oi', timestamp: '10:00' });
+
+    let [conv] = await listConversations(TENANT_A);
+    expect(conv.name).toBeUndefined();
+
+    await updateConversationState(TENANT_A, '595981111111', { name: 'Claudia' });
+    [conv] = await listConversations(TENANT_A);
+    expect(conv.name).toBe('Claudia');
+
+    await updateConversationState(TENANT_A, '595981111111', { name: 'Claudia Souza' });
+    [conv] = await listConversations(TENANT_A);
+    expect(conv.name).toBe('Claudia Souza');
+  });
 });
