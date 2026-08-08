@@ -65,11 +65,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     // uma mensagem seguinte, respondendo fora de ordem (bug real observado).
     runExclusive(phone, async () => {
       if (await isAgentPaused(tenantId)) return;
-      const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
-      const segment = await getTenantSegment(tenantId);
       // Exclui as mensagens que acabaram de ser agrupadas pelo buffer (já
       // registradas individualmente antes do flush) — o resto é histórico real.
       const conversation = await getConversation(tenantId, phone);
+      // Lead não qualificado/insistente que o operador bloqueou (menu ⋮ do
+      // painel) — achado real em produção: um lead claramente fora do
+      // público-alvo continuava recebendo resposta automática igual a
+      // qualquer outro. Bloqueio é só desse número, não do tenant inteiro
+      // (isAgentPaused acima continua valendo pra todos).
+      if (conversation?.aiBlockedAt) return;
+      const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
+      const segment = await getTenantSegment(tenantId);
       const history = conversation?.messages.slice(0, -historyExclude);
       try {
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais

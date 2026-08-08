@@ -61,7 +61,8 @@ import {
   Mail,
   ChevronUp,
   ChevronDown,
-  ArrowLeft
+  ArrowLeft,
+  Ban
 } from 'lucide-react';
 
 // Paleta de cores dos chips de etiqueta — a cor de cada etiqueta vem de um
@@ -508,7 +509,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations?archived=true');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string }[] = data.conversations || [];
 
         setLeads((prev) => {
           const byId = new Map(prev.map((l) => [l.id, l]));
@@ -547,6 +548,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               pinnedAt: conv.pinnedAt,
               muted: !!conv.muted,
               manuallyUnread: !!conv.manuallyUnread,
+              aiBlockedAt: conv.aiBlockedAt,
             } as any);
           }
           return Array.from(byId.values());
@@ -757,7 +759,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
   // atualizam o estado local, igual ao padrão de handleSaveEditedMessage.
-  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string }) => {
+  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean }) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
 
@@ -777,6 +779,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           pinnedAt: data.conversation?.pinnedAt,
           muted: !!data.conversation?.muted,
           manuallyUnread: !!data.conversation?.manuallyUnread,
+          aiBlockedAt: data.conversation?.aiBlockedAt,
         } : l)));
       } catch (err) {
         console.error('Falha ao atualizar organização da conversa no servidor:', err);
@@ -793,6 +796,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       if (patch.muted !== undefined) updated.muted = patch.muted;
       if (patch.unread !== undefined) updated.manuallyUnread = patch.unread;
       if (patch.name !== undefined) updated.name = patch.name;
+      if (patch.aiBlocked !== undefined) updated.aiBlockedAt = patch.aiBlocked ? new Date().toISOString() : undefined;
       return updated;
     }));
   };
@@ -1413,6 +1417,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const isMuted = !!lead.muted;
     const isArchived = !!lead.archivedAt;
     const isManuallyUnread = !!lead.manuallyUnread;
+    const isAiBlocked = !!lead.aiBlockedAt;
     const isMenuOpen = openMenuForLeadId === lead.id;
 
     return (
@@ -1447,6 +1452,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <span className="truncate">{lead.name}</span>
             </h4>
             <div className="flex items-center space-x-1">
+              {isAiBlocked && <Ban className="w-3 h-3 text-rose-400 flex-shrink-0" title="IA bloqueada — lead não qualificado" />}
               {isMuted && <BellOff className="w-3 h-3 text-slate-500 flex-shrink-0" title="Silenciada" />}
               <span className={`text-[10px] ${isSelected ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
                 {lead.timestamp}
@@ -1543,6 +1549,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 <Pencil className="w-3.5 h-3.5" />
                 <span>Editar nome do contato</span>
+              </button>
+              <button
+                onClick={() => { handleUpdateConversationState(lead.id, { aiBlocked: !isAiBlocked }); setOpenMenuForLeadId(null); }}
+                className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
+                title="Lead não qualificado/insistente — a IA para de responder só pra esse número, o resto do atendimento automático continua normal"
+              >
+                <Ban className="w-3.5 h-3.5" />
+                <span>{isAiBlocked ? 'Reativar IA pra esse lead' : 'Bloquear IA pra esse lead'}</span>
               </button>
               <button
                 onClick={() => { handleUpdateConversationState(lead.id, { pinned: !isPinned }); setOpenMenuForLeadId(null); }}

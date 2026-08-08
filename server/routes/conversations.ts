@@ -247,25 +247,28 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
 
   // Organização da lista de conversas — arquivar, fixar no topo, silenciar
   // notificações, marcar como não lida manualmente, identificar o lead
-  // trocando/adicionando o nome do contato (menu ⋮ de cada conversa no
-  // painel — muitos leads reais chegam só com o número de telefone como
-  // "nome" porque a Meta só manda o nome de perfil quando o cliente definiu
-  // um). Uma rota só pra tudo, em vez de vários endpoints quase idênticos —
-  // cada campo do body é opcional, só atualiza o que veio.
+  // trocando/adicionando o nome do contato, bloquear a IA pra um lead
+  // específico (menu ⋮ de cada conversa no painel — muitos leads reais
+  // chegam só com o número de telefone como "nome" porque a Meta só manda
+  // o nome de perfil quando o cliente definiu um; e um lead claramente não
+  // qualificado/insistente não deveria continuar recebendo resposta
+  // automática). Uma rota só pra tudo, em vez de vários endpoints quase
+  // idênticos — cada campo do body é opcional, só atualiza o que veio.
   router.patch('/api/conversations/:phone/state', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { archived, pinned, muted, unread, name } = req.body || {};
-    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string } = {};
+    const { archived, pinned, muted, unread, name, aiBlocked } = req.body || {};
+    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean } = {};
     if (typeof archived === 'boolean') patch.archived = archived;
     if (typeof pinned === 'boolean') patch.pinned = pinned;
     if (typeof muted === 'boolean') patch.muted = muted;
     if (typeof unread === 'boolean') patch.unread = unread;
+    if (typeof aiBlocked === 'boolean') patch.aiBlocked = aiBlocked;
     if (typeof name === 'string') {
       const trimmed = name.trim();
       if (!trimmed) return res.status(400).json({ error: 'Campo "name" não pode ser vazio.' });
       patch.name = trimmed;
     }
     if (Object.keys(patch).length === 0) {
-      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread ou name.' });
+      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread, name ou aiBlocked.' });
     }
     const conv = await updateConversationState(tenantOf(req), req.params.phone, patch);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
