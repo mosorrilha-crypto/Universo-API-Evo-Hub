@@ -49,8 +49,45 @@ import {
   Settings,
   Reply,
   Forward,
-  Pencil
+  Pencil,
+  Tag,
+  Plus
 } from 'lucide-react';
+
+// Paleta de cores dos chips de etiqueta — a cor de cada etiqueta vem de um
+// hash do próprio texto (determinístico, sem precisar de seletor de cor
+// manual nem de tabela de catálogo de etiquetas).
+const LABEL_COLOR_PALETTE = [
+  'bg-emerald-950 text-emerald-300 border-emerald-800/60',
+  'bg-blue-950 text-blue-300 border-blue-800/60',
+  'bg-amber-950 text-amber-300 border-amber-800/60',
+  'bg-rose-950 text-rose-300 border-rose-800/60',
+  'bg-purple-950 text-purple-300 border-purple-800/60',
+  'bg-cyan-950 text-cyan-300 border-cyan-800/60',
+  'bg-pink-950 text-pink-300 border-pink-800/60',
+  'bg-lime-950 text-lime-300 border-lime-800/60',
+];
+
+function labelColorClasses(label: string): string {
+  let hash = 0;
+  for (let i = 0; i < label.length; i++) {
+    hash = (hash * 31 + label.charCodeAt(i)) | 0;
+  }
+  return LABEL_COLOR_PALETTE[Math.abs(hash) % LABEL_COLOR_PALETTE.length];
+}
+
+// Só placeholders/exemplos pro operador do segmento beauty_studio — texto
+// livre, não um enum fixo. O operador pode digitar qualquer coisa.
+const BEAUTY_STUDIO_LABEL_SUGGESTIONS = [
+  'Interesada en pestañas',
+  'Interesada en cejas',
+  'Interesada en labios',
+  'Precio informado',
+  'Duda sobre dolor',
+  'Seña pendiente',
+  'Comprobante recibido',
+  'Turno confirmado',
+];
 
 interface WhatsAppLeadsSimProps {
   onSaveTranscript: (item: SavedTranscriptItem) => void;
@@ -143,6 +180,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'hot' | 'international'>('all');
   const [showRightPanel, setShowRightPanel] = useState(true);
+
+  // Etiquetas livres por conversa (tipo WhatsApp Business) — ver
+  // server/services/conversationLabelStore.ts.
+  const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [tenantLabelSuggestions, setTenantLabelSuggestions] = useState<string[]>([]);
+  const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
+  const [newLabelInput, setNewLabelInput] = useState('');
 
   // Message Sending State
   const [inputMessage, setInputMessage] = useState('');
@@ -430,7 +474,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string } }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[] }[] = data.conversations || [];
 
         setLeads((prev) => {
           const byId = new Map(prev.map((l) => [l.id, l]));
@@ -449,6 +493,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               messages: conv.messages,
               isReal: true,
               geoRestriction: conv.geoRestriction,
+              // Etiquetas vêm sempre do servidor (fonte da verdade), igual
+              // ao geoRestriction acima.
+              conversationLabels: conv.labels || [],
             } as any);
           }
           return Array.from(byId.values());
@@ -462,6 +509,82 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const interval = setInterval(fetchRealConversations, 8000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+  // Sugestões de etiqueta pro autocomplete — todas as já usadas nesse tenant
+  // (evita "Interesada en pestañas" e "Interessada em Pestañas" como duas
+  // etiquetas por erro de digitação). Refeito depois de cada etiqueta nova.
+  const refreshLabelSuggestions = async () => {
+    try {
+      const res = await apiFetch('/api/conversation-labels');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.labels)) setTenantLabelSuggestions(data.labels);
+    } catch {
+      // silencioso — sugestões são só conveniência, não bloqueiam a função principal
+    }
+  };
+
+  useEffect(() => {
+    refreshLabelSuggestions();
+  }, []);
+
+  const normalizeLabelText = (label: string) =>
+    label.trim().normalize('NFD').replace(new RegExp(`[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`, 'g'), '').toLowerCase();
+
+  // Adiciona/remove etiqueta — metadado só do painel (conversationLabelStore.ts),
+  // nunca reflete no WhatsApp real. Leads de demonstração (sem backend) só
+  // atualizam o estado local, com a mesma regra de normalização de duplicata.
+  const handleAddLabel = async (leadId: string, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const lead = leads.find((l) => l.id === leadId);
+    if (!lead) return;
+
+    if ((lead as any).isReal) {
+      try {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(lead.phone)}/labels`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: trimmed }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, conversationLabels: data.labels } : l)));
+        refreshLabelSuggestions();
+      } catch (err) {
+        console.error('Falha ao adicionar etiqueta no servidor:', err);
+        setErrorMsg('Não foi possível adicionar essa etiqueta no servidor. Tente de novo.');
+      }
+      return;
+    }
+
+    setLeads((prev) => prev.map((l) => {
+      if (l.id !== leadId) return l;
+      const existing = l.conversationLabels || [];
+      if (existing.some((e) => normalizeLabelText(e) === normalizeLabelText(trimmed))) return l;
+      return { ...l, conversationLabels: [...existing, trimmed] };
+    }));
+  };
+
+  const handleRemoveLabel = async (leadId: string, label: string) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (!lead) return;
+
+    if ((lead as any).isReal) {
+      try {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(lead.phone)}/labels/${encodeURIComponent(label)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, conversationLabels: data.labels } : l)));
+      } catch (err) {
+        console.error('Falha ao remover etiqueta no servidor:', err);
+        setErrorMsg('Não foi possível remover essa etiqueta no servidor. Tente de novo.');
+      }
+      return;
+    }
+
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, conversationLabels: (l.conversationLabels || []).filter((x) => x !== label) } : l)));
+  };
 
   const selectedLead = leads.find((l) => l.id === activeLeadId) || leads[0];
 
@@ -495,6 +618,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         lead.textContent.toLowerCase().includes(searchQuery.toLowerCase());
 
       if (!matchesSearch) return false;
+
+      if (labelFilter && !(lead.conversationLabels || []).some((l) => normalizeLabelText(l) === normalizeLabelText(labelFilter))) {
+        return false;
+      }
 
       if (activeTabFilter === 'unread') {
         return lead.status === 'pending';
@@ -1480,6 +1607,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <Globe className="w-3 h-3 text-blue-400" />
                 Internacional
               </button>
+
+              {tenantLabelSuggestions.length > 0 && (
+                <select
+                  value={labelFilter || ''}
+                  onChange={(e) => setLabelFilter(e.target.value || null)}
+                  title="Filtrar por etiqueta"
+                  className="px-2 py-1 rounded-full text-[11px] font-medium bg-[#202c33] text-slate-300 border border-slate-700 cursor-pointer focus:outline-none flex-shrink-0"
+                >
+                  <option value="">🏷️ Todas etiquetas</option>
+                  {tenantLabelSuggestions.map((l) => (
+                    <option key={l} value={l}>{l}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 
@@ -1576,6 +1717,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </span>
                         </div>
                       )}
+
+                      {/* Etiquetas livres (tipo WhatsApp Business) */}
+                      {lead.conversationLabels && lead.conversationLabels.length > 0 && (
+                        <div className="mt-1 flex items-center gap-1 flex-wrap">
+                          {lead.conversationLabels.map((label) => (
+                            <span
+                              key={label}
+                              className={`text-[9px] px-1.5 py-0.5 rounded border flex-shrink-0 ${labelColorClasses(label)}`}
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1663,6 +1818,88 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <span className="hidden sm:inline">Analisar IA</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Etiquetas livres da conversa (tipo WhatsApp Business) */}
+              <div className="px-3 py-2 bg-[#0f191e] border-b border-slate-800/60 flex items-center gap-1.5 flex-wrap relative">
+                <Tag className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                {(selectedLead.conversationLabels || []).map((label) => (
+                  <span
+                    key={label}
+                    className={`text-[10px] px-2 py-0.5 rounded-full border flex items-center gap-1 ${labelColorClasses(label)}`}
+                  >
+                    {label}
+                    <button
+                      onClick={() => handleRemoveLabel(selectedLead.id, label)}
+                      className="hover:opacity-70 cursor-pointer"
+                      title="Remover etiqueta"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+                <button
+                  onClick={() => { setIsLabelPickerOpen((v) => !v); setNewLabelInput(''); }}
+                  className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-2.5 h-2.5" />
+                  Etiqueta
+                </button>
+
+                {isLabelPickerOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsLabelPickerOpen(false)} />
+                    <div className="absolute left-3 top-9 z-50 w-72 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-3 space-y-2">
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (newLabelInput.trim()) {
+                            handleAddLabel(selectedLead.id, newLabelInput);
+                            setNewLabelInput('');
+                            setIsLabelPickerOpen(false);
+                          }
+                        }}
+                        className="flex items-center gap-1.5"
+                      >
+                        <input
+                          type="text"
+                          value={newLabelInput}
+                          onChange={(e) => setNewLabelInput(e.target.value)}
+                          placeholder="Nova etiqueta..."
+                          autoFocus
+                          className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="submit"
+                          className="p-1.5 bg-[#00a884] hover:bg-emerald-500 text-slate-950 rounded-lg cursor-pointer flex-shrink-0"
+                          title="Adicionar"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </form>
+
+                      {(() => {
+                        const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
+                        const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
+                          .filter((l) => !alreadyOn.has(normalizeLabelText(l)));
+                        if (suggestions.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto pt-1 border-t border-slate-700">
+                            {suggestions.map((l) => (
+                              <button
+                                key={l}
+                                onClick={() => { handleAddLabel(selectedLead.id, l); setIsLabelPickerOpen(false); }}
+                                className={`text-[10px] px-2 py-0.5 rounded-full border cursor-pointer hover:opacity-80 ${labelColorClasses(l)}`}
+                              >
+                                {l}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Real-time Analyzing Banner */}

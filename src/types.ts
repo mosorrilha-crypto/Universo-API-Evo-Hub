@@ -262,6 +262,12 @@ export interface LeadInfo {
   crmNotes?: CRMOperatorNote[];
   crmTasks?: CRMTask[];
   tags?: string[];
+  /**
+   * Etiquetas livres da conversa (tipo WhatsApp Business, ver
+   * server/services/conversationLabelStore.ts) — diferente de `tags` acima,
+   * que é do estágio único do CRM (OperatorCRM.tsx, ainda só localStorage).
+   */
+  conversationLabels?: string[];
 }
 
 export interface TranscriptionResult {

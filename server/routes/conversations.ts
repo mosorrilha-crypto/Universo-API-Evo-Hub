@@ -11,6 +11,7 @@ import {
   reactToMessage,
   editMessage,
 } from '../services/conversationStore';
+import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
@@ -199,6 +200,31 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
     }
     const conv = await getConversation(tenantOf(req), req.params.phone);
     res.json({ success: true, conversation: conv });
+  }));
+
+  // Etiquetas livres por conversa (tipo WhatsApp Business) — características/
+  // sinais que se acumulam, complementares ao estágio único do CRM.
+  router.post('/api/conversations/:phone/labels', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { label } = req.body || {};
+    if (!label || typeof label !== 'string' || !label.trim()) {
+      return res.status(400).json({ error: 'Campo "label" é obrigatório.' });
+    }
+    const labels = await addLabel(tenantOf(req), req.params.phone, label);
+    if (labels === undefined) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    res.json({ success: true, labels });
+  }));
+
+  router.delete('/api/conversations/:phone/labels/:label', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const labels = await removeLabel(tenantOf(req), req.params.phone, req.params.label);
+    if (labels === undefined) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    res.json({ success: true, labels });
+  }));
+
+  // Todas as etiquetas distintas já usadas no tenant — sugestões de
+  // autocomplete no painel (pra não gerar "Interesada en pestañas" e
+  // "Interessada em Pestañas" como duas etiquetas por erro de digitação).
+  router.get('/api/conversation-labels', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ labels: await listAllTenantLabels(tenantOf(req)) });
   }));
 
   // Envia a foto de exemplo cadastrada na Base de Conhecimento pro serviço

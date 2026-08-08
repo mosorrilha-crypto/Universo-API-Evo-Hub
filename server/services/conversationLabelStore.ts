@@ -1,0 +1,102 @@
+/**
+ * Etiquetas livres por conversa (tipo WhatsApp Business) — características/
+ * sinais que se acumulam ao longo do atendimento (ex: "Interesada en
+ * pestañas", "Seña pendiente"), complementares ao estágio único do CRM
+ * (crmStage). Texto livre, sem catálogo fixo — normalizado (sem acento,
+ * minúsculo) só pra comparação de duplicidade; o texto original digitado é
+ * sempre preservado e devolvido.
+ */
+import { getDb } from './db';
+
+// Faixa Unicode "Combining Diacritical Marks" (U+0300–U+036F) — construída via
+// charCode em vez de literal na regex pra evitar ambiguidade de encoding.
+const COMBINING_DIACRITICS = new RegExp(`[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`, 'g');
+
+function normalizeLabel(label: string): string {
+  return label.trim().normalize('NFD').replace(COMBINING_DIACRITICS, '').toLowerCase();
+}
+
+async function getConversationId(tenantId: string, phone: string): Promise<string | undefined> {
+  const db = getDb();
+  const { data } = await db.from('conversations').select('id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  return data?.id;
+}
+
+/** Etiquetas de uma conversa, na ordem em que foram adicionadas. Lista vazia se a conversa não existir ou não tiver etiquetas. */
+export async function listLabels(tenantId: string, phone: string): Promise<string[]> {
+  const conversationId = await getConversationId(tenantId, phone);
+  if (!conversationId) return [];
+  const db = getDb();
+  const { data, error } = await db
+    .from('conversation_labels')
+    .select('label')
+    .eq('tenant_id', tenantId)
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return ((data || []) as { label: string }[]).map((row) => row.label);
+}
+
+/**
+ * Adiciona uma etiqueta — undefined se a conversa não existir. Não duplica
+ * se já existir uma etiqueta equivalente (comparação normalizada: sem
+ * acento, case-insensitive), mesmo que o texto digitado seja levemente
+ * diferente do já cadastrado (ex: "Interesada en pestañas" vs "interesada EN
+ * PESTAÑAS" contam como a mesma).
+ */
+export async function addLabel(tenantId: string, phone: string, label: string): Promise<string[] | undefined> {
+  const trimmed = label.trim();
+  const conversationId = await getConversationId(tenantId, phone);
+  if (!conversationId) return undefined;
+  if (!trimmed) return listLabels(tenantId, phone);
+
+  const existing = await listLabels(tenantId, phone);
+  const normalizedNew = normalizeLabel(trimmed);
+  const alreadyExists = existing.some((l) => normalizeLabel(l) === normalizedNew);
+  if (alreadyExists) return existing;
+
+  const db = getDb();
+  const { error } = await db.from('conversation_labels').insert({ tenant_id: tenantId, conversation_id: conversationId, label: trimmed });
+  if (error) throw error;
+  return listLabels(tenantId, phone);
+}
+
+/** Remove pelo texto exato (o painel manda de volta o texto como veio de listLabels/addLabel). */
+export async function removeLabel(tenantId: string, phone: string, label: string): Promise<string[] | undefined> {
+  const conversationId = await getConversationId(tenantId, phone);
+  if (!conversationId) return undefined;
+  const db = getDb();
+  await db.from('conversation_labels').delete().eq('tenant_id', tenantId).eq('conversation_id', conversationId).eq('label', label);
+  return listLabels(tenantId, phone);
+}
+
+/** Todas as etiquetas distintas já usadas no tenant (uma por texto normalizado) — sugestões de autocomplete no painel. */
+export async function listAllTenantLabels(tenantId: string): Promise<string[]> {
+  const db = getDb();
+  const { data, error } = await db.from('conversation_labels').select('label').eq('tenant_id', tenantId);
+  if (error) throw error;
+  const seen = new Map<string, string>();
+  for (const row of (data || []) as { label: string }[]) {
+    const key = normalizeLabel(row.label);
+    if (!seen.has(key)) seen.set(key, row.label);
+  }
+  return Array.from(seen.values());
+}
+
+/** Etiquetas de todas as conversas de um tenant, agrupadas por conversation_id — evita N+1 query em listConversations. */
+export async function listLabelsByConversationId(tenantId: string): Promise<Map<string, string[]>> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('conversation_labels')
+    .select('conversation_id, label')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  const map = new Map<string, string[]>();
+  for (const row of (data || []) as { conversation_id: string; label: string }[]) {
+    const arr = map.get(row.conversation_id) || [];
+    arr.push(row.label);
+    map.set(row.conversation_id, arr);
+  }
+  return map;
+}
