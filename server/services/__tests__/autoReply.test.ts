@@ -71,6 +71,12 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('Nunca finja escassez');
     expect(systemInstruction).toContain('Fotos de referência');
 
+    // Achado real em produção: a IA tentava vender procedimento pra um
+    // contato que claramente não era um lead genuíno (mandando foto pessoal
+    // sem relação com o serviço, assediando a atendente) — regra nova pra
+    // reconhecer isso e parar de tentar vender.
+    expect(systemInstruction).toContain('não demonstra interesse genuíno');
+
     // Camadas 3+4 (tenant/dinâmico) + histórico: nunca a instrução fixa.
     expect(userContent).toContain(KB_MARKER);
     expect(userContent).toContain('quanto custa o retoque?');
