@@ -46,6 +46,19 @@ async function startServer() {
   const config = loadConfig();
   const app = express();
 
+  // Achado real em produção: o Render (nosso host) fica atrás de um proxy
+  // reverso que sempre seta X-Forwarded-For, mas o Express nunca declarou
+  // confiar em proxy nenhum (padrão: false). Sem isso, req.ip do
+  // express-rate-limit sempre resolve pro IP do socket (o proxy do Render),
+  // nunca pro IP real do cliente em X-Forwarded-For — o rate limit de
+  // aiRateLimiter (20 req/min) virava um limite ÚNICO COMPARTILHADO entre
+  // TODOS os usuários do app ao mesmo tempo, em vez de por pessoa (um
+  // operador ativo podia estourar o limite pra todo mundo). `1` (não
+  // `true`) porque o Render adiciona exatamente UM hop de proxy — `true`
+  // confiaria em qualquer X-Forwarded-For vindo do próprio cliente, o que
+  // permitiria burlar o rate limit por IP forjando o header.
+  app.set('trust proxy', 1);
+
   const supabase = createSupabaseClientFromConfig(config);
   const authenticateToken = createAuthenticateToken(config.jwtSecret);
   const authenticateEvoHub = createAuthenticateEvoHub(config.evohubApiKey, config.isProduction);
