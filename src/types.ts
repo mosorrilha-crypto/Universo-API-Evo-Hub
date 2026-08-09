@@ -247,6 +247,8 @@ export interface LeadInfo {
   phone: string;
   avatarUrl?: string;
   timestamp: string;
+  /** Só em leads reais (isReal): updatedAt cru do backend (ISO completo), pra ordenar por atividade de verdade — `timestamp` acima já vem formatado só como "HH:MM" pra exibição, e não dá pra reconstruir uma data válida a partir disso (ver bug real: lista real nunca ordenava, `new Date("14:32")` é Invalid Date). */
+  updatedAtIso?: string;
   audioDuration?: number; // in seconds
   audioUrl?: string;
   audioBlob?: Blob;
