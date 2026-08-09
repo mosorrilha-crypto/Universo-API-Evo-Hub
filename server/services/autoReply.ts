@@ -810,6 +810,26 @@ export async function generateAutoReplyForText(
           ? [`Deixa eu confirmar certinho com você: o horário disponível é ${confirmedTimes.join(' ou ')}. Fico assim mesmo ou prefere outro horário?`]
           : ['Deixa eu confirmar certinho esse horário na agenda antes de te dar certeza — só um instante e já te retorno.'];
       }
+    } else if (agent === 'agendamento' && !agendamentoToolsRan) {
+      // Achado real em produção (teste ao vivo do dono do produto): com o
+      // Google Calendar não conectado pro tenant (ou a IA simplesmente não
+      // chamando nenhuma ferramenta), agendamentoToolsRan fica false — o
+      // bloco acima nunca roda, e nada mais impedia o modelo de responder
+      // "Já deixei pré-agendado seu horário para segunda, às 10:00" sem
+      // NENHUMA ação real ter acontecido (nem criar_pre_reserva, nem
+      // criar_agendamento). A instrução em AGENT_INSTRUCTIONS.agendamento já
+      // pede pra nunca prometer horário como certo nesse caso, mas o modelo
+      // nem sempre segue — aqui é a garantia estrutural: citar um horário
+      // específico só é legítimo quando uma ferramenta de agenda confirmou
+      // ele nesta mensagem; se nenhuma rodou, qualquer horário citado é por
+      // definição não verificado, e o cliente não pode receber isso como se
+      // fosse um agendamento real.
+      const citedTimes = extractCitedTimes(bubbles.join(' '));
+      if (citedTimes.length) {
+        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) (${citedTimes.join(', ')}) como se tivesse agendado, mas nenhuma ferramenta de agenda rodou nesta mensagem — corrigindo resposta e escalando pra humano.`);
+        bubbles = ['Deixa eu confirmar certinho esse horário na agenda antes de te dar certeza — só um instante e já te retorno.'];
+        forcedHumanConfirmation = true;
+      }
     }
 
     // Epic 4.5.8 — toda reclamação escala pra humano, sem exceção. A IA
