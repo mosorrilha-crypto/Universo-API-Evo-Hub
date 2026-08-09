@@ -160,6 +160,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // coluna) qual das duas aparece no mobile, igual ao WhatsApp mobile real;
   // no desktop (lg:flex fixo) as duas colunas continuam sempre visíveis.
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
+  // Achado real em produção: a coluna 3 (Ficha IA) ficou hidden no mobile
+  // (PR #70, evitava sobrepor a lista) mas o botão "Ver Ficha IA" continuou
+  // visível e clicável lá, sem fazer nada — parecia quebrado. Este estado é
+  // só do mobile: abre a mesma análise como um painel deslizante por cima
+  // da conversa, sem mexer no showRightPanel (que continua controlando só a
+  // coluna fixa do desktop).
+  const [mobileAnalysisOpen, setMobileAnalysisOpen] = useState(false);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -1914,7 +1921,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   {/* Botão "voltar pra lista" — só no mobile (lg:hidden), onde
                       lista e conversa nunca ficam visíveis ao mesmo tempo. */}
                   <button
-                    onClick={() => setMobileThreadOpen(false)}
+                    onClick={() => { setMobileThreadOpen(false); setMobileAnalysisOpen(false); }}
                     className="lg:hidden p-1.5 -ml-1.5 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Voltar pra lista de conversas"
                   >
@@ -1982,6 +1989,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       <Sparkles className="w-3.5 h-3.5" />
                     )}
                     <span className="hidden sm:inline">Analisar IA</span>
+                  </button>
+
+                  {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver PR #70) */}
+                  <button
+                    onClick={() => setMobileAnalysisOpen(true)}
+                    className="lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                    title="Ver Ficha IA"
+                  >
+                    <Info className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -2512,11 +2528,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           // hidden/flex por mobileThreadOpen que as colunas 1 e 2 têm — no
           // mobile (grid-cols-1) ela sempre empilhava atrás da lista/thread
           // visível, e virou sobreposição visual real depois que o frame
-          // ganhou altura fixa (h-[85dvh]). Escondida no mobile por ora
-          // (resumo — % de probabilidade e idioma detectado — continua
-          // visível na lista e no cabeçalho da conversa); o painel
-          // detalhado completo fica só desktop até ter espaço próprio
-          // dedicado no mobile (fora do escopo deste fix pontual).
+          // ganhou altura fixa (h-[85dvh]). Escondida no mobile — o
+          // equivalente lá é o painel deslizante controlado por
+          // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
+          // cabeçalho da conversa.
           <div className="hidden lg:flex lg:col-span-4 border-l border-slate-800/80 bg-[#111b21] flex-col p-3 space-y-3 overflow-y-auto max-h-[720px] scrollbar-thin">
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
@@ -2529,6 +2544,41 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
         )}
       </div>
+
+      {/* Ficha IA no mobile — painel deslizante por cima da conversa (a
+          coluna 3 fica hidden abaixo do breakpoint lg). Mesmo componente e
+          mesmas props do painel de desktop acima, só a apresentação muda. */}
+      {mobileAnalysisOpen && mobileThreadOpen && selectedLead && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          onClick={() => setMobileAnalysisOpen(false)}
+        >
+          <div
+            className="bg-[#111b21] w-full max-h-[85vh] rounded-t-2xl border-t border-slate-800 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b border-slate-800 flex-shrink-0">
+              <h3 className="text-sm font-bold text-white">Ficha IA</h3>
+              <button
+                onClick={() => setMobileAnalysisOpen(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-3 space-y-3 overflow-y-auto">
+              <ConversationAnalysisPanel
+                analysis={selectedLead.fullAnalysis}
+                isLoading={isAnalyzingConversation}
+                onReanalyze={() => handleAnalyzeConversation(selectedLead)}
+                onApplySuggestedReply={handleApplySuggestedReply}
+                leadName={selectedLead.name || 'Lead'}
+                onSendCAPIEvent={handleDirectCAPI}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Forward Message Modal — escolher outro lead da lista pra encaminhar */}
       {forwardingMessage && (
