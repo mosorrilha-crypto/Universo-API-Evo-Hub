@@ -7,20 +7,48 @@ pra um exemplo real de como uma auditoria vira issues rastreáveis.
 
 ## Onde encontrar trabalho
 
-- **Pronto pra pegar**: issues abertas com a label `backlog`, sem ninguém
-  atribuído. Pegue sempre a mais antiga entre as de prioridade mais alta
-  (labels `P0`/🔴 no título têm prioridade sobre o resto), nunca duas issues
-  em paralelo na mesma branch.
+- **Pronto pra pegar**: issues abertas com a label `backlog` E sem ninguém
+  atribuído (`assignee`). Pegue sempre a mais antiga entre as de prioridade
+  mais alta (labels `P0`/🔴 no título têm prioridade sobre o resto), nunca
+  duas issues em paralelo na mesma branch.
 - **Bloqueada**: label `blocked` — precisa de decisão de negócio ou
   dependência externa antes de codar. Não tente resolver sozinho; comente a
   pergunta específica na issue.
-- **Em execução**: uma branch/PR (mesmo draft) já vinculada à issue já É o
-  status "em execução" — não precisa de label extra pra isso.
+- **Em execução**: label `in-progress` (issue já reivindicada — ver seção
+  abaixo) e/ou uma branch/PR (mesmo draft) já vinculada à issue.
 - **Aguardando revisão**: um PR aberto, não-draft (ou draft pedindo review
   explicitamente no corpo) já É esse status.
 - **Concluído**: issue fechada + PR mergeado referenciando ela (`Closes #N`
   no corpo do PR). Não recrie o que já virou PR mergeado — o histórico de PR
   já é o registro.
+
+## Reivindicar uma issue antes de codar (múltiplos agentes em paralelo)
+
+Várias sessões podem estar rodando ao mesmo tempo neste repo. Sem um sinal
+explícito de "peguei", duas sessões podem escolher a mesma issue no mesmo
+minuto e gerar branches/PRs conflitantes pro mesmo problema. Protocolo:
+
+1. **Reconsulte a issue na hora**, não confie em uma lista vista há alguns
+   minutos — outra sessão pode ter reivindicado nesse intervalo.
+2. **Antes de escrever qualquer código**, faça as duas coisas juntas (na
+   mesma resposta, sem pausa entre elas):
+   - troque a label `backlog` por `in-progress`;
+   - atribua a issue a si mesmo (`assignees`) — mesmo que todas as sessões
+     compartilhem a mesma identidade de commit/API, o campo `assignee`
+     preenchido já é o sinal de "está em uso", suficiente pra outra sessão
+     pular essa issue.
+   - opcional mas recomendado: comente com o nome da branch que você vai usar.
+3. **Se ao reconsultar a issue ela já não tiver mais `backlog` ou já estiver
+   atribuída**, outra sessão chegou primeiro — solte e pegue a próxima da
+   lista. Não abra uma segunda branch pro mesmo problema.
+4. **Colisão mesmo assim** (duas sessões reivindicaram quase ao mesmo
+   tempo): quem abrir o PR primeiro segue normalmente; a outra sessão, ao
+   tentar abrir o PR e notar que já existe um cobrindo a mesma issue,
+   comenta reconhecendo a colisão, descarta/fecha o que tiver feito, e pega
+   a próxima issue disponível — não force merge nem dispute a mesma issue.
+5. Ao terminar (PR aberto ou mergeado), a label `in-progress` pode ficar —
+   o PR vinculado já deixa claro que não é mais "pronto pra pegar"; ela some
+   naturalmente quando a issue fecha.
 
 ## Regras de execução
 
@@ -32,7 +60,8 @@ pra um exemplo real de como uma auditoria vira issues rastreáveis.
    direto no chat.
 3. **Uma issue por branch**, nunca duas em paralelo, exceto quando duas
    issues são a mesma causa raiz e o dono do produto autoriza explicitamente
-   combinar (registre isso no PR).
+   combinar (registre isso no PR). Reivindique a issue (ver seção acima)
+   antes de começar, pra outra sessão rodando em paralelo não pegar a mesma.
 4. **Bloqueio real**: comente na issue exatamente o que travou. Não tente
    resolver algo que exige decisão de negócio — pare e pergunte.
 5. **Nunca mergeie seu próprio PR** quando o PR tocar autenticação,
