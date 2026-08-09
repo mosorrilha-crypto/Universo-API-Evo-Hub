@@ -49,8 +49,7 @@ import {
   Server,
   Activity,
   ToggleLeft,
-  ToggleRight,
-  Play
+  ToggleRight
 } from 'lucide-react';
 
 export function ConfiguracaoCanais() {
@@ -245,8 +244,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
   const [queueStatus, setQueueStatus] = useState<QueueSystemStatus | null>(null);
   const [isMockAiActive, setIsMockAiActive] = useState<boolean>(false);
-  const [isBatchRunning, setIsBatchRunning] = useState(false);
-  const [batchResult, setBatchResult] = useState<any>(null);
 
   // New Tenant Form State
   const [newName, setNewName] = useState('');
@@ -302,30 +299,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       }
     } catch (err) {
       console.error(err);
-    }
-  };
-
-  const handleRunBatchJob = async () => {
-    setIsBatchRunning(true);
-    try {
-      const res = await apiFetch('/api/batch/lead-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: activeTenant.id,
-          leads: Array.from({ length: 10 }).map((_, i) => ({ id: `batch_lead_${i}` })),
-        }),
-      });
-      const isJson = res.headers.get('content-type')?.includes('application/json');
-      if (res.ok && isJson) {
-        const data = await res.json();
-        setBatchResult(data);
-        fetchTelemetry();
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsBatchRunning(false);
     }
   };
 
@@ -1078,51 +1051,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* BATCH PROCESSING API & VERTEX AI MIGRATION PANEL */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Gemini Batch API Executor */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Database className="w-4 h-4 text-emerald-400" />
-                    Gemini Batch API (Processamento em Lote Noturno)
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Processamento de relatórios diários de atrito e atribuição com 50% de desconto no valor de tokens.
-                  </p>
-                </div>
-                <span className="px-2 py-0.5 text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold rounded-md">
-                  50% Desconto
-                </span>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3">
-                <p className="text-xs text-slate-300">
-                  A Gemini Batch API executa tarefas assíncronas (como análise diária de leads e consolidação de atribuição CAPI) usando uma cota dedicada e sem consumir o limite do chat em tempo real.
-                </p>
-
-                <button
-                  type="button"
-                  onClick={handleRunBatchJob}
-                  disabled={isBatchRunning}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-slate-950 font-bold text-xs rounded-xl shadow flex items-center justify-center space-x-2 transition-all"
-                >
-                  <Play className="w-4 h-4" />
-                  <span>{isBatchRunning ? 'Processando Lote...' : 'Simular Processamento Noturno em Lote (Batch API)'}</span>
-                </button>
-
-                {batchResult && (
-                  <div className="bg-emerald-950/40 border border-emerald-800 p-3 rounded-lg text-xs space-y-1 animate-fade-in font-mono">
-                    <div className="text-emerald-400 font-bold">✅ Job Concluído com Sucesso! ({batchResult.jobId})</div>
-                    <div className="text-slate-300">Itens Processados: {batchResult.processedItems} leads</div>
-                    <div className="text-slate-300">Tokens Utilizados (com 50% desc): {batchResult.tokensUsed}</div>
-                    <div className="text-emerald-300">Economia Estimada: ${batchResult.estimatedSavingsUSD} USD</div>
-                  </div>
-                )}
-              </div>
-            </div>
-
+          {/* VERTEX AI MIGRATION PANEL */}
+          <div className="grid grid-cols-1 gap-6">
             {/* Google Cloud Vertex AI & Billing Guide */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between">

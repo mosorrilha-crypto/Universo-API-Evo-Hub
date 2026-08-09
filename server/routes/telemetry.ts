@@ -3,10 +3,9 @@ import { getQueueStats } from '../services/transcriptionQueue';
 
 interface TelemetryRouterDeps {
   authenticateToken: RequestHandler;
-  rateLimiter: RequestHandler;
 }
 
-export function createTelemetryRouter({ authenticateToken, rateLimiter }: TelemetryRouterDeps): Router {
+export function createTelemetryRouter({ authenticateToken }: TelemetryRouterDeps): Router {
   const router = Router();
 
   // Telemetria de Tokens & Cache AI Strategy
@@ -71,16 +70,6 @@ export function createTelemetryRouter({ authenticateToken, rateLimiter }: Teleme
       rateLimitRPM: 60,
       mockModeEnabled: mockAiEnabled,
       contextCacheEnabled: false,
-    });
-  });
-
-  router.post('/api/batch/lead-analysis', authenticateToken, rateLimiter, (req, res) => {
-    res.json({
-      success: true,
-      processedCount: 10,
-      savedTokens: 42000,
-      executionTimeMs: 1250,
-      timestamp: new Date().toISOString()
     });
   });
 

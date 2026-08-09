@@ -81,7 +81,7 @@ async function startServer() {
 
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
-  app.use(createTelemetryRouter({ authenticateToken, rateLimiter: aiRateLimiter }));
+  app.use(createTelemetryRouter({ authenticateToken }));
   app.use(createWebhooksRouter({
     metaWebhookVerifyToken: config.metaWebhookVerifyToken,
     evoHubWebhookSecret: config.evoHubWebhookSecret,
