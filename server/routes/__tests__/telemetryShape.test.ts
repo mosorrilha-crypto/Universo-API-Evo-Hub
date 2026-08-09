@@ -12,6 +12,8 @@ import express from 'express';
 import type { Server } from 'http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTelemetryRouter } from '../telemetry';
+import { initDb } from '../../services/db';
+import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 
 let server: Server;
 let baseUrl: string;
@@ -22,9 +24,14 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
 }
 
 beforeAll(async () => {
+  initDb(createFakeSupabase());
   const app = express();
   app.use(express.json());
   app.use(createTelemetryRouter({ authenticateToken: fakeAuthenticateToken as any }));
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(err);
+    res.status(500).json({ error: err?.message || 'Erro interno do servidor.' });
+  });
   await new Promise<void>((resolve) => {
     server = app.listen(0, resolve);
   });

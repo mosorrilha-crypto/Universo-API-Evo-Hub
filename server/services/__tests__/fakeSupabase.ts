@@ -11,7 +11,7 @@ type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
 
 class FakeQueryBuilder {
-  private filters: Array<['eq' | 'ilike', string, any]> = [];
+  private filters: Array<['eq' | 'ilike' | 'gte' | 'in', string, any]> = [];
   private wantSelect = false;
 
   constructor(
@@ -32,6 +32,17 @@ class FakeQueryBuilder {
     return this;
   }
 
+  /** Comparação simples (string/número) — suficiente pra filtro de janela de tempo por created_at ISO. */
+  gte(column: string, value: any) {
+    this.filters.push(['gte', column, value]);
+    return this;
+  }
+
+  in(column: string, values: any[]) {
+    this.filters.push(['in', column, values]);
+    return this;
+  }
+
   order() {
     return this;
   }
@@ -44,6 +55,8 @@ class FakeQueryBuilder {
   private matches(row: Row): boolean {
     return this.filters.every(([kind, column, value]) => {
       if (kind === 'ilike') return String(row[column] ?? '').toLowerCase() === String(value ?? '').toLowerCase();
+      if (kind === 'gte') return row[column] >= value;
+      if (kind === 'in') return (value as any[]).includes(row[column]);
       return row[column] === value;
     });
   }

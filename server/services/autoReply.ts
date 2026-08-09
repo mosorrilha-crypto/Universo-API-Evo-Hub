@@ -15,6 +15,7 @@ import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
+import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -39,6 +40,27 @@ export interface AutoReplyResult {
   routerElapsedMs: number;
 }
 
+/**
+ * Fino wrapper sobre o withGeminiRetry compartilhado (server/gemini.ts,
+ * extraído de cá no PR #103/issue #94 — o mesmo retry passou a valer
+ * também pras rotas de análise/relatório que não tinham nenhuma proteção).
+ * Local a autoReply.ts só porque a gravação de telemetria por
+ * tenant+ponto-de-chamada (issue #90) é específica do agente automático —
+ * nunca bloqueia nem falha o fluxo (recordGeminiUsage já engole os
+ * próprios erros; .catch aqui é só rede de segurança extra, mesmo padrão
+ * de notifyMetaCapiEvent).
+ */
+async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<typeof recordGeminiUsage>[2] }>(
+  tenantId: string,
+  callSite: GeminiCallSite,
+  makeCall: () => Promise<T>,
+  timeoutMs: number
+): Promise<T> {
+  const result = await withGeminiRetry(makeCall, timeoutMs);
+  recordGeminiUsage(tenantId, callSite, result.usageMetadata).catch(() => {});
+  return result;
+}
+
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
   return (history || [])
     .filter((m) => m.text)
@@ -55,7 +77,7 @@ function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[
  * (até "quanto custa?") carregaria ferramentas de agenda à toa, arriscando o
  * modelo tentar agendar por engano.
  */
-async function classifyAgent(ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[]): Promise<AgentType> {
+async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[]): Promise<AgentType> {
   const historyText = buildHistoryText(history);
   const prompt = `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
@@ -66,7 +88,9 @@ ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
 Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
 
-  const response = await withGeminiRetry(
+  const response = await withGeminiRetryAndUsage(
+    tenantId,
+    'router',
     () =>
       ai.models.generateContent({
         model: 'gemini-3.6-flash',
@@ -188,6 +212,7 @@ Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode 
  * docs/AGENTE-VERTICAL-ARQUITETURA.md seções 1 e 7 (Etapa 3).
  */
 async function generateSpecialistReply(
+  tenantId: string,
   ai: GoogleGenAI,
   agent: AgentType,
   text: string,
@@ -205,7 +230,9 @@ async function generateSpecialistReply(
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"`;
 
-  const response = await withGeminiRetry(
+  const response = await withGeminiRetryAndUsage(
+    tenantId,
+    'especialista',
     () =>
       ai.models.generateContent({
         model: 'gemini-3.6-flash',
@@ -592,7 +619,9 @@ Regras:
   let hadError = false;
 
   for (let i = 0; i < 4; i++) {
-    const response = await withGeminiRetry(
+    const response = await withGeminiRetryAndUsage(
+      tenantId,
+      'agendamento',
       () =>
         ai.models.generateContent({
           model: 'gemini-3.6-flash',
@@ -675,7 +704,9 @@ ${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensage
 
 Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e uma foto ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
 
-  const response = await withGeminiRetry(
+  const response = await withGeminiRetryAndUsage(
+    tenantId,
+    'foto',
     () =>
       ai.models.generateContent({
         model: 'gemini-3.6-flash',
@@ -743,7 +774,7 @@ export async function generateAutoReplyForText(
 
   try {
     const routerStart = Date.now();
-    const agent = await classifyAgent(ai, text, history);
+    const agent = await classifyAgent(tenantId, ai, text, history);
     const routerElapsedMs = Date.now() - routerStart;
 
     let extraContext: string | undefined;
@@ -780,7 +811,7 @@ export async function generateAutoReplyForText(
       ? `Este é o primeiro contato desta conversa. O cliente clicou num anúncio "Clique para WhatsApp" com o tema "${adHeadline}" pra chegar até aqui — se fizer sentido, deixe a saudação inicial soar como continuação natural desse anúncio (ex: mencionar brevemente esse tema), sem forçar nem soar automático. Nunca repita essa menção em mensagens seguintes.`
       : undefined;
 
-    const specialist = await generateSpecialistReply(ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext, adContext);
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext, adContext);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
