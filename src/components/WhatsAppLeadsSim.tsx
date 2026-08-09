@@ -57,7 +57,8 @@ import {
   ArrowLeft,
   Ban,
   CheckCircle2,
-  XCircle
+  XCircle,
+  AlertTriangle
 } from 'lucide-react';
 
 // Paleta de cores dos chips de etiqueta — a cor de cada etiqueta vem de um
@@ -101,6 +102,10 @@ interface WhatsAppLeadsSimProps {
   activeTenant?: Tenant;
   onAddNewLead?: (newLead: any) => void;
   onDeleteLead?: (leadId: string) => void;
+  /** Contador de escalonamentos pendentes (não resolvidos) do tenant — pro atalho na caixa de ferramentas do operador, mesmo dado que já alimenta o badge da aba "Escalonamentos" no Header. */
+  escalationsPendingCount?: number;
+  /** Troca a aba ativa do app pra "Escalonamentos" — pedido real do operador: ter um atalho aqui, sem precisar navegar pela barra de abas do topo. */
+  onGoToEscalations?: () => void;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -147,6 +152,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   activeTenant,
   onAddNewLead,
   onDeleteLead,
+  escalationsPendingCount = 0,
+  onGoToEscalations,
 }) => {
   const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis })[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
@@ -529,6 +536,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               // ("2026-08-08T22:21:05.751+00:00") em vez de só o horário —
               // mesmo formato usado em todo o resto do painel (toLocaleTimeString).
               timestamp: new Date(conv.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              // updatedAt cru (ISO completo) só pra ordenação — timestamp
+              // acima já virou "HH:MM" pra exibição, e new Date("HH:MM") é
+              // Invalid Date, então o comparador de ordenação abaixo nunca
+              // conseguia comparar conversas reais de verdade (ficava sempre
+              // na ordem que já estava, nunca subia a mais recente pro topo).
+              updatedAtIso: conv.updatedAt,
               status: 'transcribed',
               textContent: lastText,
               // Mesmo achado do timestamp da lista (ISO cru em vez de só o
@@ -784,8 +797,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         if (a.pinnedAt && b.pinnedAt) return b.pinnedAt.localeCompare(a.pinnedAt);
         return a.pinnedAt ? -1 : 1;
       }
-      const dateA = new Date(a.timestamp).getTime();
-      const dateB = new Date(b.timestamp).getTime();
+      // Lead real: usa updatedAtIso (ISO completo, sortável de verdade).
+      // Lead de demonstração: timestamp já vem como data completa/parseável
+      // (ou "Agora mesmo"/hora solta, que cai no NaN abaixo e mantém a
+      // ordem relativa de propósito).
+      const dateA = new Date((a as any).updatedAtIso || a.timestamp).getTime();
+      const dateB = new Date((b as any).updatedAtIso || b.timestamp).getTime();
       if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
       return dateB - dateA;
     });
@@ -1715,6 +1732,26 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <Trash2 className="w-3.5 h-3.5 text-red-400" />
             <span>Limpar Testes</span>
           </button>
+
+          {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
+              direto daqui, sem precisar navegar até a barra de abas do topo
+              (Header.tsx já tem a aba "Escalonamentos" com o mesmo contador,
+              esta é só uma segunda entrada mais rápida). */}
+          {onGoToEscalations && (
+            <button
+              onClick={onGoToEscalations}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Ir para a fila de Escalonamentos"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span>Escalonamentos</span>
+              {escalationsPendingCount > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
+                  {escalationsPendingCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Toggle Right Panel — só desktop (lg+). No mobile a coluna 3 já
               fica hidden por CSS (ver PR #70) e o painel real é o drawer
