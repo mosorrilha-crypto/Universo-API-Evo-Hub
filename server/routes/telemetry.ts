@@ -1,5 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import { getQueueStats } from '../services/transcriptionQueue';
+import { getTokenTelemetry } from '../services/tokenUsageStore';
+import { asyncHandler } from '../middleware/asyncHandler';
 
 interface TelemetryRouterDeps {
   authenticateToken: RequestHandler;
@@ -25,22 +27,18 @@ export function createTelemetryRouter({ authenticateToken }: TelemetryRouterDeps
   // alcançada. Em vez disso, `tenantsTelemetry[i].totalTokens.toLocaleString()`
   // (campo que nunca existiu na resposta) lançava TypeError sem nenhum
   // Error Boundary no app — React desmontava a árvore inteira, tela branca.
-  // Não existe nenhuma gravação real de uso de tokens no backend ainda
-  // (grep por "usageMetadata"/"token_telemetry" não encontra nada) — resposta
-  // honesta e vazia até essa métrica ser implementada de verdade, em vez de
-  // inventar números de negócio.
-  router.get('/api/telemetry/tokens', authenticateToken, (req, res) => {
+  // Issue #90 — gravação real de usageMetadata agora existe
+  // (server/services/tokenUsageStore.ts, chamada a partir de
+  // server/services/autoReply.ts a cada chamada Gemini). Agregado dos
+  // últimos 30 dias, por tenant.
+  router.get('/api/telemetry/tokens', authenticateToken, asyncHandler(async (req, res) => {
+    const { summary, tenantsTelemetry } = await getTokenTelemetry();
     res.json({
       useMockAiMode: mockAiEnabled,
-      summary: {
-        totalSaaSTokens: 0,
-        totalSaaSCostUSD: 0,
-        totalCachedSaved: 0,
-        totalRequests: 0,
-      },
-      tenantsTelemetry: [],
+      summary,
+      tenantsTelemetry,
     });
-  });
+  }));
 
   router.post('/api/telemetry/toggle-mock', authenticateToken, (req, res) => {
     const { enabled } = req.body || {};
