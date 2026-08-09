@@ -9,7 +9,6 @@ import {
   Play,
   Sparkles,
   Loader2,
-  Phone,
   User,
   Clock,
   PlusCircle,
@@ -37,7 +36,6 @@ import {
   Flame,
   CircleDashed,
   MessageSquarePlus,
-  Video,
   Info,
   Trash2,
   Reply,
@@ -2163,16 +2161,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-1.5 text-slate-300">
-                  <button title="Pesquisar na conversa" className="p-2 hover:bg-[#2a3942] rounded-lg transition-colors cursor-pointer">
-                    <Search className="w-4 h-4 text-slate-400" />
-                  </button>
-                  <button title="Chamada de áudio" className="p-2 hover:bg-[#2a3942] rounded-lg transition-colors cursor-pointer">
-                    <Phone className="w-4 h-4 text-slate-400" />
-                  </button>
-                  <button title="Chamada de vídeo" className="p-2 hover:bg-[#2a3942] rounded-lg transition-colors cursor-pointer">
-                    <Video className="w-4 h-4 text-slate-400" />
-                  </button>
-                  
+                  {/* Achado ao vivo: "Pesquisar na conversa"/"Chamada de áudio"/
+                      "Chamada de vídeo" eram 100% decorativos — sem onClick,
+                      sem estado nenhum ligado a eles, cursor-pointer só de
+                      mentira. Além de fingir funcionar, essa linha inteira
+                      (sem wrap/scroll) estourava a largura no mobile e
+                      empurrava os dois botões reais mais importantes
+                      (Analisar IA, Ficha IA) pra fora da tela, invisíveis.
+                      Removidos os 3 — mesmo padrão já aplicado a outras telas
+                      decorativas deste painel (ver PRs #74, #86). */}
+
                   {/* Clear Chat History & Delete Conversation Buttons */}
                   <button
                     onClick={() => handleClearChatMessages(selectedLead.id)}
