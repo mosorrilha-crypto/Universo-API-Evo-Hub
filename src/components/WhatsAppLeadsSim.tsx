@@ -519,7 +519,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations?archived=true');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; unreadCount: number }[] = data.conversations || [];
 
         setLeads((prev) => {
           const byId = new Map(prev.map((l) => [l.id, l]));
@@ -565,6 +565,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               muted: !!conv.muted,
               manuallyUnread: !!conv.manuallyUnread,
               aiBlockedAt: conv.aiBlockedAt,
+              unreadCount: conv.unreadCount ?? 0,
             } as any);
           }
           return Array.from(byId.values());
@@ -747,6 +748,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // colapsável — igual à seção "Arquivadas" do WhatsApp Web real.
   const archivedLeads = leads.filter((lead) => !!lead.archivedAt);
 
+  // Contagem real de não lidas: pra conversa real, vem de unreadCount
+  // (calculado no backend a partir de last_read_at — ver
+  // server/services/conversationStore.ts), combinada com manuallyUnread (o
+  // "Marcar como não lida" manual do menu ⋮, PR #57) — reconciliação
+  // documentada na migration 0008: uma conversa conta como não lida se
+  // QUALQUER um dos dois for verdadeiro, mesmo que o operador já tenha lido
+  // tudo de verdade (unreadCount real 0) e só queira lembrar de voltar nela.
+  // Pra lead de demonstração (sem backend por trás), não existe rastreamento
+  // real de leitura — usa o status de transcrição pendente como aproximação
+  // só pra manter a demonstração funcional, igual já era antes.
+  const getUnreadCount = (lead: LeadInfo): number => {
+    if ((lead as any).isReal) {
+      const real = (lead as any).unreadCount ?? 0;
+      return (lead as any).manuallyUnread ? Math.max(real, 1) : real;
+    }
+    return lead.status === 'pending' ? 1 : 0;
+  };
+  const unreadLeadsCount = leads.filter((lead) => getUnreadCount(lead) > 0).length;
+
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
     .filter((lead) => {
@@ -766,7 +786,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       }
 
       if (activeTabFilter === 'unread') {
-        return lead.manuallyUnread || lead.status === 'pending';
+        return getUnreadCount(lead) > 0;
       }
       if (activeTabFilter === 'hot') {
         return (
@@ -806,6 +826,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
       return dateB - dateA;
     });
+
+  // Seleciona a conversa e, se for real e tiver mensagens não lidas (contagem
+  // real vinda do servidor E/OU marcação manual do operador via menu ⋮),
+  // zera os dois: manuallyUnread (PATCH /state, já existente) e unreadCount
+  // (POST /read, zera localmente pra feedback imediato sem esperar o
+  // próximo polling de 8s).
+  const handleSelectLead = (lead: LeadInfo) => {
+    setActiveLeadId(lead.id);
+    setMobileThreadOpen(true);
+    if ((lead as any).isReal) {
+      if ((lead as any).manuallyUnread) {
+        handleUpdateConversationState(lead.id, { unread: false });
+      }
+      if ((lead as any).unreadCount > 0) {
+        setLeads((prev) => prev.map((l) => (l.id === lead.id ? ({ ...l, unreadCount: 0 } as any) : l)));
+        apiFetch(`/api/conversations/${encodeURIComponent(lead.phone)}/read`, { method: 'POST' }).catch((err) => {
+          console.error('Falha ao marcar conversa como lida:', err);
+        });
+      }
+    }
+  };
 
   // Handlers to delete conversation, clear history, or delete single message
   const handleDeleteConversation = async (leadId: string, leadName: string) => {
@@ -1504,17 +1545,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const isManuallyUnread = !!lead.manuallyUnread;
     const isAiBlocked = !!lead.aiBlockedAt;
     const isMenuOpen = openMenuForLeadId === lead.id;
+    const unreadCount = getUnreadCount(lead);
 
     return (
       <div
         key={lead.id}
-        onClick={() => {
-          setActiveLeadId(lead.id);
-          setMobileThreadOpen(true);
-          if ((lead as any).isReal && isManuallyUnread) {
-            handleUpdateConversationState(lead.id, { unread: false });
-          }
-        }}
+        onClick={() => handleSelectLead(lead)}
         className={`p-3 transition-colors cursor-pointer relative flex items-start space-x-3 ${
           isSelected
             ? 'bg-[#2a3942] border-l-4 border-[#00a884]'
@@ -1582,9 +1618,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </p>
 
             {/* Unread badge or Stage tag */}
-            {(isManuallyUnread || lead.status === 'pending') ? (
+            {unreadCount > 0 ? (
               <span className="w-5 h-5 rounded-full bg-[#00a884] text-slate-950 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0">
-                1
+                {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             ) : lead.fullAnalysis ? (
               <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/60 flex-shrink-0">
@@ -2011,7 +2047,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                Não lidos
+                Não lidos ({unreadLeadsCount})
               </button>
               <button
                 onClick={() => setActiveTabFilter('hot')}

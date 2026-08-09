@@ -1,0 +1,11 @@
+-- Rastreamento real de "não lida" por conversa. Antes disso, o painel usava
+-- o campo de status de transcrição do lead (pending/processing/transcribed/
+-- error) como proxy de "não lida" — semanticamente errado, e nunca
+-- funcionava pra conversas reais (sempre chegam do backend já como
+-- 'transcribed'). last_read_at marca quando o operador abriu a conversa pela
+-- última vez; mensagens do lead com created_at posterior a isso contam como
+-- não lidas (server/services/conversationStore.ts).
+--
+-- default now() em vez de null: evita que toda conversa já existente apareça
+-- de repente como "não lida" só por causa da migration.
+alter table public.conversations add column if not exists last_read_at timestamptz not null default now();

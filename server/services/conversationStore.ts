@@ -59,6 +59,8 @@ export interface StoredConversation {
   adHeadline?: string;
   /** Lead não qualificado/insistente — IA para de responder automaticamente só pra esse número (ver isConversationAiBlocked). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
   aiBlockedAt?: string;
+  /** Quantidade de mensagens do lead recebidas depois da última vez que o operador abriu esta conversa (ver markConversationRead). Não confundir com manuallyUnread (override manual do operador) — o painel trata a conversa como não lida quando qualquer um dos dois é verdadeiro. */
+  unreadCount: number;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -82,6 +84,7 @@ type ConversationRow = {
   manually_unread: boolean | null;
   ad_headline: string | null;
   ai_blocked_at: string | null;
+  last_read_at: string;
   messages?: MessageRow[];
 };
 
@@ -97,6 +100,11 @@ type MessageRow = {
   reactions: MessageReaction[] | null;
 };
 
+/** Conta mensagens do lead chegadas depois de lastReadAt — extraída à parte pra ser testável sem depender do formato de embed relacional do Supabase. */
+export function countUnreadMessages(messages: Pick<MessageRow, 'sender' | 'created_at'>[], lastReadAt: string): number {
+  return messages.filter((m) => m.sender === 'lead' && m.created_at > lastReadAt).length;
+}
+
 function toStoredConversation(row: ConversationRow): StoredConversation {
   return {
     phone: row.phone,
@@ -109,6 +117,7 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     manuallyUnread: !!row.manually_unread,
     adHeadline: row.ad_headline || undefined,
     aiBlockedAt: row.ai_blocked_at || undefined,
+    unreadCount: countUnreadMessages(row.messages || [], row.last_read_at),
     messages: (row.messages || [])
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -133,6 +142,22 @@ async function emitUpdatedByConversationId(tenantId: string, conversationId: str
   const db = getDb();
   const { data: conv } = await db.from('conversations').select('phone').eq('id', conversationId).maybeSingle();
   if (conv?.phone) emitConversationUpdated(tenantId, conv.phone);
+}
+
+/**
+ * Marca a conversa como lida agora — mensagens do lead recebidas antes deste
+ * instante deixam de contar em unreadCount. Chamado quando o operador abre a
+ * conversa no painel (WhatsAppLeadsSim). Sem-op silencioso se a conversa
+ * ainda não existir (nada pra marcar como lido).
+ */
+export async function markConversationRead(tenantId: string, phone: string): Promise<void> {
+  const db = getDb();
+  await db
+    .from('conversations')
+    .update({ last_read_at: new Date().toISOString() })
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone);
+  emitConversationUpdated(tenantId, phone);
 }
 
 async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string): Promise<{ id: string }> {
