@@ -143,46 +143,97 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [isNewTenantModalOpen, setIsNewTenantModalOpen] = useState(false);
   const [copiedWebhookId, setCopiedWebhookId] = useState<string | null>(null);
 
-  // User Management State
-  const [usersList, setUsersList] = useState<UserProfile[]>(() => {
-    const saved = localStorage.getItem('saas_users_list');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // User Management State — achado real em produção: este painel inteiro
+  // era local/localStorage, sem nenhum apiFetch, apesar de já existir uma
+  // API real e funcional pra isso (server/routes/admin.ts, GET/POST/DELETE
+  // /api/admin/operators, com RBAC de verdade via requireRole). Ligado à API
+  // real agora — cria/lista/remove operadores de verdade na tabela
+  // `operators`, com login funcional de verdade (senha com hash bcrypt).
+  const DEFAULT_USER_AVATAR = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('123456');
+  const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('operator');
-  const [newUserDept, setNewUserDept] = useState('Atendimento & Vendas');
   const [newUserTenantId, setNewUserTenantId] = useState(tenants[0]?.id || 'tenant_004');
+  const [userFormError, setUserFormError] = useState<string | null>(null);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const isSaasAdminUser = currentUser?.role === 'saas_admin';
 
-  useEffect(() => {
-    localStorage.setItem('saas_users_list', JSON.stringify(usersList));
-  }, [usersList]);
-
-  const handleAddUser = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUserName.trim() || !newUserEmail.trim()) return;
-    const newUser: UserProfile = {
-      id: `usr_${Date.now()}`,
-      name: newUserName.trim(),
-      email: newUserEmail.trim(),
-      role: newUserRole,
-      department: newUserDept.trim(),
-      tenantId: newUserTenantId,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    };
-    setUsersList((prev) => [...prev, newUser]);
-    setIsAddUserModalOpen(false);
-    setNewUserName('');
-    setNewUserEmail('');
+  const fetchOperators = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const res = await apiFetch('/api/admin/operators');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const mapped: UserProfile[] = (data.operators || []).map((op: any) => ({
+        id: op.id,
+        tenantId: op.tenant_id,
+        name: op.name,
+        email: op.email,
+        role: op.role,
+        avatar: DEFAULT_USER_AVATAR,
+        department: '',
+      }));
+      setUsersList(mapped);
+    } catch (err) {
+      console.error('Falha ao carregar operadores reais:', err);
+    } finally {
+      setIsLoadingUsers(false);
+    }
   };
 
-  const handleDeleteUser = (userId: string, userName: string) => {
-    if (window.confirm(`Tem certeza que deseja excluir o usuário ${userName}?`)) {
+  useEffect(() => {
+    fetchOperators();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserFormError(null);
+    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
+    setIsSavingUser(true);
+    try {
+      const res = await apiFetch('/api/admin/operators', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newUserName.trim(),
+          email: newUserEmail.trim(),
+          password: newUserPassword,
+          role: newUserRole,
+          // Só saas_admin pode escolher o tenant — pra qualquer outro papel
+          // o servidor ignora isso e usa sempre o tenant do próprio login.
+          tenantId: isSaasAdminUser ? newUserTenantId : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await fetchOperators();
+      setIsAddUserModalOpen(false);
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPassword('');
+    } catch (err: any) {
+      setUserFormError(err.message || 'Falha ao cadastrar o usuário.');
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    if (!window.confirm(`Tem certeza que deseja excluir o usuário ${userName}? Esse login para de funcionar imediatamente.`)) return;
+    try {
+      const res = await apiFetch(`/api/admin/operators/${userId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setUsersList((prev) => prev.filter((u) => u.id !== userId));
+    } catch (err) {
+      console.error('Falha ao excluir operador:', err);
+      alert('Não foi possível excluir esse usuário agora. Tente de novo.');
     }
   };
 
@@ -1273,9 +1324,9 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 >
                   <option value="all">Todas as Funções</option>
                   <option value="saas_admin">SaaS Master Admin</option>
-                  <option value="admin">Administrador / CFO</option>
-                  <option value="manager">Gerente Comercial</option>
-                  <option value="operator">Operador de Vendas</option>
+                  <option value="admin">Administrador</option>
+                  <option value="manager">Gerente</option>
+                  <option value="operator">Operador</option>
                 </select>
               </div>
             </div>
@@ -1288,74 +1339,81 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     <th className="p-3 rounded-l-xl">Usuário / Operador</th>
                     <th className="p-3">E-mail de Acesso</th>
                     <th className="p-3">Função & Permissão</th>
-                    <th className="p-3">Departamento / Função</th>
                     <th className="p-3">Empresa (Tenant)</th>
                     <th className="p-3 text-right rounded-r-xl">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {usersList
-                    .filter((u) => {
-                      const matchesSearch =
-                        u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-                        u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-                        (u.department && u.department.toLowerCase().includes(userSearch.toLowerCase()));
-                      const matchesRole = userRoleFilter === 'all' || u.role === userRoleFilter;
-                      return matchesSearch && matchesRole;
-                    })
-                    .map((usr) => {
-                      const tenantObj = tenants.find((t) => t.id === usr.tenantId);
-                      return (
-                        <tr key={usr.id} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="p-3 font-semibold text-white flex items-center space-x-3">
-                            <img
-                              src={usr.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-                              alt={usr.name}
-                              className="w-8 h-8 rounded-full object-cover border border-slate-700"
-                            />
-                            <span>{usr.name}</span>
-                          </td>
-                          <td className="p-3 text-slate-300 font-mono text-[11px]">{usr.email}</td>
-                          <td className="p-3">
-                            {usr.role === 'saas_admin' && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
-                                SaaS Master Admin
+                  {isLoadingUsers ? (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">Carregando usuários...</td>
+                    </tr>
+                  ) : usersList.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">Nenhum usuário cadastrado ainda.</td>
+                    </tr>
+                  ) : (
+                    usersList
+                      .filter((u) => {
+                        const matchesSearch =
+                          u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+                          u.email.toLowerCase().includes(userSearch.toLowerCase());
+                        const matchesRole = userRoleFilter === 'all' || u.role === userRoleFilter;
+                        return matchesSearch && matchesRole;
+                      })
+                      .map((usr) => {
+                        const tenantObj = tenants.find((t) => t.id === usr.tenantId);
+                        return (
+                          <tr key={usr.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="p-3 font-semibold text-white flex items-center space-x-3">
+                              <img
+                                src={usr.avatar || DEFAULT_USER_AVATAR}
+                                alt={usr.name}
+                                className="w-8 h-8 rounded-full object-cover border border-slate-700"
+                              />
+                              <span>{usr.name}</span>
+                            </td>
+                            <td className="p-3 text-slate-300 font-mono text-[11px]">{usr.email}</td>
+                            <td className="p-3">
+                              {usr.role === 'saas_admin' && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
+                                  SaaS Master Admin
+                                </span>
+                              )}
+                              {usr.role === 'admin' && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/80">
+                                  Administrador
+                                </span>
+                              )}
+                              {usr.role === 'manager' && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/80">
+                                  Gerente
+                                </span>
+                              )}
+                              {usr.role === 'operator' && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/80">
+                                  Operador
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              <span className="text-slate-300 font-medium">
+                                {tenantObj ? tenantObj.name : usr.tenantId}
                               </span>
-                            )}
-                            {usr.role === 'admin' && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/80">
-                                Administrador / CFO
-                              </span>
-                            )}
-                            {usr.role === 'manager' && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/80">
-                                Gerente Comercial
-                              </span>
-                            )}
-                            {usr.role === 'operator' && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/80">
-                                Operador de Vendas
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3 text-slate-400">{usr.department || 'Atendimento'}</td>
-                          <td className="p-3">
-                            <span className="text-slate-300 font-medium">
-                              {tenantObj ? tenantObj.name : usr.tenantId}
-                            </span>
-                          </td>
-                          <td className="p-3 text-right">
-                            <button
-                              onClick={() => handleDeleteUser(usr.id, usr.name)}
-                              className="p-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg transition-colors cursor-pointer"
-                              title="Excluir Usuário"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                            <td className="p-3 text-right">
+                              <button
+                                onClick={() => handleDeleteUser(usr.id, usr.name)}
+                                className="p-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg transition-colors cursor-pointer"
+                                title="Excluir Usuário"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1416,12 +1474,12 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     type="password"
                     value={newUserPassword}
                     onChange={(e) => setNewUserPassword(e.target.value)}
-                    placeholder="123456"
+                    placeholder="Mínimo 6 caracteres"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                     required
                   />
-                  <p className="text-[10px] text-amber-400 mt-1 leading-relaxed">
-                    ⚠️ Isto cadastra o usuário só neste diretório interno — ainda NÃO cria um login funcional de verdade. A pessoa não vai conseguir entrar no sistema com este e-mail/senha.
+                  <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                    Login real — a pessoa já consegue entrar com esse e-mail e senha assim que salvar.
                   </p>
                 </div>
 
@@ -1432,26 +1490,15 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     onChange={(e) => setNewUserRole(e.target.value as UserRole)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                   >
-                    <option value="operator">Operador de Vendas</option>
-                    <option value="manager">Gerente Comercial</option>
-                    <option value="admin">Administrador / CFO</option>
-                    <option value="saas_admin">SaaS Master Admin</option>
+                    <option value="operator">Operador</option>
+                    <option value="manager">Gerente</option>
+                    <option value="admin">Administrador</option>
+                    {isSaasAdminUser && <option value="saas_admin">SaaS Master Admin</option>}
                   </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Departamento</label>
-                  <input
-                    type="text"
-                    value={newUserDept}
-                    onChange={(e) => setNewUserDept(e.target.value)}
-                    placeholder="Atendimento & Vendas"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-
+              {isSaasAdminUser && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Empresa (Tenant)</label>
                   <select
@@ -1466,14 +1513,19 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     ))}
                   </select>
                 </div>
-              </div>
+              )}
+
+              {userFormError && (
+                <p className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{userFormError}</p>
+              )}
 
               <button
                 type="submit"
-                className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer mt-4"
+                disabled={isSavingUser}
+                className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer mt-4"
               >
                 <Users className="w-4 h-4" />
-                <span>Salvar e Cadastrar Usuário</span>
+                <span>{isSavingUser ? 'Salvando...' : 'Salvar e Cadastrar Usuário'}</span>
               </button>
             </form>
           </div>
