@@ -14,15 +14,29 @@ import express from 'express';
 import type { Server } from 'http';
 import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 
-vi.mock('../../gemini', () => ({
-  getGeminiClient: () => ({
-    models: {
-      generateContent: async () => {
-        throw new Error('Gemini indisponível (simulado no teste)');
+// Issue #94 — withGeminiRetry (retry/backoff) foi extraída de autoReply.ts
+// pra cá em server/gemini.ts, e agora esta rota também a usa. Mock parcial
+// via importActual: mantém a implementação REAL de withGeminiRetry (senão o
+// teste passaria por acidente com um TypeError "withGeminiRetry não é
+// função" em vez de testar o fallback de verdade), só troca getGeminiClient.
+// callCount fica em vi.hoisted pra ser visível tanto na factory (hoisted pro
+// topo do arquivo) quanto dentro dos testes, sem TDZ.
+const { callCounter } = vi.hoisted(() => ({ callCounter: { count: 0 } }));
+
+vi.mock('../../gemini', async () => {
+  const actual = await vi.importActual<typeof import('../../gemini')>('../../gemini');
+  return {
+    ...actual,
+    getGeminiClient: () => ({
+      models: {
+        generateContent: async () => {
+          callCounter.count += 1;
+          throw new Error('Gemini indisponível (simulado no teste)');
+        },
       },
-    },
-  }),
-}));
+    }),
+  };
+});
 
 const { createAiRouter } = await import('../ai');
 
@@ -72,5 +86,20 @@ describe('POST /api/analyze-conversation — fallback nunca inventa dados de ven
     expect(serialized).not.toContain('R$ 590');
     expect(data.analysis.extractedCRMData.productsOfInterest).toEqual([]);
     expect(data.analysis.extractedCRMData.keyObjections).toEqual([]);
-  });
+  }, 10000);
+
+  it('tenta de novo antes de desistir (withGeminiRetry de fato em uso, não só 1 tentativa) — issue #94', async () => {
+    callCounter.count = 0;
+    const res = await fetch(`${baseUrl}/api/analyze-conversation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        leadInfo: { name: 'Cliente Teste', phone: '595981828280' },
+        messages: [{ sender: 'lead', text: 'Oi, quero saber mais' }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    // 1 tentativa original + 2 retries configurados em withGeminiRetry = 3 chamadas ao todo.
+    expect(callCounter.count).toBe(3);
+  }, 10000);
 });

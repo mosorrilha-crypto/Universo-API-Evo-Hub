@@ -17,7 +17,8 @@ import { recordOutgoingMessage, getConversationCtwaClid } from './conversationSt
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
 
-const GEMINI_TIMEOUT_MS = 20000;
+import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
+
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
 /** Credenciais Meta pra fazer o agente enviar mídia de verdade (Epic 4.5.2) — mesmo par phone_number_id/access_token já resolvido por tenant em quem chama generateAutoReplyForText. */
@@ -39,51 +40,25 @@ export interface AutoReplyResult {
   routerElapsedMs: number;
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Gemini demorou mais de ${ms}ms — abortando.`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer!);
-  }
-}
-
-const GEMINI_RETRY_BACKOFF_MS = [500, 1500];
-
 /**
- * Achado real em produção (issue #82, item 4): falha transitória do Gemini
- * (timeout, 429, erro de rede) tinha zero tentativa extra — virava silêncio
- * total pro cliente na primeira falha. Reexecuta a chamada até
- * GEMINI_RETRY_BACKOFF_MS.length vezes com um pequeno espaçamento antes de
- * desistir de vez.
+ * Fino wrapper sobre o withGeminiRetry compartilhado (server/gemini.ts,
+ * extraído de cá no PR #103/issue #94 — o mesmo retry passou a valer
+ * também pras rotas de análise/relatório que não tinham nenhuma proteção).
+ * Local a autoReply.ts só porque a gravação de telemetria por
+ * tenant+ponto-de-chamada (issue #90) é específica do agente automático —
+ * nunca bloqueia nem falha o fluxo (recordGeminiUsage já engole os
+ * próprios erros; .catch aqui é só rede de segurança extra, mesmo padrão
+ * de notifyMetaCapiEvent).
  */
-async function withGeminiRetry<T extends { usageMetadata?: Parameters<typeof recordGeminiUsage>[2] }>(
+async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<typeof recordGeminiUsage>[2] }>(
   tenantId: string,
   callSite: GeminiCallSite,
   makeCall: () => Promise<T>,
   timeoutMs: number
 ): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= GEMINI_RETRY_BACKOFF_MS.length; attempt++) {
-    try {
-      const result = await withTimeout(makeCall(), timeoutMs);
-      // Telemetria (issue #90) — nunca bloqueia nem falha o fluxo do agente
-      // (recordGeminiUsage já engole os próprios erros; .catch aqui é só
-      // rede de segurança extra, mesmo padrão de notifyMetaCapiEvent).
-      recordGeminiUsage(tenantId, callSite, result.usageMetadata).catch(() => {});
-      return result;
-    } catch (err) {
-      lastErr = err;
-      const backoffMs = GEMINI_RETRY_BACKOFF_MS[attempt];
-      if (backoffMs === undefined) break;
-      console.warn(`⚠️  Gemini falhou (tentativa ${attempt + 1}/${GEMINI_RETRY_BACKOFF_MS.length + 1}), tentando de novo em ${backoffMs}ms:`, (err as Error)?.message || err);
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
-  }
-  throw lastErr;
+  const result = await withGeminiRetry(makeCall, timeoutMs);
+  recordGeminiUsage(tenantId, callSite, result.usageMetadata).catch(() => {});
+  return result;
 }
 
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
@@ -113,7 +88,7 @@ ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
 Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
 
-  const response = await withGeminiRetry(
+  const response = await withGeminiRetryAndUsage(
     tenantId,
     'router',
     () =>
@@ -255,7 +230,7 @@ async function generateSpecialistReply(
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"`;
 
-  const response = await withGeminiRetry(
+  const response = await withGeminiRetryAndUsage(
     tenantId,
     'especialista',
     () =>
@@ -644,7 +619,7 @@ Regras:
   let hadError = false;
 
   for (let i = 0; i < 4; i++) {
-    const response = await withGeminiRetry(
+    const response = await withGeminiRetryAndUsage(
       tenantId,
       'agendamento',
       () =>
@@ -729,7 +704,7 @@ ${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensage
 
 Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e uma foto ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
 
-  const response = await withGeminiRetry(
+  const response = await withGeminiRetryAndUsage(
     tenantId,
     'foto',
     () =>
