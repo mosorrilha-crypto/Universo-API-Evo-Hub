@@ -308,6 +308,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Achado real em produção: a rota POST /api/google-calendar/disconnect já
+  // existia no backend, mas nunca foi ligada a nenhum botão — não tinha como
+  // desconectar/trocar de conta pelo painel, só conectar pela primeira vez.
+  const handleDisconnectGoogleCalendar = async () => {
+    if (!window.confirm('Desconectar o Google Calendar? O agente de agendamento para de conseguir consultar/criar horários reais até você reconectar (pode ser com outra conta).')) return;
+    try {
+      const res = await apiFetch('/api/google-calendar/disconnect', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setGoogleCalendarConnected(false);
+    } catch (err) {
+      console.error('Falha ao desconectar Google Calendar:', err);
+      setErrorMsg('Não foi possível desconectar o Google Calendar agora — tente de novo.');
+    }
+  };
+
   const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
     const previous = agentStatus;
     setAgentStatusState(status);
@@ -1670,18 +1685,29 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
 
           {/* Conexão do backend com Google Calendar real (usada pelo agente de agendamento) */}
-          <button
-            onClick={googleCalendarConnected ? fetchGoogleCalendarStatus : handleConnectGoogleCalendar}
-            title={googleCalendarConnected ? 'Conectado — clique pra atualizar status' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-              googleCalendarConnected
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
-            }`}
-          >
-            <CalendarIcon className="w-3.5 h-3.5" />
-            <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Calendar Conectado' : 'Conectar Calendar'}</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={googleCalendarConnected ? fetchGoogleCalendarStatus : handleConnectGoogleCalendar}
+              title={googleCalendarConnected ? 'Conectado — clique pra atualizar status' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
+              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+                googleCalendarConnected
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <CalendarIcon className="w-3.5 h-3.5" />
+              <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Calendar Conectado' : 'Conectar Calendar'}</span>
+            </button>
+            {googleCalendarConnected && (
+              <button
+                onClick={handleDisconnectGoogleCalendar}
+                title="Desconectar Google Calendar (pra trocar de conta)"
+                className="p-1.5 rounded-lg border border-slate-800 bg-slate-950/80 text-slate-400 hover:text-rose-300 hover:border-rose-800/60 transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
           {/* Auto-analyze Toggle Switch */}
           <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
