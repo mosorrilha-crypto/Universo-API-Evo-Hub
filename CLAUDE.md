@@ -34,7 +34,7 @@ npm run create:tenant          # scripts/create-tenant.ts
 npm run create:operator        # scripts/create-operator.ts
 npm run migrate:legacy-data    # scripts/migrate-legacy-data.ts
 ```
-Database migrations are hand-written idempotent SQL files under `supabase/migrations/` (`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` throughout) — there is no migration runner. They're applied manually via the Supabase SQL Editor.
+Database migrations are hand-written idempotent SQL files under `supabase/migrations/` (`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` throughout) — there is no migration runner in the app itself. **Apply them with the Supabase MCP `apply_migration` tool, not by pasting into the SQL Editor** — `apply_migration` records the migration in Supabase's own tracked history (confirmed via `list_migrations`), which manual SQL Editor pastes never did; that gap caused real incidents (a "confirmed in production" migration that actually never ran, silently breaking a merged feature for days — see GitHub issue #93). If a migration alters RLS policies on a table already covered by an existing policy, don't replay the original `create policy` block verbatim — check the table's current policy first (`list_tables`/advisors) so you don't regress an already-applied optimization. When `apply_migration` isn't available (a session without Supabase MCP access), fall back to instructing the user to run it manually in the SQL Editor, and say so explicitly in the PR — don't assume someone else already did it.
 
 ## Backend architecture
 
