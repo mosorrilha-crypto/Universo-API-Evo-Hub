@@ -55,7 +55,9 @@ import {
   ChevronUp,
   ChevronDown,
   ArrowLeft,
-  Ban
+  Ban,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 
 // Paleta de cores dos chips de etiqueta — a cor de cada etiqueta vem de um
@@ -662,6 +664,50 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [selectedLead?.id, selectedLead?.messages?.length]);
+
+  // Issue #82, item 3 — o backend de verificação de pagamento
+  // (setPaymentVerification/verify-payment) já existia e funcionava, mas o
+  // agendamento com o status do comprovante nunca chegava até aqui: não
+  // tinha botão nenhum pra confirmar. Achado real em produção: agendamento
+  // com sinal pago preso em "pending_verification" por dias, cliente
+  // perguntando "confirmou?" sem ninguém conseguir clicar em nada.
+  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string } | null>(null);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+
+  useEffect(() => {
+    if (!selectedLead?.phone || !(selectedLead as any)?.isReal) {
+      setPaymentAppointment(null);
+      return;
+    }
+    let cancelled = false;
+    apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/appointment`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setPaymentAppointment(data?.appointment || null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  const handleVerifyPayment = async (status: 'verified' | 'rejected') => {
+    if (!selectedLead?.phone) return;
+    setIsVerifyingPayment(true);
+    try {
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/verify-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setPaymentAppointment(data.appointment);
+    } catch (err) {
+      console.error('Falha ao verificar pagamento:', err);
+      setErrorMsg('Não foi possível registrar a verificação de pagamento agora — tente de novo.');
+    } finally {
+      setIsVerifyingPayment(false);
+    }
+  };
 
   // Conversas arquivadas saem da lista principal e ficam numa seção própria,
   // colapsável — igual à seção "Arquivadas" do WhatsApp Web real.
@@ -1764,6 +1810,41 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               O envio pra esse número falhou porque o negócio ainda não completou a Verificação de Negócio na Meta.
               Detectado em {new Date((selectedLead as any).geoRestriction.detectedAt).toLocaleString('pt-BR')}.
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação de pagamento (issue #82, item 3) — comprovante chegou,
+          precisa de uma pessoa real pra confirmar ou rejeitar antes do
+          agente poder informar o turno como fechado pro cliente. */}
+      {paymentAppointment?.paymentStatus === 'pending_verification' && (
+        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-start space-x-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">Comprovante de pagamento aguardando verificação: </span>
+              <span>
+                {paymentAppointment.summary} em {new Date(paymentAppointment.startIso).toLocaleString('pt-BR')}.
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
+            <button
+              onClick={() => handleVerifyPayment('verified')}
+              disabled={isVerifyingPayment}
+              className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <CheckCircle2 className="w-3 h-3" />
+              <span>Confirmar pagamento</span>
+            </button>
+            <button
+              onClick={() => handleVerifyPayment('rejected')}
+              disabled={isVerifyingPayment}
+              className="px-3 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 disabled:opacity-50 text-rose-300 border border-rose-800/60 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <XCircle className="w-3 h-3" />
+              <span>Rejeitar</span>
+            </button>
           </div>
         </div>
       )}

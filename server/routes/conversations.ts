@@ -19,7 +19,7 @@ import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseSto
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
-import { setPaymentVerification } from '../services/appointmentStore';
+import { getAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 
@@ -304,6 +304,17 @@ export function createConversationsRouter({ authenticateToken, metaAccessToken, 
       console.error('❌ [Conversas] Falha ao enviar foto de exemplo:', err.message);
       res.status(502).json({ error: err.message });
     }
+  }));
+
+  // Issue #82, item 3: o fluxo de verificação de pagamento (setPaymentVerification
+  // abaixo) já existia e funcionava, mas o agendamento/status de pagamento
+  // nunca chegava ao frontend pra alguém ver e agir — não existia nenhuma
+  // rota GET expondo isso. Achado real em produção: um agendamento com sinal
+  // pago ficou preso em "pending_verification" por não ter botão nenhum no
+  // produto pra confirmar.
+  router.get('/api/conversations/:phone/appointment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const appointment = await getAppointmentForPhone(tenantOf(req), req.params.phone);
+    res.json({ appointment: appointment || null });
   }));
 
   // Etapa 8 (fluxo de verificação de pagamento) — o operador marca aqui o
