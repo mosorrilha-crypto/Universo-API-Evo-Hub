@@ -2128,13 +2128,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {selectedLead ? (
             <>
               {/* WhatsApp Web Chat Header */}
-              <div className="p-3 bg-[#202c33] border-b border-slate-800 flex items-center justify-between z-10 shadow-md">
-                <div className="flex items-center space-x-3">
+              <div className="p-3 bg-[#202c33] border-b border-slate-800 flex items-center justify-between gap-2 z-10 shadow-md">
+                {/* min-w-0 é o que deixa esta metade encolher/truncar de
+                    verdade — sem isso, um nome de lead comprido (achado ao
+                    vivo: nome tipo e-mail sem espaço nenhum pra quebrar,
+                    "Sofiamaldonado694966@gmai...") empurrava os botões de
+                    ação inteiros pra fora da tela no mobile, igual ao bug de
+                    overflow que a linha de botões já teve (agora corrigido
+                    do lado deles com flex-shrink-0 abaixo). */}
+                <div className="flex items-center space-x-3 min-w-0 flex-1">
                   {/* Botão "voltar pra lista" — só no mobile (lg:hidden), onde
                       lista e conversa nunca ficam visíveis ao mesmo tempo. */}
                   <button
                     onClick={() => { setMobileThreadOpen(false); setMobileAnalysisOpen(false); }}
-                    className="lg:hidden p-1.5 -ml-1.5 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                    className="lg:hidden flex-shrink-0 p-1.5 -ml-1.5 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Voltar pra lista de conversas"
                   >
                     <ArrowLeft className="w-4 h-4" />
@@ -2142,25 +2149,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <img
                     src={selectedLead.avatarUrl}
                     alt={selectedLead.name}
-                    className="w-10 h-10 rounded-full object-cover border border-emerald-500/50"
+                    className="w-10 h-10 rounded-full object-cover border border-emerald-500/50 flex-shrink-0"
                   />
-                  <div>
+                  <div className="min-w-0">
                     <h3 className="text-xs font-bold text-[#e9edef] flex items-center gap-2">
-                      {selectedLead.name}
+                      <span className="truncate">{selectedLead.name}</span>
                       {selectedLead.fullAnalysis?.detectedLanguage && (
-                        <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[9px] font-bold border border-blue-500/30">
+                        <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[9px] font-bold border border-blue-500/30 flex-shrink-0">
                           {selectedLead.fullAnalysis.detectedLanguage}
                         </span>
                       )}
                     </h3>
                     <p className="text-[10px] text-slate-400 flex items-center gap-2">
-                      <span>{selectedLead.phone}</span>
-                      <span className="text-emerald-400">• online</span>
+                      <span className="truncate">{selectedLead.phone}</span>
+                      <span className="text-emerald-400 flex-shrink-0">• online</span>
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-1.5 text-slate-300">
+                <div className="flex items-center space-x-1.5 text-slate-300 flex-shrink-0">
                   {/* Achado ao vivo: "Pesquisar na conversa"/"Chamada de áudio"/
                       "Chamada de vídeo" eram 100% decorativos — sem onClick,
                       sem estado nenhum ligado a eles, cursor-pointer só de
