@@ -9,7 +9,7 @@ import {
   type CalendarConfig,
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
-import { DEFAULT_SEGMENT } from './tenantProfileStore';
+import { DEFAULT_SEGMENT, getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
@@ -252,7 +252,7 @@ Nova mensagem do cliente: "${text}"`;
 }
 
 /** Data/hora atual "de parede" no fuso do negócio — dá ao agente uma âncora real pra resolver referências relativas ("amanhã às 15h") sem precisar calcular fuso horário sozinho. */
-function getNowLocalNaive(timeZone: string): { naive: string; weekday: string } {
+function getNowLocalNaive(timeZone: string): { naive: string; weekday: string; weekdayNum: number } {
   const parts = new Intl.DateTimeFormat('pt-BR', {
     timeZone,
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -262,7 +262,42 @@ function getNowLocalNaive(timeZone: string): { naive: string; weekday: string } 
   }).formatToParts(new Date());
   const map: Record<string, string> = {};
   for (const p of parts) map[p.type] = p.value;
-  return { naive: `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}:${map.second}`, weekday: map.weekday };
+  const naive = `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}:${map.second}`;
+  // Dia da semana como número (0=domingo..6=sábado, mesma convenção de
+  // BusinessHours) — derivado da data já resolvida no fuso certo, nunca de
+  // `new Date().getDay()` direto (esse pegaria o fuso do processo Node, que
+  // no Render não é America/Asuncion). Date.UTC com um Y-M-D "ingênuo" é
+  // seguro aqui porque dia-da-semana é só uma propriedade do calendário —
+  // não depende de fuso/hora, só de já termos resolvido o Y-M-D certo antes.
+  const weekdayNum = new Date(Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day))).getUTCDay();
+  return { naive, weekday: map.weekday, weekdayNum };
+}
+
+/**
+ * Achado real em produção (teste ao vivo, domingo 17:37 — expediente de
+ * domingo termina às 17:00): o agente sugeriu "podemos verificar um horário
+ * para hoje" já com o estúdio fechado. Causa raiz: nem o prompt de ferramentas
+ * nem o prompt do especialista (o que de fato escreve a mensagem pro cliente)
+ * sabiam o expediente de hoje — só a ferramenta verificar_disponibilidade
+ * checa isso, e o modelo só chama ferramenta quando já tem uma data/hora
+ * específica, então uma pergunta vaga como "posso hoje?" nunca passava por
+ * nenhum checador real antes de virar texto. Calculado sempre que o roteador
+ * classifica como "agendamento", esteja ou não uma ferramenta prestes a
+ * rodar nesta mensagem.
+ */
+function describeBusinessHoursToday(hours: BusinessHours | null, naive: string, weekdayNum: number): string {
+  const nowHHmm = naive.slice(11, 16);
+  if (!hours) return '';
+  const today = hours[String(weekdayNum)];
+  if (!today) {
+    return 'Hoje o estúdio NÃO tem expediente configurado (dia de folga) — nunca ofereça nem confirme horário pra hoje, só pra outro dia.';
+  }
+  const isOpenNow = nowHHmm >= today.open && nowHHmm < today.close;
+  if (isOpenNow) {
+    return `Hoje o expediente é ${today.open}–${today.close} — agora são ${nowHHmm}, dentro do horário de atendimento.`;
+  }
+  const motivo = nowHHmm < today.open ? 'ainda não abriu hoje' : 'já fechou por hoje';
+  return `Hoje o expediente é ${today.open}–${today.close} — agora são ${nowHHmm}, ${motivo}. NUNCA ofereça nem confirme "hoje" como opção de horário — sugira diretamente o próximo dia com expediente disponível.`;
 }
 
 const DATA_HORA_PARAM_DESCRIPTION = `Data e hora LOCAL (fuso ${BUSINESS_TIMEZONE}), formato "YYYY-MM-DDTHH:mm:ss", SEM offset UTC. Ex: "2026-08-06T15:00:00".`;
@@ -551,13 +586,18 @@ async function runAgendamentoTools(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   contactName?: string,
   messageId?: string
-): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[] }> {
+): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[]; businessHoursStatus?: string }> {
+  const { naive, weekday, weekdayNum } = getNowLocalNaive(BUSINESS_TIMEZONE);
+  // Best-effort: uma falha aqui é só um enriquecimento de prompt (aviso de
+  // horário de funcionamento) — nunca pode derrubar o fluxo real de agenda.
+  const businessHours = await getTenantBusinessHours(tenantId).catch(() => null);
+  const businessHoursStatus = describeBusinessHoursToday(businessHours, naive, weekdayNum);
+
   const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
-    return { actionsSummary: [], hadError: false, confirmedTimes: [] };
+    return { actionsSummary: [], hadError: false, confirmedTimes: [], businessHoursStatus };
   }
 
-  const { naive, weekday } = getNowLocalNaive(BUSINESS_TIMEZONE);
   const historyText = buildHistoryText(history);
   const existing = await getAppointmentForPhone(tenantId, phone);
   const kb = await getKnowledgeBase(tenantId);
@@ -601,6 +641,7 @@ async function runAgendamentoTools(
   const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
 
 Data e hora ATUAL (fuso ${BUSINESS_TIMEZONE}): ${naive} (${weekday}).
+${businessHoursStatus}
 ${existing ? `Este contato já tem um agendamento ativo: "${existing.summary}" começando em ${existing.startIso} (fuso ${BUSINESS_TIMEZONE}).` : 'Este contato não tem nenhum agendamento ativo no momento.'}
 ${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}
 Mensagem do cliente: "${text}"
@@ -653,7 +694,7 @@ Regras:
     contents.push({ role: 'user', parts: responseParts });
   }
 
-  return { actionsSummary, hadError, confirmedTimes };
+  return { actionsSummary, hadError, confirmedTimes, businessHoursStatus };
 }
 
 const FOTO_TOOLS: FunctionDeclaration[] = [
@@ -791,8 +832,21 @@ export async function generateAutoReplyForText(
 
     if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
       const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId);
+      const contextParts: string[] = [];
       if (result.actionsSummary.length) {
-        extraContext = result.actionsSummary.map((s) => `- ${s}`).join('\n');
+        contextParts.push(result.actionsSummary.map((s) => `- ${s}`).join('\n'));
+      }
+      // Bug real de produção: cliente perguntou "posso hoje?" sem citar horário
+      // específico -> nenhuma ferramenta rodou (regra "falta informação, não
+      // chame ferramenta") -> o especialista compôs a resposta sem NENHUMA
+      // noção do horário de funcionamento e ofereceu "hoje" já com o
+      // estúdio fechado. O status de expediente precisa chegar aqui sempre
+      // que o agente é agendamento, não só quando uma ferramenta roda.
+      if (result.businessHoursStatus) {
+        contextParts.push(result.businessHoursStatus);
+      }
+      if (contextParts.length) {
+        extraContext = contextParts.join('\n');
       }
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
