@@ -14,6 +14,11 @@
 --
 -- Como aplicar: cole este arquivo no SQL Editor do painel Supabase do
 -- projeto e rode uma vez. Idempotente, seguro rodar de novo.
+--
+-- Policy já usa (select current_setting(...)) em vez de current_setting(...)
+-- direto — mesmo padrão otimizado que a issue #91 aplicou nas 14 tabelas
+-- pré-existentes, pra não nascer já com o mesmo problema de performance
+-- (auth_rls_initplan) que essa outra issue corrigiu.
 
 create table if not exists public.gemini_token_usage (
   id uuid primary key default gen_random_uuid(),
@@ -31,5 +36,5 @@ alter table public.gemini_token_usage enable row level security;
 alter table public.gemini_token_usage force row level security;
 drop policy if exists tenant_isolation on public.gemini_token_usage;
 create policy tenant_isolation on public.gemini_token_usage
-  using (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+  using (tenant_id = (select current_setting('app.current_tenant_id', true))::uuid)
+  with check (tenant_id = (select current_setting('app.current_tenant_id', true))::uuid);
