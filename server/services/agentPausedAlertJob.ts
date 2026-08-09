@@ -14,12 +14,23 @@
  * se pausar → reativar → pausar de novo.
  */
 import { getDb } from './db';
-import { sendWhatsAppTextMessage } from './metaSend';
+import { sendWhatsAppTemplateMessage } from './metaSend';
 import { resolveMetaCredentialsForTenant } from './tenantResolver';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 /** Sugestão da issue #115 — tempo pausado antes de considerar "alguém precisa saber". */
 const DEFAULT_PAUSE_THRESHOLD_MS = 30 * 60 * 1000;
+
+/**
+ * Template aprovado no Meta Business Manager (categoria Utilitário) —
+ * necessário porque o admin normalmente não tem conversa ativa recente com o
+ * número comercial, então mensagem de texto livre falharia fora da janela de
+ * 24h. Corpo: "⚠️ O agente de {{1}} está pausado há {{2}}min com lead sem
+ * resposta (ex: {{3}})." — {{1}} nome do tenant, {{2}} minutos pausado, {{3}}
+ * nome/telefone do lead sem resposta, nessa ordem.
+ */
+const TEMPLATE_NAME = 'agente_pausado_alerta';
+const TEMPLATE_LANGUAGE = 'pt_BR';
 
 interface AgentStatusRow {
   tenant_id: string;
@@ -121,13 +132,18 @@ async function alertForTenant(row: AgentStatusRow, deps: AgentPausedAlertJobDeps
   }
 
   const pausedMinutes = Math.round((Date.now() - new Date(row.updated_at).getTime()) / 60000);
-  const message = `⚠️ O agente automático de "${tenant?.name || row.tenant_id}" está pausado há ${pausedMinutes}min e tem lead sem resposta (ex: ${unanswered.name || unanswered.phone}). Isso não reativa nada sozinho, é só um aviso.`;
+  const tenantName = tenant?.name || row.tenant_id;
+  const leadLabel = unanswered.name || unanswered.phone;
 
   const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(row.tenant_id, {
     metaAccessToken: deps.metaAccessToken,
     metaPhoneNumberId: deps.metaPhoneNumberId,
   });
-  await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, adminPhone, message);
+  await sendWhatsAppTemplateMessage(metaPhoneNumberId, metaAccessToken, adminPhone, TEMPLATE_NAME, TEMPLATE_LANGUAGE, [
+    tenantName,
+    String(pausedMinutes),
+    leadLabel,
+  ]);
   await markAlertSent(row.tenant_id);
   console.log(`🔔 [Alerta agente pausado] tenant=${row.tenant_id} avisou ${adminPhone} (pausado há ${pausedMinutes}min).`);
 }

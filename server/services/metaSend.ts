@@ -85,6 +85,53 @@ export async function sendWhatsAppTextMessage(
 }
 
 /**
+ * Envio de mensagem via template aprovado da Meta (POST /{phone-number-id}/messages,
+ * type "template") — diferente de sendWhatsAppTextMessage, funciona mesmo fora da
+ * janela de 24h de mensagem business-initiated (é exatamente pra isso que templates
+ * existem). Usado pelo alerta de agente pausado (issue #115): o admin normalmente
+ * não tem conversa ativa recente com o número comercial, então texto livre falharia.
+ * Só suporta parâmetros de texto no corpo, na ordem de {{1}}, {{2}}, ... — suficiente
+ * pro uso atual; sem suporte a cabeçalho/botão dinâmico por enquanto.
+ * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates
+ */
+export async function sendWhatsAppTemplateMessage(
+  phoneNumberId: string | undefined,
+  accessToken: string | undefined,
+  to: string,
+  templateName: string,
+  languageCode: string,
+  bodyParams: string[]
+): Promise<void> {
+  if (!phoneNumberId || !accessToken) {
+    throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mensagem via Meta Cloud API.');
+  }
+
+  const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: bodyParams.length
+          ? [{ type: 'body', parameters: bodyParams.map((text) => ({ type: 'text', text })) }]
+          : undefined,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    await throwMetaError(res, 'Falha ao enviar mensagem via template (Meta Cloud API)');
+  }
+}
+
+/**
  * Upload de mídia (foto/documento escolhido no painel) antes de poder
  * referenciá-la numa mensagem — mesmo padrão do whatsapp-agent-monique
  * (lib/whatsapp.js: uploadMedia). Retorna o media_id da Meta.
