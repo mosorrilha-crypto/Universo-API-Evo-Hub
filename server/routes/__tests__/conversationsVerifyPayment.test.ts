@@ -52,6 +52,23 @@ beforeEach(() => {
   initDb(supabase);
 });
 
+describe('GET /api/conversations/:phone/appointment (issue #82, item 3)', () => {
+  it('devolve o agendamento real com o status de pagamento pendente', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/595981234567/appointment`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.appointment.paymentStatus).toBe('pending_verification');
+    expect(data.appointment.summary).toBe('Microlips');
+  });
+
+  it('devolve null quando não há agendamento pra esse telefone', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/000000000/appointment`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.appointment).toBeNull();
+  });
+});
+
 describe('POST /api/conversations/:phone/verify-payment', () => {
   it('marca verified e registra quem verificou', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981234567/verify-payment`, {
