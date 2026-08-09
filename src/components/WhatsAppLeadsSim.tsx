@@ -1660,7 +1660,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             />
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-2 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs"
+              className="absolute right-2 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in"
             >
               <button
                 onClick={() => { setOpenMenuForLeadId(null); handleRenameLead(lead.id, lead.name); }}
@@ -2228,7 +2228,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       return (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setOpenMenuForLeadId(null)} />
-                          <div className="absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs">
+                          <div className="absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setOpenMenuForLeadId(null); }}
                               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
@@ -2319,7 +2319,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 {isLabelPickerOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setIsLabelPickerOpen(false)} />
-                    <div className="absolute left-3 top-9 z-50 w-72 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-3 space-y-2">
+                    <div className="absolute left-3 top-9 z-50 w-72 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-3 space-y-2 origin-top-left animate-pop-in">
                       <form
                         onSubmit={(e) => {
                           e.preventDefault();
