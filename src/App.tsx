@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ActiveTab, 
-  Tenant, 
-  UserProfile, 
-  LeadInfo, 
-  FinancialTransaction, 
-  AgentKnowledgeBase, 
-  SavedTranscriptItem 
+  ActiveTab,
+  Tenant,
+  UserProfile,
+  LeadInfo,
+  FinancialTransaction,
+  AgentKnowledgeBase,
+  SavedTranscriptItem,
+  EscalationInfo
 } from './types';
 import { Header } from './components/Header';
 import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import { OperatorCRM } from './components/OperatorCRM';
+import { EscalationsPanel } from './components/EscalationsPanel';
 import { FinancialDashboard } from './components/FinancialDashboard';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
@@ -89,6 +91,11 @@ export const App: React.FC = () => {
 
   // Transcripts
   const [savedTranscripts, setSavedTranscripts] = useState<SavedTranscriptItem[]>([]);
+
+  // Escalonamentos (issue #82, item 2) — backend GET/POST resolve/DELETE
+  // /api/escalations já existia, sem nenhuma UI (achado real em produção: 17
+  // escalonamentos acumulados no tenant real, 0 resolvidos, ninguém via).
+  const [escalations, setEscalations] = useState<EscalationInfo[]>([]);
 
   // Inter-tab Selection States
   const [financialPreselectedLead, setFinancialPreselectedLead] = useState<LeadInfo | null>(null);
@@ -203,6 +210,23 @@ export const App: React.FC = () => {
   }, [activeTenant.id]);
 
   useEffect(() => {
+    let cancelled = false;
+    const fetchEscalations = () => {
+      apiFetch('/api/escalations')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data?.escalations || cancelled) return;
+          setEscalations(data.escalations);
+        })
+        .catch(() => {});
+    };
+    fetchEscalations();
+    const interval = setInterval(fetchEscalations, 8000);
+    return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
+  useEffect(() => {
     if (currentUser) {
       localStorage.setItem('saas_current_user', JSON.stringify(currentUser));
     } else {
@@ -263,6 +287,29 @@ export const App: React.FC = () => {
     }
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
     showToast('Lead removido do CRM');
+  };
+
+  const handleResolveEscalation = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/resolve`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+    } catch (err) {
+      console.error('Falha ao marcar escalonamento como resolvido:', err);
+      showToast('Não foi possível marcar como resolvido. Tente de novo.');
+    }
+  };
+
+  const handleDeleteEscalation = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setEscalations((prev) => prev.filter((e) => e.id !== id));
+    } catch (err) {
+      console.error('Falha ao remover escalonamento:', err);
+      showToast('Não foi possível remover esse escalonamento. Tente de novo.');
+    }
   };
 
   const handleAddTransaction = (newTx: FinancialTransaction) => {
@@ -357,6 +404,7 @@ export const App: React.FC = () => {
         onExportBackup={handleExportBackup}
         leadsCount={leads.length}
         transactionsCount={transactions.length}
+        escalationsPendingCount={escalations.filter((e) => !e.resolved).length}
       />
 
       {/* Main Content Area */}
@@ -474,6 +522,14 @@ export const App: React.FC = () => {
               }
             }}
             onGoToWhatsAppSim={() => setActiveTab('whatsapp')}
+          />
+        )}
+
+        {activeTab === 'escalations' && (
+          <EscalationsPanel
+            escalations={escalations}
+            onResolve={handleResolveEscalation}
+            onDelete={handleDeleteEscalation}
           />
         )}
 
