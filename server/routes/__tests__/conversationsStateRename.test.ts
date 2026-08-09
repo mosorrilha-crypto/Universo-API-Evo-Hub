@@ -29,6 +29,7 @@ beforeAll(async () => {
   app.use(
     createConversationsRouter({
       authenticateToken: fakeAuthenticateToken as any,
+      jwtSecret: 'test-secret',
       metaAccessToken: 'tok',
       metaPhoneNumberId: 'pn',
     })

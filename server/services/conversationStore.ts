@@ -7,6 +7,7 @@
  */
 import { getDb } from './db';
 import { listLabels, listLabelsByConversationId } from './conversationLabelStore';
+import { emitConversationUpdated } from './conversationEvents';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -127,6 +128,13 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
 
 const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, edited_at, reactions)';
 
+/** Resolve o telefone da conversa a partir do id (usado por mutações que só têm o id da mensagem, não o telefone) e dispara o evento. */
+async function emitUpdatedByConversationId(tenantId: string, conversationId: string): Promise<void> {
+  const db = getDb();
+  const { data: conv } = await db.from('conversations').select('phone').eq('id', conversationId).maybeSingle();
+  if (conv?.phone) emitConversationUpdated(tenantId, conv.phone);
+}
+
 async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string): Promise<{ id: string }> {
   const db = getDb();
   const { data: existing } = await db
@@ -226,6 +234,7 @@ export async function recordIncomingMessage(
     throw new Error(`Falha ao gravar mensagem recebida: ${error.message}`);
   }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
+  emitConversationUpdated(tenantId, phone);
   return (await getConversation(tenantId, phone))!;
 }
 
@@ -262,6 +271,7 @@ export async function recordOutgoingMessage(
     throw new Error(`Falha ao gravar mensagem enviada: ${error.message}`);
   }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
+  emitConversationUpdated(tenantId, phone);
   return (await getConversation(tenantId, phone))!;
 }
 
@@ -293,11 +303,12 @@ export async function forwardMessage(tenantId: string, messageId: string, toPhon
  */
 export async function reactToMessage(tenantId: string, messageId: string, emoji: string, by: 'agent' | 'lead'): Promise<MessageReaction[]> {
   const db = getDb();
-  const { data: existing } = await db.from('messages').select('id, reactions').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
+  const { data: existing } = await db.from('messages').select('id, reactions, conversation_id').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
   if (!existing) throw new Error('Mensagem não encontrada.');
   const reactions: MessageReaction[] = ((existing.reactions as MessageReaction[]) || []).filter((r) => r.by !== by);
   reactions.push({ emoji, by, at: new Date().toISOString() });
   await db.from('messages').update({ reactions }).eq('id', existing.id);
+  await emitUpdatedByConversationId(tenantId, existing.conversation_id);
   return reactions;
 }
 
@@ -312,10 +323,11 @@ export type EditMessageResult = { ok: true } | { ok: false; reason: 'not_found' 
  */
 export async function editMessage(tenantId: string, messageId: string, newText: string): Promise<EditMessageResult> {
   const db = getDb();
-  const { data: existing } = await db.from('messages').select('id, sender').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
+  const { data: existing } = await db.from('messages').select('id, sender, conversation_id').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
   if (!existing) return { ok: false, reason: 'not_found' };
   if (existing.sender !== 'agent') return { ok: false, reason: 'forbidden' };
   await db.from('messages').update({ text: newText, edited_at: new Date().toISOString() }).eq('id', existing.id);
+  await emitUpdatedByConversationId(tenantId, existing.conversation_id);
   return { ok: true };
 }
 
@@ -325,6 +337,7 @@ export async function updateMessageText(tenantId: string, phone: string, id: str
   await db.from('messages').update({ text: newText }).eq('tenant_id', tenantId).eq('id', id);
   const { data: existing } = await db.from('conversations').select('id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
   if (existing) await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
+  emitConversationUpdated(tenantId, phone);
 }
 
 /**
@@ -385,6 +398,7 @@ export async function markGeoRestricted(tenantId: string, phone: string, reason:
   const conv = await getOrCreateConversationRow(tenantId, phone);
   const geoRestriction: GeoRestriction = { detectedAt: new Date().toISOString(), country: inferCountryFromPhone(phone), reason };
   await db.from('conversations').update({ geo_restriction: geoRestriction }).eq('id', conv.id);
+  emitConversationUpdated(tenantId, phone);
 }
 
 export interface ConversationStatePatch {
@@ -421,6 +435,7 @@ export async function updateConversationState(tenantId: string, phone: string, p
   if (Object.keys(update).length > 0) {
     await db.from('conversations').update(update).eq('id', existing.id);
   }
+  emitConversationUpdated(tenantId, phone);
   return getConversation(tenantId, phone);
 }
 
@@ -431,6 +446,7 @@ export async function clearConversationHistory(tenantId: string, phone: string):
   if (!existing) return undefined;
   await db.from('messages').delete().eq('conversation_id', existing.id);
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', existing.id);
+  emitConversationUpdated(tenantId, phone);
   return getConversation(tenantId, phone);
 }
 
@@ -439,7 +455,9 @@ export async function deleteConversation(tenantId: string, phone: string): Promi
   const db = getDb();
   const { data, error } = await db.from('conversations').delete().eq('tenant_id', tenantId).eq('phone', phone).select('id');
   if (error) throw error;
-  return !!data?.length;
+  const deleted = !!data?.length;
+  if (deleted) emitConversationUpdated(tenantId, phone);
+  return deleted;
 }
 
 /** Remove uma única mensagem — usado quando o operador apaga um item específico do histórico. */
@@ -447,5 +465,7 @@ export async function deleteMessage(tenantId: string, phone: string, messageId: 
   const db = getDb();
   const { data, error } = await db.from('messages').delete().eq('tenant_id', tenantId).eq('id', messageId).select('id');
   if (error) throw error;
-  return !!data?.length;
+  const deleted = !!data?.length;
+  if (deleted) emitConversationUpdated(tenantId, phone);
+  return deleted;
 }

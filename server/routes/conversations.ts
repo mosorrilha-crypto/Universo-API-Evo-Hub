@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import jwt from 'jsonwebtoken';
 import {
   listConversations,
   getConversation,
@@ -20,11 +21,13 @@ import { listEscalations, resolveEscalation, deleteEscalation } from '../service
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { getAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
+import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 
 interface ConversationsRouterDeps {
   authenticateToken: RequestHandler;
+  jwtSecret: string;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
   supabaseUrl?: string;
@@ -56,8 +59,47 @@ function tenantOf(req: AuthenticatedRequest): string {
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey }: ConversationsRouterDeps): Router {
   const router = Router();
+
+  /**
+   * Avisa o painel em tempo real quando uma conversa muda, no lugar do
+   * polling de 8s que existia antes — ver server/services/conversationEvents.ts.
+   * EventSource (API nativa do browser pra SSE) não manda header
+   * Authorization, então o token vem por query string aqui, verificado com
+   * o mesmo segredo/algoritmo de authenticateToken (não dá pra reaproveitar
+   * o middleware direto, que só lê do header).
+   */
+  router.get('/api/conversations/stream', asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const token = typeof req.query.token === 'string' ? req.query.token : undefined;
+    if (!token) return res.status(401).end();
+    let user: any;
+    try {
+      user = jwt.verify(token, jwtSecret);
+    } catch {
+      return res.status(403).end();
+    }
+    const tenantId = user?.tenantId;
+    if (!tenantId) return res.status(403).end();
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const unsubscribe = subscribeTenant(tenantId, (phone: string) => {
+      res.write(`data: ${JSON.stringify({ phone })}\n\n`);
+    });
+
+    // Mantém a conexão viva atrás de proxies com idle timeout (ex: Render) —
+    // sem isso a conexão cai em silêncio depois de alguns minutos sem tráfego.
+    const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 25000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
+  }));
 
   // Imagem real recebida de um cliente (ex: comprovante de pagamento) —
   // nunca pública, só acessível autenticado (pode conter dado sensível).
