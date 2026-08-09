@@ -23,6 +23,7 @@ import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
+import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
 
 dotenv.config();
 
@@ -162,6 +163,14 @@ async function startServer() {
   // (data combinada chegou e ainda está pending) — nunca confirma/libera
   // nada sozinho. Ver server/services/preReservationFollowUpJob.ts.
   startPreReservationFollowUpJob();
+
+  // Job em background que alerta o operador quando o agente automático fica
+  // pausado tempo demais com lead sem resposta acumulando (issue #115) —
+  // nunca reativa sozinho, só avisa. Ver server/services/agentPausedAlertJob.ts.
+  startAgentPausedAlertJob({
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+  });
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
   if (!config.isProduction) {
