@@ -11,6 +11,8 @@ Three living docs carry architecture decisions and roadmap state; read them befo
 - `docs/PLANO-EVOLUCAO.md` — evolution roadmap and known pending items.
 - `docs/REVISAO_E_REESTRUTURACAO.md` — structural review/restructuring notes.
 
+**Before picking up any task from the backlog, read `.github/WORKFLOW.md`** — how to find work, branch/PR/merge rules (including which areas never self-merge), and status-reporting conventions. GitHub (issues + PRs) is the official work-tracking channel; a prior Trello board was migrated out of use on 2026-08-09.
+
 ## Commands
 
 ```bash

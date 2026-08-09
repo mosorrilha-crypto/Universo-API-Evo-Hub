@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ActiveTab, 
-  Tenant, 
-  UserProfile, 
-  LeadInfo, 
-  FinancialTransaction, 
-  AgentKnowledgeBase, 
-  SavedTranscriptItem 
+  ActiveTab,
+  Tenant,
+  UserProfile,
+  LeadInfo,
+  FinancialTransaction,
+  AgentKnowledgeBase,
+  SavedTranscriptItem,
+  EscalationInfo
 } from './types';
 import { Header } from './components/Header';
 import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import { OperatorCRM } from './components/OperatorCRM';
+import { EscalationsPanel } from './components/EscalationsPanel';
 import { FinancialDashboard } from './components/FinancialDashboard';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
@@ -90,6 +92,11 @@ export const App: React.FC = () => {
   // Transcripts
   const [savedTranscripts, setSavedTranscripts] = useState<SavedTranscriptItem[]>([]);
 
+  // Escalonamentos (issue #82, item 2) — backend GET/POST resolve/DELETE
+  // /api/escalations já existia, sem nenhuma UI (achado real em produção: 17
+  // escalonamentos acumulados no tenant real, 0 resolvidos, ninguém via).
+  const [escalations, setEscalations] = useState<EscalationInfo[]>([]);
+
   // Inter-tab Selection States
   const [financialPreselectedLead, setFinancialPreselectedLead] = useState<LeadInfo | null>(null);
 
@@ -153,6 +160,72 @@ export const App: React.FC = () => {
       .catch(() => {});
   }, []);
 
+  // [CRM] Achado real em produção: OperatorCRM.tsx era 100% mock/localStorage
+  // — leads reais que já chegam via WhatsApp nunca apareciam no CRM a menos
+  // que alguém cadastrasse cada um manualmente. Busca GET /api/crm/leads
+  // (combina conversas reais + estado de CRM já persistido, ver
+  // server/routes/crm.ts) e mescla no state local sem NUNCA sobrescrever
+  // leads de exemplo locais (mesmo padrão de merge por id já usado em
+  // WhatsAppLeadsSim.tsx pra conversas reais).
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCrmLeads = () => {
+      apiFetch('/api/crm/leads')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data?.leads || cancelled) return;
+          setLeads((prev) => {
+            const byId = new Map<string, LeadInfo>(prev.map((l) => [l.id, l]));
+            for (const crmLead of data.leads as any[]) {
+              const id = `real-${crmLead.phone}`;
+              const existing = byId.get(id);
+              byId.set(id, {
+                ...(existing || {}),
+                id,
+                tenantId: activeTenant.id,
+                name: crmLead.name || crmLead.phone,
+                phone: crmLead.phone,
+                email: crmLead.email,
+                avatarUrl: (existing as any)?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+                timestamp: crmLead.updatedAt,
+                status: 'transcribed',
+                crmStage: crmLead.stage,
+                dealValue: crmLead.dealValue,
+                assignedOperator: crmLead.assignedOperator,
+                crmNotes: crmLead.notes,
+                crmTasks: crmLead.tasks,
+                isReal: true,
+                hasConversation: crmLead.hasConversation,
+              } as LeadInfo);
+            }
+            return Array.from(byId.values());
+          });
+        })
+        .catch(() => {});
+    };
+    fetchCrmLeads();
+    const interval = setInterval(fetchCrmLeads, 8000);
+    return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchEscalations = () => {
+      apiFetch('/api/escalations')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data?.escalations || cancelled) return;
+          setEscalations(data.escalations);
+        })
+        .catch(() => {});
+    };
+    fetchEscalations();
+    const interval = setInterval(fetchEscalations, 8000);
+    return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem('saas_current_user', JSON.stringify(currentUser));
@@ -166,16 +239,77 @@ export const App: React.FC = () => {
   // lead existente quanto pra inserir um novo (modal "+ Novo Lead Real") — um
   // `.map()` puro nunca casa com um ID novo, então o lead recém-criado
   // desaparecia em silêncio (bug real encontrado na auditoria pré-lançamento).
-  const handleUpdateLead = (updatedLead: LeadInfo) => {
+  const handleUpdateLead = async (updatedLead: LeadInfo) => {
+    // [CRM] Leads reais (isReal — vieram de GET /api/crm/leads ou foram
+    // cadastrados via "+ Novo Lead Real") persistem de verdade no servidor
+    // antes de atualizar a tela — nunca aplica localmente primeiro e torce
+    // pra dar certo depois (mesmo padrão de WhatsAppLeadsSim.handleUpdateConversationState,
+    // pra nunca parecer salvo sem ter salvado de verdade).
+    if (updatedLead.isReal) {
+      try {
+        const res = await apiFetch(`/api/crm/leads/${encodeURIComponent(updatedLead.phone)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: updatedLead.name,
+            email: updatedLead.email,
+            stage: updatedLead.crmStage,
+            dealValue: updatedLead.dealValue,
+            assignedOperator: updatedLead.assignedOperator,
+            notes: updatedLead.crmNotes,
+            tasks: updatedLead.crmTasks,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao salvar CRM no servidor:', err);
+        showToast('Não foi possível salvar essa alteração no servidor. Tente de novo.');
+        return;
+      }
+    }
     setLeads((prev) => {
       const exists = prev.some((l) => l.id === updatedLead.id);
       return exists ? prev.map((l) => (l.id === updatedLead.id ? updatedLead : l)) : [updatedLead, ...prev];
     });
   };
 
-  const handleDeleteLead = (leadId: string) => {
+  const handleDeleteLead = async (leadId: string) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (lead?.isReal) {
+      try {
+        const res = await apiFetch(`/api/crm/leads/${encodeURIComponent(lead.phone)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao remover CRM no servidor:', err);
+        showToast('Não foi possível remover esse lead no servidor. Tente de novo.');
+        return;
+      }
+    }
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
     showToast('Lead removido do CRM');
+  };
+
+  const handleResolveEscalation = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/resolve`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+    } catch (err) {
+      console.error('Falha ao marcar escalonamento como resolvido:', err);
+      showToast('Não foi possível marcar como resolvido. Tente de novo.');
+    }
+  };
+
+  const handleDeleteEscalation = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setEscalations((prev) => prev.filter((e) => e.id !== id));
+    } catch (err) {
+      console.error('Falha ao remover escalonamento:', err);
+      showToast('Não foi possível remover esse escalonamento. Tente de novo.');
+    }
   };
 
   const handleAddTransaction = (newTx: FinancialTransaction) => {
@@ -270,6 +404,7 @@ export const App: React.FC = () => {
         onExportBackup={handleExportBackup}
         leadsCount={leads.length}
         transactionsCount={transactions.length}
+        escalationsPendingCount={escalations.filter((e) => !e.resolved).length}
       />
 
       {/* Main Content Area */}
@@ -387,6 +522,14 @@ export const App: React.FC = () => {
               }
             }}
             onGoToWhatsAppSim={() => setActiveTab('whatsapp')}
+          />
+        )}
+
+        {activeTab === 'escalations' && (
+          <EscalationsPanel
+            escalations={escalations}
+            onResolve={handleResolveEscalation}
+            onDelete={handleDeleteEscalation}
           />
         )}
 

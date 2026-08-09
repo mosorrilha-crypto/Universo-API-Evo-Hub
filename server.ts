@@ -18,6 +18,7 @@ import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
+import { createCrmRouter } from './server/routes/crm';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
@@ -81,7 +82,7 @@ async function startServer() {
 
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
-  app.use(createTelemetryRouter({ authenticateToken, rateLimiter: aiRateLimiter }));
+  app.use(createTelemetryRouter({ authenticateToken }));
   app.use(createWebhooksRouter({
     metaWebhookVerifyToken: config.metaWebhookVerifyToken,
     evoHubWebhookSecret: config.evoHubWebhookSecret,
@@ -115,6 +116,7 @@ async function startServer() {
     jwtSecret: config.jwtSecret,
   }));
   app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey }));
+  app.use(createCrmRouter({ authenticateToken }));
 
   // Middleware de erro global do Express — precisa vir DEPOIS de todas as
   // rotas de API acima (é assim que o Express decide quem trata um

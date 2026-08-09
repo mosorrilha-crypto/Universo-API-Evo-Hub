@@ -90,7 +90,16 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // comportamento certo pra um tenant conectado via Evolution.
         const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, isEvolution ? undefined : { phoneNumberId, accessToken: token }, messageId, conversation?.adHeadline);
         if (!result) {
-          await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática', text);
+          await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
+          // Achado real em produção (issue #82, item 4): mesmo com retry
+          // (autoReply.ts), o Gemini pode ficar indisponível por mais tempo —
+          // até agora isso virava silêncio total pro cliente, que só via a
+          // fila de escalonamento (sem UI nenhuma até o item 2 desta mesma
+          // issue) ser avisada. Nunca deixa o WhatsApp mudo: manda uma
+          // mensagem de espera genérica, além do escalonamento de sempre.
+          await sendBubbles(channel, phone, ['Peço desculpa pela demora — tivemos uma instabilidade rápida aqui do nosso lado. Já te retorno em instantes!'], async (bubbleText) => {
+            await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+          }, messageId);
           return;
         }
         if (result.agent === 'reclamacao') {

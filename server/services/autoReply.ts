@@ -50,6 +50,31 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+const GEMINI_RETRY_BACKOFF_MS = [500, 1500];
+
+/**
+ * Achado real em produção (issue #82, item 4): falha transitória do Gemini
+ * (timeout, 429, erro de rede) tinha zero tentativa extra — virava silêncio
+ * total pro cliente na primeira falha. Reexecuta a chamada até
+ * GEMINI_RETRY_BACKOFF_MS.length vezes com um pequeno espaçamento antes de
+ * desistir de vez.
+ */
+async function withGeminiRetry<T>(makeCall: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= GEMINI_RETRY_BACKOFF_MS.length; attempt++) {
+    try {
+      return await withTimeout(makeCall(), timeoutMs);
+    } catch (err) {
+      lastErr = err;
+      const backoffMs = GEMINI_RETRY_BACKOFF_MS[attempt];
+      if (backoffMs === undefined) break;
+      console.warn(`⚠️  Gemini falhou (tentativa ${attempt + 1}/${GEMINI_RETRY_BACKOFF_MS.length + 1}), tentando de novo em ${backoffMs}ms:`, (err as Error)?.message || err);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+  throw lastErr;
+}
+
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
   return (history || [])
     .filter((m) => m.text)
@@ -77,12 +102,13 @@ ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
 Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
 
-  const response = await withTimeout(
-    ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: [{ text: prompt }],
-      config: { responseMimeType: 'application/json' },
-    }),
+  const response = await withGeminiRetry(
+    () =>
+      ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: [{ text: prompt }],
+        config: { responseMimeType: 'application/json' },
+      }),
     GEMINI_TIMEOUT_MS
   );
 
@@ -215,12 +241,13 @@ async function generateSpecialistReply(
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"`;
 
-  const response = await withTimeout(
-    ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: [{ text: userContent }],
-      config: { systemInstruction, responseMimeType: 'application/json' },
-    }),
+  const response = await withGeminiRetry(
+    () =>
+      ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: [{ text: userContent }],
+        config: { systemInstruction, responseMimeType: 'application/json' },
+      }),
     GEMINI_TIMEOUT_MS
   );
 
@@ -601,15 +628,16 @@ Regras:
   let hadError = false;
 
   for (let i = 0; i < 4; i++) {
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents,
-        config: {
-          tools: [{ functionDeclarations: AGENDAMENTO_TOOLS }],
-          toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
-        },
-      }),
+    const response = await withGeminiRetry(
+      () =>
+        ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents,
+          config: {
+            tools: [{ functionDeclarations: AGENDAMENTO_TOOLS }],
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+          },
+        }),
       GEMINI_TIMEOUT_MS
     );
 
@@ -683,15 +711,16 @@ ${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensage
 
 Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e uma foto ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
 
-  const response = await withTimeout(
-    ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        tools: [{ functionDeclarations: FOTO_TOOLS }],
-        toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
-      },
-    }),
+  const response = await withGeminiRetry(
+    () =>
+      ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          tools: [{ functionDeclarations: FOTO_TOOLS }],
+          toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+        },
+      }),
     GEMINI_TIMEOUT_MS
   );
 
