@@ -86,12 +86,17 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     if (!leadName.trim() || !leadPhone.trim()) return;
 
     const newLead: LeadInfo = {
-      id: `lead_${Date.now()}`,
+      // [CRM] id precisa bater com o mesmo esquema (`real-${phone}`) que
+      // GET /api/crm/leads usa pra leads reais — senão o próximo polling
+      // (App.tsx, a cada 8s) cria uma linha DUPLICADA pro mesmo telefone
+      // assim que o cadastro é persistido de verdade no servidor.
+      id: `real-${leadPhone.trim()}`,
       name: leadName.trim(),
       phone: leadPhone.trim(),
       timestamp: 'Hoje, ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       audioDuration: 0,
       status: 'pending',
+      isReal: true,
       crmStage: leadStage,
       dealValue: Number.isFinite(Number(leadValue)) ? Number(leadValue) : 2500,
       sampleType: leadSegment || 'Atendimento Comercial Real',

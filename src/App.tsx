@@ -153,6 +153,55 @@ export const App: React.FC = () => {
       .catch(() => {});
   }, []);
 
+  // [CRM] Achado real em produção: OperatorCRM.tsx era 100% mock/localStorage
+  // — leads reais que já chegam via WhatsApp nunca apareciam no CRM a menos
+  // que alguém cadastrasse cada um manualmente. Busca GET /api/crm/leads
+  // (combina conversas reais + estado de CRM já persistido, ver
+  // server/routes/crm.ts) e mescla no state local sem NUNCA sobrescrever
+  // leads de exemplo locais (mesmo padrão de merge por id já usado em
+  // WhatsAppLeadsSim.tsx pra conversas reais).
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCrmLeads = () => {
+      apiFetch('/api/crm/leads')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data?.leads || cancelled) return;
+          setLeads((prev) => {
+            const byId = new Map<string, LeadInfo>(prev.map((l) => [l.id, l]));
+            for (const crmLead of data.leads as any[]) {
+              const id = `real-${crmLead.phone}`;
+              const existing = byId.get(id);
+              byId.set(id, {
+                ...(existing || {}),
+                id,
+                tenantId: activeTenant.id,
+                name: crmLead.name || crmLead.phone,
+                phone: crmLead.phone,
+                email: crmLead.email,
+                avatarUrl: (existing as any)?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+                timestamp: crmLead.updatedAt,
+                status: 'transcribed',
+                crmStage: crmLead.stage,
+                dealValue: crmLead.dealValue,
+                assignedOperator: crmLead.assignedOperator,
+                crmNotes: crmLead.notes,
+                crmTasks: crmLead.tasks,
+                isReal: true,
+                hasConversation: crmLead.hasConversation,
+              } as LeadInfo);
+            }
+            return Array.from(byId.values());
+          });
+        })
+        .catch(() => {});
+    };
+    fetchCrmLeads();
+    const interval = setInterval(fetchCrmLeads, 8000);
+    return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem('saas_current_user', JSON.stringify(currentUser));
@@ -166,14 +215,52 @@ export const App: React.FC = () => {
   // lead existente quanto pra inserir um novo (modal "+ Novo Lead Real") — um
   // `.map()` puro nunca casa com um ID novo, então o lead recém-criado
   // desaparecia em silêncio (bug real encontrado na auditoria pré-lançamento).
-  const handleUpdateLead = (updatedLead: LeadInfo) => {
+  const handleUpdateLead = async (updatedLead: LeadInfo) => {
+    // [CRM] Leads reais (isReal — vieram de GET /api/crm/leads ou foram
+    // cadastrados via "+ Novo Lead Real") persistem de verdade no servidor
+    // antes de atualizar a tela — nunca aplica localmente primeiro e torce
+    // pra dar certo depois (mesmo padrão de WhatsAppLeadsSim.handleUpdateConversationState,
+    // pra nunca parecer salvo sem ter salvado de verdade).
+    if (updatedLead.isReal) {
+      try {
+        const res = await apiFetch(`/api/crm/leads/${encodeURIComponent(updatedLead.phone)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: updatedLead.name,
+            email: updatedLead.email,
+            stage: updatedLead.crmStage,
+            dealValue: updatedLead.dealValue,
+            assignedOperator: updatedLead.assignedOperator,
+            notes: updatedLead.crmNotes,
+            tasks: updatedLead.crmTasks,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao salvar CRM no servidor:', err);
+        showToast('Não foi possível salvar essa alteração no servidor. Tente de novo.');
+        return;
+      }
+    }
     setLeads((prev) => {
       const exists = prev.some((l) => l.id === updatedLead.id);
       return exists ? prev.map((l) => (l.id === updatedLead.id ? updatedLead : l)) : [updatedLead, ...prev];
     });
   };
 
-  const handleDeleteLead = (leadId: string) => {
+  const handleDeleteLead = async (leadId: string) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (lead?.isReal) {
+      try {
+        const res = await apiFetch(`/api/crm/leads/${encodeURIComponent(lead.phone)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao remover CRM no servidor:', err);
+        showToast('Não foi possível remover esse lead no servidor. Tente de novo.');
+        return;
+      }
+    }
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
     showToast('Lead removido do CRM');
   };
