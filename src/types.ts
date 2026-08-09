@@ -1,4 +1,4 @@
-export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'evohub';
+export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'evohub' | 'escalations';
 
 export type UserRole = 'operator' | 'manager' | 'admin' | 'saas_admin';
 
@@ -348,6 +348,24 @@ export interface BatchAnalysisJob {
   discountPercentage: number;
   createdAt: string;
   completedAt?: string;
+}
+
+/**
+ * Escalonamento pra atendimento humano — "isso precisa de você" (ver
+ * server/services/escalationStore.ts e GET/POST/DELETE /api/escalations em
+ * server/routes/conversations.ts). Achado real em produção (issue #82, item
+ * 2): esse backend existia e funcionava, mas não tinha NENHUMA UI — 17
+ * escalonamentos acumulados no tenant real, 0 resolvidos, ninguém via.
+ */
+export interface EscalationInfo {
+  id: string;
+  phone: string;
+  contactName?: string;
+  reason: string;
+  lastMessage?: string;
+  country: string;
+  resolved: boolean;
+  createdAt: string;
 }
 
 export interface Operator {

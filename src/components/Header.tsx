@@ -21,7 +21,8 @@ import {
   RotateCcw,
   Download,
   X,
-  Zap
+  Zap,
+  AlertTriangle
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -39,6 +40,7 @@ interface HeaderProps {
   onExportBackup?: () => void;
   leadsCount?: number;
   transactionsCount?: number;
+  escalationsPendingCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -55,7 +57,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLoadDemoData,
   onExportBackup,
   leadsCount = 0,
-  transactionsCount = 0
+  transactionsCount = 0,
+  escalationsPendingCount = 0
 }) => {
   const tabsRef = useRef<HTMLDivElement>(null);
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
@@ -297,6 +300,24 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Kanban className="w-4 h-4 text-emerald-400" />
               <span>CRM do Operador</span>
+            </button>
+
+            <button
+              id="tab-escalations"
+              onClick={() => setActiveTab('escalations')}
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                activeTab === 'escalations'
+                  ? 'bg-amber-600 text-white shadow-sm shadow-amber-900/50'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+              }`}
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span>Escalonamentos</span>
+              {escalationsPendingCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
+                  {escalationsPendingCount}
+                </span>
+              )}
             </button>
 
             <button
