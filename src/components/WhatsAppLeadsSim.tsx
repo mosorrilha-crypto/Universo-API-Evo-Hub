@@ -1716,10 +1716,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span>Limpar Testes</span>
           </button>
 
-          {/* Toggle Right Panel */}
+          {/* Toggle Right Panel — só desktop (lg+). No mobile a coluna 3 já
+              fica hidden por CSS (ver PR #70) e o painel real é o drawer
+              deslizante (mobileAnalysisOpen, ícone ⓘ no cabeçalho da
+              conversa) — sem este `hidden lg:flex`, este botão ficava visível
+              e clicável no mobile sem produzir NENHUM efeito visual, porque
+              alterna showRightPanel (que só controla classes lg:col-span-*),
+              confundindo quem tentava abrir a Ficha IA por aqui. */}
           <button
             onClick={() => setShowRightPanel(!showRightPanel)}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`hidden lg:flex px-3 py-1.5 rounded-xl border text-xs font-semibold items-center gap-1.5 transition-all cursor-pointer ${
               showRightPanel
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
