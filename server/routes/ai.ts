@@ -1,6 +1,6 @@
 import { Router, type RequestHandler } from 'express';
 import type { ServerConfig } from '../config';
-import { getGeminiClient } from '../gemini';
+import { getGeminiClient, withGeminiRetry } from '../gemini';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 
 interface AiRouterDeps {
@@ -78,13 +78,18 @@ Histórico de Mensagens: ${JSON.stringify(messages)}
 Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
 `;
 
-          const response = await ai.models.generateContent({
+          // Issue #94 — confirmado nos logs do Render: essa chamada não tinha
+          // nenhuma tentativa extra, então uma falha transitória do Gemini
+          // (503 "high demand", timeout) caía direto no fallback na 1ª
+          // tentativa — mesma causa raiz já corrigida em autoReply.ts (#84),
+          // helper compartilhado agora em server/gemini.ts.
+          const response = await withGeminiRetry(() => ai.models.generateContent({
             model: 'gemini-3.6-flash',
             contents: prompt,
             config: {
               responseMimeType: 'application/json',
             },
-          });
+          }));
 
           const rawText = response.text || '';
           const parsed = JSON.parse(rawText);
@@ -150,12 +155,13 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
       const { leads } = req.body || {};
       if (ai) {
         try {
-          const response = await ai.models.generateContent({
+          // Mesmo achado do endpoint /api/analyze-conversation acima (issue #94).
+          const response = await withGeminiRetry(() => ai.models.generateContent({
             model: 'gemini-3.6-flash',
             contents: `Atue como Especialista em Atribuição Meta Ads e Growth Hacking.
 Analise os dados dos leads a seguir e gere um relatório de inteligência estratégica conciso em português (3 parágrafos) destacando ROAS, Canais de Alta Conversão, CAPI Match Quality Score e sugestões de otimização:
 Leads: ${JSON.stringify(leads || [])}`,
-          });
+          }));
           return res.json({ success: true, source: 'gemini', report: response.text });
         } catch (err) {
           console.warn('AI Report generation error:', err);

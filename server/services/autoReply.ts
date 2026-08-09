@@ -16,7 +16,8 @@ import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 
-const GEMINI_TIMEOUT_MS = 20000;
+import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
+
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
 /** Credenciais Meta pra fazer o agente enviar mídia de verdade (Epic 4.5.2) — mesmo par phone_number_id/access_token já resolvido por tenant em quem chama generateAutoReplyForText. */
@@ -36,43 +37,6 @@ export interface AutoReplyResult {
   needsHumanConfirmation: boolean;
   /** ms gastos na chamada de roteamento — usado pra descontar do atraso de digitação da 1ª bolha, compensando a latência extra do router. */
   routerElapsedMs: number;
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Gemini demorou mais de ${ms}ms — abortando.`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer!);
-  }
-}
-
-const GEMINI_RETRY_BACKOFF_MS = [500, 1500];
-
-/**
- * Achado real em produção (issue #82, item 4): falha transitória do Gemini
- * (timeout, 429, erro de rede) tinha zero tentativa extra — virava silêncio
- * total pro cliente na primeira falha. Reexecuta a chamada até
- * GEMINI_RETRY_BACKOFF_MS.length vezes com um pequeno espaçamento antes de
- * desistir de vez.
- */
-async function withGeminiRetry<T>(makeCall: () => Promise<T>, timeoutMs: number): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= GEMINI_RETRY_BACKOFF_MS.length; attempt++) {
-    try {
-      return await withTimeout(makeCall(), timeoutMs);
-    } catch (err) {
-      lastErr = err;
-      const backoffMs = GEMINI_RETRY_BACKOFF_MS[attempt];
-      if (backoffMs === undefined) break;
-      console.warn(`⚠️  Gemini falhou (tentativa ${attempt + 1}/${GEMINI_RETRY_BACKOFF_MS.length + 1}), tentando de novo em ${backoffMs}ms:`, (err as Error)?.message || err);
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
-  }
-  throw lastErr;
 }
 
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
