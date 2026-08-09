@@ -101,6 +101,7 @@ async function startServer() {
   app.use(createEvoHubRouter({ authenticateEvoHub }));
   app.use(createConversationsRouter({
     authenticateToken,
+    jwtSecret: config.jwtSecret,
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
     supabaseUrl: config.supabaseUrl,

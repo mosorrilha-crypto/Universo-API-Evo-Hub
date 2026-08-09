@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
-import { apiFetch } from '../lib/apiClient';
+import { apiFetch, getAuthToken } from '../lib/apiClient';
 import { TranscriptionCard } from './TranscriptionCard';
 import { ConversationAnalysisPanel } from './ConversationAnalysisPanel';
 import {
@@ -560,8 +560,29 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     };
 
     fetchRealConversations();
-    const interval = setInterval(fetchRealConversations, 8000);
-    return () => { cancelled = true; clearInterval(interval); };
+
+    // Aviso em tempo real (SSE) no lugar do polling de 8s — ver
+    // server/services/conversationEvents.ts e a rota /api/conversations/stream.
+    // EventSource não manda header Authorization, então o token vai por
+    // query string (a mesma rota valida com jwt.verify no backend).
+    let source: EventSource | null = null;
+    const token = getAuthToken();
+    if (token) {
+      source = new EventSource(`/api/conversations/stream?token=${encodeURIComponent(token)}`);
+      // O evento só carrega o telefone que mudou — reaproveita o mesmo
+      // fetch da lista em vez de montar um merge separado por telefone,
+      // então cobre também o caso de conversa apagada.
+      source.onmessage = () => { fetchRealConversations(); };
+      // EventSource já reconecta sozinho no browser depois de erro/queda de
+      // conexão — não precisa de lógica de retry manual aqui.
+    }
+
+    // Rede de segurança: cobre o intervalo entre uma queda do processo (o
+    // pub/sub do SSE é em memória, ver conversationEvents.ts) e a
+    // reconexão real do EventSource, sem voltar a bater a cada 8s.
+    const safetyPoll = setInterval(fetchRealConversations, 90000);
+
+    return () => { cancelled = true; source?.close(); clearInterval(safetyPoll); };
   }, []);
 
   // Sugestões de etiqueta pro autocomplete — todas as já usadas nesse tenant
