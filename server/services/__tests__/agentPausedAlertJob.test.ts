@@ -11,10 +11,10 @@ import { createFakeSupabase } from './fakeSupabase';
 import { checkPausedAgentsAndAlert } from '../agentPausedAlertJob';
 
 vi.mock('../metaSend', () => ({
-  sendWhatsAppTextMessage: vi.fn().mockResolvedValue(undefined),
+  sendWhatsAppTemplateMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { sendWhatsAppTextMessage } from '../metaSend';
+import { sendWhatsAppTemplateMessage } from '../metaSend';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const NOW = new Date('2026-08-09T20:00:00Z');
@@ -51,7 +51,7 @@ beforeEach(() => {
   initDb(createFakeSupabase());
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
-  vi.mocked(sendWhatsAppTextMessage).mockClear();
+  vi.mocked(sendWhatsAppTemplateMessage).mockClear();
 });
 
 describe('agentPausedAlertJob', () => {
@@ -62,8 +62,15 @@ describe('agentPausedAlertJob', () => {
 
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
 
-    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1);
-    expect(sendWhatsAppTextMessage).toHaveBeenCalledWith('pnid', 'tok', '5567998038466', expect.stringContaining('pausado'));
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledWith(
+      'pnid',
+      'tok',
+      '5567998038466',
+      'agente_pausado_alerta',
+      'pt_BR',
+      ['Monique', '35', 'Cliente A']
+    );
 
     const { data } = await getDb().from('agent_status').select('paused_alert_sent_at').eq('tenant_id', TENANT_A).maybeSingle();
     expect(data?.paused_alert_sent_at).toBeTruthy();
@@ -76,7 +83,7 @@ describe('agentPausedAlertJob', () => {
 
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
 
-    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 
   it('agente pausado tempo suficiente mas SEM lead sem resposta (última mensagem é do agente) não alerta', async () => {
@@ -86,7 +93,7 @@ describe('agentPausedAlertJob', () => {
 
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
 
-    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 
   it('tenant sem admin_alert_phone configurado não tenta enviar nada (não quebra o job)', async () => {
@@ -95,7 +102,7 @@ describe('agentPausedAlertJob', () => {
     await seedConversationWithLastMessage('lead', 20);
 
     await expect(checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' })).resolves.not.toThrow();
-    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 
   it('rodar o job duas vezes seguidas NÃO duplica o alerta (idempotência por sessão de pausa)', async () => {
@@ -106,7 +113,7 @@ describe('agentPausedAlertJob', () => {
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
 
-    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
   });
 
   it('threshold customizado (pauseThresholdMs) é respeitado', async () => {
@@ -116,6 +123,6 @@ describe('agentPausedAlertJob', () => {
 
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid', pauseThresholdMs: 5 * 60 * 1000 });
 
-    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
   });
 });
