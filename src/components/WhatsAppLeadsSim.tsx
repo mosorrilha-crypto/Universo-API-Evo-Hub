@@ -2211,6 +2211,75 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   >
                     <Info className="w-4 h-4" />
                   </button>
+
+                  {/* Achado ao vivo: as ações da conversa (bloquear IA pra
+                      esse lead, fixar, marcar não lida, silenciar, arquivar)
+                      só existiam no menu ⋮ de cada linha na LISTA — abrindo a
+                      conversa não dava pra fazer nada disso sem voltar pra
+                      lista e achar a linha de novo. Reusa o mesmo
+                      openMenuForLeadId (já keyed por id) e as mesmas ações de
+                      handleUpdateConversationState do menu da lista — mesmo
+                      comportamento, só acessível também de dentro da
+                      conversa aberta. */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setOpenMenuForLeadId(openMenuForLeadId === selectedLead.id ? null : selectedLead.id)}
+                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      title="Mais opções"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                    {openMenuForLeadId === selectedLead.id && (() => {
+                      const isAiBlocked = !!(selectedLead as any).aiBlockedAt;
+                      const isPinned = !!(selectedLead as any).pinnedAt;
+                      const isManuallyUnread = !!(selectedLead as any).manuallyUnread;
+                      const isMuted = !!(selectedLead as any).muted;
+                      const isArchived = !!(selectedLead as any).archivedAt;
+                      return (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setOpenMenuForLeadId(null)} />
+                          <div className="absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs">
+                            <button
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setOpenMenuForLeadId(null); }}
+                              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
+                              title="Lead não qualificado/insistente — a IA para de responder só pra esse número, o resto do atendimento automático continua normal"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              <span>{isAiBlocked ? 'Reativar IA pra esse lead' : 'Bloquear IA pra esse lead'}</span>
+                            </button>
+                            <button
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setOpenMenuForLeadId(null); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                            >
+                              {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                              <span>{isPinned ? 'Desafixar conversa' : 'Fixar conversa'}</span>
+                            </button>
+                            <button
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { unread: !isManuallyUnread }); setOpenMenuForLeadId(null); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                            >
+                              <Mail className="w-3.5 h-3.5" />
+                              <span>{isManuallyUnread ? 'Marcar como lida' : 'Marcar como não lida'}</span>
+                            </button>
+                            <button
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setOpenMenuForLeadId(null); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                            >
+                              {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+                              <span>{isMuted ? 'Ativar notificações' : 'Silenciar notificações'}</span>
+                            </button>
+                            <button
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setOpenMenuForLeadId(null); setMobileThreadOpen(false); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                            >
+                              {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                              <span>{isArchived ? 'Desarquivar conversa' : 'Arquivar conversa'}</span>
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
 
