@@ -7,6 +7,12 @@
 --
 -- Como aplicar: cole este arquivo no SQL Editor do painel Supabase do
 -- projeto e rode uma vez. Idempotente, seguro rodar de novo.
+--
+-- NOTA (2026-08-09): confirmado que esta migration nunca tinha sido
+-- aplicada em produção de verdade, apesar de estar mergeada há dias —
+-- aplicada agora via Supabase MCP, com policy já no padrão otimizado
+-- (select current_setting(...)) e search_path fixo na função de trigger,
+-- consistentes com a issue #91.
 
 create table if not exists public.tenant_evolution_credentials (
   id uuid primary key default gen_random_uuid(),
@@ -30,7 +36,7 @@ begin
   new.updated_at = now();
   return new;
 end;
-$$ language plpgsql;
+$$ language plpgsql set search_path = '';
 
 drop trigger if exists update_tenant_evolution_credentials_updated_at on public.tenant_evolution_credentials;
 create trigger update_tenant_evolution_credentials_updated_at
@@ -44,5 +50,5 @@ alter table public.tenant_evolution_credentials enable row level security;
 alter table public.tenant_evolution_credentials force row level security;
 drop policy if exists tenant_isolation on public.tenant_evolution_credentials;
 create policy tenant_isolation on public.tenant_evolution_credentials
-  using (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+  using (tenant_id = (select current_setting('app.current_tenant_id', true))::uuid)
+  with check (tenant_id = (select current_setting('app.current_tenant_id', true))::uuid);

@@ -20,6 +20,13 @@
 --
 -- Como aplicar: cole este arquivo no SQL Editor do painel Supabase do
 -- projeto e rode uma vez. Idempotente, seguro rodar de novo.
+--
+-- NOTA (2026-08-09): apesar de uma sessão anterior ter reportado essa
+-- migration como "confirmada em produção" antes do PR do CRM (#83) ser
+-- mergeado, ela nunca tinha sido aplicada de verdade — GET/PATCH/DELETE
+-- /api/crm/leads estavam falhando (tabela inexistente) desde o merge do
+-- #83. Aplicada agora via Supabase MCP, com policy já no padrão otimizado
+-- (select current_setting(...)), consistente com a issue #91.
 
 -- name/email: só usados como fonte da verdade pra leads cadastrados
 -- manualmente ("+ Novo Lead Real") que ainda não têm nenhuma conversa real
@@ -47,5 +54,5 @@ alter table public.crm_lead_state enable row level security;
 alter table public.crm_lead_state force row level security;
 drop policy if exists tenant_isolation on public.crm_lead_state;
 create policy tenant_isolation on public.crm_lead_state
-  using (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-  with check (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+  using (tenant_id = (select current_setting('app.current_tenant_id', true))::uuid)
+  with check (tenant_id = (select current_setting('app.current_tenant_id', true))::uuid);
