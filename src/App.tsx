@@ -203,6 +203,15 @@ export const App: React.FC = () => {
       setLeads([]);
       setTransactions([]);
       setSavedTranscripts([]);
+      // Achado real em produção: o "Gerenciador de Usuários" (Painel SaaS
+      // Master) guarda sua própria lista fictícia numa chave separada de
+      // localStorage, gerenciada só dentro de SaaSAdminDashboard.tsx (nunca
+      // fala com a tabela real `operators` do Supabase) — esse botão nunca
+      // limpava ela, deixando nomes/e-mails fictícios (Carlos Silva, Ricardo
+      // Santos etc) presos no navegador mesmo depois de "limpar tudo". O
+      // componente só lê essa chave no mount, então remover aqui já resolve
+      // na próxima vez que a aba "Painel SaaS Master" for aberta.
+      localStorage.removeItem('saas_users_list');
       showToast('Dados limpos! Canvas pronto para produção.');
     }
   };
