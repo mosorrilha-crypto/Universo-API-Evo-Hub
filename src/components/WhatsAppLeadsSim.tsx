@@ -1616,7 +1616,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-2.5 self-end md:self-auto flex-shrink-0 flex-wrap gap-y-2">
+        {/* Achado real em produção: no mobile o pai é flex-col com
+            items-start, então esta linha de botões (sem w-full) ficava com
+            largura "shrink-to-fit" — cresce pra caber todos os botões numa
+            linha só em vez de quebrar, empurrando a PÁGINA INTEIRA pra
+            rolar na horizontal (cortava até o cabeçalho/abas). flex-wrap
+            sozinho não resolve: só quebra linha quando o container tem uma
+            largura limitada pra quebrar contra — w-full dá esse limite. */}
+        <div className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto w-full flex-shrink-0 flex-wrap gap-y-2">
           {/* Clear Mock Data Button */}
           <button
             onClick={handleClearMockData}

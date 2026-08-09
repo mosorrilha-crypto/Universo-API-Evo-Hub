@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* Achado real em produção: um layout flex-col + items-start sem w-full num
+   componente (ver WhatsAppLeadsSim.tsx) deixou uma linha de botões crescer
+   além da viewport, arrastando a PÁGINA INTEIRA pra rolar na horizontal
+   (cabeçalho e abas cortados). Corrigido lá, mas isso é uma classe de bug
+   fácil de reintroduzir em qualquer componente novo — trava aqui como rede
+   de segurança. Não afeta .custom-scrollbar abaixo (overflow-x-auto num
+   container próprio, não no body/html). */
+html, body {
+  overflow-x: hidden;
+}
+
 /* High-Contrast Emerald Horizontal Scrollbar for Navigation Menu */
 .custom-scrollbar {
   scrollbar-width: auto;
