@@ -40,6 +40,8 @@ interface HeaderProps {
   onExportBackup?: () => void;
   leadsCount?: number;
   transactionsCount?: number;
+  /** Leads sem isReal (carregados via "Restaurar Dados de Demo") — distinto de leadsCount, que inclui leads reais do backend (ver #94). */
+  demoLeadsCount?: number;
   escalationsPendingCount?: number;
 }
 
@@ -58,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   onExportBackup,
   leadsCount = 0,
   transactionsCount = 0,
+  demoLeadsCount = 0,
   escalationsPendingCount = 0
 }) => {
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -89,7 +92,16 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const isCleanProduction = leadsCount === 0 && transactionsCount === 0;
+  // Issue #94 — achado real em produção: badge mostrava "Dados de Teste
+  // Ativos" pra tenant real (Monique) com leads reais, porque isCleanProduction
+  // usava leadsCount (TOTAL, real+demo) em vez de olhar só pra dados fictícios.
+  // Ficou errado a partir do PR #83 (CRM conectado aos leads reais) — antes
+  // disso todo lead em `leads` era necessariamente demo, então o check
+  // "leadsCount === 0" ainda era um proxy válido de "sem dado fictício". Agora
+  // usa demoLeadsCount (só leads sem isReal) — transactionsCount continua
+  // 100% válido como está: FinancialDashboard não tem fonte real ainda (ver
+  // CLAUDE.md), então qualquer transação é sempre fictícia.
+  const isCleanProduction = demoLeadsCount === 0 && transactionsCount === 0;
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 shadow-md">

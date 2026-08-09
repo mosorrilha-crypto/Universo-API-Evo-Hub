@@ -404,6 +404,7 @@ export const App: React.FC = () => {
         onExportBackup={handleExportBackup}
         leadsCount={leads.length}
         transactionsCount={transactions.length}
+        demoLeadsCount={leads.filter((l) => !l.isReal).length}
         escalationsPendingCount={escalations.filter((e) => !e.resolved).length}
       />
 
