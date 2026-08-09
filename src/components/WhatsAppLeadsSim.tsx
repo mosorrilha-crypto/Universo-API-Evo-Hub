@@ -2178,23 +2178,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       Removidos os 3 — mesmo padrão já aplicado a outras telas
                       decorativas deste painel (ver PRs #74, #86). */}
 
-                  {/* Clear Chat History & Delete Conversation Buttons */}
-                  <button
-                    onClick={() => handleClearChatMessages(selectedLead.id)}
-                    className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-amber-400 transition-colors cursor-pointer"
-                    title="Limpar Histórico de Mensagens"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={() => handleDeleteConversation(selectedLead.id, selectedLead.name)}
-                    className="p-2 bg-rose-950/60 hover:bg-rose-900 border border-rose-800/80 rounded-lg text-rose-300 transition-colors cursor-pointer"
-                    title="Excluir Conversa Permanentemente"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-
                   {/* Reanalyze button */}
                   <button
                     onClick={() => handleAnalyzeConversation(selectedLead)}
@@ -2281,6 +2264,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             >
                               {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                               <span>{isArchived ? 'Desarquivar conversa' : 'Arquivar conversa'}</span>
+                            </button>
+                            <div className="border-t border-slate-700" />
+                            <button
+                              onClick={() => { handleClearChatMessages(selectedLead.id); setOpenMenuForLeadId(null); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              title="Apaga as mensagens desta conversa, mantendo o contato"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>Limpar histórico de mensagens</span>
+                            </button>
+                            <button
+                              onClick={() => { setOpenMenuForLeadId(null); handleDeleteConversation(selectedLead.id, selectedLead.name); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
+                              title="Exclui a conversa e o contato permanentemente"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Excluir conversa permanentemente</span>
                             </button>
                           </div>
                         </>
