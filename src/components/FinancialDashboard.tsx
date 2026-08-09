@@ -32,7 +32,8 @@ import {
   PieChart as PieChartIcon,
   Trash2,
   Settings,
-  Key
+  Key,
+  FlaskConical
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -203,6 +204,13 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             </h1>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
               CFO / Operador
+            </span>
+            <span
+              className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950/80 text-amber-300 border border-amber-700/60 inline-flex items-center gap-1"
+              title="Este painel ainda não tem integração de pagamento real conectada — todos os valores aqui (receita, gráficos, transações) são fictícios e ficam salvos só no navegador."
+            >
+              <FlaskConical className="w-3 h-3" />
+              Dados de Exemplo
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">

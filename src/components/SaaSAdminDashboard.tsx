@@ -49,7 +49,8 @@ import {
   Server,
   Activity,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  FlaskConical
 } from 'lucide-react';
 
 export function ConfiguracaoCanais() {
@@ -542,6 +543,13 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             R$ {totalMRR.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </div>
           <p className="text-[10px] text-emerald-300 mt-2 font-medium">ARR Estimado: R$ {totalARR.toLocaleString('pt-BR')}/ano</p>
+          <span
+            className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-950/80 text-amber-300 border border-amber-700/60"
+            title="MRR por tenant é um valor fixo escolhido ao criar o cliente (por plano), não calculado a partir de pagamento real recebido."
+          >
+            <FlaskConical className="w-2.5 h-2.5" />
+            Dados de Exemplo
+          </span>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
