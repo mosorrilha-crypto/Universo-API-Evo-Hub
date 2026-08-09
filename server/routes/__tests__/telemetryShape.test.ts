@@ -20,14 +20,11 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
   req.user = { id: 'op-1', tenantId: 'tenant-a', role: 'saas_admin' };
   next();
 }
-function fakeRateLimiter(_req: any, _res: any, next: any) {
-  next();
-}
 
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
-  app.use(createTelemetryRouter({ authenticateToken: fakeAuthenticateToken as any, rateLimiter: fakeRateLimiter as any }));
+  app.use(createTelemetryRouter({ authenticateToken: fakeAuthenticateToken as any }));
   await new Promise<void>((resolve) => {
     server = app.listen(0, resolve);
   });
@@ -72,5 +69,12 @@ describe('GET /api/queue/status — nomes de campo batendo com QueueSystemStatus
     // Nomes internos antigos (getQueueStats()) nunca devem vazar pra fora sem mapeamento.
     expect(data).not.toHaveProperty('activeWorkers');
     expect(data).not.toHaveProperty('processedTotal');
+  });
+});
+
+describe('POST /api/batch/lead-analysis — removida (issue #82, item 1)', () => {
+  it('não existe mais nenhuma rota que fabricava sucesso/números fixos de processamento em lote', async () => {
+    const res = await fetch(`${baseUrl}/api/batch/lead-analysis`, { method: 'POST' });
+    expect(res.status).toBe(404);
   });
 });
