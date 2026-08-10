@@ -185,11 +185,11 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
-        // Mantém "; codecs=opus" — mesmo valor usado no Content-Type do upload
-        // pra Meta e persistido pro player do painel tocar de volta.
+        // mimeType (e filename) do upload/persistência seguem o que a
+        // transcodificação retornou — sendWhatsAppAudioMessage escolhe o
+        // filename certo internamente a partir do mimeType.
         uploadMimeType = transcoded.mimeType;
-        uploadFilename = 'audio.ogg';
-        
+
         const audioBuffer = Buffer.from(uploadBase64, 'base64');
         mediaId = await sendWhatsAppAudioMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, audioBuffer, uploadMimeType);
       } else {

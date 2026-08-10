@@ -230,16 +230,18 @@ export async function sendWhatsAppMediaMessage(
 
   // Mensagem de áudio da Meta não aceita "caption" (diferente de imagem/documento).
   // "voice: true" marca a mensagem como nota de voz de verdade (waveform/UI de
-  // voice note no WhatsApp do destinatário) em vez de um "áudio básico" — sem
-  // isso a Meta processa o arquivo com validação diferente.
+  // voice note) — só se aplica a Ogg/Opus, o único formato real de voice note
+  // do WhatsApp; pra outros formatos de áudio (ex: MP3, usado no experimento
+  // de controle do erro 131053) a mensagem vira um "áudio básico" normal.
   const type = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
+  const isVoiceNote = mimeType.startsWith('audio/ogg');
   const payload: any = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to,
     type
   };
-  payload[type] = type === 'audio' ? { id: mediaId, voice: true } : { id: mediaId, ...(caption ? { caption } : {}) };
+  payload[type] = type === 'audio' ? { id: mediaId, ...(isVoiceNote ? { voice: true } : {}) } : { id: mediaId, ...(caption ? { caption } : {}) };
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
     method: 'POST',
@@ -271,7 +273,7 @@ export async function sendWhatsAppAudioMessage(
   if (!mimeType) throw new Error('mimeType ausente');
 
   // 2. Fazer upload do arquivo de áudio no endpoint de mídia
-  const filename = 'voice-note.ogg';
+  const filename = mimeType.startsWith('audio/ogg') ? 'voice-note.ogg' : mimeType.startsWith('audio/mpeg') ? 'voice-note.mp3' : 'voice-note';
   const mediaId = await uploadWhatsAppMedia(phoneNumberId, accessToken, audioBuffer, mimeType, filename);
 
   // 3. Enviar a mensagem final com type: "audio" e o media_id obtido
