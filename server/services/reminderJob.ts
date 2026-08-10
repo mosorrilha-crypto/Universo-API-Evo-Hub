@@ -13,7 +13,8 @@ import { listUpcomingEvents, localNaiveToUtcIso, listConnectedCalendarTenants, t
 import { listAllAppointments } from './appointmentStore';
 import { wasReminderSent, markReminderSent, type ReminderType } from './reminderStore';
 import { sendWhatsAppTextMessage } from './metaSend';
-import { resolveMetaCredentialsForTenant } from './tenantResolver';
+import { sendEvolutionTextMessage } from './evolutionSend';
+import { resolveCredentialsForTenant } from './tenantResolver';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -59,11 +60,14 @@ export interface ReminderJobDeps {
   getCalendarConfig: () => CalendarConfig | undefined;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  evolutionInstanceName?: string;
   intervalMs?: number;
 }
 
-/** Roda o job de lembretes pra todos os tenants que têm Google Calendar conectado agora (Bloco 2.C). */
-async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
+/** Roda o job de lembretes pra todos os tenants que têm Google Calendar conectado agora (Bloco 2.C). Exportado só pra teste — startReminderJob é a entrada real. */
+export async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
   const cfg = deps.getCalendarConfig();
   if (!cfg?.clientId || !cfg?.clientSecret) return;
 
@@ -76,18 +80,26 @@ async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
   }
 
   for (const tenantId of tenantIds) {
-    const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(tenantId, {
-      metaAccessToken: deps.metaAccessToken,
-      metaPhoneNumberId: deps.metaPhoneNumberId,
-    });
-    await checkAndSendRemindersForTenant(tenantId, cfg, { metaAccessToken, metaPhoneNumberId });
+    const channel = await resolveCredentialsForTenant(
+      tenantId,
+      { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
+      { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
+    );
+    await checkAndSendRemindersForTenant(tenantId, cfg, channel);
   }
 }
 
 async function checkAndSendRemindersForTenant(
   tenantId: string,
   cfg: CalendarConfig,
-  creds: { metaAccessToken?: string; metaPhoneNumberId?: string }
+  channel: {
+    provider?: 'meta' | 'evolution';
+    metaAccessToken?: string;
+    metaPhoneNumberId?: string;
+    evolutionInstanceName?: string;
+    evolutionApiUrl?: string;
+    evolutionApiKey?: string;
+  }
 ): Promise<void> {
   const today = todayDatePartsInTz();
   const tomorrow = addDays(today, 1);
@@ -125,7 +137,11 @@ async function checkAndSendRemindersForTenant(
       : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛 Te esperamos!`;
 
     try {
-      await sendWhatsAppTextMessage(creds.metaPhoneNumberId, creds.metaAccessToken, appt.phone, message);
+      if (channel.provider === 'evolution') {
+        await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, appt.phone, message);
+      } else {
+        await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message);
+      }
       await markReminderSent(tenantId, event.id, type);
       console.log(`⏰ [Lembretes] Enviado (${type}) pra ${appt.phone} — evento ${event.id}`);
     } catch (err) {
