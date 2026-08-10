@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 /**
  * Marca a mensagem recebida como lida e ativa o indicador "digitando..." no
  * celular do cliente — mesmo mecanismo usado no whatsapp-agent-monique
@@ -135,6 +137,25 @@ export async function sendWhatsAppTemplateMessage(
  * Upload de mídia (foto/documento escolhido no painel) antes de poder
  * referenciá-la numa mensagem — mesmo padrão do whatsapp-agent-monique
  * (lib/whatsapp.js: uploadMedia). Retorna o media_id da Meta.
+ *
+ * Achado real: O FormData nativo do Node/Undici (usado pelo fetch global)
+ * não lida bem com a serialização de Blobs se não for montado com cuidado
+ * no ambiente do servidor, resultando em "application/octet-stream" na Meta.
+ * Montamos o multipart manualmente para garantir que o boundary e os
+ * headers de cada parte (especialmente o Content-Type) sejam explícitos.
+ *
+ * Bug crítico corrigido (PR #138): o campo "type" no multipart estava sendo
+ * enviado como categoria genérica ("audio", "image", "document") em vez do
+ * MIME type completo ("audio/ogg", "image/jpeg", etc.). A documentação da
+ * Meta (https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media)
+ * especifica que o campo "type" deve ser o MIME type do arquivo — não a
+ * categoria. Isso fazia a Meta classificar o arquivo como
+ * "application/octet-stream" internamente, causando a rejeição silenciosa
+ * do áudio (enviava 200 mas o áudio nunca tocava no destinatário).
+ *
+ * Bug crítico corrigido (PR #138): `crypto` era usado sem ser importado —
+ * o global `crypto` do Node 22 é a Web Crypto API (sem `randomBytes`),
+ * causando TypeError em runtime ao tentar gerar o boundary do multipart.
  */
 export async function uploadWhatsAppMedia(
   phoneNumberId: string | undefined,
@@ -150,37 +171,31 @@ export async function uploadWhatsAppMedia(
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 
-  // Achado real: O FormData nativo do Node/Undici (usado pelo fetch global) 
-  // não lida bem com a serialização de Blobs se não for montado com cuidado 
-  // no ambiente do servidor, resultando em "application/octet-stream" na Meta.
-  // Montamos o multipart manualmente para garantir que o boundary e os 
-  // headers de cada parte (especialmente o Content-Type) sejam explícitos.
-  // Voltando para a montagem manual do multipart, mas com precisão cirúrgica.
-  // O FormData nativo do Node 22+ (Undici) às vezes oculta ou altera o Content-Type das partes,
-  // o que faz a Meta classificar o arquivo como "application/octet-stream" internamente.
-  const category = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
+  // O campo "type" da Meta deve ser o MIME type completo (ex: "audio/ogg"),
+  // não a categoria genérica ("audio"). Ver documentação:
+  // https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media
   const cleanMimeType = mimeType.split(';')[0].trim();
   const boundary = `----WebKitFormBoundary${crypto.randomBytes(8).toString('hex')}`;
-  
+
   const chunks: Buffer[] = [];
-  
+
   // 1. messaging_product
   chunks.push(Buffer.from(`--${boundary}\r\n`));
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="messaging_product"\r\n\r\n`));
   chunks.push(Buffer.from(`whatsapp\r\n`));
-  
-  // 2. type
+
+  // 2. type — MIME type completo, conforme documentação da Meta
   chunks.push(Buffer.from(`--${boundary}\r\n`));
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="type"\r\n\r\n`));
-  chunks.push(Buffer.from(`${category}\r\n`));
-  
-  // 3. file (O Content-Type aqui é o que a Meta usa para validar o arquivo)
+  chunks.push(Buffer.from(`${cleanMimeType}\r\n`));
+
+  // 3. file — Content-Type aqui é o que a Meta usa para validar o arquivo
   chunks.push(Buffer.from(`--${boundary}\r\n`));
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`));
   chunks.push(Buffer.from(`Content-Type: ${cleanMimeType}\r\n\r\n`));
   chunks.push(buffer);
   chunks.push(Buffer.from(`\r\n`));
-  
+
   // Fim
   chunks.push(Buffer.from(`--${boundary}--\r\n`));
 
@@ -188,10 +203,10 @@ export async function uploadWhatsAppMedia(
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/media`, {
     method: 'POST',
-    headers: { 
+    headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      'Content-Length': body.length.toString()
+      'Content-Length': body.length.toString(),
     },
     body: body as any,
   });
