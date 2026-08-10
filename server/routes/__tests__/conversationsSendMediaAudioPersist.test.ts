@@ -16,12 +16,21 @@ import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
 const saveMediaImage = vi.fn(async (_supabaseUrl?: string, _supabaseKey?: string, _messageId?: string, _base64?: string, _mimeType?: string) => undefined);
+const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: string) => ({ base64: 'T0dHLWNvbnZlcnRpZG8=', mimeType: 'audio/ogg' }));
 
 vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
   return { ...actual, uploadWhatsAppMedia, sendWhatsAppMediaMessage };
 });
 vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveMediaImage }));
+// ffmpeg real é lento/frágil em teste unitário (precisaria de um webm de
+// verdade pra decodificar) — mocka só a transcodificação em si, mantendo a
+// checagem real de isMetaAcceptedAudioMimeType (importActual) pra continuar
+// testando a decisão de QUANDO transcodificar, não só o resultado.
+vi.mock('../../services/audioTranscode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/audioTranscode')>();
+  return { ...actual, transcodeToWhatsAppVoiceNote };
+});
 
 const { createConversationsRouter } = await import('../conversations');
 
@@ -65,6 +74,7 @@ beforeEach(() => {
   uploadWhatsAppMedia.mockClear();
   sendWhatsAppMediaMessage.mockClear();
   saveMediaImage.mockClear();
+  transcodeToWhatsAppVoiceNote.mockClear();
   supabase = createFakeSupabase({
     conversations: [{ id: 'conv-1', tenant_id: TENANT_A, phone: '595981111111', name: 'Cliente A', updated_at: new Date().toISOString(), geo_restriction: null }],
   });
@@ -95,14 +105,32 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(savedMessage.id).toBe(savedMessageId);
   });
 
-  it('continua rejeitando audio/webm antes de chamar a Meta ou salvar qualquer coisa', async () => {
+  it('converte audio/webm pra Ogg/Opus antes de subir pra Meta e persistir — não toca mais como nota de voz sem isso', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64: 'QUJD', mimeType: 'audio/webm', filename: 'audio.webm' }),
+      body: JSON.stringify({ base64: 'd2VibS1mYWtl', mimeType: 'audio/webm;codecs=opus', filename: 'audio.webm' }),
     });
-    expect(res.status).toBe(400);
-    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
-    expect(saveMediaImage).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+
+    expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('d2VibS1mYWtl', 'audio/webm;codecs=opus');
+    // A Meta recebe a versão JÁ CONVERTIDA (Ogg), nunca o webm original.
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'T0dHLWNvbnZlcnRpZG8=', 'audio/ogg', 'audio.webm');
+    // O painel também guarda/reproduz a versão convertida — senão o player
+    // próprio herdaria o mesmo problema que motivou a conversão.
+    const [, , , savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
+    expect(savedBase64).toBe('T0dHLWNvbnZlcnRpZG8=');
+    expect(savedMimeType).toBe('audio/ogg');
+  });
+
+  it('não transcodifica formatos já aceitos pela Meta (ex: audio/ogg)', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64: 'b2dnLWZha2U=', mimeType: 'audio/ogg;codecs=opus', filename: 'audio.ogg' }),
+    });
+    expect(res.status).toBe(200);
+    expect(transcodeToWhatsAppVoiceNote).not.toHaveBeenCalled();
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'b2dnLWZha2U=', 'audio/ogg;codecs=opus', 'audio.ogg');
   });
 });

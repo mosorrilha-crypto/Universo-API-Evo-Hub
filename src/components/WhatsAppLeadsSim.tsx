@@ -416,15 +416,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (!selectedLead) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Achado numa investigação do "botão de áudio não funciona": a Meta
-      // Cloud API só aceita audio/aac, audio/mp4, audio/mpeg, audio/amr e
-      // audio/ogg (opus) como mensagem de voz — audio/webm (o formato que o
-      // MediaRecorder do Chrome prefere por padrão) NÃO está na lista. O
-      // código gravava sempre em webm, o upload pra Meta era rejeitado, e o
-      // áudio nunca chegava no cliente (falha silenciosa, só visível no
-      // console e no estado "falhou" da bolha). Agora prioriza formatos
-      // aceitos pela Meta; webm só entra como último recurso, quando o
-      // navegador não sabe gravar em nenhum dos outros.
+      // Achado numa investigação do "botão de áudio não funciona": prioriza
+      // formatos que a Meta aceita nativamente como nota de voz (evita uma
+      // conversão desnecessária no servidor quando o navegador já grava num
+      // formato bom). Mas em navegadores como o Chrome, NENHUM desses é
+      // suportado pra gravação — sempre cai em webm mesmo assim. Isso é
+      // esperado e sem problema: POST /send-media agora reencoda qualquer
+      // áudio não aceito pra Ogg/Opus no servidor antes de subir pra Meta
+      // (server/services/audioTranscode.ts) — achado real em produção que o
+      // upload de webm retornava sucesso mas o áudio nunca tocava de
+      // verdade no WhatsApp do cliente, uma falha silenciosa sem erro nenhum
+      // de volta.
       let mimeType = 'audio/webm';
       if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
       else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) mimeType = 'audio/ogg;codecs=opus';
