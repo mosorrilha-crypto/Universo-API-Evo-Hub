@@ -81,6 +81,38 @@ function labelColorClasses(label: string): string {
   return LABEL_COLOR_PALETTE[Math.abs(hash) % LABEL_COLOR_PALETTE.length];
 }
 
+// Avatar de iniciais — a Meta Cloud API não expõe foto de perfil de contato
+// (diferente do app pessoal do WhatsApp, que é P2P), então lead real nunca
+// tem avatarUrl e caía num <img> quebrado; mock/demo tinha o problema
+// inverso, todo lead com a mesma foto de stock. Cor determinística por hash
+// do nome/telefone — mesmo padrão de labelColorClasses acima.
+const AVATAR_COLOR_PALETTE = [
+  'bg-emerald-600',
+  'bg-blue-600',
+  'bg-amber-600',
+  'bg-rose-600',
+  'bg-purple-600',
+  'bg-cyan-600',
+  'bg-pink-600',
+  'bg-lime-600',
+];
+
+function avatarColorClasses(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return AVATAR_COLOR_PALETTE[Math.abs(hash) % AVATAR_COLOR_PALETTE.length];
+}
+
+function getInitials(name: string): string {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return '?';
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
 // livre, não um enum fixo. O operador pode digitar qualquer coisa.
 const BEAUTY_STUDIO_LABEL_SUGGESTIONS = [
@@ -1558,11 +1590,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         }`}
       >
         <div className="relative flex-shrink-0">
-          <img
-            src={lead.avatarUrl}
-            alt={lead.name}
-            className="w-11 h-11 rounded-full object-cover border border-slate-700"
-          />
+          <div
+            className={`w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-xs border border-slate-700 ${avatarColorClasses(lead.name || lead.phone)}`}
+          >
+            {getInitials(lead.name || lead.phone)}
+          </div>
           <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#111b21]" />
         </div>
 
@@ -1628,16 +1660,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </span>
             ) : null}
           </div>
-
-          {/* Language tag indicator if available */}
-          {lead.fullAnalysis?.detectedLanguage && (
-            <div className="mt-1 flex items-center gap-1">
-              <span className="text-[9px] text-blue-300 bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/40 flex items-center gap-0.5">
-                <Globe className="w-2.5 h-2.5 text-blue-400" />
-                {lead.fullAnalysis.detectedLanguage}
-              </span>
-            </div>
-          )}
 
           {/* Etiquetas livres (tipo WhatsApp Business) */}
           {lead.conversationLabels && lead.conversationLabels.length > 0 && (
@@ -2148,19 +2170,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   >
                     <ArrowLeft className="w-4 h-4" />
                   </button>
-                  <img
-                    src={selectedLead.avatarUrl}
-                    alt={selectedLead.name}
-                    className="w-10 h-10 rounded-full object-cover border border-emerald-500/50 flex-shrink-0"
-                  />
+                  <div
+                    className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-xs border border-emerald-500/50 flex-shrink-0 ${avatarColorClasses(selectedLead.name || selectedLead.phone)}`}
+                  >
+                    {getInitials(selectedLead.name || selectedLead.phone)}
+                  </div>
                   <div className="min-w-0">
                     <h3 className="text-xs font-bold text-[#e9edef] flex items-center gap-2">
                       <span className="truncate">{selectedLead.name}</span>
-                      {selectedLead.fullAnalysis?.detectedLanguage && (
-                        <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[9px] font-bold border border-blue-500/30 flex-shrink-0">
-                          {selectedLead.fullAnalysis.detectedLanguage}
-                        </span>
-                      )}
                     </h3>
                     <p className="text-[10px] text-slate-400 flex items-center gap-2">
                       <span className="truncate">{selectedLead.phone}</span>
