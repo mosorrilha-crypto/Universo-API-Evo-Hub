@@ -191,13 +191,22 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       // (imagens/documentos não passam por isso, só áudio).
       let uploadBase64 = base64;
       let uploadMimeType = mimeType as string;
+      let uploadFilename = filename || 'arquivo';
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
         uploadMimeType = transcoded.mimeType;
+        // Achado ao vivo (via o novo log de status da Meta, PR #132): a
+        // Meta rejeitava o áudio já convertido com "processing it is of
+        // type application/octet-stream" mesmo o conteúdo sendo Ogg/Opus
+        // válido (confirmado via ffprobe) — porque o filename continuava
+        // sendo o original (ex: "audio.mp4"), com a EXTENSÃO do formato de
+        // antes da conversão, enquanto os bytes já eram Ogg. Sem isso a
+        // extensão do arquivo enviado nunca bate com o conteúdo real.
+        uploadFilename = 'audio.ogg';
       }
 
-      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, uploadBase64, uploadMimeType, filename || 'arquivo');
+      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, uploadBase64, uploadMimeType, uploadFilename);
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, uploadMimeType, caption);
       const msgType = uploadMimeType.startsWith('image/') ? 'image' : uploadMimeType.startsWith('audio/') ? 'audio' : 'file';
       // Achado real em produção ("o áudio não fica na conversa"): a Meta
