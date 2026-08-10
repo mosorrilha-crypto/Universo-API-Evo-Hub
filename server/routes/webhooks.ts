@@ -318,6 +318,28 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         console.log(`📱 [Webhook Meta WhatsApp] Nova mensagem de ${msg.from}:`, msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
       }
 
+      // Achado ao investigar "o áudio sai mas não chega" ao vivo: o webhook
+      // da Meta manda `value.statuses[]` pra reportar sent/delivered/read/
+      // failed de mensagens QUE NÓS ENVIAMOS — nunca era lido, então uma
+      // falha de entrega reportada pela própria Meta (ex: código de erro
+      // específico) ficava invisível pra sempre, mesmo com upload+send
+      // retornando 200 na hora do envio (esse 200 só confirma que entrou na
+      // fila, não que chegou de verdade no destinatário).
+      const statuses = value?.statuses;
+      if (Array.isArray(statuses) && statuses.length > 0) {
+        for (const status of statuses) {
+          const errors = Array.isArray(status?.errors) ? status.errors : [];
+          if (status?.status === 'failed' || errors.length > 0) {
+            console.warn(
+              `❌ [Webhook Meta WhatsApp] Status "${status?.status}" pra mensagem ${status?.id} (recipient=${status?.recipient_id}):`,
+              JSON.stringify(errors).slice(0, 500)
+            );
+          } else {
+            console.log(`📬 [Webhook Meta WhatsApp] Status "${status?.status}" pra mensagem ${status?.id} (recipient=${status?.recipient_id})`);
+          }
+        }
+      }
+
       return res.status(200).json({
         success: true,
         message: 'Evento do WhatsApp Meta processado com sucesso',
