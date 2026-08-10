@@ -1,5 +1,3 @@
-import crypto from 'crypto';
-
 /**
  * Marca a mensagem recebida como lida e ativa o indicador "digitando..." no
  * celular do cliente — mesmo mecanismo usado no whatsapp-agent-monique
@@ -134,23 +132,30 @@ export async function sendWhatsAppTemplateMessage(
 }
 
 /**
- * Upload de mídia (foto/documento escolhido no painel) antes de poder
- * referenciá-la numa mensagem — mesmo padrão do whatsapp-agent-monique
- * (lib/whatsapp.js: uploadMedia). Retorna o media_id da Meta.
+ * Upload de mídia (foto/documento escolhido no painel, ou nota de voz
+ * gravada) antes de poder referenciá-la numa mensagem — mesmo padrão do
+ * whatsapp-agent-monique (lib/whatsapp.js: uploadMedia). Retorna o media_id
+ * da Meta.
  *
- * O FormData nativo do Node/Undici (usado pelo fetch global) foi testado e
- * serializa o Content-Type do Blob corretamente (confirmado inspecionando o
- * corpo multipart bruto produzido) — a causa real da rejeição da Meta não
- * era isso. Mantemos aqui a montagem manual do multipart só porque já
- * estava assim, não porque o FormData nativo tivesse um bug real.
+ * Achado real em produção: o erro 131053 ("Audio file uploaded with
+ * mimetype as audio/ogg; codecs=opus, however on processing it is of type
+ * application/octet-stream") persistiu de forma IDÊNTICA através de várias
+ * rodadas de correção — mesmo depois de confirmar (via assinatura "OggS"
+ * checada no próprio servidor) que o ffmpeg gera um Ogg/Opus válido, e
+ * mesmo com o Content-Type/campo "type" corretos. Ou seja, os bytes que a
+ * Meta efetivamente recebe não batiam com o que gerávamos localmente — sinal
+ * de corrupção em trânsito, não de conteúdo/contrato errados. A montagem
+ * manual do multipart (boundary própria + Content-Length calculado à mão)
+ * era a única peça nunca trocada nas tentativas anteriores. Trocado aqui
+ * pelo FormData/Blob nativos do Node — undici monta o multipart inteiro
+ * (boundary, Content-Type de cada parte, Content-Length/chunking) de forma
+ * consistente com o que o parser da Meta espera, eliminando essa superfície
+ * de bug inteira.
  *
- * Contrato real da Meta pro campo "type" do multipart (confirmado por
- * documentação de terceiros que replicam o comportamento oficial): é o MIME
- * type completo do arquivo (ex: "audio/ogg; codecs=opus", "image/jpeg"), o
- * mesmo valor que já vai no Content-Type da parte "file" — nunca uma
- * categoria genérica ("audio"/"image"). Uma correção anterior (PR #138)
- * trocou isso pra categoria por engano, o que não bate com o contrato
- * documentado — revertido aqui.
+ * Contrato do campo "type" do multipart (confirmado por documentação de
+ * terceiros que replicam o comportamento oficial): é o MIME type completo
+ * do arquivo (ex: "audio/ogg; codecs=opus", "image/jpeg") — nunca uma
+ * categoria genérica ("audio"/"image").
  */
 export async function uploadWhatsAppMedia(
   phoneNumberId: string | undefined,
@@ -164,42 +169,15 @@ export async function uploadWhatsAppMedia(
   if (!mediaBuffer || mediaBuffer.length === 0) throw new Error('Buffer da mídia ausente ou vazio.');
   if (!mimeType) throw new Error('MIME type da mídia ausente.');
 
-  const cleanMimeType = mimeType.split(';')[0].trim();
-  const boundary = `----WebKitFormBoundary${crypto.randomBytes(8).toString('hex')}`;
-
-  const chunks: Buffer[] = [];
-
-  // 1. messaging_product
-  chunks.push(Buffer.from(`--${boundary}\r\n`));
-  chunks.push(Buffer.from(`Content-Disposition: form-data; name="messaging_product"\r\n\r\n`));
-  chunks.push(Buffer.from(`whatsapp\r\n`));
-
-  // 2. type — MIME type completo (ex: "audio/ogg; codecs=opus"), igual ao
-  // Content-Type da parte "file" abaixo — nunca uma categoria genérica.
-  chunks.push(Buffer.from(`--${boundary}\r\n`));
-  chunks.push(Buffer.from(`Content-Disposition: form-data; name="type"\r\n\r\n`));
-  chunks.push(Buffer.from(`${mimeType}\r\n`));
-
-  // 3. file — Content-Type aqui é o MIME type real (ex: "audio/ogg; codecs=opus")
-  chunks.push(Buffer.from(`--${boundary}\r\n`));
-  chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`));
-  chunks.push(Buffer.from(`Content-Type: ${cleanMimeType}\r\n\r\n`));
-  chunks.push(mediaBuffer);
-  chunks.push(Buffer.from(`\r\n`));
-
-  // Fim
-  chunks.push(Buffer.from(`--${boundary}--\r\n`));
-
-  const body = Buffer.concat(chunks);
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mimeType);
+  form.append('file', new Blob([mediaBuffer], { type: mimeType }), filename);
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/media`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      'Content-Length': body.length.toString(),
-    },
-    body: body as any,
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
   });
 
   const data = await res.json().catch(() => ({}));
