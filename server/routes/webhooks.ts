@@ -98,7 +98,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           // issue) ser avisada. Nunca deixa o WhatsApp mudo: manda uma
           // mensagem de espera genérica, além do escalonamento de sempre.
           await sendBubbles(channel, phone, ['Peço desculpa pela demora — tivemos uma instabilidade rápida aqui do nosso lado. Já te retorno em instantes!'], async (bubbleText) => {
-            await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+            await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
           }, messageId);
           return;
         }
@@ -108,7 +108,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
         }
         await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
-          await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) });
+          await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
           console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
       } catch (err: any) {

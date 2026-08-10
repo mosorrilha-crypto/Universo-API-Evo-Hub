@@ -213,6 +213,8 @@ export interface ChatMessage {
   /** presente quando o texto foi editado depois de enviado. */
   editedAt?: string;
   reactions?: MessageReaction[];
+  /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel. */
+  sentBy?: 'ai' | 'operator';
 }
 
 export interface ExtractedCRMData {

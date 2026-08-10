@@ -2464,9 +2464,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           className={`max-w-[85%] rounded-xl p-2.5 shadow-md space-y-1 text-xs relative ${
                             isLead
                               ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none border border-slate-700/50'
-                              : 'bg-[#005c4b] text-white rounded-tr-none shadow-emerald-950/40'
+                              : msg.sentBy === 'operator'
+                                ? 'bg-[#1f4287] text-white rounded-tr-none shadow-blue-950/40'
+                                : 'bg-[#005c4b] text-white rounded-tr-none shadow-emerald-950/40'
                           }`}
                         >
+                          {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. */}
+                          {!isLead && msg.sentBy && (
+                            <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide opacity-70">
+                              {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5" /> : <UserCheck className="w-2.5 h-2.5" />}
+                              {msg.sentBy === 'ai' ? 'IA' : 'Operador'}
+                            </div>
+                          )}
+
                           {msg.forwardedFromMessageId && (
                             <div className="flex items-center gap-1 text-[9px] italic opacity-60">
                               <Forward className="w-2.5 h-2.5" /> Encaminhada

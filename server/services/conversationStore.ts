@@ -34,6 +34,8 @@ export interface StoredMessage {
   /** presente quando o texto foi editado depois de enviado — só mensagens do agente/operador podem ser editadas. */
   editedAt?: string;
   reactions?: MessageReaction[];
+  /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel (ver issue #126). */
+  sentBy?: 'ai' | 'operator';
 }
 
 export interface GeoRestriction {
@@ -98,6 +100,7 @@ type MessageRow = {
   forwarded_from_message_id: string | null;
   edited_at: string | null;
   reactions: MessageReaction[] | null;
+  sent_by: 'ai' | 'operator' | null;
 };
 
 /** Conta mensagens do lead chegadas depois de lastReadAt — extraída à parte pra ser testável sem depender do formato de embed relacional do Supabase. */
@@ -131,11 +134,12 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
         forwardedFromMessageId: m.forwarded_from_message_id || undefined,
         editedAt: m.edited_at || undefined,
         reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
+        sentBy: m.sent_by || undefined,
       })),
   };
 }
 
-const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, edited_at, reactions)';
+const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, edited_at, reactions, sent_by)';
 
 /** Resolve o telefone da conversa a partir do id (usado por mutações que só têm o id da mensagem, não o telefone) e dispara o evento. */
 async function emitUpdatedByConversationId(tenantId: string, conversationId: string): Promise<void> {
@@ -267,6 +271,8 @@ export async function recordOutgoingMessage(
   tenantId: string,
   phone: string,
   message: Omit<StoredMessage, 'id' | 'sender'>,
+  /** Quem gerou esta mensagem de verdade — resposta automática da IA ou digitada manualmente por um operador no painel (ver issue #126). Sempre obrigatório: toda chamada precisa decidir explicitamente qual dos dois é. */
+  sentBy: 'ai' | 'operator',
   replyToMessageId?: string,
   forwardedFromMessageId?: string,
   /** ID pré-gerado pra essa mensagem — usado quando quem chama precisa saber o id ANTES de gravar (ex: pra salvar a mídia real sob o mesmo id em mediaImageStore, ver /send-media em conversations.ts). Sem isso, o id só existia dentro desta função e ninguém conseguia associar o áudio/imagem enviado à mensagem gravada. */
@@ -286,6 +292,7 @@ export async function recordOutgoingMessage(
       text: message.text ?? null,
       reply_to_message_id: replyToMessageId || null,
       forwarded_from_message_id: forwardedFromMessageId || null,
+      sent_by: sentBy,
     });
   if (error) {
     // Mesmo bug do recordIncomingMessage (ver comentário lá): engolir o erro
@@ -316,6 +323,7 @@ export async function forwardMessage(tenantId: string, messageId: string, toPhon
     tenantId,
     toPhone,
     { type: original.type, text: original.text ?? undefined, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
+    'operator', // encaminhar é sempre uma ação manual do operador clicando no painel
     undefined,
     original.id
   );

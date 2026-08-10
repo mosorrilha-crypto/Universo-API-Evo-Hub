@@ -31,6 +31,7 @@ describe('recordOutgoingMessage — customId', () => {
       TENANT_A,
       '595981111111',
       { type: 'audio', text: '🎤 Áudio enviado', timestamp: '10:00' },
+      'operator',
       undefined,
       undefined,
       'meu-id-fixo-123'
@@ -41,7 +42,7 @@ describe('recordOutgoingMessage — customId', () => {
   });
 
   it('sem customId, continua gerando um id automático (compatibilidade)', async () => {
-    await recordOutgoingMessage(TENANT_A, '595981111111', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await recordOutgoingMessage(TENANT_A, '595981111111', { type: 'text', text: 'oi', timestamp: '10:00' }, 'operator');
     const rows = supabase.__tables.messages;
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toMatch(/^wa-/);
