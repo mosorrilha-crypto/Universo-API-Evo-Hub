@@ -2547,7 +2547,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   </div>
                                 </div>
                               )}
-                              {!msg.mediaUrl && (selectedLead as any)?.isReal && msg.sender === 'lead' && (
+                              {/* Achado ao vivo: imagens que O PRÓPRIO operador enviava (upload
+                                  pelo painel, POST /send-media) nunca apareciam — RealClientImage
+                                  só carregava pra mensagens do lead (msg.sender === 'lead'), então
+                                  uma imagem nossa sem mediaUrl caía direto no fallback de texto puro
+                                  ("📎 nome-do-arquivo.png"), sem preview nenhum. GET /api/media/:messageId
+                                  já serve mídia enviada nos dois sentidos (ver /send-media em
+                                  conversations.ts, que salva sob o mesmo messageId da mensagem) — só
+                                  faltava carregar pro sender 'agent' também. */}
+                              {!msg.mediaUrl && (selectedLead as any)?.isReal && (
                                 <RealClientImage messageId={msg.id} onOpen={setViewImageUrl} />
                               )}
                               <p className="text-xs">{msg.text}</p>

@@ -1,4 +1,5 @@
 import type { GoogleGenAI } from '@google/genai';
+import { withGeminiRetry } from '../gemini';
 
 export interface TranscriptionResult {
   transcription: string;
@@ -46,21 +47,28 @@ ${opts.customInstructions || ''}`;
 
       const cleanBase64 = audioBase64.replace(/^data:audio\/\w+;base64,/, '');
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [
-          {
-            inlineData: {
-              data: cleanBase64,
-              mimeType: mimeType || 'audio/ogg',
+      // Achado ao vivo: essa era a única chamada Gemini do projeto ainda sem
+      // withGeminiRetry (autoReply.ts e as rotas de análise já tinham, ver
+      // PR #103) — uma falha transitória (503/429/timeout) caía direto no
+      // fallback "[Não foi possível transcrever o áudio no momento]" na
+      // primeira tentativa, sem nenhuma segunda chance.
+      const response = await withGeminiRetry(() =>
+        ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: [
+            {
+              inlineData: {
+                data: cleanBase64,
+                mimeType: mimeType || 'audio/ogg',
+              },
             },
+            { text: prompt },
+          ],
+          config: {
+            responseMimeType: 'application/json',
           },
-          { text: prompt },
-        ],
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+        })
+      );
 
       const rawText = response.text || '';
       const parsed = JSON.parse(rawText);

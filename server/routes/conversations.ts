@@ -344,11 +344,25 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       const mimeType = product.exampleImageMimeType || 'image/jpeg';
       const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, product.exampleImageBase64, mimeType, `${productName}.jpg`);
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, productName);
-      const conv = await recordOutgoingMessage(tenantId, req.params.phone, {
-        type: 'image',
-        text: `📷 Foto de exemplo: ${productName}`,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      });
+      // Mesmo padrão do /send-media (ver comentário lá): gera o id ANTES de
+      // gravar pra poder salvar a imagem real sob o mesmo id — sem isso, o
+      // painel tenta buscar a mídia por messageId e nunca encontra nada
+      // (achado ao extender o carregamento de imagem real pras mensagens QUE
+      // NÓS enviamos, não só as do lead).
+      const messageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        req.params.phone,
+        {
+          type: 'image',
+          text: `📷 Foto de exemplo: ${productName}`,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        undefined,
+        undefined,
+        messageId
+      );
+      await saveMediaImage(supabaseUrl, supabaseKey, messageId, product.exampleImageBase64, mimeType);
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
