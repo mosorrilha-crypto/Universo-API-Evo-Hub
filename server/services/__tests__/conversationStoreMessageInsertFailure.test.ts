@@ -45,7 +45,7 @@ describe('conversationStore — falha ao gravar mensagem', () => {
 
   it('recordOutgoingMessage relança o erro em vez de engolir', async () => {
     await expect(
-      recordOutgoingMessage('tenant-1', '595981828280', { type: 'text', text: 'oi, tudo bem?', timestamp: '10:00' })
+      recordOutgoingMessage('tenant-1', '595981828280', { type: 'text', text: 'oi, tudo bem?', timestamp: '10:00' }, 'ai')
     ).rejects.toThrow('Falha ao gravar mensagem enviada');
   });
 });

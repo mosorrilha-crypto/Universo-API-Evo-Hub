@@ -147,6 +147,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           text: text.trim(),
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         },
+        'operator',
         typeof replyToMessageId === 'string' ? replyToMessageId : undefined
       );
       res.json({ success: true, conversation: conv });
@@ -194,6 +195,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           text: msgType === 'audio' ? '🎤 Áudio enviado' : (caption || `📎 ${filename || 'Arquivo enviado'}`),
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         },
+        'operator',
         undefined,
         undefined,
         messageId
@@ -348,7 +350,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         type: 'image',
         text: `📷 Foto de exemplo: ${productName}`,
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      });
+      }, 'operator');
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
