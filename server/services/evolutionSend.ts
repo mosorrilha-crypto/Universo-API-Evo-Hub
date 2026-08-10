@@ -36,6 +36,44 @@ export async function sendEvolutionTextMessage(
   }
 }
 
+/** Envio de mídia (imagem, áudio, documento) via Evolution API (POST /message/sendMedia/{instance}). */
+export async function sendEvolutionMediaMessage(
+  instanceName: string | undefined,
+  apiUrl: string | undefined,
+  apiKey: string | undefined,
+  to: string,
+  base64: string,
+  mimeType: string,
+  filename: string,
+  caption?: string
+): Promise<void> {
+  requireCredentials(instanceName, apiUrl, apiKey);
+
+  const isAudio = mimeType.startsWith('audio/');
+  const mediatype = isAudio ? 'audio' : mimeType.startsWith('image/') ? 'image' : 'document';
+
+  const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/message/sendMedia/${instanceName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: apiKey! },
+    body: JSON.stringify({
+      number: to,
+      media: base64,
+      mediatype,
+      mimetype: mimeType,
+      caption: isAudio ? undefined : caption,
+      fileName: filename,
+      delay: 1200,
+      isAudio: isAudio, // Essencial para que o áudio chegue como nota de voz (ícone de microfone)
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}) as any);
+    throw new Error(`Falha ao enviar mídia via Evolution API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
+  }
+}
+
 /**
  * Indicador "digitando..." via Evolution API (POST /chat/sendPresence/{instance}).
  * Mesmo espírito de `markAsReadAndShowTyping` (metaSend.ts): melhor esforço,

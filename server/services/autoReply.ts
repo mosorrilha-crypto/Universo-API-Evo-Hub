@@ -13,6 +13,7 @@ import { DEFAULT_SEGMENT, getTenantBusinessHours, type BusinessHours } from './t
 import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
+import { sendEvolutionMediaMessage } from './evolutionSend';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
@@ -23,8 +24,12 @@ const BUSINESS_TIMEZONE = 'America/Asuncion';
 
 /** Credenciais Meta pra fazer o agente enviar mídia de verdade (Epic 4.5.2) — mesmo par phone_number_id/access_token já resolvido por tenant em quem chama generateAutoReplyForText. */
 export interface MediaSendConfig {
+  provider?: 'meta' | 'evolution';
   phoneNumberId?: string;
   accessToken?: string;
+  evolutionInstanceName?: string;
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
 }
 
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
@@ -771,8 +776,24 @@ Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exe
 
   try {
     const mimeType = product.exampleImageMimeType || 'image/jpeg';
-    const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, product.exampleImageBase64, mimeType, `${product.name}.jpg`);
-    await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
+    const filename = `${product.name}.jpg`;
+    
+    if (mediaConfig.provider === 'evolution') {
+      await sendEvolutionMediaMessage(
+        mediaConfig.evolutionInstanceName,
+        mediaConfig.evolutionApiUrl,
+        mediaConfig.evolutionApiKey,
+        phone,
+        product.exampleImageBase64,
+        mimeType,
+        filename,
+        product.name
+      );
+    } else {
+      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, product.exampleImageBase64, mimeType, filename);
+      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
+    }
+
     await recordOutgoingMessage(tenantId, phone, {
       type: 'image',
       text: `📷 Foto de exemplo: ${product.name}`,

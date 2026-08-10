@@ -106,6 +106,9 @@ async function startServer() {
     jwtSecret: config.jwtSecret,
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
   }));

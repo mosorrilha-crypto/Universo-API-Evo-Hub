@@ -16,6 +16,8 @@ import {
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
+import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping } from '../services/evolutionSend';
+import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
@@ -32,6 +34,9 @@ interface ConversationsRouterDeps {
   jwtSecret: string;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  evolutionInstanceName?: string;
   supabaseUrl?: string;
   supabaseKey?: string;
 }
@@ -61,8 +66,12 @@ function tenantOf(req: AuthenticatedRequest): string {
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, supabaseUrl, supabaseKey }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey }: ConversationsRouterDeps): Router {
   const router = Router();
+  // Anexa as credenciais compartilhadas ao objeto router para uso nos handlers
+  (router as any).evolutionApiUrl = evolutionApiUrl;
+  (router as any).evolutionApiKey = evolutionApiKey;
+  (router as any).evolutionInstanceName = evolutionInstanceName;
 
   /**
    * Avisa o painel em tempo real quando uma conversa muda, no lugar do
@@ -139,6 +148,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     try {
+      // Isolando Evolution por enquanto para garantir que a Meta funcione
       await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, text.trim());
       const conv = await recordOutgoingMessage(
         tenantId,
@@ -168,27 +178,6 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     try {
-      // Achado real em produção ("o áudio sai mas não chega"): a Meta ACEITA
-      // o upload de audio/webm (o que o navegador grava por padrão em alguns
-      // casos) e o envio retorna sucesso — mas o áudio nunca toca como nota
-      // de voz de verdade no WhatsApp do cliente, uma falha silenciosa sem
-      // erro nenhum de volta.
-      //
-      // Segunda rodada do mesmo bug: a primeira correção só transcodificava
-      // quando o mimeType NÃO estava na lista que a Meta documenta como
-      // aceita (aac/mp4/mpeg/amr/ogg) — mas confirmado ao vivo com áudios
-      // reais que continuaram não chegando: o Chrome reporta suporte a
-      // "audio/mp4" e o MediaRecorder até produz um MP4 tecnicamente válido,
-      // só que com o codec Opus dentro (Opus-em-MP4), não AAC. A Meta aceita
-      // o upload (só olha o container/extensão) mas o WhatsApp não reproduz
-      // esse combo como nota de voz. Reproduzido de propósito: gravei via
-      // Chrome headless real (MediaRecorder, mesmo código do painel) e
-      // confirmei via ffprobe que o arquivo tem "Audio: opus" dentro de um
-      // container "mov,mp4,m4a" — válido como arquivo, mas não é o que o
-      // WhatsApp espera de um audio/mp4. Não dá pra confiar no mimeType que o
-      // navegador reporta pra decidir se pula a conversão — todo áudio
-      // gravado no navegador sempre passa pelo ffmpeg antes de subir
-      // (imagens/documentos não passam por isso, só áudio).
       let uploadBase64 = base64;
       let uploadMimeType = mimeType as string;
       let uploadFilename = filename || 'arquivo';
@@ -196,18 +185,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
         uploadMimeType = transcoded.mimeType;
-        // Achado ao vivo (via o novo log de status da Meta, PR #132): a
-        // Meta rejeitava o áudio já convertido com "processing it is of
-        // type application/octet-stream" mesmo o conteúdo sendo Ogg/Opus
-        // válido (confirmado via ffprobe) — porque o filename continuava
-        // sendo o original (ex: "audio.mp4"), com a EXTENSÃO do formato de
-        // antes da conversão, enquanto os bytes já eram Ogg. Sem isso a
-        // extensão do arquivo enviado nunca bate com o conteúdo real.
         uploadFilename = 'audio.ogg';
       }
 
+      // Isolando Evolution: forçando Meta
       const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, uploadBase64, uploadMimeType, uploadFilename);
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, uploadMimeType, caption);
+      
       const msgType = uploadMimeType.startsWith('image/') ? 'image' : uploadMimeType.startsWith('audio/') ? 'audio' : 'file';
       // Achado real em produção ("o áudio não fica na conversa"): a Meta
       // recebe o áudio/imagem de verdade, mas nós nunca guardávamos uma
@@ -377,8 +361,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     try {
       const mimeType = product.exampleImageMimeType || 'image/jpeg';
+      // Isolando Evolution: forçando Meta
       const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, product.exampleImageBase64, mimeType, `${productName}.jpg`);
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, productName);
+      
       // Mesmo padrão do /send-media (ver comentário lá): gera o id ANTES de
       // gravar pra poder salvar a imagem real sob o mesmo id — sem isso, o
       // painel tenta buscar a mídia por messageId e nunca encontra nada

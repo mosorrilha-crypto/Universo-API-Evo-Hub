@@ -155,20 +155,34 @@ export async function uploadWhatsAppMedia(
   // no ambiente do servidor, resultando em "application/octet-stream" na Meta.
   // Montamos o multipart manualmente para garantir que o boundary e os 
   // headers de cada parte (especialmente o Content-Type) sejam explícitos.
-  const boundary = `----WebKitFormBoundary${Math.random().toString(36).slice(2)}`;
+  // Voltando para a montagem manual do multipart, mas com precisão cirúrgica.
+  // O FormData nativo do Node 22+ (Undici) às vezes oculta ou altera o Content-Type das partes,
+  // o que faz a Meta classificar o arquivo como "application/octet-stream" internamente.
+  const category = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
+  const cleanMimeType = mimeType.split(';')[0].trim();
+  const boundary = `----WebKitFormBoundary${crypto.randomBytes(8).toString('hex')}`;
   
   const chunks: Buffer[] = [];
   
-  // Parte 1: messaging_product
-  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="messaging_product"\r\n\r\nwhatsapp\r\n`));
+  // 1. messaging_product
+  chunks.push(Buffer.from(`--${boundary}\r\n`));
+  chunks.push(Buffer.from(`Content-Disposition: form-data; name="messaging_product"\r\n\r\n`));
+  chunks.push(Buffer.from(`whatsapp\r\n`));
   
-  // Parte 2: type
-  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="type"\r\n\r\n${mimeType}\r\n`));
+  // 2. type
+  chunks.push(Buffer.from(`--${boundary}\r\n`));
+  chunks.push(Buffer.from(`Content-Disposition: form-data; name="type"\r\n\r\n`));
+  chunks.push(Buffer.from(`${category}\r\n`));
   
-  // Parte 3: file
-  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`));
+  // 3. file (O Content-Type aqui é o que a Meta usa para validar o arquivo)
+  chunks.push(Buffer.from(`--${boundary}\r\n`));
+  chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`));
+  chunks.push(Buffer.from(`Content-Type: ${cleanMimeType}\r\n\r\n`));
   chunks.push(buffer);
-  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  chunks.push(Buffer.from(`\r\n`));
+  
+  // Fim
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
 
   const body = Buffer.concat(chunks);
 

@@ -150,3 +150,60 @@ export async function resolveMetaCredentialsForTenant(
   }
   return shared;
 }
+
+/**
+ * Busca completa: resolve qual provedor e quais credenciais usar para um tenant específico.
+ * Tenta Evolution primeiro, depois Meta (específica), e cai na Meta compartilhada se nada existir.
+ */
+export async function resolveCredentialsForTenant(
+  tenantId: string,
+  sharedMeta: SharedMetaCredentials,
+  sharedEvo: SharedEvolutionCredentials
+): Promise<ResolvedTenant> {
+  try {
+    const db = getDb();
+    
+    // Tenta Evolution primeiro (Porta A)
+    const { data: evo } = await db
+      .from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    
+    if (evo) {
+      return {
+        tenantId,
+        provider: 'evolution',
+        evolutionInstanceName: evo.instance_name,
+        evolutionApiUrl: evo.api_url || sharedEvo.evolutionApiUrl,
+        evolutionApiKey: evo.api_key || sharedEvo.evolutionApiKey,
+      };
+    }
+
+    // Tenta Meta específica
+    const { data: meta } = await db
+      .from('tenant_meta_credentials')
+      .select('access_token, phone_number_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    
+    if (meta) {
+      return {
+        tenantId,
+        provider: 'meta',
+        metaAccessToken: meta.access_token || sharedMeta.metaAccessToken,
+        metaPhoneNumberId: meta.phone_number_id || sharedMeta.metaPhoneNumberId,
+      };
+    }
+  } catch (err) {
+    console.warn('⚠️  [Tenant] Falha ao resolver credenciais completas, usando fallback Meta:', (err as Error).message);
+  }
+
+  // Fallback para Meta compartilhada
+  return {
+    tenantId,
+    provider: 'meta',
+    metaAccessToken: sharedMeta.metaAccessToken,
+    metaPhoneNumberId: sharedMeta.metaPhoneNumberId,
+  };
+}

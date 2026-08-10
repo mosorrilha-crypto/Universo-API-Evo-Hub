@@ -43,6 +43,7 @@ export async function transcodeToWhatsAppVoiceNote(
         '-vn',
         '-c:a', 'libopus',
         '-ac', '1',
+        '-ar', '16000', // Frequência padrão para notas de voz no WhatsApp
         '-b:a', '32k',
         '-f', 'ogg',
         outputPath,
@@ -67,7 +68,7 @@ export async function transcodeToWhatsAppVoiceNote(
     if (magic !== 'OggS') {
       console.warn(`⚠️  [audioTranscode] Saída do ffmpeg NÃO começa com a assinatura Ogg — provável causa da rejeição da Meta.`);
     }
-    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg; codecs=opus' };
+    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg' };
   } finally {
     await fs.unlink(inputPath).catch(() => {});
     await fs.unlink(outputPath).catch(() => {});
