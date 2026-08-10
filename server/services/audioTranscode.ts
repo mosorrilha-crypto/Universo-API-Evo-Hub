@@ -57,7 +57,10 @@ export async function transcodeToWhatsAppVoiceNote(
     });
 
     const outputBuffer = await fs.readFile(outputPath);
-    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg' };
+    // "; codecs=opus" explícito — é como a própria Meta declara nota de voz
+    // (ver erro real reproduzido: mesmo com bytes Ogg/Opus válidos, um
+    // Content-Type "audio/ogg" puro/genérico já foi rejeitado). Nunca omitir.
+    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg; codecs=opus' };
   } finally {
     await fs.unlink(inputPath).catch(() => {});
     await fs.unlink(outputPath).catch(() => {});

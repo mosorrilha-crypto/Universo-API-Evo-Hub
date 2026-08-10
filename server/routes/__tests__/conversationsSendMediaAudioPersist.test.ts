@@ -14,6 +14,14 @@
  * é na verdade Opus dentro de um container MP4, não AAC — a Meta aceita o
  * upload mas o WhatsApp não reproduz. Por isso TODO áudio agora passa pela
  * transcodificação, sem exceção por mimeType.
+ *
+ * Terceira rodada: mesmo depois da transcodificação garantida, a Meta ainda
+ * rejeitava o upload — achado via o log de status (PR #132) que ela reporta
+ * "processing it is of type application/octet-stream" mesmo com bytes
+ * Ogg/Opus válidos (confirmado via ffprobe). Causa: o filename enviado
+ * continuava sendo o ORIGINAL (ex: "audio.mp4"), com a extensão de antes da
+ * conversão — descasando com o conteúdo real. Corrigido pra sempre usar
+ * "audio.ogg" quando a transcodificação roda.
  */
 import express from 'express';
 import type { Server } from 'http';
@@ -24,7 +32,7 @@ import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
 const saveMediaImage = vi.fn(async (_supabaseUrl?: string, _supabaseKey?: string, _messageId?: string, _base64?: string, _mimeType?: string) => undefined);
-const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: string) => ({ base64: 'T0dHLWNvbnZlcnRpZG8=', mimeType: 'audio/ogg' }));
+const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: string) => ({ base64: 'T0dHLWNvbnZlcnRpZG8=', mimeType: 'audio/ogg; codecs=opus' }));
 
 vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
@@ -94,12 +102,14 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(res.status).toBe(200);
 
     expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('bXA0LWZha2U=', 'audio/mp4');
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'T0dHLWNvbnZlcnRpZG8=', 'audio/ogg', 'audio.mp4');
+    // Filename SEMPRE "audio.ogg" quando transcodifica — nunca o nome
+    // original (que teria a extensão de antes da conversão, ex: .mp4).
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'T0dHLWNvbnZlcnRpZG8=', 'audio/ogg; codecs=opus', 'audio.ogg');
 
     expect(saveMediaImage).toHaveBeenCalledTimes(1);
     const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
     expect(savedBase64).toBe('T0dHLWNvbnZlcnRpZG8=');
-    expect(savedMimeType).toBe('audio/ogg');
+    expect(savedMimeType).toBe('audio/ogg; codecs=opus');
 
     // O id usado pra salvar a mídia precisa ser o MESMO id da mensagem
     // gravada na conversa (tabela crua — fakeSupabase não emula o embedded
@@ -120,8 +130,9 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(res.status).toBe(200);
 
     expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('d2VibS1mYWtl', 'audio/webm;codecs=opus');
-    // A Meta recebe a versão JÁ CONVERTIDA (Ogg), nunca o webm original.
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'T0dHLWNvbnZlcnRpZG8=', 'audio/ogg', 'audio.webm');
+    // A Meta recebe a versão JÁ CONVERTIDA (Ogg) com filename consistente,
+    // nunca o webm original nem o filename "audio.webm" antigo.
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'T0dHLWNvbnZlcnRpZG8=', 'audio/ogg; codecs=opus', 'audio.ogg');
   });
 
   it('NÃO transcodifica mídia que não é áudio (imagem passa direto)', async () => {
