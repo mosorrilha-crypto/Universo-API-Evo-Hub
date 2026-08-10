@@ -150,15 +150,36 @@ export async function uploadWhatsAppMedia(
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 
-  const form = new FormData();
-  form.append('messaging_product', 'whatsapp');
-  form.append('file', new Blob([buffer], { type: mimeType }), filename);
-  form.append('type', mimeType);
+  // Achado real: O FormData nativo do Node/Undici (usado pelo fetch global) 
+  // não lida bem com a serialização de Blobs se não for montado com cuidado 
+  // no ambiente do servidor, resultando em "application/octet-stream" na Meta.
+  // Montamos o multipart manualmente para garantir que o boundary e os 
+  // headers de cada parte (especialmente o Content-Type) sejam explícitos.
+  const boundary = `----WebKitFormBoundary${Math.random().toString(36).slice(2)}`;
+  
+  const chunks: Buffer[] = [];
+  
+  // Parte 1: messaging_product
+  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="messaging_product"\r\n\r\nwhatsapp\r\n`));
+  
+  // Parte 2: type
+  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="type"\r\n\r\n${mimeType}\r\n`));
+  
+  // Parte 3: file
+  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`));
+  chunks.push(buffer);
+  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+  const body = Buffer.concat(chunks);
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/media`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body: form as any,
+    headers: { 
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      'Content-Length': body.length.toString()
+    },
+    body: body as any,
   });
 
   const data = await res.json().catch(() => ({}));
