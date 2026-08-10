@@ -57,9 +57,16 @@ export async function transcodeToWhatsAppVoiceNote(
     });
 
     const outputBuffer = await fs.readFile(outputPath);
-    // "; codecs=opus" explícito — é como a própria Meta declara nota de voz
-    // (ver erro real reproduzido: mesmo com bytes Ogg/Opus válidos, um
-    // Content-Type "audio/ogg" puro/genérico já foi rejeitado). Nunca omitir.
+    // Diagnóstico temporário (achado real: a Meta reporta "processing it is
+    // of type application/octet-stream" mesmo com Content-Type/filename
+    // corretos) — confirma aqui mesmo, no ambiente real de produção, se o
+    // ffmpeg do Render está de fato produzindo um Ogg válido (assinatura
+    // "OggS" nos primeiros 4 bytes) antes de sequer chegar no upload.
+    const magic = outputBuffer.subarray(0, 4).toString('ascii');
+    console.log(`🎙️  [audioTranscode] input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic}" (esperado "OggS")`);
+    if (magic !== 'OggS') {
+      console.warn(`⚠️  [audioTranscode] Saída do ffmpeg NÃO começa com a assinatura Ogg — provável causa da rejeição da Meta.`);
+    }
     return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg; codecs=opus' };
   } finally {
     await fs.unlink(inputPath).catch(() => {});
