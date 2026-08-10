@@ -25,8 +25,9 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     const mediaId = await sendWhatsAppAudioMessage('pn', 'tok', '595981111111', buf, 'audio/ogg');
 
     expect(mediaId).toBe('media-123');
-    // Duas chamadas: uma pro /media (upload) e outra pro /messages (send)
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    // Três chamadas: /media (upload), GET /{media_id} (diagnóstico — só pra
+    // áudio, ver comentário em uploadWhatsAppMedia) e /messages (send).
+    expect(global.fetch).toHaveBeenCalledTimes(3);
     
     // Verifica a segunda chamada (o envio da mensagem) — "voice: true" marca
     // como nota de voz de verdade (waveform), exigido pela Meta pra áudio

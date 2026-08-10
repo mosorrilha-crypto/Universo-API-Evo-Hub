@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 /**
  * Marca a mensagem recebida como lida e ativa o indicador "digitando..." no
  * celular do cliente — mesmo mecanismo usado no whatsapp-agent-monique
@@ -184,6 +186,31 @@ export async function uploadWhatsAppMedia(
   if (!data.id) {
     throw new Error('Resposta da Meta não retornou um media_id válido após o upload.');
   }
+
+  // Diagnóstico temporário (erro 131053 "however on processing it is of
+  // type application/octet-stream" persistiu de forma idêntica através de
+  // 3 rodadas de correção de multipart/mimetype — inclusive o próprio
+  // texto do erro nunca mudou mesmo quando o mimeType enviado mudou, sinal
+  // de que é uma mensagem fixa/genérica e não reflete o que enviamos de
+  // verdade). Em vez de continuar adivinhando, consulta a Meta o que ela
+  // efetivamente registrou pro media_id — mime_type, tamanho e sha256 —
+  // pra comparar com o que geramos localmente e descobrir se a divergência
+  // (se houver) já existe logo após o upload, ou só aparece depois.
+  if (mimeType.startsWith('audio/')) {
+    try {
+      const infoRes = await fetch(`https://graph.facebook.com/v23.0/${data.id}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const info = await infoRes.json().catch(() => ({}) as any);
+      const localSha256 = crypto.createHash('sha256').update(mediaBuffer).digest('hex');
+      console.log(
+        `🔎 [uploadWhatsAppMedia] media_id=${data.id} — Meta: mime_type="${info?.mime_type}" file_size=${info?.file_size} sha256=${info?.sha256} | local: size=${mediaBuffer.length} sha256=${localSha256} sha256_bate=${info?.sha256 === localSha256}`
+      );
+    } catch (err) {
+      console.warn('⚠️  [uploadWhatsAppMedia] Falha ao consultar diagnóstico do media_id na Meta:', (err as Error).message);
+    }
+  }
+
   return data.id;
 }
 
