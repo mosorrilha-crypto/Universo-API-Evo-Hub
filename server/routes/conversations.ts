@@ -184,7 +184,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
-        uploadMimeType = transcoded.mimeType;
+        uploadMimeType = 'audio/ogg; codecs=opus';
         uploadFilename = 'audio.ogg';
       }
 

@@ -58,6 +58,6 @@ export async function getMediaImage(
   });
   if (!res.ok) return null;
   const buffer = Buffer.from(await res.arrayBuffer());
-  const contentType = res.headers.get('content-type') || 'image/jpeg';
+  const contentType = res.headers.get('content-type') || (messageId.startsWith('wa-') ? 'audio/ogg; codecs=opus' : 'image/jpeg');
   return { buffer, contentType };
 }
