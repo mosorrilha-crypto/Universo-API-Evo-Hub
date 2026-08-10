@@ -21,7 +21,7 @@ import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseSto
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
-import { isMetaAcceptedAudioMimeType, transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
+import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -172,13 +172,26 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       // o upload de audio/webm (o que o navegador grava por padrão em alguns
       // casos) e o envio retorna sucesso — mas o áudio nunca toca como nota
       // de voz de verdade no WhatsApp do cliente, uma falha silenciosa sem
-      // erro nenhum de volta (a checagem antiga só rejeitava webm com um erro
-      // claro, mas isso não resolvia o problema, só evitava um caso). O único
-      // formato garantido de funcionar é Ogg/Opus — reencoda antes de subir
-      // sempre que o formato recebido não é um dos aceitos pela Meta.
+      // erro nenhum de volta.
+      //
+      // Segunda rodada do mesmo bug: a primeira correção só transcodificava
+      // quando o mimeType NÃO estava na lista que a Meta documenta como
+      // aceita (aac/mp4/mpeg/amr/ogg) — mas confirmado ao vivo com áudios
+      // reais que continuaram não chegando: o Chrome reporta suporte a
+      // "audio/mp4" e o MediaRecorder até produz um MP4 tecnicamente válido,
+      // só que com o codec Opus dentro (Opus-em-MP4), não AAC. A Meta aceita
+      // o upload (só olha o container/extensão) mas o WhatsApp não reproduz
+      // esse combo como nota de voz. Reproduzido de propósito: gravei via
+      // Chrome headless real (MediaRecorder, mesmo código do painel) e
+      // confirmei via ffprobe que o arquivo tem "Audio: opus" dentro de um
+      // container "mov,mp4,m4a" — válido como arquivo, mas não é o que o
+      // WhatsApp espera de um audio/mp4. Não dá pra confiar no mimeType que o
+      // navegador reporta pra decidir se pula a conversão — todo áudio
+      // gravado no navegador sempre passa pelo ffmpeg antes de subir
+      // (imagens/documentos não passam por isso, só áudio).
       let uploadBase64 = base64;
       let uploadMimeType = mimeType as string;
-      if (typeof mimeType === 'string' && mimeType.startsWith('audio/') && !isMetaAcceptedAudioMimeType(mimeType)) {
+      if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
         uploadMimeType = transcoded.mimeType;

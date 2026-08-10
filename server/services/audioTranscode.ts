@@ -7,24 +7,16 @@ import crypto from 'crypto';
 import ffmpegPath from 'ffmpeg-static';
 
 /**
- * Formatos que a Meta Cloud API realmente aceita E reproduz como nota de voz.
- * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media
- */
-const META_ACCEPTED_AUDIO_PREFIXES = ['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr', 'audio/ogg'];
-
-export function isMetaAcceptedAudioMimeType(mimeType: string): boolean {
-  return META_ACCEPTED_AUDIO_PREFIXES.some((prefix) => mimeType.startsWith(prefix));
-}
-
-/**
- * Achado real em produção ("o áudio sai mas não chega"): o navegador (Chrome,
- * o mais comum) grava em audio/webm — a Meta ACEITA o upload desse container
- * (retorna 200, nossa UI mostra ✓✓), mas nunca toca como nota de voz de
- * verdade no WhatsApp do cliente, uma falha silenciosa sem erro nenhum de
- * volta. O único formato garantido de funcionar como nota de voz é Ogg com
- * codec Opus, mono — reencoda pra esse formato antes de subir, em vez de só
- * rejeitar o upload (como a checagem anterior fazia) ou torcer pra Meta
- * aceitar o container errado.
+ * Achado real em produção ("o áudio sai mas não chega"): o navegador grava um
+ * áudio (webm, ou mp4 com codec Opus dentro — Chrome reporta "audio/mp4"
+ * como suportado, mas o MediaRecorder produz Opus-em-MP4, não AAC-em-MP4). A
+ * Meta ACEITA o upload em qualquer um desses casos (retorna 200, nossa UI
+ * mostra ✓✓), mas nunca toca como nota de voz de verdade no WhatsApp do
+ * cliente — falha silenciosa sem erro nenhum de volta. Não dá pra confiar no
+ * mimeType que o navegador reporta pra decidir se pula a conversão (já foi
+ * tentado e ainda falhava ao vivo) — todo áudio gravado no navegador sempre
+ * passa por aqui antes de subir. O único formato garantido de funcionar como
+ * nota de voz é Ogg com codec Opus, mono.
  */
 export async function transcodeToWhatsAppVoiceNote(
   base64: string,
