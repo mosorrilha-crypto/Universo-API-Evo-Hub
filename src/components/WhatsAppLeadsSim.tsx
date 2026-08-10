@@ -219,8 +219,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
-  // Auto analysis toggle
-  const [autoAnalyze, setAutoAnalyze] = useState(true);
+  // Auto analysis toggle — achado real: o operador desligava (cada análise
+  // consome tokens reais do Gemini, ver tokenUsageStore.ts) mas ao atualizar
+  // a página voltava ligado sozinho, porque não persistia em lugar nenhum.
+  // Persiste em localStorage pra respeitar a última escolha do operador.
+  const [autoAnalyze, setAutoAnalyze] = useState(() => {
+    const saved = localStorage.getItem('saas_auto_analyze_ia');
+    return saved === null ? true : saved === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('saas_auto_analyze_ia', String(autoAnalyze));
+  }, [autoAnalyze]);
 
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
