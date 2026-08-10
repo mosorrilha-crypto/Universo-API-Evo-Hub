@@ -164,9 +164,10 @@ export async function uploadWhatsAppMedia(
   mimeType: string,
   filename: string
 ): Promise<string> {
-  if (!phoneNumberId || !accessToken) {
-    throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mídia via Meta Cloud API.');
-  }
+  if (!phoneNumberId) throw new Error('META_PHONE_NUMBER_ID ausente — não é possível fazer upload de mídia.');
+  if (!accessToken) throw new Error('META_ACCESS_TOKEN ausente — não é possível fazer upload de mídia.');
+  if (!base64) throw new Error('Conteúdo da mídia (base64) ausente.');
+  if (!mimeType) throw new Error('MIME type da mídia ausente.');
 
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
@@ -227,9 +228,10 @@ export async function sendWhatsAppMediaMessage(
   mimeType: string,
   caption?: string
 ): Promise<void> {
-  if (!phoneNumberId || !accessToken) {
-    throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mídia via Meta Cloud API.');
-  }
+  if (!phoneNumberId) throw new Error('META_PHONE_NUMBER_ID ausente — não é possível enviar mensagem de mídia.');
+  if (!accessToken) throw new Error('META_ACCESS_TOKEN ausente — não é possível enviar mensagem de mídia.');
+  if (!to) throw new Error('Destinatário (to) ausente.');
+  if (!mediaId) throw new Error('ID da mídia (mediaId) ausente.');
 
   // Mensagem de áudio da Meta não aceita "caption" (diferente de imagem/documento).
   const type = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
