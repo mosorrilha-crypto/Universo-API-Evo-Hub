@@ -68,7 +68,7 @@ export async function transcodeToWhatsAppVoiceNote(
     if (magic !== 'OggS') {
       console.warn(`⚠️  [audioTranscode] Saída do ffmpeg NÃO começa com a assinatura Ogg — provável causa da rejeição da Meta.`);
     }
-    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg' };
+    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg; codecs=opus' };
   } finally {
     await fs.unlink(inputPath).catch(() => {});
     await fs.unlink(outputPath).catch(() => {});

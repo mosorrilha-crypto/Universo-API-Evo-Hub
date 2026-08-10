@@ -185,7 +185,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
-        uploadMimeType = 'audio/ogg'; // Simplificado para maior compatibilidade no player do painel
+        // Mantém "; codecs=opus" — mesmo valor usado no Content-Type do upload
+        // pra Meta e persistido pro player do painel tocar de volta.
+        uploadMimeType = transcoded.mimeType;
         uploadFilename = 'audio.ogg';
         
         const audioBuffer = Buffer.from(uploadBase64, 'base64');
@@ -366,7 +368,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     try {
       const mimeType = product.exampleImageMimeType || 'image/jpeg';
       // Isolando Evolution: forçando Meta
-      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, product.exampleImageBase64, mimeType, `${productName}.jpg`);
+      const exampleImageBuffer = Buffer.from(product.exampleImageBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, exampleImageBuffer, mimeType, `${productName}.jpg`);
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, productName);
       
       // Mesmo padrão do /send-media (ver comentário lá): gera o id ANTES de
