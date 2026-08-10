@@ -140,22 +140,18 @@ export async function sendWhatsAppTemplateMessage(
  * Achado real em produção: o erro 131053 ("Audio file uploaded with
  * mimetype as audio/ogg; codecs=opus, however on processing it is of type
  * application/octet-stream") persistiu de forma IDÊNTICA através de várias
- * rodadas de correção — mesmo depois de confirmar (via assinatura "OggS"
- * checada no próprio servidor) que o ffmpeg gera um Ogg/Opus válido, e
- * mesmo com o Content-Type/campo "type" corretos. Ou seja, os bytes que a
- * Meta efetivamente recebe não batiam com o que gerávamos localmente — sinal
- * de corrupção em trânsito, não de conteúdo/contrato errados. A montagem
- * manual do multipart (boundary própria + Content-Length calculado à mão)
- * era a única peça nunca trocada nas tentativas anteriores. Trocado aqui
- * pelo FormData/Blob nativos do Node — undici monta o multipart inteiro
- * (boundary, Content-Type de cada parte, Content-Length/chunking) de forma
- * consistente com o que o parser da Meta espera, eliminando essa superfície
- * de bug inteira.
- *
- * Contrato do campo "type" do multipart (confirmado por documentação de
- * terceiros que replicam o comportamento oficial): é o MIME type completo
- * do arquivo (ex: "audio/ogg; codecs=opus", "image/jpeg") — nunca uma
- * categoria genérica ("audio"/"image").
+ * rodadas de correção que já descartaram: (a) conteúdo do arquivo — o
+ * ffmpeg gera um Ogg/Opus genuinamente válido, confirmado com "file"
+ * (libmagic) reconhecendo corretamente "Ogg data, Opus audio, ... 16000 Hz";
+ * (b) montagem do multipart — testado tanto à mão quanto com FormData/Blob
+ * nativos do Node, resultado idêntico. O que sobra: a lista de tipos de
+ * áudio documentados pela Meta usa o valor literal "audio/ogg" (sem
+ * parâmetro de codec) — só o texto da doc esclarece "codecs=opus" como
+ * requisito do CONTAINER, não como parte do MIME type a enviar. Todas as
+ * tentativas anteriores mandaram "; codecs=opus" em pelo menos um dos dois
+ * lugares (campo "type" do multipart e/ou Content-Type da parte "file").
+ * Aqui os dois usam o MIME type base, sem parâmetro — combinação ainda não
+ * testada nas rodadas anteriores.
  */
 export async function uploadWhatsAppMedia(
   phoneNumberId: string | undefined,
@@ -169,10 +165,11 @@ export async function uploadWhatsAppMedia(
   if (!mediaBuffer || mediaBuffer.length === 0) throw new Error('Buffer da mídia ausente ou vazio.');
   if (!mimeType) throw new Error('MIME type da mídia ausente.');
 
+  const cleanMimeType = mimeType.split(';')[0].trim();
   const form = new FormData();
   form.append('messaging_product', 'whatsapp');
-  form.append('type', mimeType);
-  form.append('file', new Blob([mediaBuffer], { type: mimeType }), filename);
+  form.append('type', cleanMimeType);
+  form.append('file', new Blob([mediaBuffer], { type: cleanMimeType }), filename);
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/media`, {
     method: 'POST',
