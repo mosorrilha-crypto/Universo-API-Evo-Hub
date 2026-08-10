@@ -777,7 +777,7 @@ Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exe
       type: 'image',
       text: `📷 Foto de exemplo: ${product.name}`,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    });
+    }, 'ai');
     return { actionsSummary: [`Enviou a foto de exemplo real de "${product.name}" pro cliente agora.`] };
   } catch (err: any) {
     return { actionsSummary: [`Tentou enviar a foto de "${product.name}" mas falhou (${err.message}) — não prometa que a foto foi enviada.`] };
