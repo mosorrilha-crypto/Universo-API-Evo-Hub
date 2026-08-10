@@ -6,6 +6,14 @@
  * polling), o áudio real sumia pra sempre, sem nenhuma forma de tocar de
  * novo. Trava que POST /send-media agora salva a mídia real via
  * mediaImageStore, sob o mesmo message_id gravado na conversa.
+ *
+ * Segunda rodada ("o áudio sai mas não chega"): a primeira versão desta
+ * transcodificação só rodava quando o mimeType não estava na lista que a
+ * Meta documenta como aceita — mas confirmado ao vivo (e reproduzido com
+ * Chrome headless real gravando via MediaRecorder) que "audio/mp4" do Chrome
+ * é na verdade Opus dentro de um container MP4, não AAC — a Meta aceita o
+ * upload mas o WhatsApp não reproduz. Por isso TODO áudio agora passa pela
+ * transcodificação, sem exceção por mimeType.
  */
 import express from 'express';
 import type { Server } from 'http';
@@ -23,14 +31,9 @@ vi.mock('../../services/metaSend', async (importOriginal) => {
   return { ...actual, uploadWhatsAppMedia, sendWhatsAppMediaMessage };
 });
 vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveMediaImage }));
-// ffmpeg real é lento/frágil em teste unitário (precisaria de um webm de
-// verdade pra decodificar) — mocka só a transcodificação em si, mantendo a
-// checagem real de isMetaAcceptedAudioMimeType (importActual) pra continuar
-// testando a decisão de QUANDO transcodificar, não só o resultado.
-vi.mock('../../services/audioTranscode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/audioTranscode')>();
-  return { ...actual, transcodeToWhatsAppVoiceNote };
-});
+// ffmpeg real é lento/frágil em teste unitário (precisaria de um arquivo de
+// áudio de verdade pra decodificar) — mocka só a transcodificação em si.
+vi.mock('../../services/audioTranscode', () => ({ transcodeToWhatsAppVoiceNote }));
 
 const { createConversationsRouter } = await import('../conversations');
 
@@ -82,18 +85,21 @@ beforeEach(() => {
 });
 
 describe('POST /api/conversations/:phone/send-media — persiste a mídia real (áudio/imagem)', () => {
-  it('salva o áudio real via mediaImageStore sob o mesmo message_id gravado na conversa', async () => {
+  it('transcodifica audio/mp4 também — Chrome reporta esse mimeType mas grava Opus dentro do MP4, que a Meta aceita e o WhatsApp não reproduz', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64: 'QUJD', mimeType: 'audio/mp4', filename: 'audio.mp4' }),
+      body: JSON.stringify({ base64: 'bXA0LWZha2U=', mimeType: 'audio/mp4', filename: 'audio.mp4' }),
     });
     expect(res.status).toBe(200);
 
+    expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('bXA0LWZha2U=', 'audio/mp4');
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'T0dHLWNvbnZlcnRpZG8=', 'audio/ogg', 'audio.mp4');
+
     expect(saveMediaImage).toHaveBeenCalledTimes(1);
     const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
-    expect(savedBase64).toBe('QUJD');
-    expect(savedMimeType).toBe('audio/mp4');
+    expect(savedBase64).toBe('T0dHLWNvbnZlcnRpZG8=');
+    expect(savedMimeType).toBe('audio/ogg');
 
     // O id usado pra salvar a mídia precisa ser o MESMO id da mensagem
     // gravada na conversa (tabela crua — fakeSupabase não emula o embedded
@@ -105,7 +111,7 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(savedMessage.id).toBe(savedMessageId);
   });
 
-  it('converte audio/webm pra Ogg/Opus antes de subir pra Meta e persistir — não toca mais como nota de voz sem isso', async () => {
+  it('converte audio/webm pra Ogg/Opus antes de subir pra Meta e persistir', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -116,21 +122,16 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('d2VibS1mYWtl', 'audio/webm;codecs=opus');
     // A Meta recebe a versão JÁ CONVERTIDA (Ogg), nunca o webm original.
     expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'T0dHLWNvbnZlcnRpZG8=', 'audio/ogg', 'audio.webm');
-    // O painel também guarda/reproduz a versão convertida — senão o player
-    // próprio herdaria o mesmo problema que motivou a conversão.
-    const [, , , savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
-    expect(savedBase64).toBe('T0dHLWNvbnZlcnRpZG8=');
-    expect(savedMimeType).toBe('audio/ogg');
   });
 
-  it('não transcodifica formatos já aceitos pela Meta (ex: audio/ogg)', async () => {
+  it('NÃO transcodifica mídia que não é áudio (imagem passa direto)', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64: 'b2dnLWZha2U=', mimeType: 'audio/ogg;codecs=opus', filename: 'audio.ogg' }),
+      body: JSON.stringify({ base64: 'aW1hZ2VtLWZha2U=', mimeType: 'image/jpeg', filename: 'foto.jpg' }),
     });
     expect(res.status).toBe(200);
     expect(transcodeToWhatsAppVoiceNote).not.toHaveBeenCalled();
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'b2dnLWZha2U=', 'audio/ogg;codecs=opus', 'audio.ogg');
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn', 'tok', 'aW1hZ2VtLWZha2U=', 'image/jpeg', 'foto.jpg');
   });
 });
