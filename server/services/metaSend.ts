@@ -138,40 +138,19 @@ export async function sendWhatsAppTemplateMessage(
  * referenciá-la numa mensagem — mesmo padrão do whatsapp-agent-monique
  * (lib/whatsapp.js: uploadMedia). Retorna o media_id da Meta.
  *
- * Achado real: O FormData nativo do Node/Undici (usado pelo fetch global)
- * não lida bem com a serialização de Blobs se não for montado com cuidado
- * no ambiente do servidor, resultando em "application/octet-stream" na Meta.
- * Montamos o multipart manualmente para garantir que o boundary e os
- * headers de cada parte (especialmente o Content-Type) sejam explícitos.
+ * O FormData nativo do Node/Undici (usado pelo fetch global) foi testado e
+ * serializa o Content-Type do Blob corretamente (confirmado inspecionando o
+ * corpo multipart bruto produzido) — a causa real da rejeição da Meta não
+ * era isso. Mantemos aqui a montagem manual do multipart só porque já
+ * estava assim, não porque o FormData nativo tivesse um bug real.
  *
- * Bug crítico corrigido (PR #138): o campo "type" no multipart estava sendo
- * enviado como categoria genérica ("audio", "image", "document") em vez do
- * MIME type completo ("audio/ogg", "image/jpeg", etc.). A documentação da
- * Meta (https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media)
- * especifica que o campo "type" deve ser o MIME type do arquivo — não a
- * categoria. Isso fazia a Meta classificar o arquivo como
- * "application/octet-stream" internamente, causando a rejeição silenciosa
- * do áudio (enviava 200 mas o áudio nunca tocava no destinatário).
- *
- * Bug crítico corrigido (PR #138): `crypto` era usado sem ser importado —
- * o global `crypto` do Node 22 é a Web Crypto API (sem `randomBytes`),
- * causando TypeError em runtime ao tentar gerar o boundary do multipart.
- */
-/**
- * Upload de mídia (foto/documento escolhido no painel) antes de poder
- * referenciá-la numa mensagem — mesmo padrão do whatsapp-agent-monique
- * (lib/whatsapp.js: uploadMedia). Retorna o media_id da Meta.
- *
- * Achado real: O FormData nativo do Node/Undici (usado pelo fetch global)
- * não lida bem com a serialização de Blobs se não for montado com cuidado
- * no ambiente do servidor, resultando em "application/octet-stream" na Meta.
- * Montamos o multipart manualmente para garantir que o boundary e os
- * headers de cada parte (especialmente o Content-Type) sejam explícitos.
- *
- * Causa Raiz da falha de áudio: O campo "type" no multipart deve ser a
- * CATEGORIA da mídia ("audio", "image", "video", "document"), conforme a
- * documentação oficial da Meta, e não o MIME type completo. O MIME type
- * deve ir apenas no header "Content-Type" da parte "file".
+ * Contrato real da Meta pro campo "type" do multipart (confirmado por
+ * documentação de terceiros que replicam o comportamento oficial): é o MIME
+ * type completo do arquivo (ex: "audio/ogg; codecs=opus", "image/jpeg"), o
+ * mesmo valor que já vai no Content-Type da parte "file" — nunca uma
+ * categoria genérica ("audio"/"image"). Uma correção anterior (PR #138)
+ * trocou isso pra categoria por engano, o que não bate com o contrato
+ * documentado — revertido aqui.
  */
 export async function uploadWhatsAppMedia(
   phoneNumberId: string | undefined,
@@ -185,11 +164,6 @@ export async function uploadWhatsAppMedia(
   if (!mediaBuffer || mediaBuffer.length === 0) throw new Error('Buffer da mídia ausente ou vazio.');
   if (!mimeType) throw new Error('MIME type da mídia ausente.');
 
-  // Determina a categoria da mídia para o campo "type"
-  const category = mimeType.startsWith('image/') ? 'image' : 
-                   mimeType.startsWith('audio/') ? 'audio' : 
-                   mimeType.startsWith('video/') ? 'video' : 'document';
-
   const cleanMimeType = mimeType.split(';')[0].trim();
   const boundary = `----WebKitFormBoundary${crypto.randomBytes(8).toString('hex')}`;
 
@@ -200,12 +174,13 @@ export async function uploadWhatsAppMedia(
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="messaging_product"\r\n\r\n`));
   chunks.push(Buffer.from(`whatsapp\r\n`));
 
-  // 2. type — CATEGORIA da mídia (ex: "audio"), conforme documentação da Meta
+  // 2. type — MIME type completo (ex: "audio/ogg; codecs=opus"), igual ao
+  // Content-Type da parte "file" abaixo — nunca uma categoria genérica.
   chunks.push(Buffer.from(`--${boundary}\r\n`));
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="type"\r\n\r\n`));
-  chunks.push(Buffer.from(`${category}\r\n`));
+  chunks.push(Buffer.from(`${mimeType}\r\n`));
 
-  // 3. file — Content-Type aqui é o MIME type real (ex: "audio/ogg")
+  // 3. file — Content-Type aqui é o MIME type real (ex: "audio/ogg; codecs=opus")
   chunks.push(Buffer.from(`--${boundary}\r\n`));
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`));
   chunks.push(Buffer.from(`Content-Type: ${cleanMimeType}\r\n\r\n`));
@@ -252,14 +227,17 @@ export async function sendWhatsAppMediaMessage(
   if (!mediaId) throw new Error('ID da mídia (mediaId) ausente.');
 
   // Mensagem de áudio da Meta não aceita "caption" (diferente de imagem/documento).
+  // "voice: true" marca a mensagem como nota de voz de verdade (waveform/UI de
+  // voice note no WhatsApp do destinatário) em vez de um "áudio básico" — sem
+  // isso a Meta processa o arquivo com validação diferente.
   const type = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
-  const payload: any = { 
-    messaging_product: 'whatsapp', 
+  const payload: any = {
+    messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to, 
-    type 
+    to,
+    type
   };
-  payload[type] = type === 'audio' ? { id: mediaId } : { id: mediaId, ...(caption ? { caption } : {}) };
+  payload[type] = type === 'audio' ? { id: mediaId, voice: true } : { id: mediaId, ...(caption ? { caption } : {}) };
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
     method: 'POST',

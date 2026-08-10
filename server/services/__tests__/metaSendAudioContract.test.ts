@@ -28,7 +28,9 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     // Duas chamadas: uma pro /media (upload) e outra pro /messages (send)
     expect(global.fetch).toHaveBeenCalledTimes(2);
     
-    // Verifica a segunda chamada (o envio da mensagem)
+    // Verifica a segunda chamada (o envio da mensagem) — "voice: true" marca
+    // como nota de voz de verdade (waveform), exigido pela Meta pra áudio
+    // gravado no navegador.
     expect(global.fetch).toHaveBeenLastCalledWith(
       'https://graph.facebook.com/v23.0/pn/messages',
       expect.objectContaining({
@@ -38,28 +40,29 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
           recipient_type: 'individual',
           to: '595981111111',
           type: 'audio',
-          audio: { id: 'media-123' }
+          audio: { id: 'media-123', voice: true }
         })
       })
     );
   });
 
-  it('uploadWhatsAppMedia deve enviar a CATEGORIA no campo type e o MIME no Content-Type', async () => {
+  it('uploadWhatsAppMedia deve enviar o MIME type completo no campo type e no Content-Type', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({ id: 'media-123' })
     });
 
     const buf = Buffer.from('fake-audio');
-    await uploadWhatsAppMedia('pn', 'tok', buf, 'audio/ogg', 'a.ogg');
+    await uploadWhatsAppMedia('pn', 'tok', buf, 'audio/ogg; codecs=opus', 'a.ogg');
 
     const lastCall = (global.fetch as any).mock.calls[0];
     const body = lastCall[1].body as Buffer;
     const bodyString = body.toString();
 
-    // Deve conter a categoria "audio" no campo "type"
-    expect(bodyString).toContain('name="type"\r\n\r\naudio\r\n');
-    // Deve conter o MIME type "audio/ogg" no Content-Type do arquivo
+    // O campo "type" deve ser o MIME type completo — nunca uma categoria
+    // genérica ("audio") — conforme contrato documentado da Meta.
+    expect(bodyString).toContain('name="type"\r\n\r\naudio/ogg; codecs=opus\r\n');
+    // O Content-Type da parte "file" usa o MIME type sem parâmetros.
     expect(bodyString).toContain('Content-Type: audio/ogg\r\n');
   });
 });
