@@ -157,24 +157,39 @@ export async function sendWhatsAppTemplateMessage(
  * o global `crypto` do Node 22 é a Web Crypto API (sem `randomBytes`),
  * causando TypeError em runtime ao tentar gerar o boundary do multipart.
  */
+/**
+ * Upload de mídia (foto/documento escolhido no painel) antes de poder
+ * referenciá-la numa mensagem — mesmo padrão do whatsapp-agent-monique
+ * (lib/whatsapp.js: uploadMedia). Retorna o media_id da Meta.
+ *
+ * Achado real: O FormData nativo do Node/Undici (usado pelo fetch global)
+ * não lida bem com a serialização de Blobs se não for montado com cuidado
+ * no ambiente do servidor, resultando em "application/octet-stream" na Meta.
+ * Montamos o multipart manualmente para garantir que o boundary e os
+ * headers de cada parte (especialmente o Content-Type) sejam explícitos.
+ *
+ * Causa Raiz da falha de áudio: O campo "type" no multipart deve ser a
+ * CATEGORIA da mídia ("audio", "image", "video", "document"), conforme a
+ * documentação oficial da Meta, e não o MIME type completo. O MIME type
+ * deve ir apenas no header "Content-Type" da parte "file".
+ */
 export async function uploadWhatsAppMedia(
   phoneNumberId: string | undefined,
   accessToken: string | undefined,
-  base64: string,
+  mediaBuffer: Buffer,
   mimeType: string,
   filename: string
 ): Promise<string> {
   if (!phoneNumberId) throw new Error('META_PHONE_NUMBER_ID ausente — não é possível fazer upload de mídia.');
   if (!accessToken) throw new Error('META_ACCESS_TOKEN ausente — não é possível fazer upload de mídia.');
-  if (!base64) throw new Error('Conteúdo da mídia (base64) ausente.');
+  if (!mediaBuffer || mediaBuffer.length === 0) throw new Error('Buffer da mídia ausente ou vazio.');
   if (!mimeType) throw new Error('MIME type da mídia ausente.');
 
-  const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
-  const buffer = Buffer.from(cleanBase64, 'base64');
+  // Determina a categoria da mídia para o campo "type"
+  const category = mimeType.startsWith('image/') ? 'image' : 
+                   mimeType.startsWith('audio/') ? 'audio' : 
+                   mimeType.startsWith('video/') ? 'video' : 'document';
 
-  // O campo "type" da Meta deve ser o MIME type completo (ex: "audio/ogg"),
-  // não a categoria genérica ("audio"). Ver documentação:
-  // https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media
   const cleanMimeType = mimeType.split(';')[0].trim();
   const boundary = `----WebKitFormBoundary${crypto.randomBytes(8).toString('hex')}`;
 
@@ -185,16 +200,16 @@ export async function uploadWhatsAppMedia(
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="messaging_product"\r\n\r\n`));
   chunks.push(Buffer.from(`whatsapp\r\n`));
 
-  // 2. type — MIME type completo, conforme documentação da Meta
+  // 2. type — CATEGORIA da mídia (ex: "audio"), conforme documentação da Meta
   chunks.push(Buffer.from(`--${boundary}\r\n`));
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="type"\r\n\r\n`));
-  chunks.push(Buffer.from(`${cleanMimeType}\r\n`));
+  chunks.push(Buffer.from(`${category}\r\n`));
 
-  // 3. file — Content-Type aqui é o que a Meta usa para validar o arquivo
+  // 3. file — Content-Type aqui é o MIME type real (ex: "audio/ogg")
   chunks.push(Buffer.from(`--${boundary}\r\n`));
   chunks.push(Buffer.from(`Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`));
   chunks.push(Buffer.from(`Content-Type: ${cleanMimeType}\r\n\r\n`));
-  chunks.push(buffer);
+  chunks.push(mediaBuffer);
   chunks.push(Buffer.from(`\r\n`));
 
   // Fim
@@ -216,6 +231,9 @@ export async function uploadWhatsAppMedia(
   if (!res.ok) {
     throw new Error(`Falha ao subir mídia via Meta Cloud API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
   }
+  if (!data.id) {
+    throw new Error('Resposta da Meta não retornou um media_id válido após o upload.');
+  }
   return data.id;
 }
 
@@ -235,7 +253,12 @@ export async function sendWhatsAppMediaMessage(
 
   // Mensagem de áudio da Meta não aceita "caption" (diferente de imagem/documento).
   const type = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
-  const payload: any = { messaging_product: 'whatsapp', to, type };
+  const payload: any = { 
+    messaging_product: 'whatsapp', 
+    recipient_type: 'individual',
+    to, 
+    type 
+  };
   payload[type] = type === 'audio' ? { id: mediaId } : { id: mediaId, ...(caption ? { caption } : {}) };
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
@@ -247,4 +270,32 @@ export async function sendWhatsAppMediaMessage(
   if (!res.ok) {
     await throwMetaError(res, 'Falha ao enviar mídia via Meta Cloud API');
   }
+}
+
+/**
+ * Fluxo completo de envio de áudio (Upload + Mensagem), conforme exigido pela Graph API.
+ * Garante que o áudio seja materializado no provider antes de retornar sucesso.
+ */
+export async function sendWhatsAppAudioMessage(
+  phoneNumberId: string | undefined,
+  accessToken: string | undefined,
+  to: string,
+  audioBuffer: Buffer,
+  mimeType: string
+): Promise<string> {
+  // 1. Validar parâmetros
+  if (!phoneNumberId) throw new Error('phoneNumberId ausente');
+  if (!accessToken) throw new Error('token ausente');
+  if (!to) throw new Error('to ausente');
+  if (!audioBuffer) throw new Error('audioBuffer ausente');
+  if (!mimeType) throw new Error('mimeType ausente');
+
+  // 2. Fazer upload do arquivo de áudio no endpoint de mídia
+  const filename = 'voice-note.ogg';
+  const mediaId = await uploadWhatsAppMedia(phoneNumberId, accessToken, audioBuffer, mimeType, filename);
+
+  // 3. Enviar a mensagem final com type: "audio" e o media_id obtido
+  await sendWhatsAppMediaMessage(phoneNumberId, accessToken, to, mediaId, mimeType);
+
+  return mediaId;
 }

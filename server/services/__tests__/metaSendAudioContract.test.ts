@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from '../metaSend';
+import { uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage } from '../metaSend';
 
 global.fetch = vi.fn();
 
@@ -9,25 +9,33 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
   });
 
   it('uploadWhatsAppMedia deve falhar se faltarem parâmetros críticos', async () => {
-    await expect(uploadWhatsAppMedia(undefined, 'tok', 'base64', 'audio/ogg', 'a.ogg')).rejects.toThrow('META_PHONE_NUMBER_ID ausente');
-    await expect(uploadWhatsAppMedia('pn', undefined, 'base64', 'audio/ogg', 'a.ogg')).rejects.toThrow('META_ACCESS_TOKEN ausente');
-    await expect(uploadWhatsAppMedia('pn', 'tok', '', 'audio/ogg', 'a.ogg')).rejects.toThrow('Conteúdo da mídia (base64) ausente');
+    const buf = Buffer.from('test');
+    await expect(uploadWhatsAppMedia(undefined, 'tok', buf, 'audio/ogg', 'a.ogg')).rejects.toThrow('META_PHONE_NUMBER_ID ausente');
+    await expect(uploadWhatsAppMedia('pn', undefined, buf, 'audio/ogg', 'a.ogg')).rejects.toThrow('META_ACCESS_TOKEN ausente');
+    await expect(uploadWhatsAppMedia('pn', 'tok', Buffer.alloc(0), 'audio/ogg', 'a.ogg')).rejects.toThrow('Buffer da mídia ausente');
   });
 
-  it('sendWhatsAppMediaMessage deve montar o payload correto para áudio (sem caption)', async () => {
+  it('sendWhatsAppAudioMessage deve executar o fluxo completo (upload + send)', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,
-      json: async () => ({ messaging_product: 'whatsapp', contacts: [{ input: '595981111111', wa_id: '595981111111' }], messages: [{ id: 'wa-id' }] })
+      json: async () => ({ id: 'media-123' })
     });
 
-    await sendWhatsAppMediaMessage('pn', 'tok', '595981111111', 'media-123', 'audio/ogg', 'Legenda Ignorada');
+    const buf = Buffer.from('fake-audio');
+    const mediaId = await sendWhatsAppAudioMessage('pn', 'tok', '595981111111', buf, 'audio/ogg');
 
-    expect(global.fetch).toHaveBeenCalledWith(
+    expect(mediaId).toBe('media-123');
+    // Duas chamadas: uma pro /media (upload) e outra pro /messages (send)
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    
+    // Verifica a segunda chamada (o envio da mensagem)
+    expect(global.fetch).toHaveBeenLastCalledWith(
       'https://graph.facebook.com/v23.0/pn/messages',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
           messaging_product: 'whatsapp',
+          recipient_type: 'individual',
           to: '595981111111',
           type: 'audio',
           audio: { id: 'media-123' }
@@ -36,25 +44,22 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     );
   });
 
-  it('sendWhatsAppMediaMessage deve incluir caption para imagens', async () => {
+  it('uploadWhatsAppMedia deve enviar a CATEGORIA no campo type e o MIME no Content-Type', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,
-      json: async () => ({ id: 'wa-id' })
+      json: async () => ({ id: 'media-123' })
     });
 
-    await sendWhatsAppMediaMessage('pn', 'tok', '595981111111', 'media-456', 'image/jpeg', 'Uma bela foto');
+    const buf = Buffer.from('fake-audio');
+    await uploadWhatsAppMedia('pn', 'tok', buf, 'audio/ogg', 'a.ogg');
 
-    expect(global.fetch).toHaveBeenCalledWith(
-      'https://graph.facebook.com/v23.0/pn/messages',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: '595981111111',
-          type: 'image',
-          image: { id: 'media-456', caption: 'Uma bela foto' }
-        })
-      })
-    );
+    const lastCall = (global.fetch as any).mock.calls[0];
+    const body = lastCall[1].body as Buffer;
+    const bodyString = body.toString();
+
+    // Deve conter a categoria "audio" no campo "type"
+    expect(bodyString).toContain('name="type"\r\n\r\naudio\r\n');
+    // Deve conter o MIME type "audio/ogg" no Content-Type do arquivo
+    expect(bodyString).toContain('Content-Type: audio/ogg\r\n');
   });
 });

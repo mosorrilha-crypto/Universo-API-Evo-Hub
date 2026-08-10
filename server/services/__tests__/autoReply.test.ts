@@ -184,7 +184,7 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     );
 
     expect(result).not.toBeNull();
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', PRODUCT_WITH_PHOTO.exampleImageBase64, 'image/jpeg', expect.stringContaining('Microlips'));
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
     expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
     expect(recordOutgoingMessage).toHaveBeenCalled();
   });

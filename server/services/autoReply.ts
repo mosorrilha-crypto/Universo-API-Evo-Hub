@@ -790,7 +790,8 @@ Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exe
         product.name
       );
     } else {
-      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, product.exampleImageBase64, mimeType, filename);
+      const mediaBuffer = Buffer.from(product.exampleImageBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, mediaBuffer, mimeType, filename);
       await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
     }
 

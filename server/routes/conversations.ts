@@ -15,7 +15,7 @@ import {
   markConversationRead,
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversationLabelStore';
-import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, isGeoRestrictedError } from '../services/metaSend';
+import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
@@ -181,16 +181,20 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       let uploadBase64 = base64;
       let uploadMimeType = mimeType as string;
       let uploadFilename = filename || 'arquivo';
+      let mediaId: string;
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
-        uploadMimeType = 'audio/ogg; codecs=opus';
+        uploadMimeType = 'audio/ogg'; // Simplificado para maior compatibilidade no player do painel
         uploadFilename = 'audio.ogg';
+        
+        const audioBuffer = Buffer.from(uploadBase64, 'base64');
+        mediaId = await sendWhatsAppAudioMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, audioBuffer, uploadMimeType);
+      } else {
+        const mediaBuffer = Buffer.from(uploadBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+        mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, mediaBuffer, uploadMimeType, uploadFilename);
+        await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, uploadMimeType, caption);
       }
-
-      // Isolando Evolution: forçando Meta
-      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, uploadBase64, uploadMimeType, uploadFilename);
-      await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, uploadMimeType, caption);
       
       const msgType = uploadMimeType.startsWith('image/') ? 'image' : uploadMimeType.startsWith('audio/') ? 'audio' : 'file';
       // Achado real em produção ("o áudio não fica na conversa"): a Meta
