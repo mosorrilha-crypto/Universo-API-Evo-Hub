@@ -178,7 +178,7 @@ export const Header: React.FC<HeaderProps> = ({
                     (linha única, botão perto da borda direita) — evita vazar pra fora
                     da tela nos dois casos. */}
                 {isTenantMenuOpen && (
-                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50">
+                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50 origin-top-left md:origin-top-right animate-pop-in">
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 border-b border-slate-800 mb-1">
                       Alternar Cliente (Tenant)
                     </div>
