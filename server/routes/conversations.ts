@@ -21,6 +21,7 @@ import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseSto
 import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
+import { isMetaAcceptedAudioMimeType, transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -164,21 +165,28 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!base64 || !mimeType) {
       return res.status(400).json({ error: 'Campos "base64" e "mimeType" são obrigatórios.' });
     }
-    // A Meta Cloud API só aceita audio/aac, audio/mp4, audio/mpeg, audio/amr
-    // e audio/ogg (opus) como mensagem de voz — audio/webm (o que o
-    // MediaRecorder do navegador grava por padrão em alguns casos) é
-    // rejeitado pela Meta. Sem essa checagem, o upload falhava com um erro
-    // HTTP genérico da Meta, difícil de diagnosticar ("o botão de áudio não
-    // funciona" sem nenhuma pista do porquê).
-    if (typeof mimeType === 'string' && mimeType.startsWith('audio/webm')) {
-      return res.status(400).json({ error: 'Este navegador gravou o áudio num formato que o WhatsApp não aceita (audio/webm). Tente em outro navegador (Chrome/Edge atualizados) ou grave novamente.' });
-    }
     const tenantId = tenantOf(req);
 
     try {
-      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, base64, mimeType, filename || 'arquivo');
-      await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, caption);
-      const msgType = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'file';
+      // Achado real em produção ("o áudio sai mas não chega"): a Meta ACEITA
+      // o upload de audio/webm (o que o navegador grava por padrão em alguns
+      // casos) e o envio retorna sucesso — mas o áudio nunca toca como nota
+      // de voz de verdade no WhatsApp do cliente, uma falha silenciosa sem
+      // erro nenhum de volta (a checagem antiga só rejeitava webm com um erro
+      // claro, mas isso não resolvia o problema, só evitava um caso). O único
+      // formato garantido de funcionar é Ogg/Opus — reencoda antes de subir
+      // sempre que o formato recebido não é um dos aceitos pela Meta.
+      let uploadBase64 = base64;
+      let uploadMimeType = mimeType as string;
+      if (typeof mimeType === 'string' && mimeType.startsWith('audio/') && !isMetaAcceptedAudioMimeType(mimeType)) {
+        const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
+        uploadBase64 = transcoded.base64;
+        uploadMimeType = transcoded.mimeType;
+      }
+
+      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, uploadBase64, uploadMimeType, filename || 'arquivo');
+      await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, uploadMimeType, caption);
+      const msgType = uploadMimeType.startsWith('image/') ? 'image' : uploadMimeType.startsWith('audio/') ? 'audio' : 'file';
       // Achado real em produção ("o áudio não fica na conversa"): a Meta
       // recebe o áudio/imagem de verdade, mas nós nunca guardávamos uma
       // cópia — só o texto placeholder ("🎤 Áudio enviado") ficava salvo, e
@@ -200,7 +208,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         undefined,
         messageId
       );
-      await saveMediaImage(supabaseUrl, supabaseKey, messageId, base64, mimeType);
+      // Salva a versão JÁ CONVERTIDA (não o webm original) — senão o próprio
+      // player de áudio do painel (GET /api/media/:messageId) herdaria o
+      // mesmo problema de reprodução que motivou a conversão.
+      await saveMediaImage(supabaseUrl, supabaseKey, messageId, uploadBase64, uploadMimeType);
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
@@ -346,11 +357,26 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       const mimeType = product.exampleImageMimeType || 'image/jpeg';
       const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, product.exampleImageBase64, mimeType, `${productName}.jpg`);
       await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, productName);
-      const conv = await recordOutgoingMessage(tenantId, req.params.phone, {
-        type: 'image',
-        text: `📷 Foto de exemplo: ${productName}`,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      }, 'operator');
+      // Mesmo padrão do /send-media (ver comentário lá): gera o id ANTES de
+      // gravar pra poder salvar a imagem real sob o mesmo id — sem isso, o
+      // painel tenta buscar a mídia por messageId e nunca encontra nada
+      // (achado ao extender o carregamento de imagem real pras mensagens QUE
+      // NÓS enviamos, não só as do lead).
+      const messageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        req.params.phone,
+        {
+          type: 'image',
+          text: `📷 Foto de exemplo: ${productName}`,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        'operator',
+        undefined,
+        undefined,
+        messageId
+      );
+      await saveMediaImage(supabaseUrl, supabaseKey, messageId, product.exampleImageBase64, mimeType);
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
