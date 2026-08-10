@@ -46,7 +46,7 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     );
   });
 
-  it('uploadWhatsAppMedia deve enviar o MIME type completo no campo type e no Content-Type', async () => {
+  it('uploadWhatsAppMedia deve enviar o MIME type completo no campo type e no Blob do arquivo', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({ id: 'media-123' })
@@ -56,13 +56,16 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     await uploadWhatsAppMedia('pn', 'tok', buf, 'audio/ogg; codecs=opus', 'a.ogg');
 
     const lastCall = (global.fetch as any).mock.calls[0];
-    const body = lastCall[1].body as Buffer;
-    const bodyString = body.toString();
+    const body = lastCall[1].body as FormData;
 
+    expect(body.get('messaging_product')).toBe('whatsapp');
     // O campo "type" deve ser o MIME type completo — nunca uma categoria
     // genérica ("audio") — conforme contrato documentado da Meta.
-    expect(bodyString).toContain('name="type"\r\n\r\naudio/ogg; codecs=opus\r\n');
-    // O Content-Type da parte "file" usa o MIME type sem parâmetros.
-    expect(bodyString).toContain('Content-Type: audio/ogg\r\n');
+    expect(body.get('type')).toBe('audio/ogg; codecs=opus');
+    // O Blob da parte "file" carrega o mesmo MIME type completo, que o
+    // FormData/undici nativos usam como Content-Type dessa parte.
+    const filePart = body.get('file') as File;
+    expect(filePart.type).toBe('audio/ogg; codecs=opus');
+    expect(filePart.name).toBe('a.ogg');
   });
 });
