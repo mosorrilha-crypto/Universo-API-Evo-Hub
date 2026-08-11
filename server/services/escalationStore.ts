@@ -9,6 +9,7 @@
  */
 import { getDb } from './db';
 import { inferCountryFromPhone } from './conversationStore';
+import { notifyEscalationCreated } from './escalationAlertService';
 
 export interface Escalation {
   id: string;
@@ -72,6 +73,11 @@ export async function logEscalation(tenantId: string, phone: string, contactName
   const { error } = await db.from('escalations').insert(row);
   if (error) throw error;
   console.log(`🚨 [Escalonamento] tenant=${tenantId} ${phone} (${row.country}): ${reason}`);
+  // Nunca bloqueia nem derruba o registro da escalação (que é o que importa
+  // de verdade) por causa do alerta — mesmo padrão de notifyMetaCapiEvent.
+  notifyEscalationCreated(tenantId, { phone, contactName, reason }).catch((err) =>
+    console.warn(`⚠️  [Alerta de escalonamento] tenant=${tenantId} falha ao notificar:`, (err as Error).message)
+  );
   return toEscalation({ ...row, created_at: new Date().toISOString() });
 }
 
