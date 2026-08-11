@@ -130,6 +130,20 @@ const BEAUTY_STUDIO_LABEL_SUGGESTIONS = [
   'Turno confirmado',
 ];
 
+// Item 3 do checklist visual (issue #100): emoji picker de verdade no
+// composer, no lugar do botão de emoji que era só decoração (sem onClick).
+// Curadoria curta de emojis de uso comum num atendimento (saudação,
+// confirmação, agradecimento) — não é o teclado de emoji completo do
+// sistema operacional, mas cobre o uso real de digitação de mensagens.
+const COMPOSER_EMOJIS = [
+  '😀', '😁', '😂', '🤣', '😊', '😉', '😍', '😘', '🥰', '😎',
+  '🤔', '😅', '😢', '😭', '😮', '😴', '🙄', '😬', '🤗', '🥳',
+  '👍', '👎', '🙏', '👏', '🙌', '💪', '🤝', '✌️', '👌', '🤞',
+  '❤️', '💚', '💛', '💙', '💜', '🖤', '💕', '✨', '🎉', '🔥',
+  '💇', '💅', '💄', '✂️', '💇‍♀️', '👄', '👁️', '💆', '🌸', '🌟',
+  '✅', '❌', '⏰', '📅', '📍', '💰', '💳', '📷', '📄', '❓',
+];
+
 interface WhatsAppLeadsSimProps {
   onSaveTranscript: (item: SavedTranscriptItem) => void;
   knowledgeBase?: AgentKnowledgeBase;
@@ -270,6 +284,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Message Sending State
   const [inputMessage, setInputMessage] = useState('');
+  // Item 3 do checklist visual (issue #100): o botão de emoji do composer
+  // era só decorativo (sem onClick) — clicável na aparência mas fake,
+  // violando a própria regra do checklist ("nunca deixar um ícone parecer
+  // clicável sem função real por trás"). Agora abre um seletor de verdade.
+  const [showComposerEmojiPicker, setShowComposerEmojiPicker] = useState(false);
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
@@ -2955,9 +2974,33 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
                 {/* WhatsApp Style Text Input Form */}
                 <form onSubmit={handleSendTextMessage} className="flex items-center space-x-2">
-                  <button type="button" className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer">
-                    <Smile className="w-5 h-5" />
-                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowComposerEmojiPicker((v) => !v)}
+                      className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                      title="Emoji"
+                    >
+                      <Smile className="w-5 h-5" />
+                    </button>
+                    {showComposerEmojiPicker && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowComposerEmojiPicker(false)} />
+                        <div className="absolute bottom-full left-0 mb-2 z-50 w-64 max-h-56 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-2 grid grid-cols-8 gap-0.5 origin-bottom-left animate-pop-in">
+                          {COMPOSER_EMOJIS.map((emoji, idx) => (
+                            <button
+                              key={`${emoji}-${idx}`}
+                              type="button"
+                              onClick={() => setInputMessage((prev) => prev + emoji)}
+                              className="text-lg hover:bg-white/10 rounded p-1 cursor-pointer"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
