@@ -36,7 +36,6 @@ import {
   X,
   Flame,
   CircleDashed,
-  MessageSquarePlus,
   Info,
   Trash2,
   Reply,
@@ -487,6 +486,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   /** Barra de controles reais (Ativo/Restrito/Pausado, Calendar, Auto IA) — o ícone "Config" da barra lateral estilo WhatsApp Web rola até aqui, em vez de fingir uma tela de configurações que não existe. */
   const toolbarRef = React.useRef<HTMLDivElement>(null);
+  // Achado real testando com o Lucas em produção ("dá pra otimizar as
+  // caixas de ferramenta"): a barra de controles tinha 7-8 botões numa
+  // linha só, quebrando em 3-4 linhas no mobile. Ações de configuração
+  // pontual (limpar testes, conectar Calendar, Auto IA, notificações) —
+  // usadas uma vez e esquecidas, não no dia a dia — ficam atrás deste
+  // menu; só o que o operador mexe com frequência (status do agente,
+  // escalonamentos, novo lead) continua sempre visível.
+  const [isToolbarSettingsOpen, setIsToolbarSettingsOpen] = useState(false);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1939,16 +1946,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             sozinho não resolve: só quebra linha quando o container tem uma
             largura limitada pra quebrar contra — w-full dá esse limite. */}
         <div ref={toolbarRef} className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto w-full flex-shrink-0 flex-wrap gap-y-2">
-          {/* Clear Mock Data Button */}
-          <button
-            onClick={handleClearMockData}
-            className="px-3 py-1.5 rounded-xl text-xs font-medium bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
-            title="Limpar todos os leads/conversas da tela (não apaga nada no servidor — conversas reais voltam no próximo carregamento)"
-          >
-            <Trash2 className="w-3.5 h-3.5 text-red-400" />
-            <span>Limpar Testes</span>
-          </button>
-
           {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
               direto daqui, sem precisar navegar até a barra de abas do topo
               (Header.tsx já tem a aba "Escalonamentos" com o mesmo contador,
@@ -2010,61 +2007,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             ))}
           </div>
 
-          {/* Conexão do backend com Google Calendar real (usada pelo agente de agendamento) */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={googleCalendarConnected ? fetchGoogleCalendarStatus : handleConnectGoogleCalendar}
-              title={googleCalendarConnected ? 'Conectado — clique pra atualizar status' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-                googleCalendarConnected
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                  : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
-              }`}
-            >
-              <CalendarIcon className="w-3.5 h-3.5" />
-              <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Calendar Conectado' : 'Conectar Calendar'}</span>
-            </button>
-            {googleCalendarConnected && (
-              <button
-                onClick={handleDisconnectGoogleCalendar}
-                title="Desconectar Google Calendar (pra trocar de conta)"
-                className="p-1.5 rounded-lg border border-slate-800 bg-slate-950/80 text-slate-400 hover:text-rose-300 hover:border-rose-800/60 transition-colors cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Auto-analyze Toggle Switch */}
-          <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
-            <input
-              type="checkbox"
-              checked={autoAnalyze}
-              onChange={(e) => setAutoAnalyze(e.target.checked)}
-              className="sr-only peer"
-            />
-            <div className="relative w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 mr-2" />
-            <span className="flex items-center text-[11px]">
-              <Zap className="w-3.5 h-3.5 text-amber-400 mr-1" />
-              Auto IA
-            </span>
-          </label>
-
-          {/* Push notification do PWA do atendente (issue #159) — pra não
-              depender só de estar olhando o painel pra perceber escalação
-              nova ou agente pausado com lead sem resposta. */}
+          {/* Configurações pontuais (Calendar, Auto IA, notificações, limpar
+              testes) — mexidas uma vez e esquecidas, não no dia a dia.
+              Ficam atrás deste botão em vez de sempre visíveis, pra barra
+              não quebrar em 3-4 linhas no mobile. */}
           <button
-            onClick={handleTogglePush}
-            disabled={pushBusy}
-            title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
-              pushEnabled
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
-                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
+            type="button"
+            onClick={() => setIsToolbarSettingsOpen((v) => !v)}
+            title="Configurações (Calendar, Auto IA, notificações, limpar testes)"
+            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+              isToolbarSettingsOpen
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
             }`}
           >
-            {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-            <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
+            <Settings className="w-3.5 h-3.5" />
+            <span>Configurações</span>
           </button>
 
           <button
@@ -2075,6 +2033,77 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span>Novo Lead</span>
           </button>
         </div>
+
+        {isToolbarSettingsOpen && (
+          <div className="w-full flex flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
+            {/* Clear Mock Data Button */}
+            <button
+              onClick={handleClearMockData}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Limpar todos os leads/conversas da tela (não apaga nada no servidor — conversas reais voltam no próximo carregamento)"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <span>Limpar Testes</span>
+            </button>
+
+            {/* Conexão do backend com Google Calendar real (usada pelo agente de agendamento) */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={googleCalendarConnected ? fetchGoogleCalendarStatus : handleConnectGoogleCalendar}
+                title={googleCalendarConnected ? 'Conectado — clique pra atualizar status' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+                  googleCalendarConnected
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+                }`}
+              >
+                <CalendarIcon className="w-3.5 h-3.5" />
+                <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Calendar Conectado' : 'Conectar Calendar'}</span>
+              </button>
+              {googleCalendarConnected && (
+                <button
+                  onClick={handleDisconnectGoogleCalendar}
+                  title="Desconectar Google Calendar (pra trocar de conta)"
+                  className="p-1.5 rounded-lg border border-slate-800 bg-slate-950/80 text-slate-400 hover:text-rose-300 hover:border-rose-800/60 transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Auto-analyze Toggle Switch */}
+            <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
+              <input
+                type="checkbox"
+                checked={autoAnalyze}
+                onChange={(e) => setAutoAnalyze(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="relative w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 mr-2" />
+              <span className="flex items-center text-[11px]">
+                <Zap className="w-3.5 h-3.5 text-amber-400 mr-1" />
+                Auto IA
+              </span>
+            </label>
+
+            {/* Push notification do PWA do atendente (issue #159) — pra não
+                depender só de estar olhando o painel pra perceber escalação
+                nova ou agente pausado com lead sem resposta. */}
+            <button
+              onClick={handleTogglePush}
+              disabled={pushBusy}
+              title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
+              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+                pushEnabled
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
+                  : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
+              }`}
+            >
+              {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+              <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Error Alert */}
@@ -2224,41 +2253,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           showRightPanel ? 'lg:col-span-3' : 'lg:col-span-4'
         }`}>
           
-          {/* WhatsApp Web Left Header */}
-          <div className="p-3 bg-[#202c33] border-b border-slate-800 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="relative">
-                <img
-                  src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-                  alt="Sua conta WhatsApp"
-                  className="w-9 h-9 rounded-full object-cover border border-emerald-500/60"
-                />
-                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#202c33]" />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold text-white leading-tight">Atendimento WhatsApp</h3>
-                <span className="text-[10px] text-emerald-400 font-medium flex items-center">
-                  Online (WhatsApp Web)
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2 text-slate-400">
-              <button title="Status" className="p-1.5 hover:text-white rounded-lg transition-colors cursor-pointer">
-                <CircleDashed className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={() => setShowAddLead(true)} 
-                title="Nova conversa" 
-                className="p-1.5 hover:text-white rounded-lg transition-colors cursor-pointer"
-              >
-                <MessageSquarePlus className="w-4 h-4 text-emerald-400" />
-              </button>
-              <button title="Menu" className="p-1.5 hover:text-white rounded-lg transition-colors cursor-pointer">
-                <MoreVertical className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+          {/* Achado real testando com o Lucas em produção ("muita redundância
+              nesta tela"): esse header decorativo repetia o título
+              "Atendimento WhatsApp" que já aparece na barra de controles
+              logo acima (ícone+nome+empresa), e o ícone "Nova conversa"
+              chamava exatamente o mesmo setShowAddLead(true) do botão
+              "Novo Lead" também já presente ali — dois caminhos pro mesmo
+              lugar, um deles sem rótulo nenhum. "Status" e "Menu" também
+              nunca tiveram onClick (violava a própria regra do checklist
+              de nunca deixar um ícone parecer clicável sem função real).
+              Removido o bloco inteiro — o contexto já está estabelecido
+              pela aba ativa + barra de controles, sem perda de informação. */}
 
           {/* WhatsApp Web Search Bar */}
           <div className="p-2.5 bg-[#111b21] border-b border-slate-800/60">
