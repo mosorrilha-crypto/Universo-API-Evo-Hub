@@ -187,6 +187,7 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
     expect(result?.bubbles.join(' ')).toContain('14:00');
     expect(result?.bubbles.join(' ')).toContain('Paso Bogarín');
     expect(result?.needsHumanConfirmation).toBe(false);
+    expect(result?.stopAutoReply).toBe(false);
     getAppointmentForPhone.mockResolvedValue(null);
   });
 });

@@ -41,6 +41,17 @@ export interface AutoReplyResult {
   agent: AgentType;
   /** true quando precisa de atenção humana: cliente tentando fechar agendamento sem confirmação automática, ou (Epic 4.5.8) qualquer reclamação — reclamação sempre escala, nunca é resolvida só pela IA. */
   needsHumanConfirmation: boolean;
+  /**
+   * true só no caso de alucinação de verdade (nenhuma ferramenta de agenda
+   * confirmou o horário citado E não bate com nenhum agendamento real já
+   * existente) — sinaliza que a resposta automática pra este número deve
+   * parar até um humano assumir, em vez de tentar de novo na próxima
+   * mensagem. Achado real em produção: sem isso, o mesmo fallback genérico
+   * saía IDÊNTICO várias vezes seguidas na mesma conversa (a causa raiz de
+   * cada repetição já tinha sido corrigida uma vez, mas nada impedia o
+   * agente de cair na mesma alucinação de novo na mensagem seguinte).
+   */
+  stopAutoReply: boolean;
   /** ms gastos na chamada de roteamento — usado pra descontar do atraso de digitação da 1ª bolha, compensando a latência extra do router. */
   routerElapsedMs: number;
 }
@@ -842,6 +853,7 @@ export async function generateAutoReplyForText(
 
     let extraContext: string | undefined;
     let forcedHumanConfirmation = false;
+    let stopAutoReply = false;
     let confirmedTimes: string[] = [];
     // Epic 4.5.7 — precisa ser "as ferramentas rodaram de verdade nesta
     // mensagem", não "confirmaram algum horário livre". Achado numa
@@ -927,8 +939,19 @@ export async function generateAutoReplyForText(
         // Só escala pra humano quando é o caso 1 real (nenhuma ferramenta
         // rodou nesta mensagem pra sustentar o horário citado) — o caso 2
         // (reconfirmando um agendamento já existente) não precisa de
-        // atenção humana, só da resposta corrigida acima.
-        if (!agendamentoToolsRan) forcedHumanConfirmation = true;
+        // atenção humana, só da resposta corrigida acima. Achado real em
+        // produção: mesmo escalando, nada impedia a resposta automática de
+        // tentar de novo na PRÓXIMA mensagem do cliente e cair na mesma
+        // alucinação outra vez — o mesmo fallback saiu idêntico 6x na mesma
+        // conversa. Alucinação de verdade (sem nenhuma ferramenta rodando
+        // pra sustentar o horário) marca stopAutoReply — quem chama decide
+        // como parar (ver webhooks.ts, bloqueia a IA só pra esse número até
+        // um humano reativar), em vez de deixar o agente tentar de novo
+        // sozinho e repetir o mesmo erro.
+        if (!agendamentoToolsRan) {
+          forcedHumanConfirmation = true;
+          stopAutoReply = true;
+        }
       }
     }
 
@@ -938,7 +961,7 @@ export async function generateAutoReplyForText(
     // independente do que o modelo tenha marcado.
     const needsHumanConfirmation = agent === 'reclamacao' ? true : specialist.needsHumanConfirmation || forcedHumanConfirmation;
 
-    return { ...specialist, bubbles, needsHumanConfirmation, agent, routerElapsedMs };
+    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;
