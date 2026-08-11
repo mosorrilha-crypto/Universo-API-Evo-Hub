@@ -986,7 +986,8 @@ const paidTrafficKnowledgeBase = {
 
 ## Nota
 
-`ESTRATEGIA-TRAFEGO-MONIQUE.md` (a linha de base medida, com datas, decisões e o
-registro de decisões tomadas) ainda não existe neste repositório — precisa ser
-criado/importado separadamente antes que as regras acima possam ser aplicadas com
-dados reais.
+`ESTRATEGIA-TRAFEGO-MONIQUE.md` está nesta mesma pasta (`docs/agente-trafego-pago/`).
+Ele contém a linha de base medida (09/07–07/08/2026), o horizonte atual (H1 — Fechar
+a medição), a porta de saída, o mapa de evolução em 4 horizontes e o registro de
+decisões. Consulte-o antes de qualquer análise ou recomendação, conforme
+`projectKnowledgeRefs.rule` acima.
