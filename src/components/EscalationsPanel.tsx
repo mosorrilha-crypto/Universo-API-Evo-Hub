@@ -102,7 +102,13 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                   <Clock className="w-3 h-3" /> {timeAgo(e.createdAt)}
                 </span>
               </div>
-              <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
+              {/* Achado real em produção (mesmo padrão já documentado em
+                  WhatsAppLeadsSim.tsx): flex-wrap sozinho não quebra linha
+                  no mobile se o item não tiver uma largura própria pra
+                  quebrar contra — sem w-full aqui, os 3-4 botões
+                  estouravam a tela em vez de empilhar. md:w-auto devolve o
+                  tamanho natural no desktop, onde cabem numa linha só. */}
+              <div className="flex gap-2 flex-wrap justify-end w-full md:w-auto md:flex-shrink-0">
                 {onGoToConversation && (
                   <button
                     onClick={() => onGoToConversation(e.phone)}
