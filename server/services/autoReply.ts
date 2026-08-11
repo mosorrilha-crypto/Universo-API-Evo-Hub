@@ -893,42 +893,42 @@ export async function generateAutoReplyForText(
       return null;
     }
 
-    // Epic 4.5.7 — anti-alucinação: se as ferramentas de agenda rodaram
-    // nesta mensagem (só faz sentido validar quando há algo real pra
-    // comparar), nenhum horário citado na resposta pode ser diferente dos
-    // horários realmente confirmados pelas ferramentas. Se o modelo citou
-    // um horário não confirmado, a resposta é substituída por uma correção
-    // segura antes de sair pro cliente — nunca deixa passar um horário
-    // inventado.
+    // Epic 4.5.7 — anti-alucinação: nenhum horário citado na resposta pode
+    // ser diferente dos horários realmente confirmados — seja por uma
+    // ferramenta de agenda que rodou NESTA mensagem, seja por um
+    // agendamento ATIVO já existente pra este contato (`confirmedTimes` já
+    // inclui o horário dele mesmo quando nenhuma ferramenta roda de novo,
+    // ver runAgendamentoTools). Comparar sempre contra confirmedTimes (nunca
+    // só "alguma ferramenta rodou?") é o que distingue as duas situações
+    // reais encontradas em produção:
+    // 1) o modelo inventa um horário sem NENHUM agendamento real por trás
+    //    (ex: "já deixei pré-agendado seu horário pra segunda, às 10:00"
+    //    sem criar_agendamento/criar_pre_reserva terem rodado) — precisa
+    //    escalar pra humano, é uma alucinação de verdade.
+    // 2) o cliente só manda "ok"/"obrigada"/pede a localização de novo,
+    //    sem precisar de nenhuma ferramenta nova, e o modelo simplesmente
+    //    RECONFIRMA o horário já agendado de verdade (ex: 14:00, com evento
+    //    real no Google Calendar) — achado real em produção: a versão
+    //    anterior tratava esse caso 2 exatamente igual ao caso 1 só porque
+    //    "nenhuma ferramenta rodou nesta mensagem", apagando respostas
+    //    corretas (inclusive a localização do estúdio) e substituindo por
+    //    uma frase genérica em português — mesmo a conversa inteira sendo
+    //    em espanhol — toda vez que o cliente só confirmava/agradecia algo
+    //    sobre um agendamento já real.
     let bubbles = specialist.bubbles;
-    if (agent === 'agendamento' && agendamentoToolsRan) {
+    if (agent === 'agendamento') {
       const citedTimes = extractCitedTimes(bubbles.join(' '));
       const invalidTimes = citedTimes.filter((t) => !confirmedTimes.includes(t));
       if (invalidTimes.length) {
-        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta. Confirmados: ${confirmedTimes.join(', ') || '(nenhum)'}.`);
+        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta (ferramenta rodou nesta mensagem: ${agendamentoToolsRan}). Confirmados: ${confirmedTimes.join(', ') || '(nenhum)'}.`);
         bubbles = confirmedTimes.length
-          ? [`Deixa eu confirmar certinho com você: o horário disponível é ${confirmedTimes.join(' ou ')}. Fico assim mesmo ou prefere outro horário?`]
-          : ['Deixa eu confirmar certinho esse horário na agenda antes de te dar certeza — só um instante e já te retorno.'];
-      }
-    } else if (agent === 'agendamento' && !agendamentoToolsRan) {
-      // Achado real em produção (teste ao vivo do dono do produto): com o
-      // Google Calendar não conectado pro tenant (ou a IA simplesmente não
-      // chamando nenhuma ferramenta), agendamentoToolsRan fica false — o
-      // bloco acima nunca roda, e nada mais impedia o modelo de responder
-      // "Já deixei pré-agendado seu horário para segunda, às 10:00" sem
-      // NENHUMA ação real ter acontecido (nem criar_pre_reserva, nem
-      // criar_agendamento). A instrução em AGENT_INSTRUCTIONS.agendamento já
-      // pede pra nunca prometer horário como certo nesse caso, mas o modelo
-      // nem sempre segue — aqui é a garantia estrutural: citar um horário
-      // específico só é legítimo quando uma ferramenta de agenda confirmou
-      // ele nesta mensagem; se nenhuma rodou, qualquer horário citado é por
-      // definição não verificado, e o cliente não pode receber isso como se
-      // fosse um agendamento real.
-      const citedTimes = extractCitedTimes(bubbles.join(' '));
-      if (citedTimes.length) {
-        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) (${citedTimes.join(', ')}) como se tivesse agendado, mas nenhuma ferramenta de agenda rodou nesta mensagem — corrigindo resposta e escalando pra humano.`);
-        bubbles = ['Deixa eu confirmar certinho esse horário na agenda antes de te dar certeza — só um instante e já te retorno.'];
-        forcedHumanConfirmation = true;
+          ? [`Dejame confirmarte bien: el horario es ${confirmedTimes.join(' o ')}. ¿Te sirve así o preferís otro horario?`]
+          : ['Dejame confirmar bien ese horario en la agenda antes de asegurarte algo — en un instante te aviso.'];
+        // Só escala pra humano quando é o caso 1 real (nenhuma ferramenta
+        // rodou nesta mensagem pra sustentar o horário citado) — o caso 2
+        // (reconfirmando um agendamento já existente) não precisa de
+        // atenção humana, só da resposta corrigida acima.
+        if (!agendamentoToolsRan) forcedHumanConfirmation = true;
       }
     }
 

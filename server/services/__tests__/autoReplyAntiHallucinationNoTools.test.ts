@@ -24,10 +24,12 @@ vi.mock('../googleCalendar', () => ({
   cancelCalendarEvent: vi.fn(),
   findWeeklyAvailability: vi.fn(async () => []),
 }));
+const getAppointmentForPhone = vi.fn(async () => null as any);
 vi.mock('../appointmentStore', () => ({
-  getAppointmentForPhone: vi.fn(async () => null),
+  getAppointmentForPhone,
   setAppointmentForPhone: vi.fn(async () => undefined),
   clearAppointmentForPhone: vi.fn(async () => undefined),
+  confirmPayment: vi.fn(async () => null),
 }));
 vi.mock('../conversationStore', () => ({
   getConversationCtwaClid: vi.fn(async () => null),
