@@ -61,3 +61,20 @@ html, body {
   animation: pop-in 0.3s cubic-bezier(0, 1.59, 0.26, 1.01);
 }
 
+/* Item 2 do checklist visual do WhatsApp (issue #100): flash breve na linha
+   da lista de conversas quando chega mensagem nova de cliente, mesmo se a
+   conversa não estiver aberta — chama atenção do operador na visão
+   periférica sem depender só do badge de contagem. */
+@keyframes flash-new-message {
+  0%, 100% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: rgba(0, 168, 132, 0.35);
+  }
+}
+
+.animate-flash-new-message {
+  animation: flash-new-message 1.4s ease-out;
+}
+
