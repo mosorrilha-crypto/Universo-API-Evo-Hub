@@ -118,6 +118,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('nome do cliente');
     expect(systemInstruction).toContain('Nunca chame o cliente por um nome que não apareceu');
   });
+
+  it('proíbe abrir com frases de efeito ("qué gusto...") em vez de responder a dúvida direto (achado real em produção: praticamente toda primeira mensagem abria com "qué gusto en saludarte/leerte" ou "con gusto te ayudo" antes de responder)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('qué gusto en escribirme/leerte/saludarte');
+    expect(systemInstruction).toContain('responda a dúvida real da cliente já na mesma bolha ou na seguinte');
+  });
 });
 
 describe('generateAutoReplyForText — menção ao anúncio na abertura', () => {
