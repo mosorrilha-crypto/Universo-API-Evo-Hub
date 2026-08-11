@@ -27,6 +27,12 @@ export interface ServerConfig {
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
+  /** Chave pública VAPID (Web Push) — exposta ao frontend via endpoint, não é segredo. */
+  vapidPublicKey?: string;
+  /** Chave privada VAPID — assina o envio real de push, nunca sai do backend. */
+  vapidPrivateKey?: string;
+  /** mailto: exigido pelo protocolo Web Push (identifica o remetente pro serviço de push do navegador). */
+  vapidSubject: string;
 }
 
 /**
@@ -66,6 +72,10 @@ export function loadConfig(): ServerConfig {
     console.warn('⚠️  EVO_HUB_WEBHOOK_SECRET não configurado — /api/webhooks/evohub aceita chamadas sem verificar assinatura (dev only).');
   }
 
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+    console.warn('⚠️  VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY não configuradas — push notification do PWA fica desativado até gerar um par de chaves (npx web-push generate-vapid-keys) e configurar as duas.');
+  }
+
   return {
     port,
     isProduction,
@@ -87,5 +97,8 @@ export function loadConfig(): ServerConfig {
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || 'https://universo-api-evo-hub.onrender.com/api/google-calendar/oauth-callback',
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
+    vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
+    vapidSubject: process.env.VAPID_SUBJECT || 'mailto:suporte@universo.ai',
   };
 }

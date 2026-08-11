@@ -3,6 +3,7 @@ import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken } from '../lib/apiClient';
+import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { TranscriptionCard } from './TranscriptionCard';
 import { ConversationAnalysisPanel } from './ConversationAnalysisPanel';
 import {
@@ -384,6 +385,40 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   useEffect(() => { fetchGoogleCalendarStatus(); }, []);
+
+  // Push notification do PWA do atendente (issue #159) — segundo canal de
+  // alerta pro operador (escalação nova, agente pausado com lead sem
+  // resposta), além do WhatsApp template já existente. `null` = ainda
+  // verificando se já existe assinatura salva no navegador; `false` cobre
+  // tanto "nunca ativou" quanto "navegador não suporta" (a mensagem de erro
+  // específica só aparece se o operador tentar ativar).
+  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    getExistingPushSubscription()
+      .then((sub) => setPushEnabled(!!sub))
+      .catch(() => setPushEnabled(false));
+  }, []);
+
+  const handleTogglePush = async () => {
+    setPushBusy(true);
+    try {
+      if (pushEnabled) {
+        await disablePushNotifications();
+        setPushEnabled(false);
+      } else {
+        const result = await enablePushNotifications();
+        if (result.success) {
+          setPushEnabled(true);
+        } else {
+          setErrorMsg(result.error || 'Não foi possível ativar notificações agora.');
+        }
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const handleConnectGoogleCalendar = async () => {
     try {
@@ -2008,6 +2043,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Auto IA
             </span>
           </label>
+
+          {/* Push notification do PWA do atendente (issue #159) — pra não
+              depender só de estar olhando o painel pra perceber escalação
+              nova ou agente pausado com lead sem resposta. */}
+          <button
+            onClick={handleTogglePush}
+            disabled={pushBusy}
+            title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
+            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+              pushEnabled
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
+                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
+            }`}
+          >
+            {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+            <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
+          </button>
 
           <button
             onClick={() => setShowAddLead(true)}
