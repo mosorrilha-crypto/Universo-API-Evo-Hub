@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
@@ -113,6 +113,20 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
           console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
+        // Achado real em produção: sem isso, uma alucinação de agenda sem
+        // nenhuma ferramenta pra sustentar o horário citado (autoReply.ts,
+        // stopAutoReply) mandava o MESMO fallback genérico de novo a cada
+        // nova mensagem do cliente, em vez de mandar uma vez, escalar, e
+        // esperar um humano — chegou a se repetir 6x idêntico na mesma
+        // conversa. Reaproveita o mesmo bloqueio manual de "lead não
+        // qualificado" (menu ⋮ do painel) — mecanicamente é o mesmo efeito
+        // (para a resposta automática só pra este número, resto do tenant
+        // continua normal), só a origem do bloqueio que agora também pode
+        // ser automática.
+        if (result.stopAutoReply) {
+          await updateConversationState(tenantId, phone, { aiBlocked: true });
+          console.warn(`🛑 [Resposta Automática] tenant=${tenantId} IA bloqueada automaticamente pra ${phone} depois de uma alucinação de agenda sem ferramenta pra sustentar — aguardando atendimento humano.`);
+        }
       } catch (err: any) {
         if (isGeoRestrictedError(err)) {
           await markGeoRestricted(tenantId, phone, err.message);

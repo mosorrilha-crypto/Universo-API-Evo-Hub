@@ -75,6 +75,11 @@ describe('generateAutoReplyForText — anti-alucinação quando NENHUMA ferramen
     expect(result?.bubbles.join(' ')).not.toContain('10:00');
     expect(result?.bubbles.join(' ')).not.toMatch(/pré-agendado|agendado/i);
     expect(result?.needsHumanConfirmation).toBe(true);
+    // Achado real em produção: sem stopAutoReply, o mesmo fallback saía
+    // idêntico de novo a cada mensagem seguinte do cliente, em vez de mandar
+    // uma vez e esperar um humano — quem chama (webhooks.ts) usa esta flag
+    // pra bloquear a IA só pra esse número até alguém assumir.
+    expect(result?.stopAutoReply).toBe(true);
   });
 
   it('não mexe na resposta quando o modelo corretamente não cita nenhum horário específico', async () => {
@@ -86,5 +91,6 @@ describe('generateAutoReplyForText — anti-alucinação quando NENHUMA ferramen
     );
 
     expect(result?.bubbles).toEqual(['Posso confirmar sua disponibilidade e já te retorno, tá bom?']);
+    expect(result?.stopAutoReply).toBe(false);
   });
 });
