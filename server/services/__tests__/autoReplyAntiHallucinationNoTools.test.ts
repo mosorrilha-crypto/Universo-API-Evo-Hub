@@ -93,4 +93,26 @@ describe('generateAutoReplyForText — anti-alucinação quando NENHUMA ferramen
     expect(result?.bubbles).toEqual(['Posso confirmar sua disponibilidade e já te retorno, tá bom?']);
     expect(result?.stopAutoReply).toBe(false);
   });
+
+  it('NÃO trata como alucinação quando existe um agendamento REAL, mesmo se a checagem de conectividade ao vivo com o Google Calendar falhar nesta mensagem (achado direto do dono do produto: a agenda já fez o trabalho dela ao criar o evento — uma falha passageira de conectividade não desfaz isso)', async () => {
+    getAppointmentForPhone.mockResolvedValueOnce({
+      eventId: 'evt-real-1',
+      summary: 'Diseño con Henna',
+      startIso: '2026-08-10T14:00:00',
+      endIso: '2026-08-10T14:30:00',
+      paymentStatus: null,
+    });
+    const ai = makeFakeAi('¡Te paso! Estamos en Calle Paso Bogarín 3665. ¿Nos vemos hoy a las 14:00 entonces?');
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'la ubicación no me enviaste', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.bubbles.join(' ')).toContain('14:00');
+    expect(result?.bubbles.join(' ')).toContain('Paso Bogarín');
+    expect(result?.needsHumanConfirmation).toBe(false);
+    expect(result?.stopAutoReply).toBe(false);
+  });
 });

@@ -609,13 +609,23 @@ async function runAgendamentoTools(
   const businessHours = await getTenantBusinessHours(tenantId).catch(() => null);
   const businessHoursStatus = describeBusinessHoursToday(businessHours, naive, weekdayNum);
 
+  // Achado direto do dono do produto: um agendamento já criado (linha real
+  // em appointmentStore, fato do nosso próprio banco) não pode virar
+  // "não confirmado" só porque a checagem de conectividade AO VIVO com o
+  // Google Calendar teve um problema pontual nesta mensagem — a agenda já
+  // fez o trabalho dela quando criou o evento; uma falha passageira de
+  // conectividade não desfaz isso. Por isso a busca do agendamento ativo (e
+  // o confirmedTimes que vem dela) roda ANTES da checagem de `connected` e
+  // vale nos dois casos (conectado ou não).
+  const existing = await getAppointmentForPhone(tenantId, phone);
+  const confirmedTimesFromExisting: string[] = existing ? [extractHHmm(existing.startIso)] : [];
+
   const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
-    return { actionsSummary: [], hadError: false, confirmedTimes: [], businessHoursStatus };
+    return { actionsSummary: [], hadError: false, confirmedTimes: confirmedTimesFromExisting, businessHoursStatus };
   }
 
   const historyText = buildHistoryText(history);
-  const existing = await getAppointmentForPhone(tenantId, phone);
   const kb = await getKnowledgeBase(tenantId);
   // Etapa 2 — achado numa auditoria: antes disso TODO agendamento caía num
   // fallback fixo de "90 minutos" no prompt, mesmo pra serviços de 30min
@@ -627,7 +637,8 @@ async function runAgendamentoTools(
     .join('\n');
   // O horário do agendamento ATIVO (se houver) é um fato conhecido de antemão
   // — citar ele numa confirmação de cancelamento/remarcação não é alucinação.
-  const confirmedTimes: string[] = existing ? [extractHHmm(existing.startIso)] : [];
+  // (já calculado acima, antes da checagem de `connected` — reaproveita aqui.)
+  const confirmedTimes: string[] = [...confirmedTimesFromExisting];
 
   // Etapa 8 (fluxo de verificação de pagamento) — o estado é sempre decidido
   // por um operador humano (webhooks.ts marca pending_verification quando
