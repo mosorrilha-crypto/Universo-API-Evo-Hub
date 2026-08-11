@@ -1714,7 +1714,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold text-[#e9edef] truncate flex items-center gap-1">
-              {isPinned && <Pin className="w-3 h-3 text-slate-400 flex-shrink-0" />}
               <span className="truncate">{lead.name}</span>
             </h4>
             <div className="flex items-center space-x-1">
@@ -1762,16 +1761,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               )}
             </p>
 
-            {/* Unread badge or Stage tag */}
-            {unreadCount > 0 ? (
-              <span className="w-5 h-5 rounded-full bg-[#00a884] text-slate-950 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            ) : lead.fullAnalysis ? (
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/60 flex-shrink-0">
-                {lead.fullAnalysis.dealProbability}%
-              </span>
-            ) : null}
+            {/* Pin (se fixada) + badge de não lidas ou tag de estágio — mesmo
+                canto inferior direito do WhatsApp Web real (o pin não fica
+                colado no nome, fica aqui embaixo, ao lado do indicador). */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {isPinned && <Pin className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />}
+              {unreadCount > 0 ? (
+                <span className="w-5 h-5 rounded-full bg-[#00a884] text-slate-950 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              ) : lead.fullAnalysis ? (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/60 flex-shrink-0">
+                  {lead.fullAnalysis.dealProbability}%
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {/* Etiquetas livres (tipo WhatsApp Business) */}
