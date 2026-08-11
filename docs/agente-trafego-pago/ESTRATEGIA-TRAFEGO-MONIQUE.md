@@ -226,11 +226,11 @@ em cima de medição quebrada.
 | # | Ação | Depende de | Onde |
 |---|---|---|---|
 | 1.1 | Configurar credenciais CAPI por tenant (`capi_dataset_id`, `capi_access_token`, `capi_page_id`) | Ação humana | Supabase `tenant_meta_credentials` |
-| 1.2 | Adicionar evento CAPI no momento da **seña verificada** (hoje só existe `Schedule` na criação do agendamento) | Dev | `appointmentStore.confirmPayment` → `fireMetaCapiEventForTenant` |
-| 1.3 | Corrigir `currency: 'USD'` hardcoded na rota manual do painel (fluxo automático já usa PYG correto) | Dev | `server/routes/metaCapi.ts` |
+| 1.2 | ✅ **Feito** — evento CAPI (`Purchase`) disparado no momento da seña verificada | Dev | `autoReply.ts:674-685` → `appointmentStore.confirmPayment` → `fireMetaCapiEventForTenant`. Commit `ab5cb9a` |
+| 1.3 | ✅ **Feito** — `currency: 'PYG'` na rota manual do painel (não mais `USD`) | Dev | `server/routes/metaCapi.ts:46-56`. Commit `ab5cb9a` |
 | 1.4 | Fixar e documentar a taxa de câmbio BRL↔PYG usada nos cálculos | Decisão do gestor | este doc, seção 2.6 |
 | 1.5 | Marcar origem em todo novo agendamento (`[Ads]`, `[Indicação]`, `[Orgânico]`) enquanto o CAPI não estiver completo | Ação humana | título do evento no Calendar |
-| 1.6 | Confirmar se `DEMO_MODE` foi desligado em produção (docs do sistema marcam como 🔴 crítico) | Ação humana | Render |
+| 1.6 | ✅ **Verificado no código** — nenhuma flag `DEMO_MODE` existe; `POST /api/auth/login` é incondicional (exige `operators` real + bcrypt). Confirmação direta da env var no Render ainda não foi feita (MCP não lê env vars) | Ação humana (opcional, baixo risco) | `server/routes/auth.ts:25-66` |
 | 1.7 | **Arquivar/editar o reel de 23/07 com a promoção vencida de Gs. 450.000** | Aprovação do gestor | Instagram |
 | 1.8 | Auditar os demais 130 posts em busca de outras promoções vencidas ou preços antigos ainda públicos | Ação humana | Instagram |
 | 1.9 | Aplicar recorte geográfico obrigatório (Luque + arredores) em todo público de remarketing/lookalike existente derivado do Instagram | Dev/gestor de mídia | Meta Ads |
@@ -367,19 +367,21 @@ Estas regras não expiram e não dependem de horizonte.
 O sistema (`Universo-API-Evo-Hub`) é a infraestrutura que sustenta as etapas 4–7 do funil.
 O que já existe e o que falta, do ponto de vista de tráfego:
 
-**Já pronto (auditado em 08/08/2026):**
+**Já pronto (auditado em 08/08/2026, atualizado em 11/08/2026):**
 - Captura de `ctwa_clid` na primeira mensagem de lead vindo de anúncio Clique-para-WhatsApp,
   gravado por conversa e nunca sobrescrito.
 - Disparo automático de evento `Schedule` pro Meta CAPI quando um agendamento é criado de
   verdade, com telefone hasheado (SHA-256), moeda PYG e valor do serviço.
+- ✅ Evento `Purchase` disparado no momento da **seña verificada** (item 1.2, commit `ab5cb9a`) —
+  a Meta agora recebe sinal de "cliente pagou", não só "conseguiu agendar".
+- ✅ `currency: 'PYG'` corrigida na rota manual do painel (item 1.3, commit `ab5cb9a`).
 - Guardas corretas: não dispara sem `ctwa_clid` real nem sem credencial do tenant — nunca
   fabrica atribuição.
 - Pagamento só é confirmado após verificação humana explícita; a IA nunca confirma sozinha.
 
-**Falta (itens 1.2 e 1.3 do Horizonte 1):**
-- Evento CAPI no momento da **seña verificada**. Hoje a Meta otimiza para "conseguiu agendar",
-  não para "cliente pagou" — o que pode atrair mais agendamento fantasma.
-- `currency: 'USD'` hardcoded na rota manual do painel.
+**Falta:**
+- Item 1.1 — credenciais CAPI por tenant no Supabase (ação humana).
+- Item 1.4 — fixar taxa de câmbio BRL↔PYG (decisão do gestor).
 
 **Separação de responsabilidade:** o agente de tráfego analisa campanhas e recomenda ações,
 mas não altera conversa comercial, preço, política ou catálogo. O agente de vendas atende
@@ -393,6 +395,7 @@ clientes, mas não interpreta métrica de campanha como dado confirmado sem cons
 |---|---|---|
 | 08/08/2026 | Linha de base estabelecida (seção 2). Prioridade definida: fechar medição antes de escalar. | Diagnóstico inicial |
 | 08/08/2026 | Instagram orgânico incorporado ao diagnóstico. Descoberta da assimetria geográfica da base (9,2% em Luque) e da promoção vencida ainda pública. | Diagnóstico inicial |
+| 11/08/2026 | Itens 1.2 (evento CAPI `Purchase` na seña verificada) e 1.3 (`currency: 'PYG'` na rota manual) confirmados já implementados no código (commit `ab5cb9a`, anterior a esta sessão). Item 1.6 (`DEMO_MODE`) verificado no código-fonte: sem flag ativa, login incondicional via `operators`+bcrypt — confirmação da env var no Render em si ainda pendente. | Sessão de implementação |
 | — | Taxa de câmbio BRL↔PYG para cálculo de CAC/ROAS | ⏳ pendente |
 | — | CAC máximo aceitável por serviço | ⏳ pendente |
 | — | Pausar ou reformular "New Reconhecimento Campaign" | ⏳ pendente aprovação |
