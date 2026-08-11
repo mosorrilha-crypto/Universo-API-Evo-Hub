@@ -54,6 +54,16 @@ export interface AutoReplyResult {
   stopAutoReply: boolean;
   /** ms gastos na chamada de roteamento — usado pra descontar do atraso de digitação da 1ª bolha, compensando a latência extra do router. */
   routerElapsedMs: number;
+  /**
+   * Nome que a cliente disse na conversa (não veio do perfil do WhatsApp) —
+   * quem chama deve persistir isso na conversa (mesmo campo que já guarda o
+   * nome de perfil) pra virar `contactName` daqui pra frente. Sem isso, o
+   * nome só existe enquanto a mensagem em que ela disse ainda está dentro
+   * da janela de histórico recente — depois disso o agente "esquece" o nome
+   * que acabou de perguntar, exatamente o tipo de falha que mais entrega
+   * que é um bot (achado em pesquisa de mercado sobre humanização).
+   */
+  capturedClientName?: string;
 }
 
 /**
@@ -203,6 +213,7 @@ REGRAS DE ESTILO (sempre aplicar):
 9. Antes de perguntar ou afirmar algo, confira o histórico E a "Nova mensagem do cliente" abaixo — nunca repita uma pergunta/informação que o cliente já respondeu, e nunca repita algo que VOCÊ MESMO já disse antes nesta conversa (revise as últimas mensagens do "Atendente" no histórico). Se a mensagem nova já responde algo que você perguntaria, ou se você já pediu algo (ex: uma foto) e o histórico mostra que já pediu, siga a conversa a partir dali — nunca repita o mesmo pedido/pergunta/explicação com palavras diferentes.
 10. As bolhas de uma mesma resposta são fragmentos de UM ÚNICO pensamento contínuo, na ordem certa — nunca duas ideias que se contradizem ou dois começos de resposta diferentes colados um atrás do outro.
 11. No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.
+12. Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.
 
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
@@ -210,9 +221,11 @@ Classifique também a fase atual desta conversa em UMA destas opções:
 - "objecao": cliente hesitante, com medo, dúvida sobre resultado, ou pedindo desconto/"vou pensar".
 - "fechamento": cliente decidido, confirmando nome/horário, pronto pra agendar.
 
+Se em algum momento desta mensagem OU do histórico a cliente disser o próprio nome, e a seção "Nome do cliente" acima NÃO tiver aparecido com esse nome (ou não tiver aparecido de jeito nenhum), preencha "nomeCapturado" com esse nome exato — nunca invente, nunca repita um nome que já apareceu em "Nome do cliente". Isso existe pra não "esquecer" o nome depois que a mensagem em que ela disse sair do histórico recente (achado real: conversa de WhatsApp não tem limite de tamanho, mas o contexto que você recebe só traz as últimas mensagens).
+
 Responda ESTRITAMENTE em JSON no formato:
-{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false}
-Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar.`;
+{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null}
+Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima.`;
 }
 
 /**
@@ -239,7 +252,7 @@ async function generateSpecialistReply(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   extraContext?: string,
   adContext?: string
-): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean } | null> {
+): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = buildGlobalAndSegmentLayer(agent, segment);
 
@@ -259,13 +272,19 @@ Nova mensagem do cliente: "${text}"`;
     GEMINI_TIMEOUT_MS
   );
 
-  const parsed = JSON.parse(response.text || '{}') as { phase?: string; bubbles?: string[]; needsHumanConfirmation?: boolean };
+  const parsed = JSON.parse(response.text || '{}') as { phase?: string; bubbles?: string[]; needsHumanConfirmation?: boolean; nomeCapturado?: string | null };
   const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean);
   const validPhases: ConversationPhase[] = ['abertura', 'informacao', 'objecao', 'fechamento'];
   const phase = validPhases.includes(parsed.phase as ConversationPhase) ? (parsed.phase as ConversationPhase) : 'informacao';
+  // Só aceita nomeCapturado quando ainda não tínhamos nenhum nome pra essa
+  // cliente — nunca deixa um nome extraído por engano sobrescrever o nome
+  // real de perfil do WhatsApp (contactName), que é sempre mais confiável.
+  const capturedClientName = !contactName && typeof parsed.nomeCapturado === 'string' && parsed.nomeCapturado.trim()
+    ? parsed.nomeCapturado.trim()
+    : undefined;
 
   if (!bubbles.length) return null;
-  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation };
+  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName };
 }
 
 /** Data/hora atual "de parede" no fuso do negócio — dá ao agente uma âncora real pra resolver referências relativas ("amanhã às 15h") sem precisar calcular fuso horário sozinho. */

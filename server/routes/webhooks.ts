@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
@@ -126,6 +126,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         if (result.stopAutoReply) {
           await updateConversationState(tenantId, phone, { aiBlocked: true });
           console.warn(`🛑 [Resposta Automática] tenant=${tenantId} IA bloqueada automaticamente pra ${phone} depois de uma alucinação de agenda sem ferramenta pra sustentar — aguardando atendimento humano.`);
+        }
+        // A cliente disse o próprio nome na conversa (não veio do perfil do
+        // WhatsApp) — grava agora pra virar contactName em todo turno
+        // seguinte, sem depender da janela de histórico recente (ver
+        // conversationStore.setConversationNameIfMissing).
+        if (result.capturedClientName) {
+          await setConversationNameIfMissing(tenantId, phone, result.capturedClientName);
         }
       } catch (err: any) {
         if (isGeoRestrictedError(err)) {
