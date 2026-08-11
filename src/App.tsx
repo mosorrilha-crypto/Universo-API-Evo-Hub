@@ -21,6 +21,8 @@ import { EvoHubIntegration } from './components/EvoHubIntegration';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch } from './lib/apiClient';
+import { isStandalonePwa } from './lib/pwa';
+import { hasRoleAtLeast } from './lib/roles';
 
 import { INITIAL_TENANTS } from './data/mockTenants';
 import { INITIAL_MOCK_LEADS } from './data/mockLeads';
@@ -40,9 +42,27 @@ const GUEST_USER: UserProfile = {
   department: '',
 };
 
+/** Lê o papel salvo sem depender do state de currentUser — precisa estar
+ * disponível já no cálculo inicial (lazy initializer) de activeTab, que
+ * roda antes/independente da inicialização de currentUser abaixo. */
+function readSavedUserRole(): UserProfile['role'] | undefined {
+  try {
+    const saved = localStorage.getItem('saas_current_user');
+    return saved ? (JSON.parse(saved).role as UserProfile['role']) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const App: React.FC = () => {
   // Navigation & View State
-  const [activeTab, setActiveTab] = useState<ActiveTab>('saas');
+  // Aberto pelo ícone instalado (PWA do atendente, issue #159), ou papel
+  // abaixo de saas_admin: entra direto em Atendimento, não no Painel SaaS
+  // Master (que passa a ficar reservado pra quem realmente pode vê-lo — ver
+  // Header.tsx, que também restringe as abas visíveis).
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
+    !isStandalonePwa() && hasRoleAtLeast(readSavedUserRole(), 'saas_admin') ? 'saas' : 'whatsapp'
+  );
   // Lead a abrir automaticamente ao entrar na aba WhatsApp — usado pelo
   // botão "Voltar pra conversa" do card de Escalonamento. requestId muda a
   // cada clique (mesmo pro mesmo telefone), pra garantir que clicar de novo
@@ -76,6 +96,29 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+
+  // Restrição de telas por papel + contexto (issue #159, pedido direto do
+  // Lucas: atendente não deve ver Financeiro nem telas administrativas).
+  // Mesmos níveis usados em Header.tsx pra esconder os botões das abas —
+  // repetido aqui pra também travar o CONTEÚDO: esconder só o botão não
+  // bastaria se activeTab ficasse apontando pra uma aba proibida (ex: troca
+  // de usuário no meio da sessão, sem reload da página).
+  const isInstalledApp = isStandalonePwa();
+  const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
+  const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
+  const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
+
+  // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
+  // mais permissão pra ver a aba em que estava — cobre re-login com outro
+  // papel no meio da sessão, sem depender de um reload de página completo.
+  useEffect(() => {
+    const blocked =
+      (activeTab === 'saas' && !canSeeSaasMaster) ||
+      (activeTab === 'financial' && !canSeeFinancial) ||
+      (['attribution', 'knowledge', 'evohub', 'integration'].includes(activeTab) && !canSeeAdminTools);
+    if (blocked) setActiveTab('whatsapp');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.role]);
 
   // CRM Leads
   const [leads, setLeads] = useState<LeadInfo[]>(() => {
@@ -424,7 +467,7 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'saas' && (
+        {activeTab === 'saas' && canSeeSaasMaster && (
           <SaaSAdminDashboard
             tenants={tenants}
             activeTenant={activeTenant}
@@ -483,7 +526,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'financial' && (
+        {activeTab === 'financial' && canSeeFinancial && (
           <FinancialDashboard
             transactions={transactions}
             onAddTransaction={handleAddTransaction}
@@ -499,7 +542,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'attribution' && (
+        {activeTab === 'attribution' && canSeeAdminTools && (
           <AdAttributionCAPI
             leads={leads}
             onTriggerCAPIEvent={(lead, eventName) => {
@@ -512,7 +555,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'knowledge' && (
+        {activeTab === 'knowledge' && canSeeAdminTools && (
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
             onSaveKnowledgeBase={async (updatedKb) => {
@@ -548,14 +591,14 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'evohub' && (
+        {activeTab === 'evohub' && canSeeAdminTools && (
           <EvoHubIntegration
             activeTenant={activeTenant}
             showToast={showToast}
           />
         )}
 
-        {activeTab === 'integration' && (
+        {activeTab === 'integration' && canSeeAdminTools && (
           <WhatsAppGuide />
         )}
 

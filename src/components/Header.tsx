@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
+import { isStandalonePwa } from '../lib/pwa';
+import { hasRoleAtLeast } from '../lib/roles';
 import {
   MessageSquare,
   Code,
@@ -64,6 +66,20 @@ export const Header: React.FC<HeaderProps> = ({
   escalationsPendingCount = 0
 }) => {
   const tabsRef = useRef<HTMLDivElement>(null);
+  // Duas restrições combinadas nas abas visíveis: (1) aberto pelo ícone
+  // instalado (PWA do atendente, issue #159) sempre restringe pro escopo de
+  // atendimento, não importa o papel do usuário; (2) papel "Operador" fica
+  // restrito ao mesmo escopo mesmo no navegador normal — pedido direto do
+  // Lucas: funcionário de atendimento não deve ver Financeiro nem telas
+  // administrativas. "Gerente" já enxerga Financeiro, mas só
+  // "Administrador"+ vê as ferramentas mais técnicas (Meta CAPI, Base de
+  // Conhecimento, Evo Hub, Guia de API), e só "SaaS Master Admin" vê o
+  // painel multi-tenant. display-mode não muda durante a sessão, então um
+  // cálculo só (não precisa reavaliar em cada render) já é suficiente.
+  const [isInstalledApp] = useState(() => isStandalonePwa());
+  const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
+  const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
+  const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
   const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
   const tenantMenuRef = useRef<HTMLDivElement>(null);
@@ -272,21 +288,23 @@ export const Header: React.FC<HeaderProps> = ({
             ref={tabsRef}
             className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto pb-2 pt-0.5 custom-scrollbar scroll-smooth w-full"
           >
-            <button
-              id="tab-saas-admin"
-              onClick={() => setActiveTab('saas')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'saas'
-                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
-                  : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
-              }`}
-            >
-              <Layers className="w-4 h-4 text-purple-300" />
-              <span>Painel SaaS Master</span>
-              <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
-                Multi-Tenant
-              </span>
-            </button>
+            {canSeeSaasMaster && (
+              <button
+                id="tab-saas-admin"
+                onClick={() => setActiveTab('saas')}
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  activeTab === 'saas'
+                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                    : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
+                }`}
+              >
+                <Layers className="w-4 h-4 text-purple-300" />
+                <span>Painel SaaS Master</span>
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
+                  Multi-Tenant
+                </span>
+              </button>
+            )}
 
             <button
               id="tab-whatsapp-sim"
@@ -332,70 +350,76 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            <button
-              id="tab-financial"
-              onClick={() => setActiveTab('financial')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'financial'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <DollarSign className="w-4 h-4 text-emerald-400" />
-              <span>Financeiro & Vendas</span>
-            </button>
+            {canSeeFinancial && (
+              <button
+                id="tab-financial"
+                onClick={() => setActiveTab('financial')}
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  activeTab === 'financial'
+                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                }`}
+              >
+                <DollarSign className="w-4 h-4 text-emerald-400" />
+                <span>Financeiro & Vendas</span>
+              </button>
+            )}
 
-            <button
-              id="tab-attribution"
-              onClick={() => setActiveTab('attribution')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'attribution'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Target className="w-4 h-4 text-emerald-400" />
-              <span>Atribuição Meta CAPI</span>
-            </button>
+            {canSeeAdminTools && (
+              <>
+                <button
+                  id="tab-attribution"
+                  onClick={() => setActiveTab('attribution')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'attribution'
+                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  <Target className="w-4 h-4 text-emerald-400" />
+                  <span>Atribuição Meta CAPI</span>
+                </button>
 
-            <button
-              id="tab-knowledge"
-              onClick={() => setActiveTab('knowledge')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'knowledge'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Brain className="w-4 h-4 text-emerald-400" />
-              <span>Base de Conhecimento</span>
-            </button>
+                <button
+                  id="tab-knowledge"
+                  onClick={() => setActiveTab('knowledge')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'knowledge'
+                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  <Brain className="w-4 h-4 text-emerald-400" />
+                  <span>Base de Conhecimento</span>
+                </button>
 
-            <button
-              id="tab-evohub"
-              onClick={() => setActiveTab('evohub')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'evohub'
-                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
-                  : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
-              }`}
-            >
-              <Zap className="w-4 h-4 text-purple-400" />
-              <span>Evo Hub (Meta API)</span>
-            </button>
+                <button
+                  id="tab-evohub"
+                  onClick={() => setActiveTab('evohub')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'evohub'
+                      ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                      : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
+                  }`}
+                >
+                  <Zap className="w-4 h-4 text-purple-400" />
+                  <span>Evo Hub (Meta API)</span>
+                </button>
 
-            <button
-              id="tab-integration"
-              onClick={() => setActiveTab('integration')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'integration'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Code className="w-4 h-4 text-emerald-400" />
-              <span>Guia Conexão API</span>
-            </button>
+                <button
+                  id="tab-integration"
+                  onClick={() => setActiveTab('integration')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'integration'
+                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  <Code className="w-4 h-4 text-emerald-400" />
+                  <span>Guia Conexão API</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Scroll Right Button */}
