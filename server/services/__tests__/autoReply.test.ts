@@ -234,3 +234,28 @@ describe('generateAutoReplyForText — etapa de reclamação (Epic 4.5.8)', () =
     expect(result?.needsHumanConfirmation).toBe(true);
   });
 });
+
+describe('generateAutoReplyForText — pedir o nome na triagem (achado real: falta de personalização quando o WhatsApp não tem nome de perfil)', () => {
+  function makeFakeAiTriagem() {
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          return { text: JSON.stringify({ phase: 'abertura', bubbles: ['¡Hola! ¿Cómo estás?'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return { ai, calls };
+  }
+
+  it('instrui a perguntar o nome quando "Nome do cliente" não está no contexto', async () => {
+    const { ai, calls } = makeFakeAiTriagem();
+    await generateAutoReplyForText('tenant-a', ai, 'Hola', undefined /* sem contactName */, undefined, []);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('pergunte o nome dela de forma natural');
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).not.toContain('Nome do cliente:');
+  });
+});
