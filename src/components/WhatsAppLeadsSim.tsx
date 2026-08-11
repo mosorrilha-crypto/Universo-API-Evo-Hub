@@ -402,6 +402,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, []);
 
   const handleTogglePush = async () => {
+    // Achado real em produção: o aviso de erro (setErrorMsg) nunca se
+    // limpava sozinho — se uma tentativa falhasse, o banner laranja ficava
+    // preso na tela pra sempre, mesmo numa tentativa seguinte bem-sucedida,
+    // fazendo parecer que continuava falhando quando na verdade já tinha
+    // ativado. Limpa aqui no início de cada tentativa nova.
+    setErrorMsg(null);
     setPushBusy(true);
     try {
       if (pushEnabled) {
