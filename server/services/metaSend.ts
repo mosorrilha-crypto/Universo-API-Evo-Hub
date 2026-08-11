@@ -87,6 +87,62 @@ export async function sendWhatsAppTextMessage(
 }
 
 /**
+ * Envio de mensagem com botões de resposta rápida (POST /{phone-number-id}/messages,
+ * type "interactive", subtype "button") — até 3 botões, cada título com no
+ * máximo 20 caracteres (limite da própria Meta). Quando o cliente toca um
+ * botão, a Meta manda de volta um webhook com `interactive.button_reply.title`
+ * (ver parseMetaWebhookPayload em webhookParsers.ts, que trata isso igual a
+ * uma mensagem de texto normal — o resto do pipeline nem precisa saber que
+ * veio de um botão).
+ *
+ * Achado no benchmark de mercado (comparação com outros agentes de
+ * WhatsApp): a maior causa de no-show é dificuldade de remarcar fora do
+ * horário comercial — um botão de "Confirmar"/"Remarcar" direto no lembrete
+ * resolve isso sem o cliente precisar digitar nada. Só funciona dentro da
+ * janela de 24h de mensagem business-initiated, igual sendWhatsAppTextMessage
+ * (não é um template, não pode furar essa janela).
+ * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages#interactive-object
+ */
+export async function sendWhatsAppInteractiveButtons(
+  phoneNumberId: string | undefined,
+  accessToken: string | undefined,
+  to: string,
+  bodyText: string,
+  buttons: { id: string; title: string }[]
+): Promise<void> {
+  if (!phoneNumberId || !accessToken) {
+    throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mensagem via Meta Cloud API.');
+  }
+  if (!buttons.length || buttons.length > 3) {
+    throw new Error(`sendWhatsAppInteractiveButtons aceita de 1 a 3 botões — recebeu ${buttons.length}.`);
+  }
+
+  const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: bodyText },
+        action: {
+          buttons: buttons.map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title } })),
+        },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    await throwMetaError(res, 'Falha ao enviar mensagem com botões via Meta Cloud API');
+  }
+}
+
+/**
  * Envio de mensagem via template aprovado da Meta (POST /{phone-number-id}/messages,
  * type "template") — diferente de sendWhatsAppTextMessage, funciona mesmo fora da
  * janela de 24h de mensagem business-initiated (é exatamente pra isso que templates
