@@ -231,6 +231,26 @@ export async function attachAdReferralIfMissing(tenantId: string, phone: string,
     .eq('id', conv.id);
 }
 
+/**
+ * Grava o nome que a cliente disse na própria conversa (não veio do perfil
+ * do WhatsApp) — reaproveita a mesma coluna `name` que já guarda o nome de
+ * perfil, então a partir daqui ele vira `contactName` normalmente em todo
+ * turno seguinte, sem depender da janela de histórico recente pra "lembrar"
+ * dele (achado em pesquisa de mercado: perder o nome do cliente depois de
+ * algumas mensagens é um dos sinais mais claros de que é um bot, não uma
+ * pessoa). Só grava se ainda não existir nome nenhum pra essa conversa —
+ * nunca sobrescreve um nome de perfil real do WhatsApp, que é sempre mais
+ * confiável que um nome extraído de texto livre pela IA.
+ */
+export async function setConversationNameIfMissing(tenantId: string, phone: string, name: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  const { data: existing } = await db.from('conversations').select('name').eq('id', conv.id).maybeSingle();
+  if (existing?.name) return;
+  await db.from('conversations').update({ name }).eq('id', conv.id);
+  emitConversationUpdated(tenantId, phone);
+}
+
 /** ctwa_clid gravado pra essa conversa, se algum dia veio de um anúncio — null caso contrário (nunca inventar). */
 export async function getConversationCtwaClid(tenantId: string, phone: string): Promise<string | null> {
   const db = getDb();

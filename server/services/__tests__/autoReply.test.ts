@@ -126,6 +126,45 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('qué gusto en escribirme/leerte/saludarte');
     expect(systemInstruction).toContain('responda a dúvida real da cliente já na mesma bolha ou na seguinte');
   });
+
+  it('instrui a nunca repetir frase de exemplo do contexto do negócio palavra por palavra (pesquisa de mercado: repetir a mesma frase pronta é um dos sinais mais claros de bot)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('nunca um script pra repetir palavra por palavra');
+  });
+});
+
+describe('generateAutoReplyForText — captura o nome que a cliente diz na conversa (pesquisa de mercado: "esquecer" o nome depois de algumas mensagens é um dos sinais mais claros de bot)', () => {
+  function makeFakeAiWithName(nomeCapturado: string | null) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          return { text: JSON.stringify({ phase: 'abertura', bubbles: ['¡Un gusto, Camila!'], needsHumanConfirmation: false, nomeCapturado }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('devolve capturedClientName quando o modelo extrai um nome e não havia contactName', async () => {
+    const ai = makeFakeAiWithName('Camila');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'Soy Camila, quería consultar', undefined /* sem contactName */, undefined, []);
+    expect(result?.capturedClientName).toBe('Camila');
+  });
+
+  it('IGNORA nomeCapturado quando já existe contactName — nunca deixa a IA sobrescrever o nome real de perfil do WhatsApp', async () => {
+    const ai = makeFakeAiWithName('Outro Nome');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', 'Camila (perfil do WhatsApp)', undefined, []);
+    expect(result?.capturedClientName).toBeUndefined();
+  });
+
+  it('não define capturedClientName quando o modelo não extraiu nenhum nome', async () => {
+    const ai = makeFakeAiWithName(null);
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.capturedClientName).toBeUndefined();
+  });
 });
 
 describe('generateAutoReplyForText — menção ao anúncio na abertura', () => {
