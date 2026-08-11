@@ -16,6 +16,7 @@
 import { getDb } from './db';
 import { sendWhatsAppTemplateMessage } from './metaSend';
 import { resolveMetaCredentialsForTenant } from './tenantResolver';
+import { sendPushToTenant } from './webPush';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 /** Sugestão da issue #115 — tempo pausado antes de considerar "alguém precisa saber". */
@@ -125,15 +126,26 @@ async function alertForTenant(row: AgentStatusRow, deps: AgentPausedAlertJobDeps
     .select('name, admin_alert_phone')
     .eq('id', row.tenant_id)
     .maybeSingle();
-  const adminPhone = tenant?.admin_alert_phone;
-  if (!adminPhone) {
-    console.warn(`⚠️  [Alerta agente pausado] tenant=${row.tenant_id} sem admin_alert_phone configurado — ninguém pra avisar.`);
-    return;
-  }
 
   const pausedMinutes = Math.round((Date.now() - new Date(row.updated_at).getTime()) / 60000);
   const tenantName = tenant?.name || row.tenant_id;
   const leadLabel = unanswered.name || unanswered.phone;
+
+  // Canal 1: push pro PWA do atendente (issue #159) — independente do
+  // admin_alert_phone abaixo, por dispositivo/operador que autorizou
+  // notificação. Nunca lança (sendPushToTenant engole erro por assinatura).
+  await sendPushToTenant(row.tenant_id, {
+    title: '⚠️ Agente pausado com lead sem resposta',
+    body: `${tenantName} — pausado há ${pausedMinutes}min, ex: ${leadLabel}`,
+    tag: `agent-paused-${row.tenant_id}`,
+  });
+
+  // Canal 2: WhatsApp template pro admin_alert_phone (canal original).
+  const adminPhone = tenant?.admin_alert_phone;
+  if (!adminPhone) {
+    console.warn(`⚠️  [Alerta agente pausado] tenant=${row.tenant_id} sem admin_alert_phone configurado — sem alerta via WhatsApp (push, se configurado, ainda foi tentado acima).`);
+    return;
+  }
 
   const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(row.tenant_id, {
     metaAccessToken: deps.metaAccessToken,

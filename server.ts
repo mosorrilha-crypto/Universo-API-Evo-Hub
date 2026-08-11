@@ -19,11 +19,13 @@ import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
 import { createCrmRouter } from './server/routes/crm';
+import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
+import { initWebPush } from './server/services/webPush';
 
 dotenv.config();
 
@@ -121,6 +123,8 @@ async function startServer() {
   }));
   app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey }));
   app.use(createCrmRouter({ authenticateToken }));
+  initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
+  app.use(createPushSubscriptionsRouter({ authenticateToken, vapidPublicKey: config.vapidPublicKey }));
 
   // Middleware de erro global do Express — precisa vir DEPOIS de todas as
   // rotas de API acima (é assim que o Express decide quem trata um
