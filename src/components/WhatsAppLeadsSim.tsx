@@ -249,6 +249,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'hot' | 'international'>('all');
   const [showRightPanel, setShowRightPanel] = useState(true);
 
+  // Item 2 do checklist visual (issue #100): flash breve na linha da lista
+  // quando chega mensagem nova do cliente — mesmo em conversa que não está
+  // aberta no momento, pra chamar atenção do operador na visão periférica.
+  // Guarda os ids em flash; cada um se remove sozinho via setTimeout depois
+  // de ~1.4s (duração da animação `animate-flash-new-message` no CSS).
+  const [flashLeadIds, setFlashLeadIds] = useState<Set<string>>(new Set());
+
   // Etiquetas livres por conversa (tipo WhatsApp Business) — ver
   // server/services/conversationLabelStore.ts.
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
@@ -562,6 +569,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Última contagem de mensagens vista por lead — bookkeeping simples fora
+  // do estado do React (ref, não state) pra detectar "chegou mensagem nova"
+  // de forma síncrona e confiável. Guardar esse cálculo dentro do updater
+  // funcional do setLeads (lendo/escrevendo uma variável de closure ali) não
+  // funciona: React não garante que a função updater rode de forma síncrona
+  // logo após a chamada de setLeads, então o código que lia o resultado
+  // logo em seguida via a lista sempre vazia.
+  const lastMessageCountRef = useRef<Map<string, number>>(new Map());
+
   // Busca conversas reais de WhatsApp (recebidas via webhook) e mescla na
   // lista — sem substituir os leads de exemplo/simulados que já existirem.
   useEffect(() => {
@@ -576,6 +592,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         if (!response.ok || cancelled) return;
         const data = await response.json();
         const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; unreadCount: number }[] = data.conversations || [];
+
+        // Ids que ganharam mensagem nova de CLIENTE nesta rodada (não conta
+        // mensagem enviada pelo próprio operador/IA, nem a primeira carga —
+        // só dispara quando já existia uma contagem anterior pra comparar).
+        const newlyArrivedIds: string[] = [];
+        for (const conv of realConversations) {
+          const id = `real-${conv.phone}`;
+          const prevCount = lastMessageCountRef.current.get(id);
+          const lastIncoming = conv.messages[conv.messages.length - 1];
+          if (prevCount !== undefined && conv.messages.length > prevCount && lastIncoming?.sender === 'lead') {
+            newlyArrivedIds.push(id);
+          }
+          lastMessageCountRef.current.set(id, conv.messages.length);
+        }
 
         setLeads((prev) => {
           const byId = new Map(prev.map((l) => [l.id, l]));
@@ -626,6 +656,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           }
           return Array.from(byId.values());
         });
+
+        if (newlyArrivedIds.length > 0) {
+          setFlashLeadIds((prev) => {
+            const next = new Set(prev);
+            newlyArrivedIds.forEach((id) => next.add(id));
+            return next;
+          });
+          newlyArrivedIds.forEach((id) => {
+            setTimeout(() => {
+              setFlashLeadIds((prev) => {
+                if (!prev.has(id)) return prev;
+                const next = new Set(prev);
+                next.delete(id);
+                return next;
+              });
+            }, 1400);
+          });
+        }
       } catch {
         // silencioso: painel continua funcionando com o que já tiver em memória/localStorage
       }
@@ -1620,6 +1668,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const isAiBlocked = !!lead.aiBlockedAt;
     const isMenuOpen = openMenuForLeadId === lead.id;
     const unreadCount = getUnreadCount(lead);
+    const isUnread = unreadCount > 0;
+    const isFlashing = flashLeadIds.has(lead.id);
 
     return (
       <div
@@ -1628,8 +1678,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         className={`p-3 transition-colors cursor-pointer relative flex items-start space-x-3 ${
           isSelected
             ? 'bg-[#2a3942] border-l-4 border-[#00a884]'
-            : 'hover:bg-[#202c33]'
-        }`}
+            : isUnread
+            ? 'border-l-4 border-[#00a884]/50 hover:bg-[#202c33]'
+            : 'border-l-4 border-transparent hover:bg-[#202c33]'
+        } ${isFlashing ? 'animate-flash-new-message' : ''}`}
       >
         <div className="relative flex-shrink-0">
           <div
@@ -1649,7 +1701,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <div className="flex items-center space-x-1">
               {isAiBlocked && <Ban className="w-3 h-3 text-rose-400 flex-shrink-0" title="IA bloqueada — lead não qualificado" />}
               {isMuted && <BellOff className="w-3 h-3 text-slate-500 flex-shrink-0" title="Silenciada" />}
-              <span className={`text-[10px] ${isSelected ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
+              <span className={`text-[10px] ${isSelected || isUnread ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
                 {lead.timestamp}
               </span>
               <button
@@ -1667,7 +1719,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
           {/* Message Preview */}
           <div className="flex items-center justify-between mt-1">
-            <p className="text-[11px] text-slate-400 truncate flex items-center pr-2">
+            <p className={`text-[11px] truncate flex items-center pr-2 ${isUnread ? 'text-[#e9edef] font-semibold' : 'text-slate-400'}`}>
               {lastMsg ? (
                 <>
                   {lastMsg.sender === 'agent' && (
