@@ -56,7 +56,11 @@ import {
   Ban,
   CheckCircle2,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  MessageCircle,
+  Phone,
+  Users,
+  Settings
 } from 'lucide-react';
 
 // Paleta de cores dos chips de etiqueta — a cor de cada etiqueta vem de um
@@ -408,6 +412,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  /** Barra de controles reais (Ativo/Restrito/Pausado, Calendar, Auto IA) — o ícone "Config" da barra lateral estilo WhatsApp Web rola até aqui, em vez de fingir uma tela de configurações que não existe. */
+  const toolbarRef = React.useRef<HTMLDivElement>(null);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1792,7 +1798,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             rolar na horizontal (cortava até o cabeçalho/abas). flex-wrap
             sozinho não resolve: só quebra linha quando o container tem uma
             largura limitada pra quebrar contra — w-full dá esse limite. */}
-        <div className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto w-full flex-shrink-0 flex-wrap gap-y-2">
+        <div ref={toolbarRef} className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto w-full flex-shrink-0 flex-wrap gap-y-2">
           {/* Clear Mock Data Button */}
           <button
             onClick={handleClearMockData}
@@ -1995,8 +2001,65 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[85dvh] lg:h-[720px]">
-        
+      <div className="bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-[56px_repeat(12,minmax(0,1fr))] h-[85dvh] lg:h-[720px]">
+
+        {/* ========================================== */}
+        {/* Barra de ícones lateral esquerda, estilo WhatsApp Web/Desktop —
+            só nesta seção (Atendimento WhatsApp), o resto do produto mantém
+            a navegação própria do Universo. Ocupa uma faixa fixa extra
+            (56px) ANTES das 12 colunas normais — grid auto-placement cuida
+            do resto sozinho, sem precisar recalcular nenhum lg:col-span
+            existente. Escondida no mobile (lg:flex): não há espaço real pra
+            ela nesse breakpoint e o produto já usa mobileThreadOpen pra
+            navegação lá.
+            Cada ícone só é clicável quando já existe uma ação real por trás
+            (Conversas = esta própria tela; Arquivadas = seção já existente
+            na lista; Config = rola até os controles reais do agente,
+            Ativo/Restrito/Pausado + Calendar + Auto IA, que já existem
+            acima). Chamadas/Status/Comunidades/Perfil não têm nenhuma
+            funcionalidade real no produto hoje — ficam desabilitados com
+            tooltip "Em breve" em vez de fingir que fazem algo. */}
+        <nav className="hidden lg:flex flex-col items-center py-3 gap-1 bg-[#202c33] border-r border-slate-800/80">
+          <button
+            type="button"
+            title="Conversas"
+            className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 cursor-default"
+          >
+            <MessageCircle className="w-5 h-5" />
+          </button>
+          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+            <CircleDashed className="w-5 h-5" />
+          </button>
+          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+            <Phone className="w-5 h-5" />
+          </button>
+          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+            <Users className="w-5 h-5" />
+          </button>
+
+          <div className="flex-1" />
+
+          <button
+            type="button"
+            onClick={() => setShowArchived(true)}
+            title="Arquivadas"
+            className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+          >
+            <Archive className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => toolbarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            title="Configurações do agente"
+            className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+            <User className="w-5 h-5" />
+          </button>
+        </nav>
+
         {/* ========================================== */}
         {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}
         {/* ========================================== */}
