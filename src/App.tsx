@@ -454,7 +454,6 @@ export const App: React.FC = () => {
         leadsCount={leads.length}
         transactionsCount={transactions.length}
         demoLeadsCount={leads.filter((l) => !l.isReal).length}
-        escalationsPendingCount={escalations.filter((e) => !e.resolved).length}
       />
 
       {/* Main Content Area */}

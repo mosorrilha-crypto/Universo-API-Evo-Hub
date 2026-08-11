@@ -23,8 +23,7 @@ import {
   RotateCcw,
   Download,
   X,
-  Zap,
-  AlertTriangle
+  Zap
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -44,7 +43,6 @@ interface HeaderProps {
   transactionsCount?: number;
   /** Leads sem isReal (carregados via "Restaurar Dados de Demo") — distinto de leadsCount, que inclui leads reais do backend (ver #94). */
   demoLeadsCount?: number;
-  escalationsPendingCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -62,8 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   onExportBackup,
   leadsCount = 0,
   transactionsCount = 0,
-  demoLeadsCount = 0,
-  escalationsPendingCount = 0
+  demoLeadsCount = 0
 }) => {
   const tabsRef = useRef<HTMLDivElement>(null);
   // Duas restrições combinadas nas abas visíveis: (1) aberto pelo ícone
@@ -332,23 +329,11 @@ export const Header: React.FC<HeaderProps> = ({
               <span>CRM do Operador</span>
             </button>
 
-            <button
-              id="tab-escalations"
-              onClick={() => setActiveTab('escalations')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'escalations'
-                  ? 'bg-amber-600 text-white shadow-sm shadow-amber-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span>Escalonamentos</span>
-              {escalationsPendingCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
-                  {escalationsPendingCount}
-                </span>
-              )}
-            </button>
+            {/* Sem aba própria de propósito (pedido do Lucas): já existe um
+                botão "Escalonamentos" com o mesmo badge de contagem dentro
+                do próprio Atendimento WhatsApp (toolbar de
+                WhatsAppLeadsSim.tsx, via onGoToEscalations) — deixava o
+                menu redundante, ainda mais apertado no mobile. */}
 
             {canSeeFinancial && (
               <button

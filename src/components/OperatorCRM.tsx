@@ -140,12 +140,19 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     return 'novo';
   };
 
-  const getLeadValue = (lead: LeadInfo): number => {
+  // Achado real em produção: retornava 2500 (R$) como "estimativa padrão"
+  // pra QUALQUER lead sem dealValue real — como conversas reais do
+  // WhatsApp nunca setam dealValue sozinhas, os 52 leads reais da Monique
+  // caíam todos nesse fallback, e a soma (Pipeline Em Aberto) virava um
+  // número inteiramente fabricado (52 × R$2.500 = "R$130.000" que não
+  // existe de verdade). undefined em vez de um placeholder numérico —
+  // quem chama decide como mostrar "sem valor" sem fingir que é dado real.
+  const getLeadValue = (lead: LeadInfo): number | undefined => {
     if (lead.dealValue !== undefined) return lead.dealValue;
     if (lead.attribution?.adDetails?.spendEstimate) {
       return Math.round(lead.attribution.adDetails.spendEstimate * 4.5);
     }
-    return 2500; // Default estimate BRL
+    return undefined;
   };
 
   const filteredLeads = leads.filter((l) => {
@@ -160,10 +167,13 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     return matchesSearch && matchesStage;
   });
 
-  // Calculate Pipeline Metrics
-  const totalPipelineValue = filteredLeads.reduce((acc, l) => acc + getLeadValue(l), 0);
+  // Calculate Pipeline Metrics — só soma leads com valor real conhecido
+  // (getLeadValue undefined = "não sabemos", não "zero"), pra não fabricar
+  // um total que pareça preciso sem ser dado de verdade.
+  const leadsWithKnownValue = filteredLeads.filter((l) => getLeadValue(l) !== undefined);
+  const totalPipelineValue = leadsWithKnownValue.reduce((acc, l) => acc + (getLeadValue(l) ?? 0), 0);
   const wonLeads = leads.filter((l) => getLeadStage(l) === 'ganho');
-  const wonValue = wonLeads.reduce((acc, l) => acc + getLeadValue(l), 0);
+  const wonValue = wonLeads.reduce((acc, l) => acc + (getLeadValue(l) ?? 0), 0);
   const conversionRate = leads.length ? Math.round((wonLeads.length / leads.length) * 100) : 0;
 
   const handleStageChange = (lead: LeadInfo, newStage: CRMStage) => {
@@ -330,7 +340,12 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
           <div className="text-lg font-bold text-white">
             R$ {totalPipelineValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </div>
-          <p className="text-[10px] text-slate-500 mt-1">{filteredLeads.length} Oportunidades ativas</p>
+          <p className="text-[10px] text-slate-500 mt-1">
+            {filteredLeads.length} Oportunidades ativas
+            {leadsWithKnownValue.length < filteredLeads.length && (
+              <> · {leadsWithKnownValue.length} com valor estimado</>
+            )}
+          </p>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800/80 p-4 rounded-xl">
@@ -399,7 +414,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 overflow-x-auto pb-4">
           {STAGES.map((stage) => {
             const columnLeads = filteredLeads.filter((l) => getLeadStage(l) === stage.id);
-            const columnTotal = columnLeads.reduce((acc, l) => acc + getLeadValue(l), 0);
+            const columnTotal = columnLeads.reduce((acc, l) => acc + (getLeadValue(l) ?? 0), 0);
 
             return (
               <div
@@ -446,7 +461,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                             </span>
                             <div className="flex items-center space-x-1">
                               <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
-                                R$ {val.toLocaleString('pt-BR')}
+                                {val !== undefined ? `R$ ${val.toLocaleString('pt-BR')}` : 'Sem valor'}
                               </span>
                               {onDeleteLead && (
                                 <button
@@ -561,7 +576,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                       </td>
 
                       <td className="p-3.5 font-bold text-emerald-400">
-                        R$ {getLeadValue(lead).toLocaleString('pt-BR')}
+                        {getLeadValue(lead) !== undefined ? `R$ ${getLeadValue(lead)!.toLocaleString('pt-BR')}` : <span className="text-slate-500 font-normal">Sem valor</span>}
                       </td>
 
                       <td className="p-3.5 text-slate-300">
@@ -689,7 +704,8 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                     </label>
                     <input
                       type="number"
-                      value={getLeadValue(selectedLead)}
+                      value={getLeadValue(selectedLead) ?? ''}
+                      placeholder="Sem valor estimado ainda"
                       onChange={(e) => handleUpdateDealValue(Number(e.target.value))}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
                     />
