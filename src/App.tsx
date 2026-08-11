@@ -43,6 +43,12 @@ const GUEST_USER: UserProfile = {
 export const App: React.FC = () => {
   // Navigation & View State
   const [activeTab, setActiveTab] = useState<ActiveTab>('saas');
+  // Lead a abrir automaticamente ao entrar na aba WhatsApp — usado pelo
+  // botão "Voltar pra conversa" do card de Escalonamento. requestId muda a
+  // cada clique (mesmo pro mesmo telefone), pra garantir que clicar de novo
+  // no mesmo lead depois de já ter navegado manualmente pra outra conversa
+  // sempre reabra o lead certo.
+  const [whatsAppOpenLead, setWhatsAppOpenLead] = useState<{ phone: string; requestId: number } | undefined>(undefined);
   
   // Tenants & Active Company
   const [tenants, setTenants] = useState<Tenant[]>(() => {
@@ -458,6 +464,8 @@ export const App: React.FC = () => {
             onDeleteLead={handleDeleteLead}
             escalationsPendingCount={escalations.filter((e) => !e.resolved).length}
             onGoToEscalations={() => setActiveTab('escalations')}
+            openLeadPhone={whatsAppOpenLead?.phone}
+            openLeadRequestId={whatsAppOpenLead?.requestId}
           />
         </div>
 
@@ -533,6 +541,10 @@ export const App: React.FC = () => {
             escalations={escalations}
             onResolve={handleResolveEscalation}
             onDelete={handleDeleteEscalation}
+            onGoToConversation={(phone) => {
+              setWhatsAppOpenLead({ phone, requestId: Date.now() });
+              setActiveTab('whatsapp');
+            }}
           />
         )}
 

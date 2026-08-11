@@ -1,11 +1,21 @@
 import React, { useState } from 'react';
 import { EscalationInfo } from '../types';
-import { AlertTriangle, CheckCircle2, Trash2, Clock, Phone, MessageSquare, Globe2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Trash2, Clock, Phone, MessageSquare, Globe2, MessageCircle, ExternalLink } from 'lucide-react';
 
 interface EscalationsPanelProps {
   escalations: EscalationInfo[];
   onResolve: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Abre a conversa desse lead na aba WhatsApp — pedido real do operador
+   * depois de revisar prints do app no celular: hoje resolver um
+   * escalonamento exige sair daqui e caçar o lead manualmente na lista de
+   * conversas. */
+  onGoToConversation?: (phone: string) => void;
+}
+
+/** wa.me só aceita dígitos (sem "+", espaços, parênteses, hífen). */
+function toWaMeLink(phone: string): string {
+  return `https://wa.me/${phone.replace(/\D/g, '')}`;
 }
 
 function timeAgo(iso: string): string {
@@ -19,7 +29,7 @@ function timeAgo(iso: string): string {
   return `há ${days}d`;
 }
 
-export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations, onResolve, onDelete }) => {
+export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations, onResolve, onDelete, onGoToConversation }) => {
   const [filter, setFilter] = useState<'pendentes' | 'resolvidos'>('pendentes');
 
   const pending = escalations.filter((e) => !e.resolved);
@@ -92,30 +102,48 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                   <Clock className="w-3 h-3" /> {timeAgo(e.createdAt)}
                 </span>
               </div>
-              {!e.resolved && (
-                <div className="flex gap-2 flex-shrink-0">
+              <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
+                {onGoToConversation && (
                   <button
-                    onClick={() => onResolve(e.id)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5"
+                    onClick={() => onGoToConversation(e.phone)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300 flex items-center gap-1.5"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Marcar resolvido
+                    <MessageCircle className="w-3.5 h-3.5" /> Voltar pra conversa
                   </button>
+                )}
+                <a
+                  href={toWaMeLink(e.phone)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300 flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> WhatsApp pessoal
+                </a>
+                {!e.resolved && (
+                  <>
+                    <button
+                      onClick={() => onResolve(e.id)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Marcar resolvido
+                    </button>
+                    <button
+                      onClick={() => onDelete(e.id)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-red-900/40 hover:text-red-300 flex items-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Descartar
+                    </button>
+                  </>
+                )}
+                {e.resolved && (
                   <button
                     onClick={() => onDelete(e.id)}
                     className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-red-900/40 hover:text-red-300 flex items-center gap-1.5"
                   >
-                    <Trash2 className="w-3.5 h-3.5" /> Descartar
+                    <Trash2 className="w-3.5 h-3.5" /> Remover
                   </button>
-                </div>
-              )}
-              {e.resolved && (
-                <button
-                  onClick={() => onDelete(e.id)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-red-900/40 hover:text-red-300 flex items-center gap-1.5 flex-shrink-0"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Remover
-                </button>
-              )}
+                )}
+              </div>
             </div>
           </div>
         ))}
