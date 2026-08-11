@@ -140,6 +140,10 @@ interface WhatsAppLeadsSimProps {
   escalationsPendingCount?: number;
   /** Troca a aba ativa do app pra "Escalonamentos" — pedido real do operador: ter um atalho aqui, sem precisar navegar pela barra de abas do topo. */
   onGoToEscalations?: () => void;
+  /** Telefone de um lead pra abrir a conversa dele automaticamente — usado pelo botão "Voltar pra conversa" no card de Escalonamento (App.tsx troca a aba pra "whatsapp" e passa o telefone aqui). */
+  openLeadPhone?: string;
+  /** Muda a cada clique em "Voltar pra conversa", mesmo pro mesmo telefone — garante que clicar de novo no mesmo lead depois de já ter navegado manualmente reabra a conversa mesmo assim. */
+  openLeadRequestId?: number;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -188,6 +192,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onDeleteLead,
   escalationsPendingCount = 0,
   onGoToEscalations,
+  openLeadPhone,
+  openLeadRequestId,
 }) => {
   const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis })[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
@@ -897,6 +903,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       }
     }
   };
+
+  // Abre automaticamente a conversa de um lead quando o painel de
+  // Escalonamentos manda o operador "voltar pra conversa" (App.tsx troca a
+  // aba pra "whatsapp" e passa telefone + requestId). Compara com o
+  // requestId (não só o telefone) num ref — sem isso, o polling de leads (a
+  // cada 8s) reexecutaria o efeito à toa, E clicar de novo no mesmo lead
+  // depois de já ter navegado manualmente pra outra conversa não reabriria
+  // nada, porque o telefone sozinho não muda entre um clique e outro.
+  const lastOpenedRequestIdRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!openLeadPhone || openLeadRequestId === undefined || openLeadRequestId === lastOpenedRequestIdRef.current) return;
+    const lead = leads.find((l) => (l as any).isReal && l.phone === openLeadPhone);
+    if (!lead) return;
+    lastOpenedRequestIdRef.current = openLeadRequestId;
+    setShowArchived(false);
+    setActiveTabFilter('all');
+    handleSelectLead(lead);
+  }, [openLeadPhone, openLeadRequestId, leads]);
 
   // Handlers to delete conversation, clear history, or delete single message
   const handleDeleteConversation = async (leadId: string, leadName: string) => {
