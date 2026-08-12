@@ -688,8 +688,14 @@ async function runAgendamentoTools(
     // conforme o volume de anúncio crescer). Só dispara quando confirmPayment
     // realmente efetuou a transição agora (evita duplicar se essa checagem
     // rodar de novo numa corrida e a linha já não estiver mais 'verified').
+    //
+    // Issue #182 — agendamento cadastrado manualmente pelo operador
+    // (source: 'manual', fechado fora da IA — WhatsApp pessoal, telefone,
+    // presencial) nunca dispara Purchase: não carrega origem de anúncio
+    // rastreável, contaria como venda "sem origem" e distorceria a métrica
+    // de atribuição de tráfego pago (decisão do dono do produto, 12/08/2026).
     const confirmed = await confirmPayment(tenantId, phone);
-    if (confirmed) {
+    if (confirmed && confirmed.source !== 'manual') {
       notifyMetaCapiEvent(tenantId, phone, 'Purchase', confirmed.summary).catch(() => {});
     }
     actionsSummary.push('Pagamento verificado por um operador agora mesmo — pode confirmar o turno pro cliente com segurança.');

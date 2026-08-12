@@ -101,6 +101,20 @@ describe('generateAutoReplyForText — consciência de payment_status (Etapa 8)'
     }));
   });
 
+  it('[TRÁFEGO][Issue #182] CAPI: agendamento cadastrado manualmente (source: manual) verificado NÃO dispara Purchase', async () => {
+    mockAppointment = { eventId: 'evt-1', summary: 'Microlips', startIso: '2026-08-10T10:00:00', endIso: '2026-08-10T11:30:00', paymentStatus: 'verified' };
+    confirmPayment.mockClear();
+    confirmPayment.mockResolvedValue({ eventId: 'evt-1', summary: 'Microlips', startIso: '2026-08-10T10:00:00', endIso: '2026-08-10T11:30:00', source: 'manual' } as any);
+    getConversationCtwaClid.mockClear();
+    getConversationCtwaClid.mockResolvedValue('clid-real');
+    fireMetaCapiEventForTenant.mockClear();
+
+    await generateAutoReplyForText('tenant-a', makeFakeAiCapturingUserContent([]), 'já confirmaram meu pagamento?', 'Cliente', undefined, undefined, '595981234567', CALENDAR_CONFIG);
+
+    expect(confirmPayment).toHaveBeenCalledWith('tenant-a', '595981234567');
+    expect(fireMetaCapiEventForTenant).not.toHaveBeenCalled();
+  });
+
   it('[TRÁFEGO] CAPI: se confirmPayment não confirmar nada (corrida — já não estava mais "verified"), não dispara o evento', async () => {
     mockAppointment = { eventId: 'evt-1', summary: 'Microlips', startIso: '2026-08-10T10:00:00', endIso: '2026-08-10T11:30:00', paymentStatus: 'verified' };
     confirmPayment.mockClear();
