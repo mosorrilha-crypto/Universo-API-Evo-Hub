@@ -376,6 +376,37 @@ export const App: React.FC = () => {
     }
   };
 
+  // Verificação de pagamento unificada aqui (pedido real do dono do
+  // produto, 12/08/2026) — antes existiam dois lugares desconectados pro
+  // mesmo caso: o banner Confirmar/Rejeitar dentro da conversa, e este
+  // escalonamento gerado automaticamente pro mesmo comprovante.
+  const handleResolvePaymentEscalation = async (id: string, phone: string, status: 'verified' | 'rejected', reply?: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/resolve-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, status, reply }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.escalation) {
+        setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+      }
+      if (data.outcome?.sent && data.outcome.viaTemplate) {
+        showToast('Pagamento rejeitado — fora da janela de 24h, mandamos um convite pro cliente responder antes de explicar o motivo.');
+      } else if (data.outcome?.sent) {
+        showToast(status === 'verified' ? 'Pagamento confirmado e cliente avisado.' : 'Pagamento rejeitado e cliente avisado do motivo.');
+      } else if (status === 'verified') {
+        showToast('Pagamento confirmado.');
+      } else {
+        showToast('Pagamento rejeitado.');
+      }
+    } catch (err) {
+      console.error('Falha ao resolver verificação de pagamento:', err);
+      showToast('Não foi possível registrar a verificação de pagamento agora — tente de novo.');
+    }
+  };
+
   const handleDeleteEscalation = async (id: string) => {
     try {
       const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -610,6 +641,7 @@ export const App: React.FC = () => {
             onResolve={handleResolveEscalation}
             onDelete={handleDeleteEscalation}
             onSubmitOperatorReply={handleSubmitOperatorReply}
+            onResolvePayment={handleResolvePaymentEscalation}
             onGoToConversation={(phone) => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
               setActiveTab('whatsapp');

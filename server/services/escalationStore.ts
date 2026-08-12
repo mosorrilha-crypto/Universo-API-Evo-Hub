@@ -11,6 +11,8 @@ import { getDb } from './db';
 import { inferCountryFromPhone } from './conversationStore';
 import { notifyEscalationCreated } from './escalationAlertService';
 
+export type EscalationKind = 'general' | 'payment_proof';
+
 export interface Escalation {
   id: string;
   phone: string;
@@ -25,6 +27,14 @@ export interface Escalation {
   operatorReplyAt?: string;
   /** Preenchido só quando a orientação já foi usada numa resposta real pro cliente. */
   operatorReplyConsumedAt?: string;
+  /**
+   * 'payment_proof' = escalonamento gerado por um possível comprovante de
+   * pagamento (ver webhooks.ts) — o painel mostra os botões "Confirmar
+   * pagamento"/"Rejeitar pagamento" direto no card em vez das ações
+   * genéricas, unificando o que antes eram dois lugares desconectados pro
+   * mesmo caso (pedido real do dono do produto).
+   */
+  kind: EscalationKind;
 }
 
 type EscalationRow = {
@@ -39,6 +49,7 @@ type EscalationRow = {
   operator_reply: string | null;
   operator_reply_at: string | null;
   operator_reply_consumed_at: string | null;
+  kind: EscalationKind | null;
 };
 
 function toEscalation(row: EscalationRow): Escalation {
@@ -54,6 +65,7 @@ function toEscalation(row: EscalationRow): Escalation {
     operatorReply: row.operator_reply || undefined,
     operatorReplyAt: row.operator_reply_at || undefined,
     operatorReplyConsumedAt: row.operator_reply_consumed_at || undefined,
+    kind: row.kind || 'general',
   };
 }
 
@@ -68,7 +80,7 @@ export function isPaymentRelated(text: string): boolean {
   return /\b(pago|pagu[eé]i|se[ñn]a|transfer[êe]nc[ií]a|transferir|comprobante|comprovante|dep[oó]sit(o|ei))\b/i.test(text || '');
 }
 
-export async function logEscalation(tenantId: string, phone: string, contactName: string | undefined, reason: string, lastMessage?: string): Promise<Escalation> {
+export async function logEscalation(tenantId: string, phone: string, contactName: string | undefined, reason: string, lastMessage?: string, kind: EscalationKind = 'general'): Promise<Escalation> {
   const db = getDb();
   const id = `esc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   // Gravado explicitamente (em vez de depender só do default now() do
@@ -85,6 +97,7 @@ export async function logEscalation(tenantId: string, phone: string, contactName
     country: inferCountryFromPhone(phone),
     resolved: false,
     created_at: createdAt,
+    kind,
   };
   const { error } = await db.from('escalations').insert(row);
   if (error) throw error;
