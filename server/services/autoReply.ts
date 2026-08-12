@@ -883,7 +883,16 @@ export async function generateAutoReplyForText(
   /** ID da mensagem do WhatsApp que disparou esta resposta — idempotência de criar_pre_reserva (Etapa 2), nunca duplica por reentrega de webhook. */
   messageId?: string,
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver conversationStore.attachAdReferralIfMissing) — usado só na abertura (histórico vazio) pra saudação soar como continuação natural do anúncio, nunca repetido depois. */
-  adHeadline?: string
+  adHeadline?: string,
+  /**
+   * Orientação de um atendente humano deixada num escalonamento (issue #97)
+   * — o cliente ficou sem resposta, o operador não quis assumir a conversa
+   * pessoalmente, e essa nota é o que ele escreveu pra IA usar como base ao
+   * retomar. Só chega aqui quando o cliente manda uma NOVA mensagem depois
+   * da nota (webhooks.ts consome a nota pendente e chama isto) — nunca
+   * dispara uma mensagem por conta própria sem o cliente ter escrito algo.
+   */
+  operatorGuidance?: string
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
@@ -940,7 +949,11 @@ export async function generateAutoReplyForText(
       ? `Este é o primeiro contato desta conversa. O cliente clicou num anúncio "Clique para WhatsApp" com o tema "${adHeadline}" pra chegar até aqui — se fizer sentido, deixe a saudação inicial soar como continuação natural desse anúncio (ex: mencionar brevemente esse tema), sem forçar nem soar automático. Nunca repita essa menção em mensagens seguintes.`
       : undefined;
 
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext, adContext);
+    const operatorGuidanceContext = operatorGuidance
+      ? `Um atendente humano deixou esta orientação pra você usar ao responder (siga-a ao montar a resposta, sem citar que veio de um "atendente" ou de uma "nota" — fale diretamente com o cliente): "${operatorGuidance}"`
+      : undefined;
+    const combinedExtraContext = [extraContext, operatorGuidanceContext].filter(Boolean).join('\n');
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, knowledgeBaseContext, history, combinedExtraContext || undefined, adContext);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;

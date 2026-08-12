@@ -89,6 +89,34 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(calls[1].config.systemInstruction).toBeTruthy();
   });
 
+  it('issue #97: orientação de operador humano (retomada guiada) entra em contents, nunca em systemInstruction, e não muda a classificação do roteador', async () => {
+    const { ai, calls } = makeFakeAi();
+    const operatorGuidance = 'Diz pra ela que o horário de sábado 14h ainda está livre.';
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'oi de novo', 'Cliente Teste', undefined, undefined,
+      undefined, undefined, 'beauty_studio', undefined, undefined, undefined,
+      operatorGuidance
+    );
+
+    const routerCall = calls[0];
+    // A orientação é conteúdo dinâmico (camada 3+4) — nunca deveria influenciar
+    // o prompt do roteador, que só recebe texto/histórico.
+    expect(routerCall.contents[0].text).not.toContain(operatorGuidance);
+
+    const specialistCall = calls[1];
+    expect(specialistCall.config.systemInstruction).not.toContain(operatorGuidance);
+    expect(specialistCall.contents[0].text).toContain(operatorGuidance);
+    expect(specialistCall.contents[0].text).toContain('Um atendente humano deixou esta orientação');
+  });
+
+  it('sem orientação de operador (caso normal): não adiciona nada extra ao prompt', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', 'Cliente Teste', undefined, undefined);
+    const specialistCall = calls[1];
+    expect(specialistCall.contents[0].text).not.toContain('atendente humano');
+  });
+
   it('reforça a regra anti-parênteses/dois-pontos na camada Global (achado real em produção)', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);

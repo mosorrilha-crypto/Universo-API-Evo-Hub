@@ -13,7 +13,7 @@ import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/know
 import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText } from '../services/messageBuffer';
-import { logEscalation, isPaymentRelated } from '../services/escalationStore';
+import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
@@ -90,7 +90,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
           : { provider: 'meta' as const, phoneNumberId, accessToken: token };
 
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline);
+        // Issue #97 — orientação que um operador deixou num escalonamento,
+        // ainda não usada numa resposta real (ex: foi deixada fora da
+        // janela de 24h, esperando o cliente escrever de novo pra reabrir a
+        // janela — ver operatorFollowUpService.ts). Esta é a mensagem que
+        // reabre.
+        const pendingGuidance = await getPendingOperatorGuidance(tenantId, phone);
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply);
         if (!result) {
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
           // Achado real em produção (issue #82, item 4): mesmo com retry
@@ -113,6 +119,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
           console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
+        if (pendingGuidance) {
+          await markOperatorGuidanceConsumed(tenantId, pendingGuidance.id);
+          console.log(`🤝 [Retomada guiada] tenant=${tenantId} usou a orientação do operador pra responder ${phone} (fora da janela original, cliente reabriu agora).`);
+        }
         // Achado real em produção: sem isso, uma alucinação de agenda sem
         // nenhuma ferramenta pra sustentar o horário citado (autoReply.ts,
         // stopAutoReply) mandava o MESMO fallback genérico de novo a cada
