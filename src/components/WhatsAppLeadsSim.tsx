@@ -884,8 +884,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // motivo, e o operador podia se perder entre os dois lugares. Unificado
   // no card de escalonamento (kind: 'payment_proof' — ver EscalationsPanel.tsx
   // e App.tsx, handleResolvePaymentEscalation): aqui fica só o aviso,
-  // sem ação, apontando pra onde decidir de verdade.
-  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string } | null>(null);
+  // sem ação, apontando pra onde decidir de verdade. paymentReceiptHint
+  // (dica gerada pelo Gemini a partir da imagem, ver paymentReceiptAnalysis.ts)
+  // continua exibida aqui, só como informação extra pro operador decidir
+  // mais rápido lá no card.
+  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string; paymentReceiptHint?: string } | null>(null);
 
   // Issue #182 — antes disso, um agendamento fechado fora da IA (WhatsApp
   // pessoal, telefone, presencial) era invisível pro sistema inteiro: sem
@@ -2188,6 +2191,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <span>
                 {paymentAppointment.summary} em {new Date(paymentAppointment.startIso).toLocaleString('pt-BR')}.
               </span>
+              {/* Dica da IA a partir da imagem do comprovante — nunca confirma
+                  sozinha, só ajuda a decidir mais rápido (resposta a uma
+                  pergunta real do dono do produto: hoje o sistema não olhava
+                  o conteúdo da foto, só o contexto). */}
+              {paymentAppointment.paymentReceiptHint && (
+                <p className="text-amber-300/80 mt-1 flex items-start gap-1">
+                  <Sparkles className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                  <span>IA: "{paymentAppointment.paymentReceiptHint}"</span>
+                </p>
+              )}
             </div>
           </div>
           {onGoToEscalations && (
