@@ -71,6 +71,10 @@ export function isPaymentRelated(text: string): boolean {
 export async function logEscalation(tenantId: string, phone: string, contactName: string | undefined, reason: string, lastMessage?: string): Promise<Escalation> {
   const db = getDb();
   const id = `esc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Gravado explicitamente (em vez de depender só do default now() do
+  // Postgres): listEscalations ordena por created_at, e mais de um
+  // escalonamento no mesmo tenant sem esse valor quebra o sort.
+  const createdAt = new Date().toISOString();
   const row = {
     id,
     tenant_id: tenantId,
@@ -80,6 +84,7 @@ export async function logEscalation(tenantId: string, phone: string, contactName
     last_message: lastMessage || null,
     country: inferCountryFromPhone(phone),
     resolved: false,
+    created_at: createdAt,
   };
   const { error } = await db.from('escalations').insert(row);
   if (error) throw error;
@@ -89,7 +94,7 @@ export async function logEscalation(tenantId: string, phone: string, contactName
   notifyEscalationCreated(tenantId, { phone, contactName, reason }).catch((err) =>
     console.warn(`⚠️  [Alerta de escalonamento] tenant=${tenantId} falha ao notificar:`, (err as Error).message)
   );
-  return toEscalation({ ...row, created_at: new Date().toISOString(), operator_reply: null, operator_reply_at: null, operator_reply_consumed_at: null });
+  return toEscalation({ ...row, operator_reply: null, operator_reply_at: null, operator_reply_consumed_at: null });
 }
 
 export async function listEscalations(tenantId: string): Promise<Escalation[]> {

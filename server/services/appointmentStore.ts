@@ -19,6 +19,9 @@ export interface TrackedAppointment {
   paymentProofMessageId?: string;
   paymentVerifiedBy?: string;
   paymentVerifiedAt?: string;
+  /** Desde quando está 'pending_verification' — usado pelo job de alerta (issue #98). */
+  paymentPendingSince?: string;
+  paymentPendingAlertedAt?: string;
 }
 
 type AppointmentRow = {
@@ -32,6 +35,8 @@ type AppointmentRow = {
   payment_proof_message_id: string | null;
   payment_verified_by: string | null;
   payment_verified_at: string | null;
+  payment_pending_since: string | null;
+  payment_pending_alerted_at: string | null;
 };
 
 function toTracked(row: AppointmentRow): TrackedAppointment {
@@ -45,6 +50,8 @@ function toTracked(row: AppointmentRow): TrackedAppointment {
     paymentProofMessageId: row.payment_proof_message_id || undefined,
     paymentVerifiedBy: row.payment_verified_by || undefined,
     paymentVerifiedAt: row.payment_verified_at || undefined,
+    paymentPendingSince: row.payment_pending_since || undefined,
+    paymentPendingAlertedAt: row.payment_pending_alerted_at || undefined,
   };
 }
 
@@ -93,10 +100,45 @@ export async function markPaymentPendingVerification(tenantId: string, phone: st
   const db = getDb();
   const { error } = await db
     .from('appointments')
-    .update({ payment_status: 'pending_verification', payment_proof_message_id: proofMessageId })
+    .update({
+      payment_status: 'pending_verification',
+      payment_proof_message_id: proofMessageId,
+      payment_pending_since: new Date().toISOString(),
+      // reseta pra permitir um novo alerta se o cliente reenviar um comprovante
+      // depois de uma rejeição anterior (novo ciclo de verificação).
+      payment_pending_alerted_at: null,
+    })
     .eq('tenant_id', tenantId)
     .eq('phone', phone);
   if (error) throw error;
+}
+
+/** Marca que o job de alerta (issue #98) já avisou o operador sobre ESTE ciclo de verificação pendente — nunca duplica. */
+export async function markPaymentPendingAlerted(tenantId: string, phone: string): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('appointments')
+    .update({ payment_pending_alerted_at: new Date().toISOString() })
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone);
+  if (error) throw error;
+}
+
+/** Todos os tenant_id distintos com ao menos um agendamento com pagamento pendente de verificação — usado pelo job de alerta (issue #98). */
+export async function listTenantIdsWithPendingPaymentVerification(): Promise<string[]> {
+  const db = getDb();
+  const { data, error } = await db.from('appointments').select('tenant_id').eq('payment_status', 'pending_verification');
+  if (error) throw error;
+  const ids = new Set(((data || []) as { tenant_id: string }[]).map((row) => row.tenant_id));
+  return Array.from(ids);
+}
+
+/** Agendamentos de um tenant com pagamento pendente de verificação — usado pelo job de alerta (issue #98). */
+export async function listPendingPaymentVerifications(tenantId: string): Promise<Array<{ phone: string } & TrackedAppointment>> {
+  const db = getDb();
+  const { data, error } = await db.from('appointments').select('*').eq('tenant_id', tenantId).eq('payment_status', 'pending_verification');
+  if (error) throw error;
+  return (data as AppointmentRow[]).map((row) => ({ phone: row.phone, ...toTracked(row) }));
 }
 
 /**

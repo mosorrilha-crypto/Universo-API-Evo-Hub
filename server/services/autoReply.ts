@@ -103,7 +103,7 @@ function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[
  * (até "quanto custa?") carregaria ferramentas de agenda à toa, arriscando o
  * modelo tentar agendar por engano.
  */
-async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[]): Promise<AgentType> {
+async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[], phone?: string): Promise<AgentType> {
   const historyText = buildHistoryText(history);
   const prompt = `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
@@ -112,7 +112,7 @@ async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, hi
 - "reclamacao": o cliente está insatisfeito ou reclamando de um serviço JÁ REALIZADO (resultado, dor, alergia, reação), ou claramente irritado/chateado com o negócio.
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
-Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
+Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "confidence": 0 a 1 (o quão confiante você está nessa classificação), "reasoning": "explicação breve de 1 frase do motivo da escolha"}`;
 
   const response = await withGeminiRetryAndUsage(
     tenantId,
@@ -126,9 +126,19 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
     GEMINI_TIMEOUT_MS
   );
 
-  const parsed = JSON.parse(response.text || '{}') as { agent?: string };
+  const parsed = JSON.parse(response.text || '{}') as { agent?: string; confidence?: number; reasoning?: string };
   const valid: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
-  return valid.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
+  const agent = valid.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
+
+  // Auditabilidade do roteamento (issue #99): sem confidence/reasoning um
+  // misroteamento (ex: reclamação classificada como faq) fica invisível —
+  // não dá pra auditar onde o agente está errando o tom com o lead sem
+  // reconstruir manualmente a conversa inteira. Log estruturado por
+  // enquanto (não persiste em banco) — não muda a decisão de roteamento em
+  // si, só torna ela auditável.
+  console.log(`[Router] tenant=${tenantId} phone=${phone ?? '-'} agent=${agent} confidence=${typeof parsed.confidence === 'number' ? parsed.confidence : '-'} reasoning="${parsed.reasoning ?? '-'}"`);
+
+  return agent;
 }
 
 const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
@@ -888,7 +898,7 @@ export async function generateAutoReplyForText(
 
   try {
     const routerStart = Date.now();
-    const agent = await classifyAgent(tenantId, ai, text, history);
+    const agent = await classifyAgent(tenantId, ai, text, history, phone);
     const routerElapsedMs = Date.now() - routerStart;
 
     let extraContext: string | undefined;

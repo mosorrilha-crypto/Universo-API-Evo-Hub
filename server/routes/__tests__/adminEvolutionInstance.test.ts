@@ -134,3 +134,46 @@ describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('GET /api/admin/tenants/:id/evolution-instance/status', () => {
+  it('devolve connected=true quando o estado da instância é "open"', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      expect(String(url)).toBe(`${EVOLUTION_API_URL}/instance/connectionState/cliente-novo-abc123`);
+      return { ok: true, json: async () => ({ instance: { instanceName: 'cliente-novo-abc123', state: 'open' } }) } as any;
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/status`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toMatchObject({ state: 'open', connected: true });
+  });
+
+  it('devolve connected=false enquanto o estado ainda é "connecting"', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      return { ok: true, json: async () => ({ state: 'connecting' }) } as any;
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/status`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toMatchObject({ state: 'connecting', connected: false });
+  });
+
+  it('404 quando o tenant ainda não tem instância criada', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/status`);
+    expect(res.status).toBe(404);
+  });
+});
