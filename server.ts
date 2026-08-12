@@ -25,6 +25,7 @@ import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
+import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { initWebPush } from './server/services/webPush';
 
 dotenv.config();
@@ -178,6 +179,13 @@ async function startServer() {
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
   });
+
+  // Job em background que alerta o operador quando um pagamento fica
+  // pending_verification há mais de 2h sem ninguém confirmar/rejeitar
+  // (issue #98) — nunca confirma/rejeita sozinho, só avisa. Reusa o mesmo
+  // canal de alerta (push + WhatsApp) do escalonamento normal. Ver
+  // server/services/paymentPendingAlertJob.ts.
+  startPaymentPendingAlertJob();
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
   if (!config.isProduction) {
