@@ -264,9 +264,17 @@ nunca é acionado pra esses casos. Bug secundário no mesmo trecho: a checagem d
 `paymentStatus` é "truthy", então um comprovante `rejected` reenviado corrigido não dispara
 verificação de novo.
 
-`[FALTA]` Decisão de produto sobre como fechar essa lacuna — mexe no modelo de dados que
-`confirmPayment`/CAPI Purchase (#168) e os lembretes (`reminderJob.ts`) já assumem. Issue
-marcada `blocked` até essa decisão ser tomada.
+`[DADO]` **Resolvido em 12/08/2026 — PR #187 mesclada.** Decisão do dono do produto: sim ao
+cadastro manual de agendamento fechado fora da IA, sim ao lembrete automático pra esses casos,
+**não** ao evento CAPI `Purchase` pra eles (sem origem de anúncio rastreável, distorceria a
+métrica de atribuição de tráfego pago). Novo endpoint
+`POST /api/conversations/:phone/manual-appointment` cria evento real no Calendar + linha em
+`appointments` com `source='manual'`. Migrations `0021_appointment_source.sql` e
+`0022_payment_receipt_hint.sql` aplicadas em produção (12/08).
+
+`[HIPÓTESE]` A lacuna estrutural está fechada, mas a porta de saída do H1 ainda depende do
+hábito operacional mudar — o operador precisa de fato usar o botão "Cadastrar agendamento" pro
+booking fechado por fora virar dado rastreável. Acompanhar isso no ritual semanal (seção 5).
 
 ---
 
@@ -282,7 +290,7 @@ tem um dono de dado (onde a verdade daquela etapa mora).
 | 3 | Conversa iniciada | Meta Ads (`messaging_conversation_started_7d`) + `conversations.ctwa_clid`/`ad_headline` no Supabase | ✅ medido, **86,5% com origem confirmada (12/08)** |
 | 4 | Lead qualificado (serviço identificado) | Sistema Universo (`crm_lead_state`) | ❌ tabela existe, **0 linhas** — nunca usada na prática |
 | 5 | Preço informado / disponibilidade consultada | Sistema Universo | ⚠️ não exportado pra análise |
-| 6 | **Seña paga (conversão principal)** | `appointments` (Supabase) + comprovante manual | ⚠️ tabela `appointments` só tem **2 linhas** desde 06/08 — fluxo real ainda é planilha manual |
+| 6 | **Seña paga (conversão principal)** | `appointments` (Supabase) + comprovante manual | ⚠️ lacuna estrutural corrigida (PR #187, 12/08) — agora depende do operador usar o cadastro manual pra bookings fora da IA |
 | 7 | Turno confirmado | Google Calendar | ✅ medido, mas **sem origem** |
 | 8 | Comparecimento / retorno | — | ❌ não registrado |
 
@@ -483,6 +491,7 @@ clientes, mas não interpreta métrica de campanha como dado confirmado sem cons
 | 12/08/2026 | Primeira campanha da nova fase definida: Combo Cejas + Labios. Preço confirmado pelo gestor: **Gs 850.000**. Fotos de antes/depois da arte confirmadas como de cliente real autorizada. | Gestor |
 | 12/08/2026 | `knowledge_base.products` ("Combo Cejas + Labios") atualizado em produção: Gs 800.000 → Gs 850.000 (`price` e `priceAmount`). Arte corrigida no Canva (Lábios → Labios). Ver issue #153. | Sessão de implementação |
 | 12/08/2026 | Confirmado com o gestor: a conta de anúncios `677275869339059` é compartilhada de propósito com outros negócios (campanhas "HARMONY HAIR", "bendito", etc. não são erro/vazamento — são esperadas). Nunca analisar/alterar campanhas fora do que é claramente da Monique. | Gestor |
+| 12/08/2026 | PR #187 mesclada: cadastro manual de agendamento fecha a lacuna estrutural do #182. Sim ao lembrete automático pra esses casos, não ao CAPI Purchase (sem origem rastreável). Migrations 0021 e 0022 aplicadas em produção (via SQL Editor — pendente registrar via `apply_migration` do MCP quando reconectar, pra ficar no histórico rastreado do Supabase). | Gestor + PR #187 |
 | 12/08/2026 | Campanhas de teste residuais com gasto quase zero e status inativo (ENGAJAMENTO DIRECT- EXTENSION DE PESTAÑAS, ENGAJAMENTO DIRECT - MICROPIGMENTACIÓN DE CEJAS, ENGAJAMENTO WHATSAPP - MICROPIGMENTACIÓN DE CEJAS — Cópia [$0,24]) — gestor decidiu não mexer, já estão inativas. | Gestor |
 | — | CAC máximo aceitável por serviço | ⏳ pendente |
 | — | Pausar ou reformular "New Reconhecimento Campaign" | ⏳ pendente aprovação |
