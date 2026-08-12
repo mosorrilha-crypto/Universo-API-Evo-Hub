@@ -379,6 +379,69 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Postar Status/Stories da empresa (pedido real do dono do produto,
+  // 12/08/2026: fotos de antes/depois de procedimento já aquecem lead
+  // comprovadamente). Só existe pra tenants conectados via Evolution API
+  // (QR Code) — a Meta Cloud API oficial (canal da Monique hoje) não tem
+  // Status nenhum, então o ícone fica desabilitado com tooltip explicando
+  // isso em vez de "Em breve" quando não disponível.
+  const [statusAvailable, setStatusAvailable] = useState(false);
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+  const [statusText, setStatusText] = useState('');
+  const [statusBackgroundColor, setStatusBackgroundColor] = useState('#25D366');
+  const [statusImageBase64, setStatusImageBase64] = useState<string | null>(null);
+  const [statusImageFileName, setStatusImageFileName] = useState('');
+  const [statusCaption, setStatusCaption] = useState('');
+  const [isPostingStatus, setIsPostingStatus] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusSuccess, setStatusSuccess] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/status/available')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setStatusAvailable(!!data?.available))
+      .catch(() => {});
+  }, []);
+
+  const handleStatusImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setStatusImageBase64(await blobToBase64(file));
+    setStatusImageFileName(file.name);
+  };
+
+  const handlePostStatus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!statusText.trim() && !statusImageBase64) return;
+    setIsPostingStatus(true);
+    setStatusError(null);
+    try {
+      const res = await apiFetch('/api/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          statusImageBase64
+            ? { imageBase64: statusImageBase64, caption: statusCaption.trim() || undefined }
+            : { text: statusText.trim(), backgroundColor: statusBackgroundColor }
+        ),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setIsStatusModalOpen(false);
+      setStatusText('');
+      setStatusImageBase64(null);
+      setStatusImageFileName('');
+      setStatusCaption('');
+      setStatusSuccess(true);
+      setTimeout(() => setStatusSuccess(false), 4000);
+    } catch (err: any) {
+      setStatusError(err.message || 'Não foi possível postar o Status agora.');
+    } finally {
+      setIsPostingStatus(false);
+    }
+  };
+
   // Conexão do backend com o Google Calendar real (usada pelo agente de
   // agendamento pra consultar disponibilidade e criar/reagendar/cancelar
   // consultas).
@@ -2245,6 +2308,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           Agendamento cadastrado! Já entra no lembrete automático da véspera.
         </div>
       )}
+      {statusSuccess && (
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          Status postado!
+        </div>
+      )}
 
       {/* Main WhatsApp Web Application Frame — altura fixa em todo breakpoint
           (igual ao WhatsApp Web/Desktop real: a página não cresce, cada
@@ -2273,9 +2342,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             (Conversas = esta própria tela; Arquivadas = seção já existente
             na lista; Config = rola até os controles reais do agente,
             Ativo/Restrito/Pausado + Calendar + Auto IA, que já existem
-            acima). Chamadas/Status/Comunidades/Perfil não têm nenhuma
+            acima). Chamadas/Comunidades/Perfil não têm nenhuma
             funcionalidade real no produto hoje — ficam desabilitados com
-            tooltip "Em breve" em vez de fingir que fazem algo. */}
+            tooltip "Em breve" em vez de fingir que fazem algo.
+            Status (pedido real do dono do produto, 12/08/2026: fotos de
+            antes/depois de procedimento já aquecem lead comprovadamente) só
+            existe pra tenants conectados via Evolution API — a Meta Cloud
+            API oficial (canal da Monique hoje) não tem Status nenhum, então
+            o ícone fica desabilitado com um tooltip que explica isso, não
+            "Em breve" (não é uma questão de tempo, é de canal). */}
         <nav className="hidden lg:flex flex-col items-center py-3 gap-1 bg-[#202c33] border-r border-slate-800/80">
           <button
             type="button"
@@ -2284,9 +2359,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           >
             <MessageCircle className="w-5 h-5" />
           </button>
-          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-            <CircleDashed className="w-5 h-5" />
-          </button>
+          {statusAvailable ? (
+            <button
+              type="button"
+              onClick={() => setIsStatusModalOpen(true)}
+              title="Postar Status"
+              className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <CircleDashed className="w-5 h-5" />
+            </button>
+          ) : (
+            <button type="button" disabled title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+              <CircleDashed className="w-5 h-5" />
+            </button>
+          )}
           <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
             <Phone className="w-5 h-5" />
           </button>
@@ -3443,6 +3529,90 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 >
                   <CalendarPlus className="w-3.5 h-3.5 mr-1" />
                   <span>{isCreatingManualAppointment ? 'Cadastrando...' : 'Cadastrar'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isStatusModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CircleDashed className="w-5 h-5 text-emerald-400" />
+              Postar Status
+            </h3>
+            <p className="text-xs text-slate-400">
+              Vai pro Status do WhatsApp da empresa, visível pra todos os contatos — bom pra foto de antes/depois de procedimento ou aviso rápido.
+            </p>
+
+            {statusError && (
+              <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{statusError}</div>
+            )}
+
+            <form onSubmit={handlePostStatus} className="space-y-3">
+              {statusImageBase64 ? (
+                <div className="space-y-2">
+                  <div className="relative rounded-xl overflow-hidden border border-slate-800">
+                    <img src={statusImageBase64} alt={statusImageFileName} className="w-full max-h-48 object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => { setStatusImageBase64(null); setStatusImageFileName(''); }}
+                      className="absolute top-2 right-2 p-1.5 rounded-lg bg-slate-950/80 text-slate-300 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Legenda (opcional)"
+                    value={statusCaption}
+                    onChange={(e) => setStatusCaption(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              ) : (
+                <>
+                  <textarea
+                    placeholder="Escreva o texto do Status..."
+                    value={statusText}
+                    onChange={(e) => setStatusText(e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none resize-none"
+                  />
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-slate-300">Cor de fundo</label>
+                    <input
+                      type="color"
+                      value={statusBackgroundColor}
+                      onChange={(e) => setStatusBackgroundColor(e.target.value)}
+                      className="w-8 h-8 rounded-lg border border-slate-800 bg-slate-950 cursor-pointer"
+                    />
+                    <span className="text-slate-500 text-xs">ou</span>
+                    <label className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300 flex items-center gap-1.5 cursor-pointer">
+                      <ImageIcon className="w-3.5 h-3.5" /> Usar foto
+                      <input type="file" accept="image/*" className="hidden" onChange={handleStatusImageSelect} />
+                    </label>
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setIsStatusModalOpen(false); setStatusError(null); setStatusImageBase64(null); setStatusImageFileName(''); setStatusText(''); setStatusCaption(''); }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isPostingStatus || (!statusText.trim() && !statusImageBase64)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 shadow-md shadow-emerald-950 flex items-center space-x-1 cursor-pointer"
+                >
+                  <CircleDashed className="w-3.5 h-3.5 mr-1" />
+                  <span>{isPostingStatus ? 'Postando...' : 'Postar'}</span>
                 </button>
               </div>
             </form>
