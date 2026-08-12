@@ -13,7 +13,8 @@ import { listUpcomingEvents, localNaiveToUtcIso, listConnectedCalendarTenants, t
 import { listAllAppointments } from './appointmentStore';
 import { wasReminderSent, markReminderSent, type ReminderType } from './reminderStore';
 import { sendWhatsAppInteractiveButtons } from './metaSend';
-import { resolveMetaCredentialsForTenant } from './tenantResolver';
+import { sendEvolutionTextMessage } from './evolutionSend';
+import { resolveCredentialsForTenant } from './tenantResolver';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -59,6 +60,9 @@ export interface ReminderJobDeps {
   getCalendarConfig: () => CalendarConfig | undefined;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  evolutionInstanceName?: string;
   intervalMs?: number;
 }
 
@@ -76,18 +80,26 @@ export async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void
   }
 
   for (const tenantId of tenantIds) {
-    const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(tenantId, {
-      metaAccessToken: deps.metaAccessToken,
-      metaPhoneNumberId: deps.metaPhoneNumberId,
-    });
-    await checkAndSendRemindersForTenant(tenantId, cfg, { metaAccessToken, metaPhoneNumberId });
+    const channel = await resolveCredentialsForTenant(
+      tenantId,
+      { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
+      { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
+    );
+    await checkAndSendRemindersForTenant(tenantId, cfg, channel);
   }
 }
 
 async function checkAndSendRemindersForTenant(
   tenantId: string,
   cfg: CalendarConfig,
-  creds: { metaAccessToken?: string; metaPhoneNumberId?: string }
+  channel: {
+    provider?: 'meta' | 'evolution';
+    metaAccessToken?: string;
+    metaPhoneNumberId?: string;
+    evolutionInstanceName?: string;
+    evolutionApiUrl?: string;
+    evolutionApiKey?: string;
+  }
 ): Promise<void> {
   const today = todayDatePartsInTz();
   const tomorrow = addDays(today, 1);
@@ -125,14 +137,21 @@ async function checkAndSendRemindersForTenant(
       : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛`;
 
     try {
-      // Achado no benchmark de mercado: a maior causa de no-show é
-      // dificuldade de remarcar fora do horário comercial — botões deixam o
-      // cliente resolver isso num toque, sem precisar digitar (e sem
-      // precisar esperar alguém abrir o WhatsApp comercial pra ler).
-      await sendWhatsAppInteractiveButtons(creds.metaPhoneNumberId, creds.metaAccessToken, appt.phone, message, [
-        { id: 'lembrete_confirmar', title: '✅ Confirmar' },
-        { id: 'lembrete_remarcar', title: '🔄 Remarcar' },
-      ]);
+      if (channel.provider === 'evolution') {
+        // Botões interativos são um recurso da Meta Cloud API — a Evolution
+        // API (Baileys) não tem o mesmo tipo de mensagem, então cai pro
+        // texto simples equivalente.
+        await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, appt.phone, message);
+      } else {
+        // Achado no benchmark de mercado: a maior causa de no-show é
+        // dificuldade de remarcar fora do horário comercial — botões deixam o
+        // cliente resolver isso num toque, sem precisar digitar (e sem
+        // precisar esperar alguém abrir o WhatsApp comercial pra ler).
+        await sendWhatsAppInteractiveButtons(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message, [
+          { id: 'lembrete_confirmar', title: '✅ Confirmar' },
+          { id: 'lembrete_remarcar', title: '🔄 Remarcar' },
+        ]);
+      }
       await markReminderSent(tenantId, event.id, type);
       console.log(`⏰ [Lembretes] Enviado (${type}) pra ${appt.phone} — evento ${event.id}`);
     } catch (err) {

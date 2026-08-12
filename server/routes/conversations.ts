@@ -16,7 +16,7 @@ import {
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
-import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping } from '../services/evolutionSend';
+import { sendEvolutionTextMessage, sendEvolutionMediaMessage } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
@@ -80,10 +80,6 @@ function tenantOf(req: AuthenticatedRequest): string {
 export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, googleClientId, googleClientSecret, googleRedirectUri }: ConversationsRouterDeps): Router {
   const router = Router();
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
-  // Anexa as credenciais compartilhadas ao objeto router para uso nos handlers
-  (router as any).evolutionApiUrl = evolutionApiUrl;
-  (router as any).evolutionApiKey = evolutionApiKey;
-  (router as any).evolutionInstanceName = evolutionInstanceName;
 
   /**
    * Avisa o painel em tempo real quando uma conversa muda, no lugar do
@@ -160,8 +156,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     try {
-      // Isolando Evolution por enquanto para garantir que a Meta funcione
-      await sendWhatsAppTextMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, text.trim());
+      const channel = await resolveCredentialsForTenant(
+        tenantId,
+        { metaAccessToken, metaPhoneNumberId },
+        { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+      );
+      if (channel.provider === 'evolution') {
+        await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, text.trim());
+      } else {
+        await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, text.trim());
+      }
       const conv = await recordOutgoingMessage(
         tenantId,
         req.params.phone,
@@ -193,23 +197,37 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       let uploadBase64 = base64;
       let uploadMimeType = mimeType as string;
       let uploadFilename = filename || 'arquivo';
-      let mediaId: string;
+      const channel = await resolveCredentialsForTenant(
+        tenantId,
+        { metaAccessToken, metaPhoneNumberId },
+        { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+      );
+      const isEvolution = channel.provider === 'evolution';
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
         const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
         uploadBase64 = transcoded.base64;
         // mimeType (e filename) do upload/persistência seguem o que a
-        // transcodificação retornou — sendWhatsAppAudioMessage escolhe o
-        // filename certo internamente a partir do mimeType.
+        // transcodificação retornou.
         uploadMimeType = transcoded.mimeType;
+        uploadFilename = uploadMimeType.startsWith('audio/mpeg') ? 'audio.mp3' : 'audio.ogg';
 
-        const audioBuffer = Buffer.from(uploadBase64, 'base64');
-        mediaId = await sendWhatsAppAudioMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, audioBuffer, uploadMimeType);
+        if (isEvolution) {
+          await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType, uploadFilename);
+        } else {
+          const audioBuffer = Buffer.from(uploadBase64, 'base64');
+          await sendWhatsAppAudioMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, audioBuffer, uploadMimeType);
+        }
       } else {
-        const mediaBuffer = Buffer.from(uploadBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
-        mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, mediaBuffer, uploadMimeType, uploadFilename);
-        await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, uploadMimeType, caption);
+        const cleanBase64 = uploadBase64.replace(/^data:[^;]+;base64,/, '');
+        if (isEvolution) {
+          await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, cleanBase64, uploadMimeType, uploadFilename, caption);
+        } else {
+          const mediaBuffer = Buffer.from(cleanBase64, 'base64');
+          const mediaId = await uploadWhatsAppMedia(channel.metaPhoneNumberId, channel.metaAccessToken, mediaBuffer, uploadMimeType, uploadFilename);
+          await sendWhatsAppMediaMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, mediaId, uploadMimeType, caption);
+        }
       }
-      
+
       const msgType = uploadMimeType.startsWith('image/') ? 'image' : uploadMimeType.startsWith('audio/') ? 'audio' : 'file';
       // Achado real em produção ("o áudio não fica na conversa"): a Meta
       // recebe o áudio/imagem de verdade, mas nós nunca guardávamos uma
@@ -379,11 +397,20 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     try {
       const mimeType = product.exampleImageMimeType || 'image/jpeg';
-      // Isolando Evolution: forçando Meta
-      const exampleImageBuffer = Buffer.from(product.exampleImageBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
-      const mediaId = await uploadWhatsAppMedia(metaPhoneNumberId, metaAccessToken, exampleImageBuffer, mimeType, `${productName}.jpg`);
-      await sendWhatsAppMediaMessage(metaPhoneNumberId, metaAccessToken, req.params.phone, mediaId, mimeType, productName);
-      
+      const channel = await resolveCredentialsForTenant(
+        tenantId,
+        { metaAccessToken, metaPhoneNumberId },
+        { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+      );
+      const cleanImageBase64 = product.exampleImageBase64.replace(/^data:[^;]+;base64,/, '');
+      if (channel.provider === 'evolution') {
+        await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, cleanImageBase64, mimeType, `${productName}.jpg`, productName);
+      } else {
+        const exampleImageBuffer = Buffer.from(cleanImageBase64, 'base64');
+        const mediaId = await uploadWhatsAppMedia(channel.metaPhoneNumberId, channel.metaAccessToken, exampleImageBuffer, mimeType, `${productName}.jpg`);
+        await sendWhatsAppMediaMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, mediaId, mimeType, productName);
+      }
+
       // Mesmo padrão do /send-media (ver comentário lá): gera o id ANTES de
       // gravar pra poder salvar a imagem real sob o mesmo id — sem isso, o
       // painel tenta buscar a mídia por messageId e nunca encontra nada

@@ -177,6 +177,9 @@ async function startServer() {
     }),
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
   });
 
   // Job em background que alerta o operador quando uma pré-reserva vence
