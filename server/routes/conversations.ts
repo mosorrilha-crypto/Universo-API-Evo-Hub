@@ -515,6 +515,50 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ escalation, outcome });
   }));
 
+  // Unifica a verificação de pagamento dentro do próprio card de
+  // escalonamento (pedido real do dono do produto, 12/08/2026): antes disso
+  // existiam dois lugares desconectados pro mesmo caso — o banner
+  // Confirmar/Rejeitar dentro da conversa (verify-payment acima) e o
+  // escalonamento gerado automaticamente pra esse mesmo comprovante
+  // (kind: 'payment_proof', ver webhooks.ts). Confirmar/rejeitar E orientar
+  // a IA (se rejeitado, por que) agora é uma ação só. Sem "reply": só marca
+  // o pagamento e resolve o card, igual o fluxo antigo. Com "reply": além
+  // de marcar o pagamento, reusa o mesmo pipeline do operator-reply acima
+  // (issue #97) pra já avisar o cliente com o motivo, texto livre se dentro
+  // da janela de 24h ou template de reengajamento se não.
+  router.post('/api/escalations/:id/resolve-payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const operatorId = req.user?.id;
+    if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });
+
+    const { phone, status, reply } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'Campo "phone" é obrigatório.' });
+    if (status !== 'verified' && status !== 'rejected') {
+      return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
+    }
+
+    const appointment = await setPaymentVerification(tenantId, phone, status, operatorId);
+    if (!appointment) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
+
+    const trimmedReply: string = (reply || '').trim();
+    if (!trimmedReply) {
+      const escalation = await resolveEscalation(tenantId, req.params.id);
+      if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+      return res.json({ appointment, escalation, outcome: null });
+    }
+
+    const escalation = await submitOperatorReply(tenantId, req.params.id, trimmedReply);
+    if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    const { data: tenant } = await getDb().from('tenants').select('name').eq('id', tenantId).maybeSingle();
+    const outcome = await sendOperatorGuidedFollowUp(tenantId, escalation, {
+      ai: getAi?.() ?? null,
+      metaAccessToken,
+      metaPhoneNumberId,
+      tenantName: tenant?.name || 'nosso time',
+    });
+    res.json({ appointment, escalation, outcome });
+  }));
+
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const deleted = await deleteEscalation(tenantOf(req), req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
