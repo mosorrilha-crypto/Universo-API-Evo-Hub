@@ -30,6 +30,32 @@ interface AgentKnowledgeBaseProps {
   onGoToWhatsAppSim: () => void;
 }
 
+/**
+ * Achado real em produção: os catálogos semeados via scripts/seed-monique-
+ * knowledge-base.ts nunca tiveram campo `id` (o tipo do backend,
+ * server/services/knowledgeBaseStore.ts, nem declara essa propriedade — só
+ * o tipo do frontend, src/types.ts, exige `id: string`). Isso significa que
+ * itens vindos do servidor chegam aqui com `id === undefined` em TODOS eles.
+ * handleProductFieldChange/handlePromoChange/handleDeleteProduct comparam
+ * por `p.id === id` — com todo mundo compartilhando `undefined`, editar UM
+ * produto atualizava TODOS ao mesmo tempo (ex real: editar o preço de
+ * "Neutralización" mudou também "Combo Cejas + Labios", "Retoque" etc. pro
+ * mesmo valor). Gera um id único pra qualquer item sem um (ou com um
+ * duplicado) assim que os dados entram no editor, antes de qualquer edição
+ * ser possível.
+ */
+export function ensureUniqueIds<T extends { id?: string }>(items: T[] | undefined, prefix: string): (T & { id: string })[] {
+  const seen = new Set<string>();
+  return (items || []).map((item, idx) => {
+    let id = item.id;
+    if (!id || seen.has(id)) {
+      id = `${prefix}-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+    seen.add(id);
+    return { ...item, id };
+  });
+}
+
 // Espelha o "PROMPT FINAL — MONIQUE SORRILHA BEAUTY STUDIO" (versão final
 // fechada em 07/08/2026, ver scripts/seed-monique-knowledge-base.ts pra a
 // cópia que roda de verdade no backend/Gemini). Essa cópia aqui alimenta só
@@ -240,7 +266,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   onSaveKnowledgeBase,
   onGoToWhatsAppSim
 }) => {
-  const [formData, setFormData] = useState<AgentKnowledgeBase>(knowledgeBase);
+  const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
+    ...knowledgeBase,
+    products: ensureUniqueIds(knowledgeBase.products, 'prod'),
+    faqs: ensureUniqueIds(knowledgeBase.faqs, 'faq'),
+    documents: ensureUniqueIds(knowledgeBase.documents, 'doc'),
+  }));
   const [isSavedToast, setIsSavedToast] = useState(false);
   const [activeSubSection, setActiveSubSection] = useState<'general' | 'products' | 'rules' | 'faqs' | 'docs'>('general');
 
@@ -293,7 +324,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     e.preventDefault();
     if (!newProductName.trim()) return;
     const item: AgentProduct = {
-      id: Date.now().toString(),
+      id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: newProductName.trim(),
       price: newProductPrice.trim() || 'Sob Consulta',
       description: newProductDesc.trim() || 'Sem descrição cadastrada'
@@ -367,7 +398,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     e.preventDefault();
     if (!newFaqQuestion.trim() || !newFaqAnswer.trim()) return;
     const faqItem: AgentFAQ = {
-      id: Date.now().toString(),
+      id: `faq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       question: newFaqQuestion.trim(),
       answer: newFaqAnswer.trim()
     };
