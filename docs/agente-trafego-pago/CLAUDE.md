@@ -113,7 +113,8 @@ const paidTrafficKnowledgeBase = {
         { id: '677275869339059', name: 'Monique Souza', status: 'ATIVA — é esta que roda', currency: 'BRL' },
         { id: '1390254178132705', name: 'Monique Souza Beauty', status: 'CLOSED — sem dados, não usar' }
       ],
-      note: 'Conversas de WhatsApp vêm do campo actions_onsite_conversion_messaging_conversation_started_7d.'
+      note: 'Conversas de WhatsApp vêm do campo actions_onsite_conversion_messaging_conversation_started_7d.',
+      sharedAccountWarning: 'A conta 677275869339059 é COMPARTILHADA de propósito com outros negócios do responsável (ex: campanhas "HARMONY HAIR", "bendito", posts de terceiros — confirmado com o gestor em 12/08/2026, não é vazamento). Ao listar/analisar campanhas dessa conta, filtrar só pelas que são claramente da Monique (nomes "ENGAJAMENTO WHATSAPP...", "WHATSAPP - MICRO CEJAS...", "Micropigmentación Video V2", "New Reconhecimento Campaign", "ENGAJAMENTO DIRECT..."). Nunca analisar, pausar, editar ou reportar métricas de campanhas de outros negócios.'
     },
     googleAds: {
       via: 'Windsor.ai (connector "google_ads")',

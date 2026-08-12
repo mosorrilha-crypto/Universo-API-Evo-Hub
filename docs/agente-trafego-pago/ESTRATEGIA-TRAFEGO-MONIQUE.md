@@ -254,6 +254,20 @@ de ser conciliado depois numa planilha à parte.
 Não é possível cruzar isso hoje: `appointments` não tem volume suficiente e a agenda real
 (Google Calendar, seção 2.3) não guarda `ctwa_clid` nem telefone padronizado para join direto.
 
+**Causa raiz confirmada (issue #182, 12/08/2026):** `appointments` e `pre_reservations` só são
+escritas pelas ferramentas de function-calling do Gemini (`criar_agendamento`,
+`remarcar_agendamento`, `criar_pre_reserva` em `autoReply.ts`). Não existe caminho pro operador
+registrar manualmente um agendamento fechado fora da IA — se o booking não passou pela
+ferramenta, a linha nunca existe, e a verificação de comprovante (`server/routes/webhooks.ts:
+226-232`) exige essa linha pra sequer disparar. Não é fricção de UI: o fluxo de verificação
+nunca é acionado pra esses casos. Bug secundário no mesmo trecho: a checagem de
+`paymentStatus` é "truthy", então um comprovante `rejected` reenviado corrigido não dispara
+verificação de novo.
+
+`[FALTA]` Decisão de produto sobre como fechar essa lacuna — mexe no modelo de dados que
+`confirmPayment`/CAPI Purchase (#168) e os lembretes (`reminderJob.ts`) já assumem. Issue
+marcada `blocked` até essa decisão ser tomada.
+
 ---
 
 ## 3. A espinha dorsal — o funil canônico
@@ -468,6 +482,8 @@ clientes, mas não interpreta métrica de campanha como dado confirmado sem cons
 | 12/08/2026 | Acesso direto ao Supabase de produção confirmado. Achado: captura de origem (`ctwa_clid`) funciona bem (86,5% das conversas), mas o rastreio de seña paga (`appointments`) e o CRM (`crm_lead_state`) têm volume quase nulo — o gargalo do H1 é operacional (fluxo de verificação de pagamento não passa pelo sistema), não de captura de dado. | Diagnóstico Supabase |
 | 12/08/2026 | Primeira campanha da nova fase definida: Combo Cejas + Labios. Preço confirmado pelo gestor: **Gs 850.000**. Fotos de antes/depois da arte confirmadas como de cliente real autorizada. | Gestor |
 | 12/08/2026 | `knowledge_base.products` ("Combo Cejas + Labios") atualizado em produção: Gs 800.000 → Gs 850.000 (`price` e `priceAmount`). Arte corrigida no Canva (Lábios → Labios). Ver issue #153. | Sessão de implementação |
+| 12/08/2026 | Confirmado com o gestor: a conta de anúncios `677275869339059` é compartilhada de propósito com outros negócios (campanhas "HARMONY HAIR", "bendito", etc. não são erro/vazamento — são esperadas). Nunca analisar/alterar campanhas fora do que é claramente da Monique. | Gestor |
+| 12/08/2026 | Campanhas de teste residuais com gasto quase zero e status inativo (ENGAJAMENTO DIRECT- EXTENSION DE PESTAÑAS, ENGAJAMENTO DIRECT - MICROPIGMENTACIÓN DE CEJAS, ENGAJAMENTO WHATSAPP - MICROPIGMENTACIÓN DE CEJAS — Cópia [$0,24]) — gestor decidiu não mexer, já estão inativas. | Gestor |
 | — | CAC máximo aceitável por serviço | ⏳ pendente |
 | — | Pausar ou reformular "New Reconhecimento Campaign" | ⏳ pendente aprovação |
 | — | Reativar ou desligar Google Ads | ⏳ pendente |
