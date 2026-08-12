@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken } from '../lib/apiClient';
@@ -210,12 +209,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   openLeadPhone,
   openLeadRequestId,
 }) => {
+  // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
+  // anônima, ou depois de limpar dados do site), essa lista caía pro
+  // conjunto inteiro de leads fictícios de demonstração — e como os leads
+  // reais (buscados em App.tsx e sincronizados de volta nesta mesma chave)
+  // só são ADICIONADOS, nunca removidos, os fictícios ficavam misturados
+  // com clientes reais pra sempre. Começa vazia agora; o botão "Limpar dados
+  // de teste" (handleClearMockData) já produzia esse mesmo estado antes, e o
+  // resto do componente já lida bem com ele (selectedLead undefined etc).
   const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis })[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
-    return saved ? JSON.parse(saved) : INITIAL_MOCK_LEADS;
+    return saved ? JSON.parse(saved) : [];
   });
   type PanelLead = (typeof leads)[number];
-  const [activeLeadId, setActiveLeadId] = useState<string | null>(INITIAL_MOCK_LEADS[0].id);
+  const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
   // No mobile (abaixo do breakpoint lg), lista e conversa não cabem lado a
   // lado como no desktop — achado real do Lucas: com a lista cheia, o
   // operador tinha que rolar por dezenas de conversas até chegar na caixa de
