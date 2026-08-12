@@ -16,6 +16,8 @@ export interface ServerConfig {
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
   evolutionInstanceName?: string;
+  /** URL pública deste próprio backend — usada pra registrar o webhook de uma instância Evolution API recém-criada (Epic 4.6) apontando de volta pra cá. */
+  publicBaseUrl: string;
   /** URL base da API real do Evo Hub (api.evohub.ai) — não confundir com evohubApiKey acima. */
   evoHubApiUrl: string;
   /** Chave de conta (evh_pk_...) pra chamar a API do Evo Hub (criar canal, credenciais BYO etc.). */
@@ -90,6 +92,7 @@ export function loadConfig(): ServerConfig {
     evolutionApiUrl: process.env.EVOLUTION_API_URL,
     evolutionApiKey: process.env.EVOLUTION_API_KEY,
     evolutionInstanceName: process.env.EVOLUTION_INSTANCE_NAME,
+    publicBaseUrl: process.env.PUBLIC_BASE_URL || 'https://universo-api-evo-hub.onrender.com',
     evoHubApiUrl: process.env.EVO_HUB_API_URL || 'https://api.evohub.ai',
     evoHubAccountApiKey: process.env.EVO_HUB_ACCOUNT_API_KEY,
     evoHubWebhookSecret: process.env.EVO_HUB_WEBHOOK_SECRET,

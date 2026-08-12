@@ -161,6 +161,11 @@ export function ConectarEvolutionQrCode() {
       const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // "warning" aqui cobre o caso do webhook não ter sido configurado —
+      // a instância/QR estão OK, mas mensagem nenhuma vai chegar até isso
+      // ser corrigido (bug real encontrado 12/08/2026), então mostra mesmo
+      // sem bloquear o fluxo (o QR continua funcionando pra pareamento).
+      if (data.warning) setErrorMsg(data.warning);
       if (data.qrCodeBase64) {
         setQrCodeBase64(data.qrCodeBase64);
         setConnectionState('waiting');
@@ -185,6 +190,7 @@ export function ConectarEvolutionQrCode() {
       const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance/qrcode`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.warning) setErrorMsg(data.warning);
       setQrCodeBase64(data.qrCodeBase64 || null);
       setConnectionState('waiting');
     } catch (err: any) {

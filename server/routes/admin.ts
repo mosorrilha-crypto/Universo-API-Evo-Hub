@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireRole, isSaasAdmin } from '../middleware/rbac';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { setEvolutionWebhook } from '../services/evolutionSend';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -11,6 +12,8 @@ interface AdminRouterDeps {
   /** Credencial "admin" da Evolution API (servidor self-hosted) usada só pra provisionar instância nova — depois de criada, cada instância tem sua própria linha em tenant_evolution_credentials (Epic 4.6). */
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
+  /** URL pública deste backend — usada pra registrar o webhook da instância recém-criada apontando de volta pra cá (ver setEvolutionWebhook). */
+  publicBaseUrl: string;
 }
 
 /**
@@ -20,7 +23,7 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
-export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey }: AdminRouterDeps): Router {
+export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl }: AdminRouterDeps): Router {
   const router = Router();
 
   function db() {
@@ -177,10 +180,22 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       return res.status(500).json({ error: `Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}` });
     }
 
+    // Bug real em produção (12/08/2026): sem isso, a instância recebe a
+    // mensagem normalmente (por isso aparece no WhatsApp do celular, síncrono
+    // direto com a Meta) mas nunca avisa o Universo — o agente nunca vê nada
+    // chegar. Melhor esforço: instância+credencial já estão salvas mesmo se
+    // isso falhar, e reabrir o QR Code (rota abaixo) tenta de novo.
+    let webhookWarning: string | undefined;
+    try {
+      await setEvolutionWebhook(instanceName, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+    } catch (err: any) {
+      webhookWarning = `Instância e QR Code prontos, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+    }
+
     res.status(201).json({
       instanceName,
       qrCodeBase64,
-      warning: qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.',
+      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
     });
   }));
 
@@ -206,7 +221,18 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
         return res.status(502).json({ error: `Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
       }
       const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
-      res.json({ instanceName: cred.instance_name, qrCodeBase64 });
+
+      // Reafirma o webhook toda vez que o QR é (re)buscado — corrige de
+      // graça instâncias criadas antes da correção do webhook acima, sem
+      // precisar desconectar/reconectar o número (basta reabrir esta tela).
+      let webhookWarning: string | undefined;
+      try {
+        await setEvolutionWebhook(cred.instance_name, cred.api_url, cred.api_key, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+      } catch (err: any) {
+        webhookWarning = `QR Code pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+      }
+
+      res.json({ instanceName: cred.instance_name, qrCodeBase64, warning: webhookWarning });
     } catch (err: any) {
       res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
     }
