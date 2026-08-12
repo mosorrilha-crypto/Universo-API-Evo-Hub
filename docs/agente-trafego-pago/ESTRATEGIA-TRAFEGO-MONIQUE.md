@@ -403,6 +403,7 @@ clientes, mas não interpreta métrica de campanha como dado confirmado sem cons
 | 11/08/2026 | Itens 1.2 (evento CAPI `Purchase` na seña verificada) e 1.3 (`currency: 'PYG'` na rota manual) confirmados já implementados no código (commit `ab5cb9a`, anterior a esta sessão). Item 1.6 (`DEMO_MODE`) verificado no código-fonte: sem flag ativa, login incondicional via `operators`+bcrypt — confirmação da env var no Render em si ainda pendente. | Sessão de implementação |
 | 12/08/2026 | Taxa de câmbio BRL↔PYG fixada: 1 BRL = 1.100 PYG. | Gestor |
 | 12/08/2026 | Todos os anúncios pausados manualmente pelo gestor até haver novos criativos e uma estratégia pronta. Compatível com o H1 (que já proibia escalar/criar campanha); agora a pausa é deliberada e cobre também as campanhas ativas restantes. | Gestor |
+| 12/08/2026 | Recorte geográfico dos públicos de remarketing/lookalike (item 1.9) fica para quando a nova estratégia/criativos estiverem prontos — raio definido como **7 km** a partir de Calle Paso Bogarín 3665, Loma Merlo, Luque (inclui o Barrio Cerrado Betharram, calle 1). Não aplicar ainda. | Gestor |
 | — | CAC máximo aceitável por serviço | ⏳ pendente |
 | — | Pausar ou reformular "New Reconhecimento Campaign" | ⏳ pendente aprovação |
 | — | Reativar ou desligar Google Ads | ⏳ pendente |
