@@ -75,6 +75,36 @@ export async function sendEvolutionMediaMessage(
 }
 
 /**
+ * Postagem de Status/Stories via Evolution API (POST /message/sendStatus/{instance})
+ * — só existe pra instâncias Evolution (Baileys/não-oficial); a Meta Cloud
+ * API oficial não expõe Status nenhum. Pedido real do dono do produto,
+ * 12/08/2026: fotos de "antes/depois" de procedimento no Status já aquecem
+ * lead comprovadamente, mas isso hoje só é postado manualmente fora do
+ * produto. `allContacts: true` sempre — não faz sentido no nosso caso
+ * escolher destinatários específicos, é uma vitrine pra toda a lista.
+ */
+export async function sendEvolutionStatus(
+  instanceName: string | undefined,
+  apiUrl: string | undefined,
+  apiKey: string | undefined,
+  status: { type: 'text'; content: string; backgroundColor?: string; font?: number } | { type: 'image'; content: string; caption?: string }
+): Promise<void> {
+  requireCredentials(instanceName, apiUrl, apiKey);
+
+  const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/message/sendStatus/${instanceName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: apiKey! },
+    body: JSON.stringify({ ...status, allContacts: true }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}) as any);
+    throw new Error(`Falha ao postar Status via Evolution API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
+  }
+}
+
+/**
  * Indicador "digitando..." via Evolution API (POST /chat/sendPresence/{instance}).
  * Mesmo espírito de `markAsReadAndShowTyping` (metaSend.ts): melhor esforço,
  * nunca deve travar o envio real da resposta se falhar.

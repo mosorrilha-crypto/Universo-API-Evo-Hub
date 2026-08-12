@@ -16,7 +16,7 @@ import {
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
-import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping } from '../services/evolutionSend';
+import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
@@ -240,6 +240,63 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
       console.error('❌ [Conversas] Falha ao enviar mídia real:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  }));
+
+  // Pro painel saber, antes de abrir o modal, se esse tenant tem canal
+  // capaz de postar Status (só Evolution API) — evita deixar o operador
+  // preencher tudo pra só descobrir na hora de enviar que não dá.
+  router.get('/api/status/available', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const credentials = await resolveCredentialsForTenant(
+      tenantOf(req),
+      { metaAccessToken, metaPhoneNumberId },
+      { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+    );
+    res.json({ available: credentials.provider === 'evolution' });
+  }));
+
+  // Postar Status/Stories da empresa (pedido real do dono do produto,
+  // 12/08/2026: fotos de antes/depois de procedimento já aquecem lead
+  // comprovadamente). Só existe pra tenants conectados via Evolution API
+  // (Baileys/QR Code) — a Meta Cloud API oficial não tem Status nenhum, então
+  // resolveCredentialsForTenant precisa achar provider 'evolution' pra esse
+  // tenant, senão não tem como cumprir o pedido.
+  router.post('/api/status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { text, imageBase64, caption, backgroundColor } = req.body || {};
+    const hasText = typeof text === 'string' && text.trim();
+    const hasImage = typeof imageBase64 === 'string' && imageBase64.trim();
+    if (!hasText && !hasImage) {
+      return res.status(400).json({ error: 'Informe um texto ou uma imagem pro Status.' });
+    }
+
+    const tenantId = tenantOf(req);
+    const credentials = await resolveCredentialsForTenant(
+      tenantId,
+      { metaAccessToken, metaPhoneNumberId },
+      { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+    );
+    if (credentials.provider !== 'evolution') {
+      return res.status(400).json({ error: 'Esse número está conectado pela Meta Cloud API oficial, que não tem suporte a Status — só tenants conectados via Evolution API (QR Code) podem postar.' });
+    }
+
+    try {
+      if (hasImage) {
+        await sendEvolutionStatus(credentials.evolutionInstanceName, credentials.evolutionApiUrl, credentials.evolutionApiKey, {
+          type: 'image',
+          content: imageBase64,
+          caption: typeof caption === 'string' && caption.trim() ? caption.trim() : undefined,
+        });
+      } else {
+        await sendEvolutionStatus(credentials.evolutionInstanceName, credentials.evolutionApiUrl, credentials.evolutionApiKey, {
+          type: 'text',
+          content: text.trim(),
+          backgroundColor: typeof backgroundColor === 'string' && backgroundColor.trim() ? backgroundColor.trim() : undefined,
+        });
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('❌ [Status] Falha ao postar Status via Evolution API:', err.message);
       res.status(502).json({ error: err.message });
     }
   }));
