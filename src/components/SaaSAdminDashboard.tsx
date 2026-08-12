@@ -161,6 +161,11 @@ export function ConectarEvolutionQrCode() {
       const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // "warning" aqui cobre o caso do webhook não ter sido configurado —
+      // a instância/QR estão OK, mas mensagem nenhuma vai chegar até isso
+      // ser corrigido (bug real encontrado 12/08/2026), então mostra mesmo
+      // sem bloquear o fluxo (o QR continua funcionando pra pareamento).
+      if (data.warning) setErrorMsg(data.warning);
       if (data.qrCodeBase64) {
         setQrCodeBase64(data.qrCodeBase64);
         setConnectionState('waiting');
@@ -185,6 +190,7 @@ export function ConectarEvolutionQrCode() {
       const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance/qrcode`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.warning) setErrorMsg(data.warning);
       setQrCodeBase64(data.qrCodeBase64 || null);
       setConnectionState('waiting');
     } catch (err: any) {
@@ -348,10 +354,34 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('operator');
-  const [newUserTenantId, setNewUserTenantId] = useState(tenants[0]?.id || 'tenant_004');
+  const [newUserTenantId, setNewUserTenantId] = useState('');
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const isSaasAdminUser = currentUser?.role === 'saas_admin';
+
+  // Achado real em produção (12/08/2026): esse dropdown usava `tenants`
+  // (prop vinda do App.tsx, só localStorage/mock — ex: id "tenant_004") em
+  // vez da tabela real — cadastrar operador pra QUALQUER tenant (inclusive a
+  // Monique) quebrava com "invalid input syntax for type uuid", porque o
+  // backend exige um UUID de verdade. Busca separada, só pra este dropdown,
+  // sem mexer no resto do painel (a aba "Tenants & Conexões" mistura campos
+  // decorativos — plano, MRR, engine de WhatsApp — que não existem na tabela
+  // `tenants` real; misturar os dois pediria um refactor maior, fora de
+  // escopo aqui).
+  const [realTenants, setRealTenants] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!isSaasAdminUser) return;
+    apiFetch('/api/admin/tenants')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const list = (data?.tenants || []).map((t: any) => ({ id: t.id, name: t.name }));
+        setRealTenants(list);
+        setNewUserTenantId((prev) => prev || list[0]?.id || '');
+      })
+      .catch((err) => console.error('Falha ao carregar tenants reais:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSaasAdminUser]);
 
   const fetchOperators = async () => {
     setIsLoadingUsers(true);
@@ -385,6 +415,10 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     e.preventDefault();
     setUserFormError(null);
     if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
+    if (isSaasAdminUser && !newUserTenantId) {
+      setUserFormError('Nenhum tenant carregado ainda — aguarde a lista carregar antes de cadastrar.');
+      return;
+    }
     setIsSavingUser(true);
     try {
       const res = await apiFetch('/api/admin/operators', {
@@ -1633,7 +1667,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     onChange={(e) => setNewUserTenantId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                   >
-                    {tenants.map((t) => (
+                    {realTenants.length === 0 && <option value="">Carregando tenants...</option>}
+                    {realTenants.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
                       </option>

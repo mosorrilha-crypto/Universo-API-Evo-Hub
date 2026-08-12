@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireRole, isSaasAdmin } from '../middleware/rbac';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { setEvolutionWebhook } from '../services/evolutionSend';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -11,6 +12,8 @@ interface AdminRouterDeps {
   /** Credencial "admin" da Evolution API (servidor self-hosted) usada só pra provisionar instância nova — depois de criada, cada instância tem sua própria linha em tenant_evolution_credentials (Epic 4.6). */
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
+  /** URL pública deste backend — usada pra registrar o webhook da instância recém-criada apontando de volta pra cá (ver setEvolutionWebhook). */
+  publicBaseUrl: string;
 }
 
 /**
@@ -20,7 +23,7 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
-export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey }: AdminRouterDeps): Router {
+export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl }: AdminRouterDeps): Router {
   const router = Router();
 
   function db() {
@@ -127,6 +130,38 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     res.json({ success: true });
   }));
 
+  /**
+   * Reconecta uma instância Evolution já existente: busca um QR Code novo e
+   * reafirma o webhook (corrige de graça instâncias criadas antes da
+   * correção do webhook, sem precisar desconectar/reconectar o número).
+   * Compartilhado entre a rota GET .../qrcode e o atalho idempotente da
+   * rota POST .../evolution-instance abaixo (achado real em produção,
+   * 12/08/2026: clicar em "Gerar QR Code" pra um tenant que já tem instância
+   * tentava CRIAR outra, e quebrava com "duplicate key" no unique constraint
+   * de tenant_evolution_credentials — deixando pra trás uma instância órfã
+   * na Evolution API).
+   */
+  async function reconnectExistingInstance(cred: { instance_name: string; api_url: string; api_key: string }) {
+    const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
+      headers: { apikey: cred.api_key },
+      signal: AbortSignal.timeout(20000),
+    });
+    const data = await connectRes.json().catch(() => ({}));
+    if (!connectRes.ok) {
+      throw new Error(`Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}`);
+    }
+    const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
+
+    let webhookWarning: string | undefined;
+    try {
+      await setEvolutionWebhook(cred.instance_name, cred.api_url, cred.api_key, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+    } catch (err: any) {
+      webhookWarning = `QR Code pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+    }
+
+    return { instanceName: cred.instance_name, qrCodeBase64, warning: webhookWarning };
+  }
+
   // ── Evolution API multi-instância (Epic 4.6 — Porta A, QR Code) ────────
   // Onboarding "sem barreira de entrada": cria uma instância nova na
   // Evolution API self-hosted em nome do tenant e devolve o QR Code pro
@@ -139,6 +174,24 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     const { data: tenant, error: tenantError } = await db().from('tenants').select('id, slug, name').eq('id', req.params.id).maybeSingle();
     if (tenantError) return res.status(500).json({ error: tenantError.message });
     if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
+
+    // Idempotente: esse tenant já tem uma instância — em vez de tentar criar
+    // outra (e quebrar com "duplicate key" + deixar uma instância órfã na
+    // Evolution API), reusa a existente e só busca um QR Code novo.
+    const { data: existingCred, error: existingCredError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key')
+      .eq('tenant_id', tenant.id)
+      .maybeSingle();
+    if (existingCredError) return res.status(500).json({ error: existingCredError.message });
+    if (existingCred) {
+      try {
+        const result = await reconnectExistingInstance(existingCred as any);
+        return res.json(result);
+      } catch (err: any) {
+        return res.status(502).json({ error: err.message });
+      }
+    }
 
     const requestedName: string | undefined = req.body?.instanceName;
     // Nome estável e único: slug do tenant (ou prefixo do id) + sufixo curto
@@ -177,10 +230,22 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       return res.status(500).json({ error: `Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}` });
     }
 
+    // Bug real em produção (12/08/2026): sem isso, a instância recebe a
+    // mensagem normalmente (por isso aparece no WhatsApp do celular, síncrono
+    // direto com a Meta) mas nunca avisa o Universo — o agente nunca vê nada
+    // chegar. Melhor esforço: instância+credencial já estão salvas mesmo se
+    // isso falhar, e reabrir o QR Code (rota abaixo) tenta de novo.
+    let webhookWarning: string | undefined;
+    try {
+      await setEvolutionWebhook(instanceName, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+    } catch (err: any) {
+      webhookWarning = `Instância e QR Code prontos, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+    }
+
     res.status(201).json({
       instanceName,
       qrCodeBase64,
-      warning: qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.',
+      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
     });
   }));
 
@@ -197,18 +262,10 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
 
     try {
-      const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
-        headers: { apikey: cred.api_key },
-        signal: AbortSignal.timeout(20000),
-      });
-      const data = await connectRes.json().catch(() => ({}));
-      if (!connectRes.ok) {
-        return res.status(502).json({ error: `Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
-      }
-      const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
-      res.json({ instanceName: cred.instance_name, qrCodeBase64 });
+      const result = await reconnectExistingInstance(cred as any);
+      res.json(result);
     } catch (err: any) {
-      res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+      res.status(502).json({ error: err.message });
     }
   }));
 

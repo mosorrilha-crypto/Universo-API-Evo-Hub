@@ -133,7 +133,7 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
     jwtSecret: config.jwtSecret,
   }));
-  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey }));
+  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl }));
   app.use(createCrmRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
   app.use(createPushSubscriptionsRouter({ authenticateToken, vapidPublicKey: config.vapidPublicKey }));
@@ -177,6 +177,9 @@ async function startServer() {
     }),
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
   });
 
   // Job em background que alerta o operador quando uma pré-reserva vence

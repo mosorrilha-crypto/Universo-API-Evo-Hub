@@ -25,8 +25,10 @@ vi.mock('../reminderStore', () => ({ wasReminderSent, markReminderSent }));
 const sendWhatsAppInteractiveButtons = vi.fn(async () => undefined);
 vi.mock('../metaSend', () => ({ sendWhatsAppInteractiveButtons }));
 
+vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage: vi.fn() }));
+
 vi.mock('../tenantResolver', () => ({
-  resolveMetaCredentialsForTenant: vi.fn(async () => ({ metaAccessToken: 'tok', metaPhoneNumberId: 'pn' })),
+  resolveCredentialsForTenant: vi.fn(async () => ({ provider: 'meta', metaAccessToken: 'tok', metaPhoneNumberId: 'pn' })),
 }));
 
 const { checkAndSendReminders } = await import('../reminderJob');

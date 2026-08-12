@@ -15,6 +15,7 @@ import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 const TENANT_ID = 'tenant-evo-1';
 const EVOLUTION_API_URL = 'https://evolution.example.com';
 const EVOLUTION_API_KEY = 'admin-global-key';
+const PUBLIC_BASE_URL = 'https://universo.example.com';
 
 let server: Server;
 let baseUrl: string;
@@ -33,6 +34,7 @@ function startServer(deps: { evolutionApiUrl?: string; evolutionApiKey?: string 
     createAdminRouter({
       authenticateToken: fakeAuthenticateToken as any,
       supabase: supabase as any,
+      publicBaseUrl: PUBLIC_BASE_URL,
       ...deps,
     })
   );
@@ -58,14 +60,22 @@ afterEach(async () => {
 });
 
 describe('POST /api/admin/tenants/:id/evolution-instance', () => {
-  it('cria a instância na Evolution API e persiste a credencial por tenant', async () => {
+  it('cria a instância na Evolution API, persiste a credencial por tenant e configura o webhook de volta pro Universo', async () => {
+    let webhookCall: { url: string; body: any } | undefined;
     global.fetch = vi.fn(async (url: any, options?: any) => {
-      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
-      expect(String(url)).toBe(`${EVOLUTION_API_URL}/instance/create`);
-      return {
-        ok: true,
-        json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { base64: 'data:image/png;base64,ABC123' } }),
-      } as any;
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        return {
+          ok: true,
+          json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { base64: 'data:image/png;base64,ABC123' } }),
+        } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        webhookCall = { url: urlStr, body: JSON.parse(options.body) };
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
     }) as any;
 
     ({ server, baseUrl } = await startServer());
@@ -75,10 +85,42 @@ describe('POST /api/admin/tenants/:id/evolution-instance', () => {
     const data = await res.json();
     expect(data.qrCodeBase64).toBe('data:image/png;base64,ABC123');
     expect(data.instanceName).toMatch(/^cliente-novo-/);
+    expect(data.warning).toBeUndefined();
 
     const rows = supabase.__tables.tenant_evolution_credentials;
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ tenant_id: TENANT_ID, api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' });
+
+    expect(webhookCall?.url).toBe(`${EVOLUTION_API_URL}/webhook/set/${data.instanceName}`);
+    expect(webhookCall?.body).toEqual({
+      webhook: { enabled: true, url: `${PUBLIC_BASE_URL}/api/webhooks/evolution`, events: ['MESSAGES_UPSERT'] },
+    });
+  });
+
+  it('bug real (12/08/2026): instância criada mas webhook não configurado — devolve warning em vez de deixar a instância muda pra sempre', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        return { ok: true, json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { base64: 'data:image/png;base64,ABC123' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        return { ok: false, status: 500, json: async () => ({ error: 'boom' }) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,ABC123');
+    expect(data.warning).toMatch(/webhook/i);
+
+    // A instância e a credencial continuam salvas mesmo com o webhook falho
+    // — reabrir o QR Code (rota GET .../qrcode) tenta configurar de novo.
+    expect(supabase.__tables.tenant_evolution_credentials).toHaveLength(1);
   });
 
   it('devolve 404 pra tenant inexistente', async () => {
@@ -106,17 +148,61 @@ describe('POST /api/admin/tenants/:id/evolution-instance', () => {
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
     expect(res.status).toBe(503);
   });
-});
 
-describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
-  it('busca um QR Code novo pra instância já criada', async () => {
+  it('bug real (12/08/2026): tenant que já tem instância — reusa em vez de tentar criar outra e quebrar com "duplicate key"', async () => {
     supabase.__tables.tenant_evolution_credentials = [
       { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
     ];
+    let createCalled = false;
+    let webhookCall: { url: string; body: any } | undefined;
     global.fetch = vi.fn(async (url: any, options?: any) => {
-      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
-      expect(String(url)).toBe(`${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`);
-      return { ok: true, json: async () => ({ base64: 'data:image/png;base64,NOVOQR' }) } as any;
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        createCalled = true;
+        return { ok: true, json: async () => ({ hash: { apikey: 'outra-key' }, qrcode: { base64: 'NAO-DEVERIA-CRIAR' } }) } as any;
+      }
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`) {
+        return { ok: true, json: async () => ({ base64: 'data:image/png;base64,QR-REUSADO' }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        webhookCall = { url: urlStr, body: JSON.parse(options.body) };
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.instanceName).toBe('cliente-novo-abc123');
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,QR-REUSADO');
+    expect(createCalled).toBe(false);
+    expect(webhookCall?.url).toBe(`${EVOLUTION_API_URL}/webhook/set/cliente-novo-abc123`);
+
+    // Continua uma credencial só — nenhuma segunda instância/linha criada.
+    expect(supabase.__tables.tenant_evolution_credentials).toHaveLength(1);
+  });
+});
+
+describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
+  it('busca um QR Code novo pra instância já criada e reafirma o webhook', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    let webhookCall: { url: string; body: any } | undefined;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`) {
+        return { ok: true, json: async () => ({ base64: 'data:image/png;base64,NOVOQR' }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        webhookCall = { url: urlStr, body: JSON.parse(options.body) };
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
     }) as any;
     ({ server, baseUrl } = await startServer());
 
@@ -124,6 +210,35 @@ describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.qrCodeBase64).toBe('data:image/png;base64,NOVOQR');
+    expect(data.warning).toBeUndefined();
+    expect(webhookCall?.url).toBe(`${EVOLUTION_API_URL}/webhook/set/cliente-novo-abc123`);
+    expect(webhookCall?.body).toEqual({
+      webhook: { enabled: true, url: `${PUBLIC_BASE_URL}/api/webhooks/evolution`, events: ['MESSAGES_UPSERT'] },
+    });
+  });
+
+  it('bug real (12/08/2026): reabrir o QR de uma instância criada ANTES da correção também conserta o webhook dela', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`) {
+        return { ok: true, json: async () => ({ base64: 'data:image/png;base64,NOVOQR' }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        return { ok: false, status: 500, json: async () => ({ error: 'boom' }) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,NOVOQR');
+    expect(data.warning).toMatch(/webhook/i);
   });
 
   it('404 quando o tenant ainda não tem instância criada', async () => {

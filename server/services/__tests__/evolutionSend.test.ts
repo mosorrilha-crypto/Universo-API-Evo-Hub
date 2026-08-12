@@ -5,7 +5,7 @@
  * com header `apikey`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sendEvolutionTextMessage, showEvolutionTyping } from '../evolutionSend';
+import { sendEvolutionTextMessage, showEvolutionTyping, setEvolutionWebhook } from '../evolutionSend';
 
 const realFetch = global.fetch;
 
@@ -34,6 +34,32 @@ describe('sendEvolutionTextMessage', () => {
 
   it('lança erro quando falta instância/URL/chave', async () => {
     await expect(sendEvolutionTextMessage(undefined, undefined, undefined, '595981234567', 'Oi!')).rejects.toThrow();
+  });
+});
+
+describe('setEvolutionWebhook', () => {
+  it('chama POST {apiUrl}/webhook/set/{instance} com apikey e a URL/eventos certos', async () => {
+    const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as any;
+
+    await setEvolutionWebhook('inst-1', 'https://evo.example.com/', 'key-1', 'https://universo.example.com/api/webhooks/evolution');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://evo.example.com/webhook/set/inst-1');
+    expect((options as any).headers.apikey).toBe('key-1');
+    expect(JSON.parse((options as any).body)).toEqual({
+      webhook: { enabled: true, url: 'https://universo.example.com/api/webhooks/evolution', events: ['MESSAGES_UPSERT'] },
+    });
+  });
+
+  it('lança erro quando a Evolution API responde com falha', async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) })) as any;
+    await expect(setEvolutionWebhook('inst-1', 'https://evo.example.com', 'key-1', 'https://universo.example.com/api/webhooks/evolution')).rejects.toThrow(/HTTP 500/);
+  });
+
+  it('lança erro quando falta instância/URL/chave', async () => {
+    await expect(setEvolutionWebhook(undefined, undefined, undefined, 'https://universo.example.com/api/webhooks/evolution')).rejects.toThrow();
   });
 });
 

@@ -54,6 +54,23 @@ function readSavedUserRole(): UserProfile['role'] | undefined {
   }
 }
 
+/**
+ * Bug real em produção (12/08/2026): `localStorage.setItem` sem try/catch
+ * pra cachear o estado do painel — assim que a base de conhecimento real (com
+ * fotos de exemplo em base64, Epic 4.5.2) passou a caber no cache, estourou a
+ * cota do navegador (~5-10MB por origem) e o `QuotaExceededError` não tratado
+ * derrubava a árvore de componentes inteira (tela em branco). O cache é só
+ * uma otimização de carregamento a frio — se não couber, segue sem ele em vez
+ * de quebrar a tela.
+ */
+function safeSetLocalStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`⚠️  Falha ao salvar cache local "${key}" (provavelmente localStorage cheio) — segue funcionando só com os dados em memória:`, err);
+  }
+}
+
 export const App: React.FC = () => {
   // Navigation & View State
   // Aberto pelo ícone instalado (PWA do atendente, issue #159), ou papel
@@ -120,10 +137,17 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
 
-  // CRM Leads
+  // CRM Leads — bug real em produção (12/08/2026): sempre que o cache local
+  // estava vazio (navegador novo, aba anônima, ou depois de limpar dados do
+  // site pra corrigir outro bug), essa tela caía pro conjunto inteiro de
+  // leads fictícios de demonstração em vez de começar vazia — e como o merge
+  // com os leads reais (GET /api/crm/leads, abaixo) só ADICIONA por id, nunca
+  // remove, os fictícios ficavam "grudados" na lista pra sempre, misturados
+  // com clientes reais. Começa vazia agora; quem quiser os dados de exemplo
+  // de volta usa o botão "Carregar dados de demonstração" (handleLoadDemoData).
   const [leads, setLeads] = useState<LeadInfo[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
-    return saved ? JSON.parse(saved) : INITIAL_MOCK_LEADS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Financial Transactions
@@ -157,6 +181,25 @@ export const App: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
+  // Bug real em produção (12/08/2026): o cache local (leads, base de
+  // conhecimento, faturas) nunca era limpo no logout — então trocar de conta
+  // no mesmo navegador (ex: saas_admin pra um operador de outro tenant)
+  // continuava mostrando, por alguns instantes, os dados em cache da conta
+  // anterior até a busca real terminar, e às vezes nem terminava de limpar
+  // (leads reais só são ADICIONADOS ao merge, nunca removidos). Limpa tudo
+  // no logout — o próximo login sempre recomeça do zero e busca os dados
+  // reais do tenant certo.
+  const clearCachedTenantScopedData = () => {
+    localStorage.removeItem('saas_crm_leads');
+    localStorage.removeItem('saas_agent_kb');
+    localStorage.removeItem('saas_transactions');
+    setLeads([]);
+    setTransactions([]);
+    setKnowledgeBase(moniqueStudioKnowledgeBase);
+    setSavedTranscripts([]);
+    setEscalations([]);
+  };
+
   // Se o servidor rejeitar explicitamente o token da sessão (403 — token
   // presente mas inválido/expirado), força um novo login com aviso — em vez
   // de deixar a tela travada mostrando dados velhos com tudo quebrado em
@@ -167,6 +210,7 @@ export const App: React.FC = () => {
       setCurrentUser(null);
       setAuthToken(null);
       setIsLoginModalOpen(true);
+      clearCachedTenantScopedData();
       showToast('Sessão expirada — faça login novamente.');
     });
     return () => setUnauthorizedHandler(null);
@@ -174,19 +218,28 @@ export const App: React.FC = () => {
 
   // Sync state to local storage
   useEffect(() => {
-    localStorage.setItem('saas_tenants', JSON.stringify(tenants));
+    safeSetLocalStorage('saas_tenants', JSON.stringify(tenants));
   }, [tenants]);
 
   useEffect(() => {
-    localStorage.setItem('saas_crm_leads', JSON.stringify(leads));
+    safeSetLocalStorage('saas_crm_leads', JSON.stringify(leads));
   }, [leads]);
 
   useEffect(() => {
-    localStorage.setItem('saas_transactions', JSON.stringify(transactions));
+    safeSetLocalStorage('saas_transactions', JSON.stringify(transactions));
   }, [transactions]);
 
+  // As fotos de exemplo (`exampleImageBase64`, Epic 4.5.2) são o que estoura
+  // a cota — e não precisam estar no cache: são carregadas de novo, completas,
+  // do backend real logo abaixo (GET /api/knowledge-base) toda vez que a
+  // página abre. O cache existe só pra evitar a tela vazia entre o primeiro
+  // render e essa busca terminar, não pra guardar imagem nenhuma.
   useEffect(() => {
-    localStorage.setItem('saas_agent_kb', JSON.stringify(knowledgeBase));
+    const cacheableKb = {
+      ...knowledgeBase,
+      products: knowledgeBase.products.map(({ exampleImageBase64, exampleImageMimeType, ...rest }) => rest),
+    };
+    safeSetLocalStorage('saas_agent_kb', JSON.stringify(cacheableKb));
   }, [knowledgeBase]);
 
   // Busca a base de conhecimento real salva no backend (usada pelo agente
@@ -277,7 +330,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem('saas_current_user', JSON.stringify(currentUser));
+      safeSetLocalStorage('saas_current_user', JSON.stringify(currentUser));
     } else {
       localStorage.removeItem('saas_current_user');
     }
@@ -500,6 +553,7 @@ export const App: React.FC = () => {
           setCurrentUser(null);
           setAuthToken(null);
           setIsLoginModalOpen(true);
+          clearCachedTenantScopedData();
           showToast('Sessão encerrada');
         }}
         tenants={tenants}
