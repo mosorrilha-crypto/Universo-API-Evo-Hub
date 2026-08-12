@@ -212,5 +212,35 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     }
   }));
 
+  // Estado da conexão (aberta/fechada/conectando) — pro painel saber quando
+  // parar de mostrar o QR Code e exibir "conectado" sem precisar o operador
+  // ficar recarregando a tela manualmente pra descobrir.
+  router.get('/api/admin/tenants/:id/evolution-instance/status', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { data: cred, error: credError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key')
+      .eq('tenant_id', req.params.id)
+      .maybeSingle();
+    if (credError) return res.status(500).json({ error: credError.message });
+    if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+
+    try {
+      const stateRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connectionState/${cred.instance_name}`, {
+        headers: { apikey: cred.api_key },
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await stateRes.json().catch(() => ({}));
+      if (!stateRes.ok) {
+        return res.status(502).json({ error: `Falha ao consultar estado da instância: HTTP ${stateRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
+      }
+      // Formato varia por versão do servidor Evolution, mesma cautela já
+      // aplicada na leitura do QR Code acima.
+      const state: string = data?.instance?.state || data?.state || 'unknown';
+      res.json({ instanceName: cred.instance_name, state, connected: state === 'open' });
+    } catch (err: any) {
+      res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+    }
+  }));
+
   return router;
 }
