@@ -276,6 +276,16 @@ métrica de atribuição de tráfego pago). Novo endpoint
 hábito operacional mudar — o operador precisa de fato usar o botão "Cadastrar agendamento" pro
 booking fechado por fora virar dado rastreável. Acompanhar isso no ritual semanal (seção 5).
 
+`[DADO]` **Checagem de linha de base, 12/08/2026 (poucas horas após o merge):** cruzamento dos
+30 comprovantes de pagamento (11/07–11/08) contra a tabela `appointments` mostra **0 linhas com
+`source='manual'`** — a tabela só tem 2 linhas no total, ambas `source='ai'`. **Isso é esperado
+no dia zero de um recurso recém-lançado, não é um sinal de alarme.** Vira sinal de preocupação
+só se continuar zerado depois de um ciclo real de uso (próxima checagem: ver seção 5, ritual
+semanal). Cruzamento completo dos 30 comprovantes × agenda do Google Calendar está registrado
+à parte (fora deste documento por ora); achados: ~Gs 7.700.000 em comprovantes "ok" no período,
+alguns sem evento de agenda correspondente (a investigar com a Monique), cobertura de agenda
+inexistente antes de 04/07.
+
 ---
 
 ## 3. A espinha dorsal — o funil canônico
@@ -396,6 +406,10 @@ Checklist fixo, na ordem:
 9. Instagram: novos seguidores, **e de onde eles vieram** — crescimento fora do Paraguai não
    conta como resultado comercial.
 10. Posts publicados na semana: nenhum com preço promocional vencido?
+11. Adoção do cadastro manual de agendamento (PR #187, no ar desde 12/08): quantos
+    agendamentos fechados fora da IA na semana viraram linha `source='manual'` em
+    `appointments`? Baseline em 12/08 era 0 — esperado no lançamento, mas deve sair de 0 nas
+    próximas semanas.
 
 ### Mensal (revisão estratégica)
 
