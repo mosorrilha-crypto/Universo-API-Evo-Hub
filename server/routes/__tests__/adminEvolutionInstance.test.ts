@@ -148,6 +148,42 @@ describe('POST /api/admin/tenants/:id/evolution-instance', () => {
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
     expect(res.status).toBe(503);
   });
+
+  it('bug real (12/08/2026): tenant que já tem instância — reusa em vez de tentar criar outra e quebrar com "duplicate key"', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    let createCalled = false;
+    let webhookCall: { url: string; body: any } | undefined;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        createCalled = true;
+        return { ok: true, json: async () => ({ hash: { apikey: 'outra-key' }, qrcode: { base64: 'NAO-DEVERIA-CRIAR' } }) } as any;
+      }
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`) {
+        return { ok: true, json: async () => ({ base64: 'data:image/png;base64,QR-REUSADO' }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        webhookCall = { url: urlStr, body: JSON.parse(options.body) };
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.instanceName).toBe('cliente-novo-abc123');
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,QR-REUSADO');
+    expect(createCalled).toBe(false);
+    expect(webhookCall?.url).toBe(`${EVOLUTION_API_URL}/webhook/set/cliente-novo-abc123`);
+
+    // Continua uma credencial só — nenhuma segunda instância/linha criada.
+    expect(supabase.__tables.tenant_evolution_credentials).toHaveLength(1);
+  });
 });
 
 describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
