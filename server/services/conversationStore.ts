@@ -59,7 +59,7 @@ export interface StoredConversation {
   manuallyUnread?: boolean;
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver attachAdReferralIfMissing) — undefined se a conversa não veio de um anúncio. */
   adHeadline?: string;
-  /** Lead não qualificado/insistente — IA para de responder automaticamente só pra esse número (ver isConversationAiBlocked). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
+  /** IA para de responder automaticamente só pra esse número — ligado manualmente pelo operador (lead não qualificado/insistente) OU automaticamente pelo próprio autoReply.ts (alucinação de agenda sem ferramenta pra sustentar, ver stopAutoReply em autoReply.ts). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
   aiBlockedAt?: string;
   /** Quantidade de mensagens do lead recebidas depois da última vez que o operador abriu esta conversa (ver markConversationRead). Não confundir com manuallyUnread (override manual do operador) — o painel trata a conversa como não lida quando qualquer um dos dois é verdadeiro. */
   unreadCount: number;
@@ -229,6 +229,26 @@ export async function attachAdReferralIfMissing(tenantId: string, phone: string,
     .from('conversations')
     .update({ ctwa_clid: referral.ctwaClid, ad_source_id: referral.adSourceId || null, ad_headline: referral.adHeadline || null })
     .eq('id', conv.id);
+}
+
+/**
+ * Grava o nome que a cliente disse na própria conversa (não veio do perfil
+ * do WhatsApp) — reaproveita a mesma coluna `name` que já guarda o nome de
+ * perfil, então a partir daqui ele vira `contactName` normalmente em todo
+ * turno seguinte, sem depender da janela de histórico recente pra "lembrar"
+ * dele (achado em pesquisa de mercado: perder o nome do cliente depois de
+ * algumas mensagens é um dos sinais mais claros de que é um bot, não uma
+ * pessoa). Só grava se ainda não existir nome nenhum pra essa conversa —
+ * nunca sobrescreve um nome de perfil real do WhatsApp, que é sempre mais
+ * confiável que um nome extraído de texto livre pela IA.
+ */
+export async function setConversationNameIfMissing(tenantId: string, phone: string, name: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  const { data: existing } = await db.from('conversations').select('name').eq('id', conv.id).maybeSingle();
+  if (existing?.name) return;
+  await db.from('conversations').update({ name }).eq('id', conv.id);
+  emitConversationUpdated(tenantId, phone);
 }
 
 /** ctwa_clid gravado pra essa conversa, se algum dia veio de um anúncio — null caso contrário (nunca inventar). */
@@ -441,16 +461,18 @@ export interface ConversationStatePatch {
   unread?: boolean;
   /** Identifica o lead — troca/adiciona o nome de exibição do contato (a Meta só manda o nome do perfil de WhatsApp quando o cliente define um; muitos leads chegam só com o número). Sempre uma ação explícita do operador, nunca sobrescrita automaticamente. */
   name?: string;
-  /** Lead não qualificado/insistente ("assediando") — true pausa a IA só pra esse número (agentStatus.ts continua controlando o resto do tenant normalmente). O operador pode responder manualmente à vontade; só a resposta automática para. */
+  /** true pausa a IA só pra esse número (agentStatus.ts continua controlando o resto do tenant normalmente). O operador pode responder manualmente à vontade; só a resposta automática para. Origem: ação explícita do operador (lead não qualificado/insistente) OU automática, disparada por autoReply.ts (stopAutoReply) quando a IA aluciona um agendamento sem nenhuma ferramenta pra sustentar — evita repetir o mesmo erro mensagem após mensagem até um humano assumir. */
   aiBlocked?: boolean;
 }
 
 /**
  * Atualiza os estados de organização da conversa (arquivar, fixar, silenciar,
- * marcar como não lida, nome de exibição) — sempre uma ação explícita do
- * operador no painel (menu ⋮ da lista), nunca automática. archived_at/pinned_at
- * guardam quando cada estado foi ativado (null quando desativado), pra dar
- * pra ordenar por "há quanto tempo foi fixado" sem precisar de outra coluna.
+ * marcar como não lida, nome de exibição, bloquear IA). A maioria é sempre
+ * uma ação explícita do operador no painel (menu ⋮ da lista) — a exceção é
+ * aiBlocked, que também pode vir automaticamente de webhooks.ts (ver
+ * ConversationStatePatch.aiBlocked acima). archived_at/pinned_at guardam
+ * quando cada estado foi ativado (null quando desativado), pra dar pra
+ * ordenar por "há quanto tempo foi fixado" sem precisar de outra coluna.
  */
 export async function updateConversationState(tenantId: string, phone: string, patch: ConversationStatePatch): Promise<StoredConversation | undefined> {
   const db = getDb();

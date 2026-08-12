@@ -89,6 +89,34 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(calls[1].config.systemInstruction).toBeTruthy();
   });
 
+  it('issue #97: orientação de operador humano (retomada guiada) entra em contents, nunca em systemInstruction, e não muda a classificação do roteador', async () => {
+    const { ai, calls } = makeFakeAi();
+    const operatorGuidance = 'Diz pra ela que o horário de sábado 14h ainda está livre.';
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'oi de novo', 'Cliente Teste', undefined, undefined,
+      undefined, undefined, 'beauty_studio', undefined, undefined, undefined,
+      operatorGuidance
+    );
+
+    const routerCall = calls[0];
+    // A orientação é conteúdo dinâmico (camada 3+4) — nunca deveria influenciar
+    // o prompt do roteador, que só recebe texto/histórico.
+    expect(routerCall.contents[0].text).not.toContain(operatorGuidance);
+
+    const specialistCall = calls[1];
+    expect(specialistCall.config.systemInstruction).not.toContain(operatorGuidance);
+    expect(specialistCall.contents[0].text).toContain(operatorGuidance);
+    expect(specialistCall.contents[0].text).toContain('Um atendente humano deixou esta orientação');
+  });
+
+  it('sem orientação de operador (caso normal): não adiciona nada extra ao prompt', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', 'Cliente Teste', undefined, undefined);
+    const specialistCall = calls[1];
+    expect(specialistCall.contents[0].text).not.toContain('atendente humano');
+  });
+
   it('reforça a regra anti-parênteses/dois-pontos na camada Global (achado real em produção)', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
@@ -117,6 +145,53 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const systemInstruction: string = calls[1].config.systemInstruction;
     expect(systemInstruction).toContain('nome do cliente');
     expect(systemInstruction).toContain('Nunca chame o cliente por um nome que não apareceu');
+  });
+
+  it('proíbe abrir com frases de efeito ("qué gusto...") em vez de responder a dúvida direto (achado real em produção: praticamente toda primeira mensagem abria com "qué gusto en saludarte/leerte" ou "con gusto te ayudo" antes de responder)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('qué gusto en escribirme/leerte/saludarte');
+    expect(systemInstruction).toContain('responda a dúvida real da cliente já na mesma bolha ou na seguinte');
+  });
+
+  it('instrui a nunca repetir frase de exemplo do contexto do negócio palavra por palavra (pesquisa de mercado: repetir a mesma frase pronta é um dos sinais mais claros de bot)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('nunca um script pra repetir palavra por palavra');
+  });
+});
+
+describe('generateAutoReplyForText — captura o nome que a cliente diz na conversa (pesquisa de mercado: "esquecer" o nome depois de algumas mensagens é um dos sinais mais claros de bot)', () => {
+  function makeFakeAiWithName(nomeCapturado: string | null) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          return { text: JSON.stringify({ phase: 'abertura', bubbles: ['¡Un gusto, Camila!'], needsHumanConfirmation: false, nomeCapturado }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('devolve capturedClientName quando o modelo extrai um nome e não havia contactName', async () => {
+    const ai = makeFakeAiWithName('Camila');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'Soy Camila, quería consultar', undefined /* sem contactName */, undefined, []);
+    expect(result?.capturedClientName).toBe('Camila');
+  });
+
+  it('IGNORA nomeCapturado quando já existe contactName — nunca deixa a IA sobrescrever o nome real de perfil do WhatsApp', async () => {
+    const ai = makeFakeAiWithName('Outro Nome');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', 'Camila (perfil do WhatsApp)', undefined, []);
+    expect(result?.capturedClientName).toBeUndefined();
+  });
+
+  it('não define capturedClientName quando o modelo não extraiu nenhum nome', async () => {
+    const ai = makeFakeAiWithName(null);
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.capturedClientName).toBeUndefined();
   });
 });
 
@@ -232,5 +307,30 @@ describe('generateAutoReplyForText — etapa de reclamação (Epic 4.5.8)', () =
     const result = await generateAutoReplyForText('tenant-a', ai, 'me machucou muito, tô com alergia', 'Cliente');
     expect(result?.agent).toBe('reclamacao');
     expect(result?.needsHumanConfirmation).toBe(true);
+  });
+});
+
+describe('generateAutoReplyForText — pedir o nome na triagem (achado real: falta de personalização quando o WhatsApp não tem nome de perfil)', () => {
+  function makeFakeAiTriagem() {
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          return { text: JSON.stringify({ phase: 'abertura', bubbles: ['¡Hola! ¿Cómo estás?'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return { ai, calls };
+  }
+
+  it('instrui a perguntar o nome quando "Nome do cliente" não está no contexto', async () => {
+    const { ai, calls } = makeFakeAiTriagem();
+    await generateAutoReplyForText('tenant-a', ai, 'Hola', undefined /* sem contactName */, undefined, []);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('pergunte o nome dela de forma natural');
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).not.toContain('Nome do cliente:');
   });
 });

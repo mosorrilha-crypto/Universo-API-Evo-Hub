@@ -21,10 +21,12 @@ vi.mock('../googleCalendar', () => ({
   cancelCalendarEvent: vi.fn(),
   findWeeklyAvailability,
 }));
+const getAppointmentForPhone = vi.fn(async () => null as any);
 vi.mock('../appointmentStore', () => ({
-  getAppointmentForPhone: vi.fn(async () => null),
+  getAppointmentForPhone,
   setAppointmentForPhone: vi.fn(async () => undefined),
   clearAppointmentForPhone: vi.fn(async () => undefined),
+  confirmPayment: vi.fn(async () => null),
 }));
 vi.mock('../conversationStore', () => ({
   getConversationCtwaClid: vi.fn(async () => null),
@@ -149,5 +151,43 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
     expect(result?.bubbles.join(' ')).not.toContain('11:00');
     // A correção deve oferecer um dos horários realmente confirmados.
     expect(result?.bubbles.join(' ')).toMatch(/09:00|14:00/);
+  });
+
+  it('NÃO apaga a resposta quando o cliente só reconfirma/pede a localização de um agendamento JÁ REAL, mesmo sem nenhuma ferramenta rodar nesta mensagem (achado real em produção: "Ok ok" / "la ubicación no me enviaste" apagava a resposta certa e virava uma frase genérica em português)', async () => {
+    getAppointmentForPhone.mockResolvedValue({
+      eventId: 'evt-real-1',
+      summary: 'Diseño con Henna',
+      startIso: '2026-08-10T14:00:00',
+      endIso: '2026-08-10T14:30:00',
+      paymentStatus: null,
+    });
+    let toolCallCount = 0;
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents?.[0]?.text?.includes('Classifique a intenção principal')) {
+            return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          }
+          if (req.config?.tools) {
+            toolCallCount++;
+            // Nenhuma ferramenta nova precisa rodar — o cliente só agradeceu/pediu a localização de novo.
+            return { functionCalls: [] } as any;
+          }
+          return { text: JSON.stringify({ phase: 'fechamento', bubbles: ['¡Te paso! Estamos en Calle Paso Bogarín 3665. ¿Nos vemos hoy a las 14:00 entonces?'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'la ubicación no me enviaste', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.bubbles.join(' ')).toContain('14:00');
+    expect(result?.bubbles.join(' ')).toContain('Paso Bogarín');
+    expect(result?.needsHumanConfirmation).toBe(false);
+    expect(result?.stopAutoReply).toBe(false);
+    getAppointmentForPhone.mockResolvedValue(null);
   });
 });

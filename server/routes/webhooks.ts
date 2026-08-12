@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
@@ -13,10 +13,11 @@ import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/know
 import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText } from '../services/messageBuffer';
-import { logEscalation, isPaymentRelated } from '../services/escalationStore';
+import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
+import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnalysis';
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import type { GoogleGenAI } from '@google/genai';
@@ -90,7 +91,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
           : { provider: 'meta' as const, phoneNumberId, accessToken: token };
 
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline);
+        // Issue #97 — orientação que um operador deixou num escalonamento,
+        // ainda não usada numa resposta real (ex: foi deixada fora da
+        // janela de 24h, esperando o cliente escrever de novo pra reabrir a
+        // janela — ver operatorFollowUpService.ts). Esta é a mensagem que
+        // reabre.
+        const pendingGuidance = await getPendingOperatorGuidance(tenantId, phone);
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply);
         if (!result) {
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
           // Achado real em produção (issue #82, item 4): mesmo com retry
@@ -113,6 +120,31 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
           console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
         }, messageId, result.phase, result.routerElapsedMs);
+        if (pendingGuidance) {
+          await markOperatorGuidanceConsumed(tenantId, pendingGuidance.id);
+          console.log(`🤝 [Retomada guiada] tenant=${tenantId} usou a orientação do operador pra responder ${phone} (fora da janela original, cliente reabriu agora).`);
+        }
+        // Achado real em produção: sem isso, uma alucinação de agenda sem
+        // nenhuma ferramenta pra sustentar o horário citado (autoReply.ts,
+        // stopAutoReply) mandava o MESMO fallback genérico de novo a cada
+        // nova mensagem do cliente, em vez de mandar uma vez, escalar, e
+        // esperar um humano — chegou a se repetir 6x idêntico na mesma
+        // conversa. Reaproveita o mesmo bloqueio manual de "lead não
+        // qualificado" (menu ⋮ do painel) — mecanicamente é o mesmo efeito
+        // (para a resposta automática só pra este número, resto do tenant
+        // continua normal), só a origem do bloqueio que agora também pode
+        // ser automática.
+        if (result.stopAutoReply) {
+          await updateConversationState(tenantId, phone, { aiBlocked: true });
+          console.warn(`🛑 [Resposta Automática] tenant=${tenantId} IA bloqueada automaticamente pra ${phone} depois de uma alucinação de agenda sem ferramenta pra sustentar — aguardando atendimento humano.`);
+        }
+        // A cliente disse o próprio nome na conversa (não veio do perfil do
+        // WhatsApp) — grava agora pra virar contactName em todo turno
+        // seguinte, sem depender da janela de histórico recente (ver
+        // conversationStore.setConversationNameIfMissing).
+        if (result.capturedClientName) {
+          await setConversationNameIfMissing(tenantId, phone, result.capturedClientName);
+        }
       } catch (err: any) {
         if (isGeoRestrictedError(err)) {
           await markGeoRestricted(tenantId, phone, err.message);
@@ -192,21 +224,52 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
         } else if (msg.type === 'image') {
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
-          if (msg.metaImage) {
-            downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
+
+          // Uma única promise de download, reaproveitada abaixo (await duas
+          // vezes na mesma promise não baixa a imagem de novo) — mantém o
+          // salvamento da imagem incondicional (toda imagem recebida
+          // continua salva pro painel exibir, igual antes) e ainda dá pra
+          // reusar os mesmos bytes pra análise de comprovante sem duplicar o
+          // download.
+          const downloadPromise = msg.metaImage
+            ? downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
+            : null;
+          if (downloadPromise) {
+            downloadPromise
               .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
               .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
           }
+
           // Etapa 8 (fluxo de verificação de pagamento) — uma imagem chegando
           // com um agendamento ativo ainda sem comprovante registrado é o
           // caso mais comum de "cliente mandou o comprovante da seña". Nunca
           // confirma nada sozinho: só marca pending_verification e escala pra
           // um operador olhar de verdade (ver server/services/appointmentStore.ts).
+          //
+          // Achado (pergunta real do dono do produto): antes disso o sistema
+          // nunca olhava o CONTEÚDO da imagem, só o contexto (tem agendamento
+          // ativo sem pagamento? então é "possível comprovante"). Agora, só
+          // nesse caso específico (não em toda imagem — custo de Gemini
+          // controlado), manda a mesma imagem já baixada pro Gemini analisar
+          // e devolve uma dica curta ("parece um comprovante de Gs 50.000,
+          // 12/08") pro operador decidir mais rápido — a decisão final
+          // continua sendo sempre humana.
           getAppointmentForPhone(tenantId, msg.from)
             .then(async (appointment) => {
               if (!appointment || appointment.paymentStatus) return;
-              await markPaymentPendingVerification(tenantId, msg.from, msg.messageId);
-              await logEscalation(tenantId, msg.from, msg.contactName, 'Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno', '[imagem]');
+              let receiptHint: string | undefined;
+              if (downloadPromise) {
+                try {
+                  const downloaded = await downloadPromise;
+                  const analysis = await analyzePaymentReceiptWithGemini(getAi?.() ?? null, downloaded.base64, downloaded.mimeType);
+                  receiptHint = analysis?.hint || undefined;
+                } catch (err: any) {
+                  console.warn(`❌ [Imagem] Falha ao analisar possível comprovante de ${msg.from}:`, err.message);
+                }
+              }
+              await markPaymentPendingVerification(tenantId, msg.from, msg.messageId, receiptHint);
+              const hintSuffix = receiptHint ? ` IA: "${receiptHint}"` : '';
+              await logEscalation(tenantId, msg.from, msg.contactName, `Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno.${hintSuffix}`, '[imagem]', 'payment_proof');
             })
             .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
         } else {

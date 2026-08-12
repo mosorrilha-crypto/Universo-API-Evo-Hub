@@ -19,11 +19,15 @@ import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
 import { createCrmRouter } from './server/routes/crm';
+import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
+import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
+import { initWebPush } from './server/services/webPush';
+import { notifySystemError } from './server/services/systemErrorAlertService';
 
 dotenv.config();
 
@@ -38,10 +42,16 @@ dotenv.config();
 // startServer) cuida de devolver uma resposta HTTP decente pra quem
 // disparou o erro, quando a rota usa asyncHandler.
 process.on('unhandledRejection', (reason) => {
-  console.error('🔥 [unhandledRejection] Erro não tratado — processo continua vivo:', reason instanceof Error ? reason.stack || reason.message : reason);
+  const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
+  console.error('🔥 [unhandledRejection] Erro não tratado — processo continua vivo:', message);
+  // Issue #111 — sem isso, esse tipo de erro só existia no log do Render;
+  // ninguém era avisado até um cliente reclamar. Nunca lança, nunca bloqueia
+  // (ver systemErrorAlertService.ts).
+  notifySystemError({ source: 'unhandledRejection', message }).catch(() => {});
 });
 process.on('uncaughtException', (err) => {
   console.error('🔥 [uncaughtException] Erro não tratado — processo continua vivo:', err.stack || err.message);
+  notifySystemError({ source: 'uncaughtException', message: err.message }).catch(() => {});
 });
 
 async function startServer() {
@@ -111,6 +121,10 @@ async function startServer() {
     evolutionInstanceName: config.evolutionInstanceName,
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
+    getAi: () => getGeminiClient(config),
+    googleClientId: config.googleClientId,
+    googleClientSecret: config.googleClientSecret,
+    googleRedirectUri: config.googleRedirectUri,
   }));
   app.use(createGoogleCalendarRouter({
     authenticateToken,
@@ -119,8 +133,10 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
     jwtSecret: config.jwtSecret,
   }));
-  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey }));
+  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl }));
   app.use(createCrmRouter({ authenticateToken }));
+  initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
+  app.use(createPushSubscriptionsRouter({ authenticateToken, vapidPublicKey: config.vapidPublicKey }));
 
   // Middleware de erro global do Express — precisa vir DEPOIS de todas as
   // rotas de API acima (é assim que o Express decide quem trata um
@@ -132,6 +148,7 @@ async function startServer() {
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
     console.error(`❌ [Erro não tratado] ${req.method} ${req.path}:`, err?.stack || err?.message || err);
+    notifySystemError({ source: `${req.method} ${req.path}`, message: err?.message || String(err) }).catch(() => {});
     res.status(500).json({ error: 'Erro interno do servidor.' });
   });
 
@@ -177,6 +194,13 @@ async function startServer() {
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
   });
+
+  // Job em background que alerta o operador quando um pagamento fica
+  // pending_verification há mais de 2h sem ninguém confirmar/rejeitar
+  // (issue #98) — nunca confirma/rejeita sozinho, só avisa. Reusa o mesmo
+  // canal de alerta (push + WhatsApp) do escalonamento normal. Ver
+  // server/services/paymentPendingAlertJob.ts.
+  startPaymentPendingAlertJob();
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
   if (!config.isProduction) {

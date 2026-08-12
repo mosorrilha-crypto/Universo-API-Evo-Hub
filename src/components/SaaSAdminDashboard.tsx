@@ -53,59 +53,254 @@ import {
   FlaskConical
 } from 'lucide-react';
 
-export function ConfiguracaoCanais() {
-  const [isCreating, setIsCreating] = useState(false);
+interface RealTenant {
+  id: string;
+  name: string;
+  slug: string | null;
+}
 
-  const handleCriarConexao = async () => {
-    setIsCreating(true);
+/**
+ * Onboarding real de WhatsApp via Evolution API (Epic 4.6, issue #95) —
+ * substitui o antigo `ConfiguracaoCanais`, que era 100% decorativo (chamava
+ * `/api/canais/criar`, uma rota que nunca existiu no backend, e abria um
+ * link fixo pra `app.evohub.ai`, domínio que também não é real). O fluxo
+ * real já existia no backend desde antes (server/routes/admin.ts —
+ * POST/GET .../evolution-instance) mas nenhuma tela chamava essas rotas.
+ *
+ * Achado ao investigar: a lista de tenants desta tela ("Tenants & Conexões"
+ * acima) é local/localStorage, igual ao já documentado sobre CRM/Financeiro
+ * em CLAUDE.md — criar um tenant ali não grava nada na tabela real
+ * `tenants` do Supabase. Esse componente busca a lista REAL (GET
+ * /api/admin/tenants) separadamente, e permite criar um tenant real na
+ * hora (POST /api/admin/tenants) se o que se quer conectar ainda não
+ * existe no banco.
+ */
+export function ConectarEvolutionQrCode() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [realTenants, setRealTenants] = useState<RealTenant[]>([]);
+  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('');
+  const [newTenantName, setNewTenantName] = useState('');
+  const [isCreatingTenant, setIsCreatingTenant] = useState(false);
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
+  const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
+  const [connectionState, setConnectionState] = useState<'idle' | 'waiting' | 'connected'>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const fetchRealTenants = async () => {
+    setIsLoadingTenants(true);
     try {
-      const response = await fetch('/api/canais/criar', {
+      const res = await apiFetch('/api/admin/tenants');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const tenants: RealTenant[] = (data.tenants || []).map((t: any) => ({ id: t.id, name: t.name, slug: t.slug }));
+      setRealTenants(tenants);
+      if (tenants.length && !selectedTenantId) setSelectedTenantId(tenants[0].id);
+    } catch (err) {
+      console.error('Falha ao carregar tenants reais:', err);
+    } finally {
+      setIsLoadingTenants(false);
+    }
+  };
+
+  const openModal = () => {
+    setIsModalOpen(true);
+    setErrorMsg(null);
+    setQrCodeBase64(null);
+    setConnectionState('idle');
+    fetchRealTenants();
+  };
+
+  const handleCreateRealTenant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTenantName.trim()) return;
+    setIsCreatingTenant(true);
+    setErrorMsg(null);
+    try {
+      const res = await apiFetch('/api/admin/tenants', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          empresaId: 'tenant_123',
-          nomeCanal: 'Suporte Vendas WhatsApp'
-        })
+        body: JSON.stringify({ name: newTenantName.trim() }),
       });
-
-      const data = await response.json();
-
-      if (data.channel_token) {
-        const publicConnectUrl = `https://app.evohub.ai/connect/${data.channel_token}`;
-        window.open(publicConnectUrl, '_blank', 'width=800,height=600');
-      } else {
-        alert('Erro ao gerar link de conexão.');
-      }
-    } catch (error) {
-      console.error('Erro ao solicitar nova conexão:', error);
-      alert('Erro ao gerar link de conexão. Verifique o console.');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setNewTenantName('');
+      await fetchRealTenants();
+      setSelectedTenantId(data.tenant.id);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao criar o tenant.');
     } finally {
-      setIsCreating(false);
+      setIsCreatingTenant(false);
+    }
+  };
+
+  // Enquanto aguarda o operador escanear o QR, consulta o estado da conexão
+  // a cada 3s — pra tela virar "conectado" sozinha, sem precisar recarregar
+  // manualmente pra descobrir se já pareou.
+  useEffect(() => {
+    if (connectionState !== 'waiting' || !selectedTenantId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.connected) setConnectionState('connected');
+      } catch {
+        // Falha transitória de rede durante o polling — tenta de novo no próximo tick.
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [connectionState, selectedTenantId]);
+
+  const handleGenerateQr = async () => {
+    if (!selectedTenantId) return;
+    setIsGeneratingQr(true);
+    setErrorMsg(null);
+    setQrCodeBase64(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // "warning" aqui cobre o caso do webhook não ter sido configurado —
+      // a instância/QR estão OK, mas mensagem nenhuma vai chegar até isso
+      // ser corrigido (bug real encontrado 12/08/2026), então mostra mesmo
+      // sem bloquear o fluxo (o QR continua funcionando pra pareamento).
+      if (data.warning) setErrorMsg(data.warning);
+      if (data.qrCodeBase64) {
+        setQrCodeBase64(data.qrCodeBase64);
+        setConnectionState('waiting');
+      } else {
+        // Instância criada mas a resposta não trouxe QR (varia por versão
+        // do servidor Evolution) — busca separadamente, mesma rota que o
+        // botão "Gerar novo QR Code" usa.
+        await handleRefreshQr();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao gerar o QR Code.');
+    } finally {
+      setIsGeneratingQr(false);
+    }
+  };
+
+  const handleRefreshQr = async () => {
+    if (!selectedTenantId) return;
+    setIsGeneratingQr(true);
+    setErrorMsg(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance/qrcode`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.warning) setErrorMsg(data.warning);
+      setQrCodeBase64(data.qrCodeBase64 || null);
+      setConnectionState('waiting');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao buscar o QR Code.');
+    } finally {
+      setIsGeneratingQr(false);
     }
   };
 
   return (
-    <div className="flex justify-between items-center bg-slate-900 border border-slate-800 p-4 rounded-xl mt-4">
-      <div>
-        <h3 className="text-white font-bold text-sm">Conexões Meta (Evo Hub)</h3>
-        <p className="text-xs text-slate-400">Conecte o WhatsApp da empresa via proxy seguro</p>
-      </div>
-      
-      <button 
+    <>
+      <button
         type="button"
-        onClick={handleCriarConexao}
-        disabled={isCreating}
-        className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center transition-all shadow disabled:opacity-50"
+        onClick={openModal}
+        className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
       >
-        {isCreating ? (
-          <span className="animate-spin mr-2">⏳</span>
-        ) : (
-          <span className="mr-2">+</span>
-        )}
-        {isCreating ? 'Gerando Link...' : 'Criar Nova Conexão'}
+        <QrCode className="w-3.5 h-3.5" />
+        Conectar WhatsApp via QR Code
       </button>
-    </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsModalOpen(false)}>
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-bold text-sm flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-purple-400" /> Conectar WhatsApp (Evolution API)
+              </h3>
+              <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {errorMsg && (
+              <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{errorMsg}</div>
+            )}
+
+            {connectionState === 'connected' ? (
+              <div className="text-center py-6 space-y-2">
+                <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+                <p className="text-sm text-white font-semibold">WhatsApp conectado!</p>
+                <p className="text-xs text-slate-400">O número já pode receber e enviar mensagens por esse tenant.</p>
+              </div>
+            ) : qrCodeBase64 ? (
+              <div className="text-center space-y-3">
+                <img src={qrCodeBase64} alt="QR Code de conexão" className="mx-auto rounded-lg border border-slate-700 w-56 h-56 object-contain bg-white" />
+                <p className="text-xs text-slate-400">Abra o WhatsApp no celular do tenant → Aparelhos conectados → Conectar um aparelho → escaneie este código.</p>
+                <button
+                  type="button"
+                  onClick={handleRefreshQr}
+                  disabled={isGeneratingQr}
+                  className="text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isGeneratingQr ? 'animate-spin' : ''}`} /> QR expirou? Gerar novo
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Tenant a conectar</label>
+                  <select
+                    value={selectedTenantId}
+                    onChange={(e) => setSelectedTenantId(e.target.value)}
+                    disabled={isLoadingTenants || !realTenants.length}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                  >
+                    {!realTenants.length && <option value="">{isLoadingTenants ? 'Carregando...' : 'Nenhum tenant cadastrado ainda'}</option>}
+                    {realTenants.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateQr}
+                  disabled={!selectedTenantId || isGeneratingQr}
+                  className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  {isGeneratingQr ? <span className="animate-spin">⏳</span> : <QrCode className="w-3.5 h-3.5" />}
+                  {isGeneratingQr ? 'Gerando...' : 'Gerar QR Code'}
+                </button>
+
+                <div className="pt-2 border-t border-slate-800">
+                  <p className="text-[11px] text-slate-500 mb-1.5">Cliente novo? Cadastre o tenant real primeiro:</p>
+                  <form onSubmit={handleCreateRealTenant} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newTenantName}
+                      onChange={(e) => setNewTenantName(e.target.value)}
+                      placeholder="Nome do tenant"
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newTenantName.trim() || isCreatingTenant}
+                      className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-3 rounded-xl disabled:opacity-50"
+                    >
+                      {isCreatingTenant ? '...' : '+ Criar'}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 interface SaaSAdminDashboardProps {
@@ -159,10 +354,34 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('operator');
-  const [newUserTenantId, setNewUserTenantId] = useState(tenants[0]?.id || 'tenant_004');
+  const [newUserTenantId, setNewUserTenantId] = useState('');
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const isSaasAdminUser = currentUser?.role === 'saas_admin';
+
+  // Achado real em produção (12/08/2026): esse dropdown usava `tenants`
+  // (prop vinda do App.tsx, só localStorage/mock — ex: id "tenant_004") em
+  // vez da tabela real — cadastrar operador pra QUALQUER tenant (inclusive a
+  // Monique) quebrava com "invalid input syntax for type uuid", porque o
+  // backend exige um UUID de verdade. Busca separada, só pra este dropdown,
+  // sem mexer no resto do painel (a aba "Tenants & Conexões" mistura campos
+  // decorativos — plano, MRR, engine de WhatsApp — que não existem na tabela
+  // `tenants` real; misturar os dois pediria um refactor maior, fora de
+  // escopo aqui).
+  const [realTenants, setRealTenants] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!isSaasAdminUser) return;
+    apiFetch('/api/admin/tenants')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const list = (data?.tenants || []).map((t: any) => ({ id: t.id, name: t.name }));
+        setRealTenants(list);
+        setNewUserTenantId((prev) => prev || list[0]?.id || '');
+      })
+      .catch((err) => console.error('Falha ao carregar tenants reais:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSaasAdminUser]);
 
   const fetchOperators = async () => {
     setIsLoadingUsers(true);
@@ -196,6 +415,10 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     e.preventDefault();
     setUserFormError(null);
     if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
+    if (isSaasAdminUser && !newUserTenantId) {
+      setUserFormError('Nenhum tenant carregado ainda — aguarde a lista carregar antes de cadastrar.');
+      return;
+    }
     setIsSavingUser(true);
     try {
       const res = await apiFetch('/api/admin/operators', {
@@ -770,7 +993,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           </div>
         </div>
 <div className="mb-4 flex justify-end">
-  <ConfiguracaoCanais />
+  <ConectarEvolutionQrCode />
 </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
@@ -1444,7 +1667,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     onChange={(e) => setNewUserTenantId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                   >
-                    {tenants.map((t) => (
+                    {realTenants.length === 0 && <option value="">Carregando tenants...</option>}
+                    {realTenants.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
                       </option>

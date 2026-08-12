@@ -12,7 +12,7 @@
 import { listUpcomingEvents, localNaiveToUtcIso, listConnectedCalendarTenants, type CalendarConfig } from './googleCalendar';
 import { listAllAppointments } from './appointmentStore';
 import { wasReminderSent, markReminderSent, type ReminderType } from './reminderStore';
-import { sendWhatsAppTextMessage } from './metaSend';
+import { sendWhatsAppInteractiveButtons } from './metaSend';
 import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForTenant } from './tenantResolver';
 
@@ -66,7 +66,7 @@ export interface ReminderJobDeps {
   intervalMs?: number;
 }
 
-/** Roda o job de lembretes pra todos os tenants que têm Google Calendar conectado agora (Bloco 2.C). Exportado só pra teste — startReminderJob é a entrada real. */
+/** Roda o job de lembretes pra todos os tenants que têm Google Calendar conectado agora (Bloco 2.C). Exportada (não só via startReminderJob/setInterval) pra dar pra chamar direto nos testes. */
 export async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void> {
   const cfg = deps.getCalendarConfig();
   if (!cfg?.clientId || !cfg?.clientSecret) return;
@@ -133,14 +133,24 @@ async function checkAndSendRemindersForTenant(
     if (await wasReminderSent(tenantId, event.id, type)) continue;
 
     const message = type === 'dia_anterior'
-      ? `Oi! Passando pra lembrar que seu horário é amanhã, às ${hora} 💛 Qualquer coisa me chama por aqui!`
-      : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛 Te esperamos!`;
+      ? `Oi! Passando pra lembrar que seu horário é amanhã, às ${hora} 💛`
+      : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛`;
 
     try {
       if (channel.provider === 'evolution') {
+        // Botões interativos são um recurso da Meta Cloud API — a Evolution
+        // API (Baileys) não tem o mesmo tipo de mensagem, então cai pro
+        // texto simples equivalente.
         await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, appt.phone, message);
       } else {
-        await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message);
+        // Achado no benchmark de mercado: a maior causa de no-show é
+        // dificuldade de remarcar fora do horário comercial — botões deixam o
+        // cliente resolver isso num toque, sem precisar digitar (e sem
+        // precisar esperar alguém abrir o WhatsApp comercial pra ler).
+        await sendWhatsAppInteractiveButtons(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message, [
+          { id: 'lembrete_confirmar', title: '✅ Confirmar' },
+          { id: 'lembrete_remarcar', title: '🔄 Remarcar' },
+        ]);
       }
       await markReminderSent(tenantId, event.id, type);
       console.log(`⏰ [Lembretes] Enviado (${type}) pra ${appt.phone} — evento ${event.id}`);

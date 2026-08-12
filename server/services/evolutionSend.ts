@@ -96,3 +96,41 @@ export async function showEvolutionTyping(
     console.warn('⚠️  Falha ao mostrar indicador de digitação (Evolution):', (err as Error).message);
   }
 }
+
+/**
+ * Registra o webhook da instância pra apontar de volta pro nosso backend
+ * (POST /webhook/set/{instance}) — bug real em produção (12/08/2026): o
+ * onboarding via QR Code (admin.ts, POST .../evolution-instance) criava a
+ * instância normalmente, mas nunca configurava o webhook dela. A instância
+ * recebia a mensagem certinho (por isso aparecia no WhatsApp Business do
+ * celular, sincronizado direto pela Meta), mas nunca avisava o Universo —
+ * o agente nunca via nada chegar. Chamado tanto na criação quanto sempre
+ * que o QR é (re)gerado, pra também corrigir instâncias já criadas antes
+ * desta correção sem precisar desconectar/reconectar o número.
+ */
+export async function setEvolutionWebhook(
+  instanceName: string | undefined,
+  apiUrl: string | undefined,
+  apiKey: string | undefined,
+  webhookUrl: string
+): Promise<void> {
+  requireCredentials(instanceName, apiUrl, apiKey);
+
+  const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/webhook/set/${instanceName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: apiKey! },
+    body: JSON.stringify({
+      webhook: {
+        enabled: true,
+        url: webhookUrl,
+        events: ['MESSAGES_UPSERT'],
+      },
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}) as any);
+    throw new Error(`Falha ao configurar o webhook da instância Evolution API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
+  }
+}

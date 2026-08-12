@@ -72,6 +72,12 @@ export function parseMetaWebhookPayload(body: any, provider: 'meta' | 'evohub' =
           parsed.push({ ...base, type: 'audio', metaAudio: { mediaId: msg.audio.id, mimeType: msg.audio.mime_type } });
         } else if (msg.type === 'text' && msg.text?.body) {
           parsed.push({ ...base, type: 'text', text: msg.text.body });
+        } else if (msg.type === 'interactive' && msg.interactive?.button_reply?.title) {
+          // Resposta a um botão (ver sendWhatsAppInteractiveButtons, metaSend.ts) —
+          // tratada igual a mensagem de texto normal: o resto do pipeline
+          // (router, especialista, ferramentas de agenda) nem precisa saber
+          // que veio de um toque em botão em vez de digitação.
+          parsed.push({ ...base, type: 'text', text: msg.interactive.button_reply.title });
         } else if (msg.type === 'image' && msg.image?.id) {
           parsed.push({ ...base, type: 'image', metaImage: { mediaId: msg.image.id, mimeType: msg.image.mime_type } });
         } else {

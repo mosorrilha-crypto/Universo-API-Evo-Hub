@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
+import { isStandalonePwa } from '../lib/pwa';
+import { hasRoleAtLeast } from '../lib/roles';
 import {
   MessageSquare,
   Code,
@@ -22,7 +24,7 @@ import {
   Download,
   X,
   Zap,
-  AlertTriangle
+  Menu
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -42,7 +44,6 @@ interface HeaderProps {
   transactionsCount?: number;
   /** Leads sem isReal (carregados via "Restaurar Dados de Demo") — distinto de leadsCount, que inclui leads reais do backend (ver #94). */
   demoLeadsCount?: number;
-  escalationsPendingCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -60,11 +61,30 @@ export const Header: React.FC<HeaderProps> = ({
   onExportBackup,
   leadsCount = 0,
   transactionsCount = 0,
-  demoLeadsCount = 0,
-  escalationsPendingCount = 0
+  demoLeadsCount = 0
 }) => {
   const tabsRef = useRef<HTMLDivElement>(null);
+  // Duas restrições combinadas nas abas visíveis: (1) aberto pelo ícone
+  // instalado (PWA do atendente, issue #159) sempre restringe pro escopo de
+  // atendimento, não importa o papel do usuário; (2) papel "Operador" fica
+  // restrito ao mesmo escopo mesmo no navegador normal — pedido direto do
+  // Lucas: funcionário de atendimento não deve ver Financeiro nem telas
+  // administrativas. "Gerente" já enxerga Financeiro, mas só
+  // "Administrador"+ vê as ferramentas mais técnicas (Meta CAPI, Base de
+  // Conhecimento, Evo Hub, Guia de API), e só "SaaS Master Admin" vê o
+  // painel multi-tenant. display-mode não muda durante a sessão, então um
+  // cálculo só (não precisa reavaliar em cada render) já é suficiente.
+  const [isInstalledApp] = useState(() => isStandalonePwa());
+  const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
+  const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
+  const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
+  // Achado real testando no celular (Lucas): o cabeçalho completo (marca +
+  // seletor de empresa + perfil, cada um sua própria "caixa") empilhava em
+  // 3 blocos cheios antes de qualquer conteúdo útil aparecer na tela. No
+  // mobile, tudo isso agora fica atrás de um botão de menu — no desktop
+  // (md:) o layout original continua igual, sem essa condensação.
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
   const tenantMenuRef = useRef<HTMLDivElement>(null);
 
@@ -106,8 +126,119 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between py-4 gap-4">
-          
+        {/* Barra compacta só no mobile: ícone + título curto + status +
+            botão de menu, tudo numa linha só. O bloco completo (marca,
+            seletor de empresa, perfil) fica escondido atrás do menu — ver
+            painel logo abaixo — pra não empilhar 3 caixas grandes antes de
+            qualquer conteúdo real aparecer na tela pequena. */}
+        <div className="flex md:hidden items-center justify-between py-3">
+          <div className="flex items-center space-x-2 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
+              <MessageSquare className="w-4 h-4 text-emerald-400" />
+            </div>
+            <span className="font-bold text-white text-sm truncate">Universo</span>
+            <span
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${isCleanProduction ? 'bg-emerald-400' : 'bg-amber-400'}`}
+              title={isCleanProduction ? 'Ambiente Limpo (Produção)' : 'Dados de Teste Ativos'}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen((open) => !open)}
+            className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all flex-shrink-0"
+            title="Menu"
+          >
+            {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
+
+        {isMobileMenuOpen && (
+          <div className="md:hidden pb-4 space-y-3 border-t border-slate-800/80 pt-3 animate-pop-in origin-top">
+            <p className="text-xs text-slate-400">
+              Plataforma Multi-Empresas de Inteligência de Atendimento, CRM, Financeiro e CAPI
+            </p>
+
+            <button
+              onClick={() => { setIsDataModalOpen(true); setIsMobileMenuOpen(false); }}
+              className={`w-full inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                isCleanProduction
+                  ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
+                  : 'bg-amber-950/80 text-amber-300 border-amber-700/60'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 mr-1.5 text-emerald-400" />
+              {isCleanProduction ? 'Ambiente Limpo (Produção)' : 'Dados de Teste Ativos'} — Clientes Reais / Dados
+            </button>
+
+            {currentUser?.role === 'saas_admin' ? (
+              <div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 mb-1">Empresa ativa</div>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {tenants.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => { onSelectTenant(t); setIsMobileMenuOpen(false); }}
+                      className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition-all ${
+                        t.id === activeTenant.id
+                          ? 'bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50'
+                          : 'text-slate-300 bg-slate-950 border border-slate-800'
+                      }`}
+                    >
+                      <span className="truncate pr-2">{t.name}</span>
+                      {t.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300" title={activeTenant.name}>
+                <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                <span className="font-semibold text-xs truncate">{activeTenant.name}</span>
+              </div>
+            )}
+
+            {currentUser ? (
+              <div className="flex items-center justify-between bg-slate-800/90 border border-slate-700/80 p-2 rounded-xl text-slate-200">
+                <div className="flex items-center gap-2 min-w-0">
+                  <img src={currentUser.avatar} alt={currentUser.name} className="w-8 h-8 rounded-full object-cover border border-emerald-500/50 flex-shrink-0" />
+                  <div className="text-left min-w-0">
+                    <div className="font-bold text-white text-xs leading-none truncate">{currentUser.name}</div>
+                    <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }}
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-all"
+                    title="Trocar Operador / Perfil"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => { onLogout(); setIsMobileMenuOpen(false); }}
+                    className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition-all"
+                    title="Sair"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }}
+                className="w-full px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl flex items-center justify-center space-x-1.5 shadow"
+              >
+                <User className="w-4 h-4" />
+                <span>Entrar / Login</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Layout original — só no desktop (md:) a partir daqui, sem
+            nenhuma mudança de comportamento pra quem já usava assim. */}
+        <div className="hidden md:flex md:items-center md:justify-between py-4 gap-4">
+
           {/* Brand & App Title */}
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
@@ -272,21 +403,23 @@ export const Header: React.FC<HeaderProps> = ({
             ref={tabsRef}
             className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto pb-2 pt-0.5 custom-scrollbar scroll-smooth w-full"
           >
-            <button
-              id="tab-saas-admin"
-              onClick={() => setActiveTab('saas')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'saas'
-                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
-                  : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
-              }`}
-            >
-              <Layers className="w-4 h-4 text-purple-300" />
-              <span>Painel SaaS Master</span>
-              <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
-                Multi-Tenant
-              </span>
-            </button>
+            {canSeeSaasMaster && (
+              <button
+                id="tab-saas-admin"
+                onClick={() => setActiveTab('saas')}
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  activeTab === 'saas'
+                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                    : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
+                }`}
+              >
+                <Layers className="w-4 h-4 text-purple-300" />
+                <span>Painel SaaS Master</span>
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
+                  Multi-Tenant
+                </span>
+              </button>
+            )}
 
             <button
               id="tab-whatsapp-sim"
@@ -314,88 +447,82 @@ export const Header: React.FC<HeaderProps> = ({
               <span>CRM do Operador</span>
             </button>
 
-            <button
-              id="tab-escalations"
-              onClick={() => setActiveTab('escalations')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'escalations'
-                  ? 'bg-amber-600 text-white shadow-sm shadow-amber-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span>Escalonamentos</span>
-              {escalationsPendingCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
-                  {escalationsPendingCount}
-                </span>
-              )}
-            </button>
+            {/* Sem aba própria de propósito (pedido do Lucas): já existe um
+                botão "Escalonamentos" com o mesmo badge de contagem dentro
+                do próprio Atendimento WhatsApp (toolbar de
+                WhatsAppLeadsSim.tsx, via onGoToEscalations) — deixava o
+                menu redundante, ainda mais apertado no mobile. */}
 
-            <button
-              id="tab-financial"
-              onClick={() => setActiveTab('financial')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'financial'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <DollarSign className="w-4 h-4 text-emerald-400" />
-              <span>Financeiro & Vendas</span>
-            </button>
+            {canSeeFinancial && (
+              <button
+                id="tab-financial"
+                onClick={() => setActiveTab('financial')}
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  activeTab === 'financial'
+                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                }`}
+              >
+                <DollarSign className="w-4 h-4 text-emerald-400" />
+                <span>Financeiro & Vendas</span>
+              </button>
+            )}
 
-            <button
-              id="tab-attribution"
-              onClick={() => setActiveTab('attribution')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'attribution'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Target className="w-4 h-4 text-emerald-400" />
-              <span>Atribuição Meta CAPI</span>
-            </button>
+            {canSeeAdminTools && (
+              <>
+                <button
+                  id="tab-attribution"
+                  onClick={() => setActiveTab('attribution')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'attribution'
+                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  <Target className="w-4 h-4 text-emerald-400" />
+                  <span>Atribuição Meta CAPI</span>
+                </button>
 
-            <button
-              id="tab-knowledge"
-              onClick={() => setActiveTab('knowledge')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'knowledge'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Brain className="w-4 h-4 text-emerald-400" />
-              <span>Base de Conhecimento</span>
-            </button>
+                <button
+                  id="tab-knowledge"
+                  onClick={() => setActiveTab('knowledge')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'knowledge'
+                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  <Brain className="w-4 h-4 text-emerald-400" />
+                  <span>Base de Conhecimento</span>
+                </button>
 
-            <button
-              id="tab-evohub"
-              onClick={() => setActiveTab('evohub')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'evohub'
-                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
-                  : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
-              }`}
-            >
-              <Zap className="w-4 h-4 text-purple-400" />
-              <span>Evo Hub (Meta API)</span>
-            </button>
+                <button
+                  id="tab-evohub"
+                  onClick={() => setActiveTab('evohub')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'evohub'
+                      ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                      : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
+                  }`}
+                >
+                  <Zap className="w-4 h-4 text-purple-400" />
+                  <span>Evo Hub (Meta API)</span>
+                </button>
 
-            <button
-              id="tab-integration"
-              onClick={() => setActiveTab('integration')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'integration'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Code className="w-4 h-4 text-emerald-400" />
-              <span>Guia Conexão API</span>
-            </button>
+                <button
+                  id="tab-integration"
+                  onClick={() => setActiveTab('integration')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'integration'
+                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  <Code className="w-4 h-4 text-emerald-400" />
+                  <span>Guia Conexão API</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Scroll Right Button */}

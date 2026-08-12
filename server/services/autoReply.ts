@@ -41,8 +41,29 @@ export interface AutoReplyResult {
   agent: AgentType;
   /** true quando precisa de atenção humana: cliente tentando fechar agendamento sem confirmação automática, ou (Epic 4.5.8) qualquer reclamação — reclamação sempre escala, nunca é resolvida só pela IA. */
   needsHumanConfirmation: boolean;
+  /**
+   * true só no caso de alucinação de verdade (nenhuma ferramenta de agenda
+   * confirmou o horário citado E não bate com nenhum agendamento real já
+   * existente) — sinaliza que a resposta automática pra este número deve
+   * parar até um humano assumir, em vez de tentar de novo na próxima
+   * mensagem. Achado real em produção: sem isso, o mesmo fallback genérico
+   * saía IDÊNTICO várias vezes seguidas na mesma conversa (a causa raiz de
+   * cada repetição já tinha sido corrigida uma vez, mas nada impedia o
+   * agente de cair na mesma alucinação de novo na mensagem seguinte).
+   */
+  stopAutoReply: boolean;
   /** ms gastos na chamada de roteamento — usado pra descontar do atraso de digitação da 1ª bolha, compensando a latência extra do router. */
   routerElapsedMs: number;
+  /**
+   * Nome que a cliente disse na conversa (não veio do perfil do WhatsApp) —
+   * quem chama deve persistir isso na conversa (mesmo campo que já guarda o
+   * nome de perfil) pra virar `contactName` daqui pra frente. Sem isso, o
+   * nome só existe enquanto a mensagem em que ela disse ainda está dentro
+   * da janela de histórico recente — depois disso o agente "esquece" o nome
+   * que acabou de perguntar, exatamente o tipo de falha que mais entrega
+   * que é um bot (achado em pesquisa de mercado sobre humanização).
+   */
+  capturedClientName?: string;
 }
 
 /**
@@ -82,7 +103,7 @@ function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[
  * (até "quanto custa?") carregaria ferramentas de agenda à toa, arriscando o
  * modelo tentar agendar por engano.
  */
-async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[]): Promise<AgentType> {
+async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[], phone?: string): Promise<AgentType> {
   const historyText = buildHistoryText(history);
   const prompt = `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
@@ -91,7 +112,7 @@ async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, hi
 - "reclamacao": o cliente está insatisfeito ou reclamando de um serviço JÁ REALIZADO (resultado, dor, alergia, reação), ou claramente irritado/chateado com o negócio.
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
-Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
+Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "confidence": 0 a 1 (o quão confiante você está nessa classificação), "reasoning": "explicação breve de 1 frase do motivo da escolha"}`;
 
   const response = await withGeminiRetryAndUsage(
     tenantId,
@@ -105,13 +126,23 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao"}`;
     GEMINI_TIMEOUT_MS
   );
 
-  const parsed = JSON.parse(response.text || '{}') as { agent?: string };
+  const parsed = JSON.parse(response.text || '{}') as { agent?: string; confidence?: number; reasoning?: string };
   const valid: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
-  return valid.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
+  const agent = valid.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
+
+  // Auditabilidade do roteamento (issue #99): sem confidence/reasoning um
+  // misroteamento (ex: reclamação classificada como faq) fica invisível —
+  // não dá pra auditar onde o agente está errando o tom com o lead sem
+  // reconstruir manualmente a conversa inteira. Log estruturado por
+  // enquanto (não persiste em banco) — não muda a decisão de roteamento em
+  // si, só torna ela auditável.
+  console.log(`[Router] tenant=${tenantId} phone=${phone ?? '-'} agent=${agent} confidence=${typeof parsed.confidence === 'number' ? parsed.confidence : '-'} reasoning="${parsed.reasoning ?? '-'}"`);
+
+  return agent;
 }
 
 const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
-  triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente (nunca prometa mandar depois — ela já foi).`,
+  triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo. Se a seção "Nome do cliente" NÃO aparecer no contexto abaixo (o WhatsApp dela não tem nome de perfil configurado), pergunte o nome dela de forma natural, cedo na conversa — é o tipo de coisa que uma pessoa de verdade pergunta ao atender alguém pela primeira vez, não interrogatório. Sempre responda primeiro à dúvida real dela antes de perguntar isso, e nunca pergunte de novo se ela já ignorou. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente (nunca prometa mandar depois — ela já foi).`,
   faq: `Seu papel agora é FAQ/ESPECIALISTA: responda a dúvida específica (preço, procedimento, política) com precisão total usando SOMENTE o contexto do negócio abaixo. Se não tiver o dado exato, diga que vai confirmar — nunca invente. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto foi enviada, mencione isso naturalmente na resposta (ex: "manda ver a foto que te mandei ali em cima") — nunca prometa mandar uma foto que já foi enviada, e nunca diga que vai mandar se a seção mostra que a tentativa falhou.`,
   agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, escalado pra humano, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.
 
@@ -191,6 +222,8 @@ REGRAS DE ESTILO (sempre aplicar):
 8. Nunca use parênteses nem dois-pontos explicativos dentro da mensagem — soa a texto escrito, não a uma pessoa conversando.
 9. Antes de perguntar ou afirmar algo, confira o histórico E a "Nova mensagem do cliente" abaixo — nunca repita uma pergunta/informação que o cliente já respondeu, e nunca repita algo que VOCÊ MESMO já disse antes nesta conversa (revise as últimas mensagens do "Atendente" no histórico). Se a mensagem nova já responde algo que você perguntaria, ou se você já pediu algo (ex: uma foto) e o histórico mostra que já pediu, siga a conversa a partir dali — nunca repita o mesmo pedido/pergunta/explicação com palavras diferentes.
 10. As bolhas de uma mesma resposta são fragmentos de UM ÚNICO pensamento contínuo, na ordem certa — nunca duas ideias que se contradizem ou dois começos de resposta diferentes colados um atrás do outro.
+11. No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.
+12. Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.
 
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
@@ -198,9 +231,11 @@ Classifique também a fase atual desta conversa em UMA destas opções:
 - "objecao": cliente hesitante, com medo, dúvida sobre resultado, ou pedindo desconto/"vou pensar".
 - "fechamento": cliente decidido, confirmando nome/horário, pronto pra agendar.
 
+Se em algum momento desta mensagem OU do histórico a cliente disser o próprio nome, e a seção "Nome do cliente" acima NÃO tiver aparecido com esse nome (ou não tiver aparecido de jeito nenhum), preencha "nomeCapturado" com esse nome exato — nunca invente, nunca repita um nome que já apareceu em "Nome do cliente". Isso existe pra não "esquecer" o nome depois que a mensagem em que ela disse sair do histórico recente (achado real: conversa de WhatsApp não tem limite de tamanho, mas o contexto que você recebe só traz as últimas mensagens).
+
 Responda ESTRITAMENTE em JSON no formato:
-{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false}
-Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar.`;
+{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null}
+Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima.`;
 }
 
 /**
@@ -227,7 +262,7 @@ async function generateSpecialistReply(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   extraContext?: string,
   adContext?: string
-): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean } | null> {
+): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = buildGlobalAndSegmentLayer(agent, segment);
 
@@ -247,13 +282,19 @@ Nova mensagem do cliente: "${text}"`;
     GEMINI_TIMEOUT_MS
   );
 
-  const parsed = JSON.parse(response.text || '{}') as { phase?: string; bubbles?: string[]; needsHumanConfirmation?: boolean };
+  const parsed = JSON.parse(response.text || '{}') as { phase?: string; bubbles?: string[]; needsHumanConfirmation?: boolean; nomeCapturado?: string | null };
   const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean);
   const validPhases: ConversationPhase[] = ['abertura', 'informacao', 'objecao', 'fechamento'];
   const phase = validPhases.includes(parsed.phase as ConversationPhase) ? (parsed.phase as ConversationPhase) : 'informacao';
+  // Só aceita nomeCapturado quando ainda não tínhamos nenhum nome pra essa
+  // cliente — nunca deixa um nome extraído por engano sobrescrever o nome
+  // real de perfil do WhatsApp (contactName), que é sempre mais confiável.
+  const capturedClientName = !contactName && typeof parsed.nomeCapturado === 'string' && parsed.nomeCapturado.trim()
+    ? parsed.nomeCapturado.trim()
+    : undefined;
 
   if (!bubbles.length) return null;
-  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation };
+  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName };
 }
 
 /** Data/hora atual "de parede" no fuso do negócio — dá ao agente uma âncora real pra resolver referências relativas ("amanhã às 15h") sem precisar calcular fuso horário sozinho. */
@@ -598,13 +639,23 @@ async function runAgendamentoTools(
   const businessHours = await getTenantBusinessHours(tenantId).catch(() => null);
   const businessHoursStatus = describeBusinessHoursToday(businessHours, naive, weekdayNum);
 
+  // Achado direto do dono do produto: um agendamento já criado (linha real
+  // em appointmentStore, fato do nosso próprio banco) não pode virar
+  // "não confirmado" só porque a checagem de conectividade AO VIVO com o
+  // Google Calendar teve um problema pontual nesta mensagem — a agenda já
+  // fez o trabalho dela quando criou o evento; uma falha passageira de
+  // conectividade não desfaz isso. Por isso a busca do agendamento ativo (e
+  // o confirmedTimes que vem dela) roda ANTES da checagem de `connected` e
+  // vale nos dois casos (conectado ou não).
+  const existing = await getAppointmentForPhone(tenantId, phone);
+  const confirmedTimesFromExisting: string[] = existing ? [extractHHmm(existing.startIso)] : [];
+
   const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
-    return { actionsSummary: [], hadError: false, confirmedTimes: [], businessHoursStatus };
+    return { actionsSummary: [], hadError: false, confirmedTimes: confirmedTimesFromExisting, businessHoursStatus };
   }
 
   const historyText = buildHistoryText(history);
-  const existing = await getAppointmentForPhone(tenantId, phone);
   const kb = await getKnowledgeBase(tenantId);
   // Etapa 2 — achado numa auditoria: antes disso TODO agendamento caía num
   // fallback fixo de "90 minutos" no prompt, mesmo pra serviços de 30min
@@ -616,7 +667,8 @@ async function runAgendamentoTools(
     .join('\n');
   // O horário do agendamento ATIVO (se houver) é um fato conhecido de antemão
   // — citar ele numa confirmação de cancelamento/remarcação não é alucinação.
-  const confirmedTimes: string[] = existing ? [extractHHmm(existing.startIso)] : [];
+  // (já calculado acima, antes da checagem de `connected` — reaproveita aqui.)
+  const confirmedTimes: string[] = [...confirmedTimesFromExisting];
 
   // Etapa 8 (fluxo de verificação de pagamento) — o estado é sempre decidido
   // por um operador humano (webhooks.ts marca pending_verification quando
@@ -636,8 +688,14 @@ async function runAgendamentoTools(
     // conforme o volume de anúncio crescer). Só dispara quando confirmPayment
     // realmente efetuou a transição agora (evita duplicar se essa checagem
     // rodar de novo numa corrida e a linha já não estiver mais 'verified').
+    //
+    // Issue #182 — agendamento cadastrado manualmente pelo operador
+    // (source: 'manual', fechado fora da IA — WhatsApp pessoal, telefone,
+    // presencial) nunca dispara Purchase: não carrega origem de anúncio
+    // rastreável, contaria como venda "sem origem" e distorceria a métrica
+    // de atribuição de tráfego pago (decisão do dono do produto, 12/08/2026).
     const confirmed = await confirmPayment(tenantId, phone);
-    if (confirmed) {
+    if (confirmed && confirmed.source !== 'manual') {
       notifyMetaCapiEvent(tenantId, phone, 'Purchase', confirmed.summary).catch(() => {});
     }
     actionsSummary.push('Pagamento verificado por um operador agora mesmo — pode confirmar o turno pro cliente com segurança.');
@@ -831,17 +889,27 @@ export async function generateAutoReplyForText(
   /** ID da mensagem do WhatsApp que disparou esta resposta — idempotência de criar_pre_reserva (Etapa 2), nunca duplica por reentrega de webhook. */
   messageId?: string,
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver conversationStore.attachAdReferralIfMissing) — usado só na abertura (histórico vazio) pra saudação soar como continuação natural do anúncio, nunca repetido depois. */
-  adHeadline?: string
+  adHeadline?: string,
+  /**
+   * Orientação de um atendente humano deixada num escalonamento (issue #97)
+   * — o cliente ficou sem resposta, o operador não quis assumir a conversa
+   * pessoalmente, e essa nota é o que ele escreveu pra IA usar como base ao
+   * retomar. Só chega aqui quando o cliente manda uma NOVA mensagem depois
+   * da nota (webhooks.ts consome a nota pendente e chama isto) — nunca
+   * dispara uma mensagem por conta própria sem o cliente ter escrito algo.
+   */
+  operatorGuidance?: string
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
   try {
     const routerStart = Date.now();
-    const agent = await classifyAgent(tenantId, ai, text, history);
+    const agent = await classifyAgent(tenantId, ai, text, history, phone);
     const routerElapsedMs = Date.now() - routerStart;
 
     let extraContext: string | undefined;
     let forcedHumanConfirmation = false;
+    let stopAutoReply = false;
     let confirmedTimes: string[] = [];
     // Epic 4.5.7 — precisa ser "as ferramentas rodaram de verdade nesta
     // mensagem", não "confirmaram algum horário livre". Achado numa
@@ -887,48 +955,63 @@ export async function generateAutoReplyForText(
       ? `Este é o primeiro contato desta conversa. O cliente clicou num anúncio "Clique para WhatsApp" com o tema "${adHeadline}" pra chegar até aqui — se fizer sentido, deixe a saudação inicial soar como continuação natural desse anúncio (ex: mencionar brevemente esse tema), sem forçar nem soar automático. Nunca repita essa menção em mensagens seguintes.`
       : undefined;
 
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext, adContext);
+    const operatorGuidanceContext = operatorGuidance
+      ? `Um atendente humano deixou esta orientação pra você usar ao responder (siga-a ao montar a resposta, sem citar que veio de um "atendente" ou de uma "nota" — fale diretamente com o cliente): "${operatorGuidance}"`
+      : undefined;
+    const combinedExtraContext = [extraContext, operatorGuidanceContext].filter(Boolean).join('\n');
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, knowledgeBaseContext, history, combinedExtraContext || undefined, adContext);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
     }
 
-    // Epic 4.5.7 — anti-alucinação: se as ferramentas de agenda rodaram
-    // nesta mensagem (só faz sentido validar quando há algo real pra
-    // comparar), nenhum horário citado na resposta pode ser diferente dos
-    // horários realmente confirmados pelas ferramentas. Se o modelo citou
-    // um horário não confirmado, a resposta é substituída por uma correção
-    // segura antes de sair pro cliente — nunca deixa passar um horário
-    // inventado.
+    // Epic 4.5.7 — anti-alucinação: nenhum horário citado na resposta pode
+    // ser diferente dos horários realmente confirmados — seja por uma
+    // ferramenta de agenda que rodou NESTA mensagem, seja por um
+    // agendamento ATIVO já existente pra este contato (`confirmedTimes` já
+    // inclui o horário dele mesmo quando nenhuma ferramenta roda de novo,
+    // ver runAgendamentoTools). Comparar sempre contra confirmedTimes (nunca
+    // só "alguma ferramenta rodou?") é o que distingue as duas situações
+    // reais encontradas em produção:
+    // 1) o modelo inventa um horário sem NENHUM agendamento real por trás
+    //    (ex: "já deixei pré-agendado seu horário pra segunda, às 10:00"
+    //    sem criar_agendamento/criar_pre_reserva terem rodado) — precisa
+    //    escalar pra humano, é uma alucinação de verdade.
+    // 2) o cliente só manda "ok"/"obrigada"/pede a localização de novo,
+    //    sem precisar de nenhuma ferramenta nova, e o modelo simplesmente
+    //    RECONFIRMA o horário já agendado de verdade (ex: 14:00, com evento
+    //    real no Google Calendar) — achado real em produção: a versão
+    //    anterior tratava esse caso 2 exatamente igual ao caso 1 só porque
+    //    "nenhuma ferramenta rodou nesta mensagem", apagando respostas
+    //    corretas (inclusive a localização do estúdio) e substituindo por
+    //    uma frase genérica em português — mesmo a conversa inteira sendo
+    //    em espanhol — toda vez que o cliente só confirmava/agradecia algo
+    //    sobre um agendamento já real.
     let bubbles = specialist.bubbles;
-    if (agent === 'agendamento' && agendamentoToolsRan) {
+    if (agent === 'agendamento') {
       const citedTimes = extractCitedTimes(bubbles.join(' '));
       const invalidTimes = citedTimes.filter((t) => !confirmedTimes.includes(t));
       if (invalidTimes.length) {
-        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta. Confirmados: ${confirmedTimes.join(', ') || '(nenhum)'}.`);
+        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta (ferramenta rodou nesta mensagem: ${agendamentoToolsRan}). Confirmados: ${confirmedTimes.join(', ') || '(nenhum)'}.`);
         bubbles = confirmedTimes.length
-          ? [`Deixa eu confirmar certinho com você: o horário disponível é ${confirmedTimes.join(' ou ')}. Fico assim mesmo ou prefere outro horário?`]
-          : ['Deixa eu confirmar certinho esse horário na agenda antes de te dar certeza — só um instante e já te retorno.'];
-      }
-    } else if (agent === 'agendamento' && !agendamentoToolsRan) {
-      // Achado real em produção (teste ao vivo do dono do produto): com o
-      // Google Calendar não conectado pro tenant (ou a IA simplesmente não
-      // chamando nenhuma ferramenta), agendamentoToolsRan fica false — o
-      // bloco acima nunca roda, e nada mais impedia o modelo de responder
-      // "Já deixei pré-agendado seu horário para segunda, às 10:00" sem
-      // NENHUMA ação real ter acontecido (nem criar_pre_reserva, nem
-      // criar_agendamento). A instrução em AGENT_INSTRUCTIONS.agendamento já
-      // pede pra nunca prometer horário como certo nesse caso, mas o modelo
-      // nem sempre segue — aqui é a garantia estrutural: citar um horário
-      // específico só é legítimo quando uma ferramenta de agenda confirmou
-      // ele nesta mensagem; se nenhuma rodou, qualquer horário citado é por
-      // definição não verificado, e o cliente não pode receber isso como se
-      // fosse um agendamento real.
-      const citedTimes = extractCitedTimes(bubbles.join(' '));
-      if (citedTimes.length) {
-        console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) (${citedTimes.join(', ')}) como se tivesse agendado, mas nenhuma ferramenta de agenda rodou nesta mensagem — corrigindo resposta e escalando pra humano.`);
-        bubbles = ['Deixa eu confirmar certinho esse horário na agenda antes de te dar certeza — só um instante e já te retorno.'];
-        forcedHumanConfirmation = true;
+          ? [`Dejame confirmarte bien: el horario es ${confirmedTimes.join(' o ')}. ¿Te sirve así o preferís otro horario?`]
+          : ['Dejame confirmar bien ese horario en la agenda antes de asegurarte algo — en un instante te aviso.'];
+        // Só escala pra humano quando é o caso 1 real (nenhuma ferramenta
+        // rodou nesta mensagem pra sustentar o horário citado) — o caso 2
+        // (reconfirmando um agendamento já existente) não precisa de
+        // atenção humana, só da resposta corrigida acima. Achado real em
+        // produção: mesmo escalando, nada impedia a resposta automática de
+        // tentar de novo na PRÓXIMA mensagem do cliente e cair na mesma
+        // alucinação outra vez — o mesmo fallback saiu idêntico 6x na mesma
+        // conversa. Alucinação de verdade (sem nenhuma ferramenta rodando
+        // pra sustentar o horário) marca stopAutoReply — quem chama decide
+        // como parar (ver webhooks.ts, bloqueia a IA só pra esse número até
+        // um humano reativar), em vez de deixar o agente tentar de novo
+        // sozinho e repetir o mesmo erro.
+        if (!agendamentoToolsRan) {
+          forcedHumanConfirmation = true;
+          stopAutoReply = true;
+        }
       }
     }
 
@@ -938,7 +1021,7 @@ export async function generateAutoReplyForText(
     // independente do que o modelo tenha marcado.
     const needsHumanConfirmation = agent === 'reclamacao' ? true : specialist.needsHumanConfirmation || forcedHumanConfirmation;
 
-    return { ...specialist, bubbles, needsHumanConfirmation, agent, routerElapsedMs };
+    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;
