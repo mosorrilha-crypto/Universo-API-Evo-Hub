@@ -193,6 +193,67 @@ Com a taxa fixada, o investimento da linha de base (seção 2.1, R$ 1.695,53) eq
 (seção "budget" do `CLAUDE.md`) — falta ainda o CAC máximo aceitável por serviço (item 2.2,
 Horizonte 2) para os cálculos serem completos.
 
+### 2.8 Atribuição real no banco de dados (Supabase) — diagnóstico de 12/08/2026
+
+`[DADO]` Acesso direto ao Supabase de produção (projeto `pkocepjfedtsxmufymvd`) confirmado
+em 12/08/2026. Tenant único: `11111111-1111-1111-1111-111111111111` ("Monique — Pestañas por
+Monique"). Achados que mudam a leitura do H1:
+
+**A captura de origem (`ctwa_clid`) está funcionando muito melhor do que o esperado:**
+
+| Métrica | Valor |
+|---|---|
+| Conversas registradas na tabela `conversations` | 52 |
+| Conversas com `ctwa_clid` (origem de anúncio conhecida) | 45 (**86,5%**) |
+| Conversas com `ad_headline`/`ad_source_id` preenchidos | 45 (mesmas 45) |
+
+`[DADO]` 86,5% já supera o teto de 70% definido como porta de saída do H1 — **mas essa
+porcentagem é de conversas, não de señas pagas**, que é o critério real da porta de saída
+(seção 4). Não promover isso a "H1 cumprido" sem medir na etapa certa.
+
+`[DADO]` Distribuição por anúncio (`ad_source_id`, cruzado com Meta Ads via Windsor.ai):
+
+| Ad ID | Nome do anúncio | Campanha | Conversas |
+|---|---|---|---|
+| 120254171393560221 | A1 - TÉCNICA BRASILEÑA | WHATSAPP - MICRO CEJAS - TESTE 3 CRIATIVOS - LUQUE | **38** |
+| 120254562057310221 | A2 \| Técnica Brasileira \| Story Orgânico | ENGAJAMENTO WHATSAPP - EXTENSION DE PESTAÑAS | 2 |
+| 120253004186280221 | 1 ESTÁTICO CÍLIOS | ENGAJAMENTO WHATSAPP - EXTENSION DE PESTAÑAS | 2 |
+| 120253004186240221 | 1 ESTÁTICO CÍLIOS | ENGAJAMENTO WHATSAPP - EXTENSION DE PESTAÑAS | 1 |
+| 120254519209830221 | A1 - TÉCNICA BRASILEÑA (replicado) | ENGAJAMENTO WHATSAPP - MICROPIGMENTACIÓN DE CEJAS | 1 |
+| 120253004186250221 | 1 ESTÁTICO CÍLIOS | ENGAJAMENTO WHATSAPP - EXTENSION DE PESTAÑAS | 1 |
+
+Confirma no nível de anúncio (não só de campanha) o que a seção 2.1 já apontava: o anúncio
+"A1 - TÉCNICA BRASILEÑA", da campanha que já era a melhor em CTR/CPC, sozinho responde por
+38 das 45 conversas com origem conhecida (84%). É o criativo com maior evidência real de
+tração — mas "gera conversa" ainda não é "gera seña", ver abaixo.
+
+**O gargalo real está uma etapa depois — no rastreio da seña, não na captura de origem:**
+
+`[DADO]` A tabela `appointments` (onde o evento CAPI `Purchase` da issue #168 dispara ao
+transicionar `payment_status: verified -> confirmed`) tem **apenas 2 linhas** desde a criação
+do tenant (06/08/2026). Uma com `payment_status: null`, outra `confirmed`. Nenhuma seña foi
+processada pelo fluxo automático de verificação além dessas duas.
+
+`[DADO]` `crm_lead_state` (estágio do lead) e `pre_reservations` estão **completamente
+vazias (0 linhas)** — as tabelas existem no schema, mas nenhum lead jamais passou por elas.
+
+**Interpretação:** o problema do H1 não é a captura de atribuição (`ctwa_clid`/`ad_headline`
+já funciona bem, 86,5%). É que a operação real de confirmar seña continua acontecendo fora do
+sistema rastreado — por planilha manual e Google Calendar (consistente com a seção 2.4: 45
+comprovantes manuais, só 14 confirmados por cruzamento manual). O evento `Purchase` do CAPI
+(#168) e o pipeline de CRM existem em código e funcionam, mas quase não são exercitados na
+prática porque o fluxo operacional não passa por eles.
+
+`[HIPÓTESE]` Isso sugere que a porta de saída do H1 (≥70% das señas pagas com origem
+identificada) depende menos de mais código de atribuição e mais de mudar o hábito operacional:
+o pagamento precisa ser verificado *dentro* do fluxo do sistema (upload de comprovante no
+WhatsApp → operador verifica no painel) para que `confirmPayment`/`Purchase` dispare, em vez
+de ser conciliado depois numa planilha à parte.
+
+`[FALTA]` Quantas das 38 conversas do anúncio "A1 - TÉCNICA BRASILEÑA" viraram seña paga.
+Não é possível cruzar isso hoje: `appointments` não tem volume suficiente e a agenda real
+(Google Calendar, seção 2.3) não guarda `ctwa_clid` nem telefone padronizado para join direto.
+
 ---
 
 ## 3. A espinha dorsal — o funil canônico
@@ -204,10 +265,10 @@ tem um dono de dado (onde a verdade daquela etapa mora).
 |---|---|---|---|
 | 1 | Impressão / alcance | Meta Ads | ✅ medido |
 | 2 | Clique | Meta Ads | ✅ medido |
-| 3 | Conversa iniciada | Meta Ads (`messaging_conversation_started_7d`) | ✅ medido |
-| 4 | Lead qualificado (serviço identificado) | Sistema Universo (CRM/conversations) | ⚠️ existe no sistema, não exportado pra análise |
-| 5 | Preço informado / disponibilidade consultada | Sistema Universo | ⚠️ idem |
-| 6 | **Seña paga (conversão principal)** | Comprovante + `appointmentStore` | ⚠️ manual, via planilha |
+| 3 | Conversa iniciada | Meta Ads (`messaging_conversation_started_7d`) + `conversations.ctwa_clid`/`ad_headline` no Supabase | ✅ medido, **86,5% com origem confirmada (12/08)** |
+| 4 | Lead qualificado (serviço identificado) | Sistema Universo (`crm_lead_state`) | ❌ tabela existe, **0 linhas** — nunca usada na prática |
+| 5 | Preço informado / disponibilidade consultada | Sistema Universo | ⚠️ não exportado pra análise |
+| 6 | **Seña paga (conversão principal)** | `appointments` (Supabase) + comprovante manual | ⚠️ tabela `appointments` só tem **2 linhas** desde 06/08 — fluxo real ainda é planilha manual |
 | 7 | Turno confirmado | Google Calendar | ✅ medido, mas **sem origem** |
 | 8 | Comparecimento / retorno | — | ❌ não registrado |
 
@@ -404,6 +465,7 @@ clientes, mas não interpreta métrica de campanha como dado confirmado sem cons
 | 12/08/2026 | Taxa de câmbio BRL↔PYG fixada: 1 BRL = 1.100 PYG. | Gestor |
 | 12/08/2026 | Todos os anúncios pausados manualmente pelo gestor até haver novos criativos e uma estratégia pronta. Compatível com o H1 (que já proibia escalar/criar campanha); agora a pausa é deliberada e cobre também as campanhas ativas restantes. | Gestor |
 | 12/08/2026 | Recorte geográfico dos públicos de remarketing/lookalike (item 1.9) fica para quando a nova estratégia/criativos estiverem prontos — raio definido como **7 km** a partir de Calle Paso Bogarín 3665, Loma Merlo, Luque (inclui o Barrio Cerrado Betharram, calle 1). Não aplicar ainda. | Gestor |
+| 12/08/2026 | Acesso direto ao Supabase de produção confirmado. Achado: captura de origem (`ctwa_clid`) funciona bem (86,5% das conversas), mas o rastreio de seña paga (`appointments`) e o CRM (`crm_lead_state`) têm volume quase nulo — o gargalo do H1 é operacional (fluxo de verificação de pagamento não passa pelo sistema), não de captura de dado. | Diagnóstico Supabase |
 | — | CAC máximo aceitável por serviço | ⏳ pendente |
 | — | Pausar ou reformular "New Reconhecimento Campaign" | ⏳ pendente aprovação |
 | — | Reativar ou desligar Google Ads | ⏳ pendente |
