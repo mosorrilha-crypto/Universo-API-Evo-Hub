@@ -10,7 +10,7 @@ import {
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
-import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase } from './knowledgeBaseStore';
+import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
@@ -226,6 +226,21 @@ Se em algum momento desta mensagem OU do histórico a cliente disser o próprio 
 Responda ESTRITAMENTE em JSON no formato:
 {"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null}
 Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima.`;
+}
+
+/**
+ * Issue #153, Parte 2 — encontra o produto do catálogo cujo nome aparece
+ * literalmente no headline do anúncio (case-insensitive). Quando mais de um
+ * bate (ex: "Cejas" e "Combo Cejas + Labios" no mesmo headline), prefere o
+ * nome mais longo/específico, pra não sinalizar um serviço genérico quando
+ * o anúncio na verdade é de um combo.
+ */
+function findServiceNamedInHeadline(adHeadline: string, products?: AgentProduct[]): AgentProduct | undefined {
+  if (!products?.length) return undefined;
+  const headlineLower = adHeadline.toLowerCase();
+  const matches = products.filter((p) => p.name && headlineLower.includes(p.name.toLowerCase()));
+  if (!matches.length) return undefined;
+  return matches.sort((a, b) => b.name.length - a.name.length)[0];
 }
 
 /**
@@ -926,9 +941,22 @@ export async function generateAutoReplyForText(
     // Só faz sentido mencionar o anúncio na saudação inicial (histórico
     // vazio) — repetir isso mensagem após mensagem soaria tão robótico
     // quanto o problema que essa personalização tenta resolver.
-    const adContext = adHeadline && (!history || history.length === 0)
-      ? `Este é o primeiro contato desta conversa. O cliente clicou num anúncio "Clique para WhatsApp" com o tema "${adHeadline}" pra chegar até aqui — se fizer sentido, deixe a saudação inicial soar como continuação natural desse anúncio (ex: mencionar brevemente esse tema), sem forçar nem soar automático. Nunca repita essa menção em mensagens seguintes.`
-      : undefined;
+    let adContext: string | undefined;
+    if (adHeadline && (!history || history.length === 0)) {
+      const baseAdContext = `Este é o primeiro contato desta conversa. O cliente clicou num anúncio "Clique para WhatsApp" com o tema "${adHeadline}" pra chegar até aqui — se fizer sentido, deixe a saudação inicial soar como continuação natural desse anúncio (ex: mencionar brevemente esse tema), sem forçar nem soar automático. Nunca repita essa menção em mensagens seguintes.`;
+      // Issue #153, Parte 2 — quando o headline já nomeia um serviço
+      // específico do catálogo (ex: "Combo Cejas + Labios"), a pergunta
+      // genérica de triagem ("cejas, pestañas ou labios?") é redundante:
+      // a cliente já sinalizou o que quer ao clicar nesse anúncio
+      // específico. Match simples pelo nome exato do produto contido no
+      // headline — nunca por categoria solta, pra não dar falso positivo
+      // com headline genérico que só cita "beleza" ou similar.
+      const kb = await getKnowledgeBase(tenantId);
+      const matchedService = findServiceNamedInHeadline(adHeadline, kb?.products);
+      adContext = matchedService
+        ? `${baseAdContext} O headline já nomeia um serviço específico do catálogo: "${matchedService.name}". Pule a pergunta genérica de qual serviço a cliente busca — vá direto pra apresentar esse serviço (o que é, preço, duração) como continuação natural da saudação, a menos que a mensagem dela já deixe claro que quer outra coisa.`
+        : baseAdContext;
+    }
 
     const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, knowledgeBaseContext, history, extraContext, adContext);
     if (!specialist) {

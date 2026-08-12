@@ -306,3 +306,55 @@ describe('generateAutoReplyForText — pedir o nome na triagem (achado real: fal
     expect(userContent).not.toContain('Nome do cliente:');
   });
 });
+
+describe('generateAutoReplyForText — headline do anúncio nomeando serviço do catálogo (issue #153, Parte 2)', () => {
+  function makeFakeAiTriagem() {
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'triagem' }) } as any;
+          return { text: JSON.stringify({ phase: 'abertura', bubbles: ['¡Hola!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return { ai, calls };
+  }
+
+  it('pede pra pular a pergunta de triagem quando o headline nomeia um produto real do catálogo (mock: Microlips)', async () => {
+    const { ai, calls } = makeFakeAiTriagem();
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Hola', 'Cliente', undefined, [] /* histórico vazio = primeiro contato */,
+      undefined, undefined, undefined, undefined, undefined,
+      'Conocé Microlips en Luque'
+    );
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).toContain('Pule a pergunta genérica de qual serviço a cliente busca');
+    expect(userContent).toContain('"Microlips"');
+  });
+
+  it('NÃO pede pra pular a triagem quando o headline é genérico (não nomeia produto nenhum do catálogo)', async () => {
+    const { ai, calls } = makeFakeAiTriagem();
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Hola', 'Cliente', undefined, [],
+      undefined, undefined, undefined, undefined, undefined,
+      'Técnica brasileña en Luque'
+    );
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).not.toContain('Pule a pergunta genérica');
+    expect(userContent).toContain('Técnica brasileña en Luque');
+  });
+
+  it('não menciona o anúncio quando já há histórico (não é mais o primeiro contato)', async () => {
+    const { ai, calls } = makeFakeAiTriagem();
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Hola de novo', 'Cliente', undefined, [{ sender: 'lead', text: 'oi' }],
+      undefined, undefined, undefined, undefined, undefined,
+      'Conocé Microlips en Luque'
+    );
+    const userContent: string = calls[1].contents[0].text;
+    expect(userContent).not.toContain('Pule a pergunta genérica');
+    expect(userContent).not.toContain('clicou num anúncio');
+  });
+});
