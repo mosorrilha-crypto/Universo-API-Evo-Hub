@@ -466,6 +466,7 @@ clientes, mas não interpreta métrica de campanha como dado confirmado sem cons
 | 12/08/2026 | Todos os anúncios pausados manualmente pelo gestor até haver novos criativos e uma estratégia pronta. Compatível com o H1 (que já proibia escalar/criar campanha); agora a pausa é deliberada e cobre também as campanhas ativas restantes. | Gestor |
 | 12/08/2026 | Recorte geográfico dos públicos de remarketing/lookalike (item 1.9) fica para quando a nova estratégia/criativos estiverem prontos — raio definido como **7 km** a partir de Calle Paso Bogarín 3665, Loma Merlo, Luque (inclui o Barrio Cerrado Betharram, calle 1). Não aplicar ainda. | Gestor |
 | 12/08/2026 | Acesso direto ao Supabase de produção confirmado. Achado: captura de origem (`ctwa_clid`) funciona bem (86,5% das conversas), mas o rastreio de seña paga (`appointments`) e o CRM (`crm_lead_state`) têm volume quase nulo — o gargalo do H1 é operacional (fluxo de verificação de pagamento não passa pelo sistema), não de captura de dado. | Diagnóstico Supabase |
+| 12/08/2026 | Primeira campanha da nova fase definida: Combo Cejas + Labios. Preço confirmado pelo gestor: **Gs 850.000** (catálogo atual no Supabase ainda tem Gs 800.000 — atualização pendente, ver issue #153). Fotos de antes/depois da arte confirmadas como de cliente real autorizada. | Gestor |
 | — | CAC máximo aceitável por serviço | ⏳ pendente |
 | — | Pausar ou reformular "New Reconhecimento Campaign" | ⏳ pendente aprovação |
 | — | Reativar ou desligar Google Ads | ⏳ pendente |
