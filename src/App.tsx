@@ -137,10 +137,17 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
 
-  // CRM Leads
+  // CRM Leads — bug real em produção (12/08/2026): sempre que o cache local
+  // estava vazio (navegador novo, aba anônima, ou depois de limpar dados do
+  // site pra corrigir outro bug), essa tela caía pro conjunto inteiro de
+  // leads fictícios de demonstração em vez de começar vazia — e como o merge
+  // com os leads reais (GET /api/crm/leads, abaixo) só ADICIONA por id, nunca
+  // remove, os fictícios ficavam "grudados" na lista pra sempre, misturados
+  // com clientes reais. Começa vazia agora; quem quiser os dados de exemplo
+  // de volta usa o botão "Carregar dados de demonstração" (handleLoadDemoData).
   const [leads, setLeads] = useState<LeadInfo[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
-    return saved ? JSON.parse(saved) : INITIAL_MOCK_LEADS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Financial Transactions
@@ -174,6 +181,25 @@ export const App: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
+  // Bug real em produção (12/08/2026): o cache local (leads, base de
+  // conhecimento, faturas) nunca era limpo no logout — então trocar de conta
+  // no mesmo navegador (ex: saas_admin pra um operador de outro tenant)
+  // continuava mostrando, por alguns instantes, os dados em cache da conta
+  // anterior até a busca real terminar, e às vezes nem terminava de limpar
+  // (leads reais só são ADICIONADOS ao merge, nunca removidos). Limpa tudo
+  // no logout — o próximo login sempre recomeça do zero e busca os dados
+  // reais do tenant certo.
+  const clearCachedTenantScopedData = () => {
+    localStorage.removeItem('saas_crm_leads');
+    localStorage.removeItem('saas_agent_kb');
+    localStorage.removeItem('saas_transactions');
+    setLeads([]);
+    setTransactions([]);
+    setKnowledgeBase(moniqueStudioKnowledgeBase);
+    setSavedTranscripts([]);
+    setEscalations([]);
+  };
+
   // Se o servidor rejeitar explicitamente o token da sessão (403 — token
   // presente mas inválido/expirado), força um novo login com aviso — em vez
   // de deixar a tela travada mostrando dados velhos com tudo quebrado em
@@ -184,6 +210,7 @@ export const App: React.FC = () => {
       setCurrentUser(null);
       setAuthToken(null);
       setIsLoginModalOpen(true);
+      clearCachedTenantScopedData();
       showToast('Sessão expirada — faça login novamente.');
     });
     return () => setUnauthorizedHandler(null);
@@ -526,6 +553,7 @@ export const App: React.FC = () => {
           setCurrentUser(null);
           setAuthToken(null);
           setIsLoginModalOpen(true);
+          clearCachedTenantScopedData();
           showToast('Sessão encerrada');
         }}
         tenants={tenants}
