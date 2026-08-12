@@ -183,10 +183,15 @@ anúncio pago, não só como orgânico.
 ### 2.7 O problema de moeda
 
 `[DADO]` Anúncios são cobrados em **BRL**. Agenda, comprovantes e catálogo estão em **PYG**.
-`[FALTA]` Uma taxa de câmbio fixada e documentada.
 
-**Nenhum cálculo de CAC ou ROAS é válido antes disso.** Não estimar de cabeça — a taxa precisa
-ser definida pelo gestor, registrada aqui, e revisada em cadência combinada.
+`[DADO]` **Taxa de câmbio fixada pelo gestor em 12/08/2026: 1 BRL = 1.100 PYG.** Esta é a taxa
+oficial do projeto para todo cálculo de CAC, ROAS e receita atribuída — não recalcular a partir
+de cotação de mercado sem nova decisão registrada aqui.
+
+Com a taxa fixada, o investimento da linha de base (seção 2.1, R$ 1.695,53) equivale a
+**≈ Gs. 1.865.083**. Isso desbloqueia o item 1.4 do Horizonte 1 e a fórmula de orçamento
+(seção "budget" do `CLAUDE.md`) — falta ainda o CAC máximo aceitável por serviço (item 2.2,
+Horizonte 2) para os cálculos serem completos.
 
 ---
 
@@ -228,7 +233,7 @@ em cima de medição quebrada.
 | 1.1 | Configurar credenciais CAPI por tenant (`capi_dataset_id`, `capi_access_token`, `capi_page_id`) | Ação humana | Supabase `tenant_meta_credentials` |
 | 1.2 | ✅ **Feito** — evento CAPI (`Purchase`) disparado no momento da seña verificada | Dev | `autoReply.ts:674-685` → `appointmentStore.confirmPayment` → `fireMetaCapiEventForTenant`. Commit `ab5cb9a` |
 | 1.3 | ✅ **Feito** — `currency: 'PYG'` na rota manual do painel (não mais `USD`) | Dev | `server/routes/metaCapi.ts:46-56`. Commit `ab5cb9a` |
-| 1.4 | Fixar e documentar a taxa de câmbio BRL↔PYG usada nos cálculos | Decisão do gestor | este doc, seção 2.6 |
+| 1.4 | ✅ **Feito** — taxa de câmbio fixada em 1 BRL = 1.100 PYG (12/08/2026) | Decisão do gestor | este doc, seção 2.7 |
 | 1.5 | Marcar origem em todo novo agendamento (`[Ads]`, `[Indicação]`, `[Orgânico]`) enquanto o CAPI não estiver completo | Ação humana | título do evento no Calendar |
 | 1.6 | ✅ **Verificado no código** — nenhuma flag `DEMO_MODE` existe; `POST /api/auth/login` é incondicional (exige `operators` real + bcrypt). Confirmação direta da env var no Render ainda não foi feita (MCP não lê env vars) | Ação humana (opcional, baixo risco) | `server/routes/auth.ts:25-66` |
 | 1.7 | **Arquivar/editar o reel de 23/07 com a promoção vencida de Gs. 450.000** | Aprovação do gestor | Instagram |
@@ -396,7 +401,8 @@ clientes, mas não interpreta métrica de campanha como dado confirmado sem cons
 | 08/08/2026 | Linha de base estabelecida (seção 2). Prioridade definida: fechar medição antes de escalar. | Diagnóstico inicial |
 | 08/08/2026 | Instagram orgânico incorporado ao diagnóstico. Descoberta da assimetria geográfica da base (9,2% em Luque) e da promoção vencida ainda pública. | Diagnóstico inicial |
 | 11/08/2026 | Itens 1.2 (evento CAPI `Purchase` na seña verificada) e 1.3 (`currency: 'PYG'` na rota manual) confirmados já implementados no código (commit `ab5cb9a`, anterior a esta sessão). Item 1.6 (`DEMO_MODE`) verificado no código-fonte: sem flag ativa, login incondicional via `operators`+bcrypt — confirmação da env var no Render em si ainda pendente. | Sessão de implementação |
-| — | Taxa de câmbio BRL↔PYG para cálculo de CAC/ROAS | ⏳ pendente |
+| 12/08/2026 | Taxa de câmbio BRL↔PYG fixada: 1 BRL = 1.100 PYG. | Gestor |
+| 12/08/2026 | Todos os anúncios pausados manualmente pelo gestor até haver novos criativos e uma estratégia pronta. Compatível com o H1 (que já proibia escalar/criar campanha); agora a pausa é deliberada e cobre também as campanhas ativas restantes. | Gestor |
 | — | CAC máximo aceitável por serviço | ⏳ pendente |
 | — | Pausar ou reformular "New Reconhecimento Campaign" | ⏳ pendente aprovação |
 | — | Reativar ou desligar Google Ads | ⏳ pendente |

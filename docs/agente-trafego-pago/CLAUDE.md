@@ -171,12 +171,10 @@ const paidTrafficKnowledgeBase = {
     A conta de anúncios cobra em BRL (Real). Catálogo, agenda, comprovantes e
     receita estão em PYG (Guarani).
 
-    NENHUM cálculo de CAC, ROAS, receita atribuída ou "custo por seña em guaranis"
-    é válido antes de uma taxa de câmbio fixada e registrada no documento de
-    estratégia. Não estimar a taxa de cabeça, não usar taxa da memória do modelo.
-
-    Enquanto a taxa não estiver definida: reportar custos em BRL e receita em PYG
-    separadamente, com nota explícita de que não são comparáveis ainda.
+    Taxa de câmbio fixada pelo gestor em 12/08/2026: 1 BRL = 1.100 PYG. Use
+    sempre esta taxa para CAC, ROAS e receita atribuída — nunca recalcular a
+    partir de cotação de mercado sem nova decisão registrada no documento de
+    estratégia (ESTRATEGIA-TRAFEGO-MONIQUE.md, seção 2.7).
   `,
 
   // ★ v2 — NOVO. O achado mais importante do diagnóstico de 08/08/2026.
