@@ -877,7 +877,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // tinha botão nenhum pra confirmar. Achado real em produção: agendamento
   // com sinal pago preso em "pending_verification" por dias, cliente
   // perguntando "confirmou?" sem ninguém conseguir clicar em nada.
-  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string } | null>(null);
+  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string; paymentReceiptHint?: string } | null>(null);
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
 
   useEffect(() => {
@@ -2152,6 +2152,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <span>
                 {paymentAppointment.summary} em {new Date(paymentAppointment.startIso).toLocaleString('pt-BR')}.
               </span>
+              {/* Dica da IA a partir da imagem do comprovante — nunca confirma
+                  sozinha, só ajuda a decidir mais rápido (resposta a uma
+                  pergunta real do dono do produto: hoje o sistema não olhava
+                  o conteúdo da foto, só o contexto). */}
+              {paymentAppointment.paymentReceiptHint && (
+                <p className="text-amber-300/80 mt-1 flex items-start gap-1">
+                  <Sparkles className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                  <span>IA: "{paymentAppointment.paymentReceiptHint}"</span>
+                </p>
+              )}
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">

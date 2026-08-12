@@ -17,6 +17,7 @@ import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperat
 import { downloadMetaMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
+import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnalysis';
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import type { GoogleGenAI } from '@google/genai';
@@ -223,21 +224,52 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
         } else if (msg.type === 'image') {
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
-          if (msg.metaImage) {
-            downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
+
+          // Uma única promise de download, reaproveitada abaixo (await duas
+          // vezes na mesma promise não baixa a imagem de novo) — mantém o
+          // salvamento da imagem incondicional (toda imagem recebida
+          // continua salva pro painel exibir, igual antes) e ainda dá pra
+          // reusar os mesmos bytes pra análise de comprovante sem duplicar o
+          // download.
+          const downloadPromise = msg.metaImage
+            ? downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
+            : null;
+          if (downloadPromise) {
+            downloadPromise
               .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
               .catch((err) => console.warn(`❌ [Imagem] Falha ao baixar imagem de ${msg.from}:`, err.message));
           }
+
           // Etapa 8 (fluxo de verificação de pagamento) — uma imagem chegando
           // com um agendamento ativo ainda sem comprovante registrado é o
           // caso mais comum de "cliente mandou o comprovante da seña". Nunca
           // confirma nada sozinho: só marca pending_verification e escala pra
           // um operador olhar de verdade (ver server/services/appointmentStore.ts).
+          //
+          // Achado (pergunta real do dono do produto): antes disso o sistema
+          // nunca olhava o CONTEÚDO da imagem, só o contexto (tem agendamento
+          // ativo sem pagamento? então é "possível comprovante"). Agora, só
+          // nesse caso específico (não em toda imagem — custo de Gemini
+          // controlado), manda a mesma imagem já baixada pro Gemini analisar
+          // e devolve uma dica curta ("parece um comprovante de Gs 50.000,
+          // 12/08") pro operador decidir mais rápido — a decisão final
+          // continua sendo sempre humana.
           getAppointmentForPhone(tenantId, msg.from)
             .then(async (appointment) => {
               if (!appointment || appointment.paymentStatus) return;
-              await markPaymentPendingVerification(tenantId, msg.from, msg.messageId);
-              await logEscalation(tenantId, msg.from, msg.contactName, 'Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno', '[imagem]');
+              let receiptHint: string | undefined;
+              if (downloadPromise) {
+                try {
+                  const downloaded = await downloadPromise;
+                  const analysis = await analyzePaymentReceiptWithGemini(getAi?.() ?? null, downloaded.base64, downloaded.mimeType);
+                  receiptHint = analysis?.hint || undefined;
+                } catch (err: any) {
+                  console.warn(`❌ [Imagem] Falha ao analisar possível comprovante de ${msg.from}:`, err.message);
+                }
+              }
+              await markPaymentPendingVerification(tenantId, msg.from, msg.messageId, receiptHint);
+              const hintSuffix = receiptHint ? ` IA: "${receiptHint}"` : '';
+              await logEscalation(tenantId, msg.from, msg.contactName, `Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno.${hintSuffix}`, '[imagem]');
             })
             .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
         } else {

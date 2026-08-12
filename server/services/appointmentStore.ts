@@ -22,6 +22,8 @@ export interface TrackedAppointment {
   /** Desde quando está 'pending_verification' — usado pelo job de alerta (issue #98). */
   paymentPendingSince?: string;
   paymentPendingAlertedAt?: string;
+  /** Dica gerada pelo Gemini a partir da imagem do comprovante — nunca confirma pagamento sozinha, só ajuda o operador a decidir mais rápido no painel. Ver paymentReceiptAnalysis.ts. */
+  paymentReceiptHint?: string;
 }
 
 type AppointmentRow = {
@@ -37,6 +39,7 @@ type AppointmentRow = {
   payment_verified_at: string | null;
   payment_pending_since: string | null;
   payment_pending_alerted_at: string | null;
+  payment_receipt_hint: string | null;
 };
 
 function toTracked(row: AppointmentRow): TrackedAppointment {
@@ -52,6 +55,7 @@ function toTracked(row: AppointmentRow): TrackedAppointment {
     paymentVerifiedAt: row.payment_verified_at || undefined,
     paymentPendingSince: row.payment_pending_since || undefined,
     paymentPendingAlertedAt: row.payment_pending_alerted_at || undefined,
+    paymentReceiptHint: row.payment_receipt_hint || undefined,
   };
 }
 
@@ -96,7 +100,7 @@ export async function listAllAppointments(tenantId: string): Promise<Array<{ pho
  * "chegou algo pra verificar", nunca confirma pagamento sozinha (ver
  * docs/AGENTE-VERTICAL-ARQUITETURA.md, seção 4.3 / tabela 4.5).
  */
-export async function markPaymentPendingVerification(tenantId: string, phone: string, proofMessageId: string): Promise<void> {
+export async function markPaymentPendingVerification(tenantId: string, phone: string, proofMessageId: string, receiptHint?: string): Promise<void> {
   const db = getDb();
   const { error } = await db
     .from('appointments')
@@ -107,6 +111,8 @@ export async function markPaymentPendingVerification(tenantId: string, phone: st
       // reseta pra permitir um novo alerta se o cliente reenviar um comprovante
       // depois de uma rejeição anterior (novo ciclo de verificação).
       payment_pending_alerted_at: null,
+      // idem — dica de um ciclo anterior não deve sobreviver pro reenvio.
+      payment_receipt_hint: receiptHint || null,
     })
     .eq('tenant_id', tenantId)
     .eq('phone', phone);
