@@ -27,6 +27,7 @@ import { startPreReservationFollowUpJob } from './server/services/preReservation
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { initWebPush } from './server/services/webPush';
+import { notifySystemError } from './server/services/systemErrorAlertService';
 
 dotenv.config();
 
@@ -41,10 +42,16 @@ dotenv.config();
 // startServer) cuida de devolver uma resposta HTTP decente pra quem
 // disparou o erro, quando a rota usa asyncHandler.
 process.on('unhandledRejection', (reason) => {
-  console.error('🔥 [unhandledRejection] Erro não tratado — processo continua vivo:', reason instanceof Error ? reason.stack || reason.message : reason);
+  const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
+  console.error('🔥 [unhandledRejection] Erro não tratado — processo continua vivo:', message);
+  // Issue #111 — sem isso, esse tipo de erro só existia no log do Render;
+  // ninguém era avisado até um cliente reclamar. Nunca lança, nunca bloqueia
+  // (ver systemErrorAlertService.ts).
+  notifySystemError({ source: 'unhandledRejection', message }).catch(() => {});
 });
 process.on('uncaughtException', (err) => {
   console.error('🔥 [uncaughtException] Erro não tratado — processo continua vivo:', err.stack || err.message);
+  notifySystemError({ source: 'uncaughtException', message: err.message }).catch(() => {});
 });
 
 async function startServer() {
@@ -137,6 +144,7 @@ async function startServer() {
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
     console.error(`❌ [Erro não tratado] ${req.method} ${req.path}:`, err?.stack || err?.message || err);
+    notifySystemError({ source: `${req.method} ${req.path}`, message: err?.message || String(err) }).catch(() => {});
     res.status(500).json({ error: 'Erro interno do servidor.' });
   });
 
