@@ -130,6 +130,38 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     res.json({ success: true });
   }));
 
+  /**
+   * Reconecta uma instância Evolution já existente: busca um QR Code novo e
+   * reafirma o webhook (corrige de graça instâncias criadas antes da
+   * correção do webhook, sem precisar desconectar/reconectar o número).
+   * Compartilhado entre a rota GET .../qrcode e o atalho idempotente da
+   * rota POST .../evolution-instance abaixo (achado real em produção,
+   * 12/08/2026: clicar em "Gerar QR Code" pra um tenant que já tem instância
+   * tentava CRIAR outra, e quebrava com "duplicate key" no unique constraint
+   * de tenant_evolution_credentials — deixando pra trás uma instância órfã
+   * na Evolution API).
+   */
+  async function reconnectExistingInstance(cred: { instance_name: string; api_url: string; api_key: string }) {
+    const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
+      headers: { apikey: cred.api_key },
+      signal: AbortSignal.timeout(20000),
+    });
+    const data = await connectRes.json().catch(() => ({}));
+    if (!connectRes.ok) {
+      throw new Error(`Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}`);
+    }
+    const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
+
+    let webhookWarning: string | undefined;
+    try {
+      await setEvolutionWebhook(cred.instance_name, cred.api_url, cred.api_key, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+    } catch (err: any) {
+      webhookWarning = `QR Code pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+    }
+
+    return { instanceName: cred.instance_name, qrCodeBase64, warning: webhookWarning };
+  }
+
   // ── Evolution API multi-instância (Epic 4.6 — Porta A, QR Code) ────────
   // Onboarding "sem barreira de entrada": cria uma instância nova na
   // Evolution API self-hosted em nome do tenant e devolve o QR Code pro
@@ -142,6 +174,24 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     const { data: tenant, error: tenantError } = await db().from('tenants').select('id, slug, name').eq('id', req.params.id).maybeSingle();
     if (tenantError) return res.status(500).json({ error: tenantError.message });
     if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
+
+    // Idempotente: esse tenant já tem uma instância — em vez de tentar criar
+    // outra (e quebrar com "duplicate key" + deixar uma instância órfã na
+    // Evolution API), reusa a existente e só busca um QR Code novo.
+    const { data: existingCred, error: existingCredError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key')
+      .eq('tenant_id', tenant.id)
+      .maybeSingle();
+    if (existingCredError) return res.status(500).json({ error: existingCredError.message });
+    if (existingCred) {
+      try {
+        const result = await reconnectExistingInstance(existingCred as any);
+        return res.json(result);
+      } catch (err: any) {
+        return res.status(502).json({ error: err.message });
+      }
+    }
 
     const requestedName: string | undefined = req.body?.instanceName;
     // Nome estável e único: slug do tenant (ou prefixo do id) + sufixo curto
@@ -212,29 +262,10 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
 
     try {
-      const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
-        headers: { apikey: cred.api_key },
-        signal: AbortSignal.timeout(20000),
-      });
-      const data = await connectRes.json().catch(() => ({}));
-      if (!connectRes.ok) {
-        return res.status(502).json({ error: `Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
-      }
-      const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
-
-      // Reafirma o webhook toda vez que o QR é (re)buscado — corrige de
-      // graça instâncias criadas antes da correção do webhook acima, sem
-      // precisar desconectar/reconectar o número (basta reabrir esta tela).
-      let webhookWarning: string | undefined;
-      try {
-        await setEvolutionWebhook(cred.instance_name, cred.api_url, cred.api_key, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
-      } catch (err: any) {
-        webhookWarning = `QR Code pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
-      }
-
-      res.json({ instanceName: cred.instance_name, qrCodeBase64, warning: webhookWarning });
+      const result = await reconnectExistingInstance(cred as any);
+      res.json(result);
     } catch (err: any) {
-      res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+      res.status(502).json({ error: err.message });
     }
   }));
 
