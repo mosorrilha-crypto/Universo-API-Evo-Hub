@@ -57,6 +57,14 @@ interface WhatsAppLeadsSimProps {
   onDeleteLead?: (leadId: string) => void;
 }
 
+// Seleção curada de emojis comuns em atendimento (sem depender de nenhuma
+// biblioteca de emoji-picker) pro botão de emoji no campo de texto.
+const QUICK_EMOJIS = [
+  '😀', '😂', '😍', '🥰', '😉', '😊', '😅', '🤔', '😢', '😮',
+  '🙏', '👍', '👏', '💪', '✨', '🎉', '❤️', '💚', '💙', '🔥',
+  '✅', '❌', '⏰', '📅', '📍', '💰', '📸', '🎁', '👋', '🙌',
+];
+
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
 // comprovante de pagamento) — buscada via rota autenticada (nunca pública,
 // pode conter dado sensível), em vez do placeholder genérico de antes.
@@ -140,6 +148,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'hot' | 'international'>('all');
   const [showRightPanel, setShowRightPanel] = useState(true);
+
+  // IDs de conversa com mensagem nova chegada no último poll — recebem um
+  // "flash" visual de ~1.4s na lista. Populado comparando o id da última
+  // mensagem entre polls (lastMessageIdRef, perto de fetchRealConversations),
+  // nunca por reordenação da lista (que já muda sozinha pela ordenação por
+  // atividade recente e geraria flash falso a cada re-render).
+  const [flashingLeadIds, setFlashingLeadIds] = useState<Set<string>>(new Set());
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // Message Sending State
   const [inputMessage, setInputMessage] = useState('');
@@ -406,6 +422,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Busca conversas reais de WhatsApp (recebidas via webhook) e mescla na
   // lista — sem substituir os leads de exemplo/simulados que já existirem.
+  //
+  // Guarda o id da última mensagem de cada conversa fora do state (ref, não
+  // dispara re-render sozinho) pra detectar "chegou mensagem nova de
+  // verdade" comparando id contra o poll anterior — nunca por reordenação
+  // pura da lista, que já muda a cada poll pela ordenação por atividade
+  // recente e daria falso positivo de flash a cada 8s sem mensagem nenhuma.
+  // Na primeira vez que uma conversa aparece (id ainda não visto), não
+  // dispara flash — só a partir da segunda mensagem detectada.
+  const lastMessageIdRef = useRef<Record<string, string>>({});
+
   useEffect(() => {
     let cancelled = false;
 
@@ -415,6 +441,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         if (!response.ok || cancelled) return;
         const data = await response.json();
         const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string } }[] = data.conversations || [];
+
+        const newlyFlashing: string[] = [];
+        for (const conv of realConversations) {
+          const id = `real-${conv.phone}`;
+          const lastMsg = conv.messages[conv.messages.length - 1];
+          if (!lastMsg) continue;
+          const prevLastId = lastMessageIdRef.current[id];
+          if (prevLastId !== undefined && prevLastId !== lastMsg.id) {
+            newlyFlashing.push(id);
+          }
+          lastMessageIdRef.current[id] = lastMsg.id;
+        }
 
         setLeads((prev) => {
           const byId = new Map(prev.map((l) => [l.id, l]));
@@ -437,6 +475,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           }
           return Array.from(byId.values());
         });
+
+        if (newlyFlashing.length > 0) {
+          setFlashingLeadIds((prev) => new Set([...prev, ...newlyFlashing]));
+          setTimeout(() => {
+            if (cancelled) return;
+            setFlashingLeadIds((prev) => {
+              const next = new Set(prev);
+              newlyFlashing.forEach((id) => next.delete(id));
+              return next;
+            });
+          }, 1400);
+        }
       } catch {
         // silencioso: painel continua funcionando com o que já tiver em memória/localStorage
       }
@@ -1334,15 +1384,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             {filteredLeads.length > 0 ? (
               filteredLeads.map((lead) => {
                 const isSelected = lead.id === activeLeadId;
+                const isUnread = lead.status === 'pending';
+                const isFlashing = flashingLeadIds.has(lead.id);
                 const lastMsg = lead.messages && lead.messages.length > 0 ? lead.messages[lead.messages.length - 1] : null;
 
                 return (
                   <div
                     key={lead.id}
                     onClick={() => setActiveLeadId(lead.id)}
-                    className={`p-3 transition-colors cursor-pointer relative flex items-start space-x-3 ${
+                    className={`p-3 transition-colors cursor-pointer relative flex items-start space-x-3 ${isFlashing ? 'flash-new-message' : ''} ${
                       isSelected
                         ? 'bg-[#2a3942] border-l-4 border-[#00a884]'
+                        : isUnread
+                        ? 'bg-emerald-500/5 border-l-4 border-l-emerald-500/60 hover:bg-emerald-500/10'
                         : 'hover:bg-[#202c33]'
                     }`}
                   >
@@ -1784,9 +1838,32 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
                 {/* WhatsApp Style Text Input Form */}
                 <form onSubmit={handleSendTextMessage} className="flex items-center space-x-2">
-                  <button type="button" className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer">
-                    <Smile className="w-5 h-5" />
-                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowEmojiPicker((v) => !v)}
+                      className={`p-2 rounded-lg transition-colors cursor-pointer ${showEmojiPicker ? 'text-emerald-400 bg-slate-800' : 'text-slate-400 hover:text-white'}`}
+                    >
+                      <Smile className="w-5 h-5" />
+                    </button>
+                    {showEmojiPicker && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setShowEmojiPicker(false)} />
+                        <div className="absolute bottom-full left-0 mb-2 z-20 bg-[#233138] border border-slate-700 rounded-xl p-2.5 shadow-2xl grid grid-cols-6 gap-1 w-56">
+                          {QUICK_EMOJIS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => setInputMessage((prev) => prev + emoji)}
+                              className="text-lg p-1 rounded hover:bg-slate-700 transition-colors cursor-pointer"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}

@@ -30,3 +30,14 @@
   background: #34d399;
 }
 
+/* Flash de ~1.4s numa conversa da lista do WhatsApp quando chega mensagem
+   nova (ver WhatsAppLeadsSim.tsx, flashingLeadIds) */
+@keyframes flash-new-message {
+  0% { background-color: rgba(16, 185, 129, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.flash-new-message {
+  animation: flash-new-message 1.4s ease-out;
+}
+
