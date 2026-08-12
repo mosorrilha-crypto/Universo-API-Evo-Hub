@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { EscalationInfo } from '../types';
-import { AlertTriangle, CheckCircle2, Trash2, Clock, Phone, MessageSquare, Globe2, MessageCircle, ExternalLink, MessageCircleReply, Send, TimerReset } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle, Trash2, Clock, Phone, MessageSquare, Globe2, MessageCircle, ExternalLink, MessageCircleReply, Send, TimerReset } from 'lucide-react';
 
 interface EscalationsPanelProps {
   escalations: EscalationInfo[];
@@ -17,6 +17,15 @@ interface EscalationsPanelProps {
    * manda um convite e usa a orientação assim que o cliente escrever de novo.
    */
   onSubmitOperatorReply?: (id: string, reply: string) => void;
+  /**
+   * Verificação de pagamento unificada aqui (pedido real do dono do
+   * produto, 12/08/2026) — antes existiam dois lugares desconectados pro
+   * mesmo caso: o banner Confirmar/Rejeitar dentro da conversa, e este
+   * escalonamento gerado automaticamente pro mesmo comprovante. `reply`
+   * presente = também usa o motivo como orientação pra IA avisar o cliente
+   * (reusa o mesmo pipeline de onSubmitOperatorReply).
+   */
+  onResolvePayment?: (id: string, phone: string, status: 'verified' | 'rejected', reply?: string) => void;
 }
 
 /** wa.me só aceita dígitos (sem "+", espaços, parênteses, hífen). */
@@ -45,7 +54,7 @@ function formatWindowRemaining(expiresAtIso: string): string {
   return diffMs > 0 ? `expira em ${label}` : `expirou há ${label}`;
 }
 
-export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations, onResolve, onDelete, onGoToConversation, onSubmitOperatorReply }) => {
+export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations, onResolve, onDelete, onGoToConversation, onSubmitOperatorReply, onResolvePayment }) => {
   const [filter, setFilter] = useState<'pendentes' | 'resolvidos'>('pendentes');
   const [replyDraftById, setReplyDraftById] = useState<Record<string, string>>({});
   const [openReplyId, setOpenReplyId] = useState<string | null>(null);
@@ -145,7 +154,7 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                     <textarea
                       value={replyDraftById[e.id] || ''}
                       onChange={(evt) => setReplyDraftById((prev) => ({ ...prev, [e.id]: evt.target.value }))}
-                      placeholder="Ex: diz pra ela que o horário de sábado 14h ainda está livre"
+                      placeholder={e.kind === 'payment_proof' ? 'Ex: faltam Gs 10.000, pede pra ela completar e reenviar o comprovante' : 'Ex: diz pra ela que o horário de sábado 14h ainda está livre'}
                       rows={2}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500 resize-none"
                     />
@@ -153,15 +162,21 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                       <button
                         onClick={() => {
                           const reply = (replyDraftById[e.id] || '').trim();
-                          if (!reply || !onSubmitOperatorReply) return;
-                          onSubmitOperatorReply(e.id, reply);
+                          if (!reply) return;
+                          if (e.kind === 'payment_proof') {
+                            if (!onResolvePayment) return;
+                            onResolvePayment(e.id, e.phone, 'rejected', reply);
+                          } else {
+                            if (!onSubmitOperatorReply) return;
+                            onSubmitOperatorReply(e.id, reply);
+                          }
                           setReplyDraftById((prev) => ({ ...prev, [e.id]: '' }));
                           setOpenReplyId(null);
                         }}
                         disabled={!(replyDraftById[e.id] || '').trim()}
                         className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
                       >
-                        <Send className="w-3.5 h-3.5" /> Enviar orientação
+                        <Send className="w-3.5 h-3.5" /> {e.kind === 'payment_proof' ? 'Rejeitar e enviar' : 'Enviar orientação'}
                       </button>
                       <button
                         onClick={() => setOpenReplyId(null)}
@@ -196,29 +211,54 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                 >
                   <ExternalLink className="w-3.5 h-3.5" /> WhatsApp pessoal
                 </a>
-                {!e.resolved && onSubmitOperatorReply && (
-                  <button
-                    onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-amber-900/40 hover:text-amber-300 flex items-center gap-1.5"
-                  >
-                    <MessageCircleReply className="w-3.5 h-3.5" /> Orientar a IA
-                  </button>
-                )}
-                {!e.resolved && (
+                {/* Verificação de pagamento unificada aqui — em vez das ações
+                    genéricas, o card já resolvido pra decidir na hora
+                    (pedido real do dono do produto, 12/08/2026): antes disso
+                    confirmar/rejeitar vivia num banner separado dentro da
+                    conversa, desconectado deste escalonamento gerado pro
+                    mesmo comprovante. */}
+                {!e.resolved && e.kind === 'payment_proof' && onResolvePayment ? (
                   <>
                     <button
-                      onClick={() => onResolve(e.id)}
+                      onClick={() => onResolvePayment(e.id, e.phone, 'verified')}
                       className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5"
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Marcar resolvido
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Confirmar pagamento
                     </button>
                     <button
-                      onClick={() => onDelete(e.id)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-red-900/40 hover:text-red-300 flex items-center gap-1.5"
+                      onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800/60 flex items-center gap-1.5"
                     >
-                      <Trash2 className="w-3.5 h-3.5" /> Descartar
+                      <XCircle className="w-3.5 h-3.5" /> Rejeitar pagamento
                     </button>
                   </>
+                ) : (
+                  <>
+                    {!e.resolved && onSubmitOperatorReply && (
+                      <button
+                        onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-amber-900/40 hover:text-amber-300 flex items-center gap-1.5"
+                      >
+                        <MessageCircleReply className="w-3.5 h-3.5" /> Orientar a IA
+                      </button>
+                    )}
+                    {!e.resolved && (
+                      <button
+                        onClick={() => onResolve(e.id)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Marcar resolvido
+                      </button>
+                    )}
+                  </>
+                )}
+                {!e.resolved && (
+                  <button
+                    onClick={() => onDelete(e.id)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-red-900/40 hover:text-red-300 flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Descartar
+                  </button>
                 )}
                 {e.resolved && (
                   <button

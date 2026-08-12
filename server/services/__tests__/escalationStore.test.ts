@@ -22,6 +22,18 @@ beforeEach(() => {
   initDb(createFakeSupabase());
 });
 
+describe('logEscalation — kind (verificação de pagamento unificada)', () => {
+  it('default é "general" quando não informado', async () => {
+    const esc = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Sumiu no meio da conversa');
+    expect(esc.kind).toBe('general');
+  });
+
+  it('"payment_proof" quando informado explicitamente (webhooks.ts, comprovante de pagamento)', async () => {
+    const esc = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Possível comprovante recebido', '[imagem]', 'payment_proof');
+    expect(esc.kind).toBe('payment_proof');
+  });
+});
+
 describe('submitOperatorReply', () => {
   it('grava a orientação e o timestamp, undefined para escalonamento inexistente', async () => {
     const esc = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Sumiu no meio da conversa');

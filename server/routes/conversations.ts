@@ -26,10 +26,13 @@ import { getDb } from '../services/db';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
-import { getAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
+import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
+import { checkFreeBusy, createCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+
+const BUSINESS_TIMEZONE = 'America/Asuncion';
 
 interface ConversationsRouterDeps {
   authenticateToken: RequestHandler;
@@ -43,6 +46,10 @@ interface ConversationsRouterDeps {
   supabaseKey?: string;
   /** Issue #97 — retomada guiada pelo operador precisa da IA pra redigir a mensagem dentro da janela de 24h. */
   getAi?: () => import('@google/genai').GoogleGenAI | null;
+  /** Issue #182 — cadastro manual de agendamento cria um evento real no Google Calendar, mesmo caminho que a ferramenta criar_agendamento da IA usa. */
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri?: string;
 }
 
 /**
@@ -70,8 +77,9 @@ function tenantOf(req: AuthenticatedRequest): string {
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, googleClientId, googleClientSecret, googleRedirectUri }: ConversationsRouterDeps): Router {
   const router = Router();
+  const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
   // Anexa as credenciais compartilhadas ao objeto router para uso nos handlers
   (router as any).evolutionApiUrl = evolutionApiUrl;
   (router as any).evolutionApiKey = evolutionApiKey;
@@ -415,6 +423,53 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ appointment: appointment || null });
   }));
 
+  // Issue #182 — agendamento fechado fora da IA (WhatsApp pessoal, telefone,
+  // presencial) até aqui era invisível pro sistema inteiro: nenhuma linha em
+  // appointments, nenhum lembrete automático, e o comprovante de pagamento
+  // do cliente caía num "buraco" (webhooks.ts só marca pending_verification
+  // quando já existe um agendamento ativo pra esse telefone). Cria um evento
+  // real no Google Calendar (mesmo caminho de criar_agendamento em
+  // autoReply.ts) + a linha em appointments com source='manual', pra entrar
+  // no mesmo lembrete automático — mas sem disparar Purchase pro Meta CAPI
+  // (decisão do dono do produto: sem origem de anúncio rastreável).
+  router.post('/api/conversations/:phone/manual-appointment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (!calendarConfig) {
+      return res.status(503).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const { serviceName, startIso, endIso } = req.body || {};
+    if (!serviceName?.trim() || !startIso || !endIso) {
+      return res.status(400).json({ error: 'Campos "serviceName", "startIso" e "endIso" são obrigatórios.' });
+    }
+
+    const existing = await getAppointmentForPhone(tenantId, phone);
+    if (existing) {
+      return res.status(409).json({ error: `Este contato já tem um agendamento ativo ("${existing.summary}" em ${existing.startIso}).` });
+    }
+
+    let disponivel: boolean;
+    try {
+      disponivel = await checkFreeBusy(tenantId, calendarConfig, startIso, endIso, BUSINESS_TIMEZONE);
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao verificar disponibilidade na agenda: ${err.message}` });
+    }
+    if (!disponivel) {
+      return res.status(409).json({ error: 'Esse horário já está ocupado na agenda.' });
+    }
+
+    let eventId: string;
+    try {
+      eventId = await createCalendarEvent(tenantId, calendarConfig, serviceName.trim(), 'Agendado manualmente pelo operador no painel.', startIso, endIso, BUSINESS_TIMEZONE);
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao criar o evento na agenda: ${err.message}` });
+    }
+
+    await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' });
+    const appointment = await getAppointmentForPhone(tenantId, phone);
+    res.status(201).json({ appointment });
+  }));
+
   // Etapa 8 (fluxo de verificação de pagamento) — o operador marca aqui o
   // comprovante que chegou (webhooks.ts já grava pending_verification
   // automaticamente quando uma imagem chega com agendamento ativo sem
@@ -513,6 +568,50 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       tenantName: tenant?.name || 'nosso time',
     });
     res.json({ escalation, outcome });
+  }));
+
+  // Unifica a verificação de pagamento dentro do próprio card de
+  // escalonamento (pedido real do dono do produto, 12/08/2026): antes disso
+  // existiam dois lugares desconectados pro mesmo caso — o banner
+  // Confirmar/Rejeitar dentro da conversa (verify-payment acima) e o
+  // escalonamento gerado automaticamente pra esse mesmo comprovante
+  // (kind: 'payment_proof', ver webhooks.ts). Confirmar/rejeitar E orientar
+  // a IA (se rejeitado, por que) agora é uma ação só. Sem "reply": só marca
+  // o pagamento e resolve o card, igual o fluxo antigo. Com "reply": além
+  // de marcar o pagamento, reusa o mesmo pipeline do operator-reply acima
+  // (issue #97) pra já avisar o cliente com o motivo, texto livre se dentro
+  // da janela de 24h ou template de reengajamento se não.
+  router.post('/api/escalations/:id/resolve-payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const operatorId = req.user?.id;
+    if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });
+
+    const { phone, status, reply } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'Campo "phone" é obrigatório.' });
+    if (status !== 'verified' && status !== 'rejected') {
+      return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
+    }
+
+    const appointment = await setPaymentVerification(tenantId, phone, status, operatorId);
+    if (!appointment) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
+
+    const trimmedReply: string = (reply || '').trim();
+    if (!trimmedReply) {
+      const escalation = await resolveEscalation(tenantId, req.params.id);
+      if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+      return res.json({ appointment, escalation, outcome: null });
+    }
+
+    const escalation = await submitOperatorReply(tenantId, req.params.id, trimmedReply);
+    if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    const { data: tenant } = await getDb().from('tenants').select('name').eq('id', tenantId).maybeSingle();
+    const outcome = await sendOperatorGuidedFollowUp(tenantId, escalation, {
+      ai: getAi?.() ?? null,
+      metaAccessToken,
+      metaPhoneNumberId,
+      tenantName: tenant?.name || 'nosso time',
+    });
+    res.json({ appointment, escalation, outcome });
   }));
 
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {

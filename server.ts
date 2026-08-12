@@ -122,6 +122,9 @@ async function startServer() {
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
     getAi: () => getGeminiClient(config),
+    googleClientId: config.googleClientId,
+    googleClientSecret: config.googleClientSecret,
+    googleRedirectUri: config.googleRedirectUri,
   }));
   app.use(createGoogleCalendarRouter({
     authenticateToken,
