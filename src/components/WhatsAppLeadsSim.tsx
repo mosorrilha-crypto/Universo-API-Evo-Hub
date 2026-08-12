@@ -875,11 +875,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Issue #82, item 3 — o backend de verificação de pagamento
   // (setPaymentVerification/verify-payment) já existia e funcionava, mas o
   // agendamento com o status do comprovante nunca chegava até aqui: não
-  // tinha botão nenhum pra confirmar. Achado real em produção: agendamento
-  // com sinal pago preso em "pending_verification" por dias, cliente
-  // perguntando "confirmou?" sem ninguém conseguir clicar em nada.
-  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string; source?: 'ai' | 'manual' } | null>(null);
-  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  // tinha botão nenhum pra confirmar.
+  //
+  // Achado depois (pedido real do dono do produto, 12/08/2026): o botão
+  // "Confirmar"/"Rejeitar" que existia bem aqui virou um SEGUNDO lugar
+  // desconectado do escalonamento que webhooks.ts já cria automaticamente
+  // pro mesmo comprovante — confirmar por aqui não avisava o cliente do
+  // motivo, e o operador podia se perder entre os dois lugares. Unificado
+  // no card de escalonamento (kind: 'payment_proof' — ver EscalationsPanel.tsx
+  // e App.tsx, handleResolvePaymentEscalation): aqui fica só o aviso,
+  // sem ação, apontando pra onde decidir de verdade.
+  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string } | null>(null);
 
   // Issue #182 — antes disso, um agendamento fechado fora da IA (WhatsApp
   // pessoal, telefone, presencial) era invisível pro sistema inteiro: sem
@@ -942,26 +948,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedLead?.phone, (selectedLead as any)?.isReal]);
-
-  const handleVerifyPayment = async (status: 'verified' | 'rejected') => {
-    if (!selectedLead?.phone) return;
-    setIsVerifyingPayment(true);
-    try {
-      const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/verify-payment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setPaymentAppointment(data.appointment);
-    } catch (err) {
-      console.error('Falha ao verificar pagamento:', err);
-      setErrorMsg('Não foi possível registrar a verificação de pagamento agora — tente de novo.');
-    } finally {
-      setIsVerifyingPayment(false);
-    }
-  };
 
   // Conversas arquivadas saem da lista principal e ficam numa seção própria,
   // colapsável — igual à seção "Arquivadas" do WhatsApp Web real.
@@ -2190,7 +2176,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       {/* Confirmação de pagamento (issue #82, item 3) — comprovante chegou,
           precisa de uma pessoa real pra confirmar ou rejeitar antes do
-          agente poder informar o turno como fechado pro cliente. */}
+          agente poder informar o turno como fechado pro cliente.
+          Ação em si mora só no card de escalonamento (kind: 'payment_proof')
+          desde a unificação — aqui é só o aviso, com atalho pra decidir. */}
       {paymentAppointment?.paymentStatus === 'pending_verification' && (
         <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-start space-x-2">
@@ -2202,24 +2190,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </span>
             </div>
           </div>
-          <div className="flex gap-2 flex-shrink-0">
+          {onGoToEscalations && (
             <button
-              onClick={() => handleVerifyPayment('verified')}
-              disabled={isVerifyingPayment}
-              className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
+              onClick={onGoToEscalations}
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer flex-shrink-0"
             >
-              <CheckCircle2 className="w-3 h-3" />
-              <span>Confirmar pagamento</span>
+              <AlertTriangle className="w-3 h-3" />
+              <span>Confirmar/rejeitar em Escalonamentos</span>
             </button>
-            <button
-              onClick={() => handleVerifyPayment('rejected')}
-              disabled={isVerifyingPayment}
-              className="px-3 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 disabled:opacity-50 text-rose-300 border border-rose-800/60 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
-            >
-              <XCircle className="w-3 h-3" />
-              <span>Rejeitar</span>
-            </button>
-          </div>
+          )}
         </div>
       )}
 

@@ -237,7 +237,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
             .then(async (appointment) => {
               if (!appointment || appointment.paymentStatus) return;
               await markPaymentPendingVerification(tenantId, msg.from, msg.messageId);
-              await logEscalation(tenantId, msg.from, msg.contactName, 'Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno', '[imagem]');
+              await logEscalation(tenantId, msg.from, msg.contactName, 'Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno', '[imagem]', 'payment_proof');
             })
             .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
         } else {
