@@ -22,6 +22,16 @@ export interface TrackedAppointment {
   /** Desde quando está 'pending_verification' — usado pelo job de alerta (issue #98). */
   paymentPendingSince?: string;
   paymentPendingAlertedAt?: string;
+  /**
+   * 'ai' (default) = criado pela própria IA via criar_agendamento/
+   * remarcar_agendamento. 'manual' = operador cadastrou no painel um
+   * agendamento fechado fora da IA (issue #182) — mesmo evento real no
+   * Google Calendar e mesmo lembrete automático, mas NUNCA dispara o
+   * evento Purchase pro Meta CAPI (sem origem de anúncio rastreável,
+   * distorceria a métrica de atribuição de tráfego pago — decisão do dono
+   * do produto, 12/08/2026).
+   */
+  source?: 'ai' | 'manual';
 }
 
 type AppointmentRow = {
@@ -37,6 +47,7 @@ type AppointmentRow = {
   payment_verified_at: string | null;
   payment_pending_since: string | null;
   payment_pending_alerted_at: string | null;
+  source: 'ai' | 'manual' | null;
 };
 
 function toTracked(row: AppointmentRow): TrackedAppointment {
@@ -52,6 +63,7 @@ function toTracked(row: AppointmentRow): TrackedAppointment {
     paymentVerifiedAt: row.payment_verified_at || undefined,
     paymentPendingSince: row.payment_pending_since || undefined,
     paymentPendingAlertedAt: row.payment_pending_alerted_at || undefined,
+    source: row.source || 'ai',
   };
 }
 
@@ -72,6 +84,7 @@ export async function setAppointmentForPhone(tenantId: string, phone: string, ap
       start_iso: appt.startIso,
       end_iso: appt.endIso,
       created_at: new Date().toISOString(),
+      source: appt.source || 'ai',
     },
     { onConflict: 'tenant_id,phone' }
   );

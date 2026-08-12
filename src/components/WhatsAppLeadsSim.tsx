@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Image as ImageIcon,
   Calendar as CalendarIcon,
+  CalendarPlus,
   FileText,
   Mic,
   Zap,
@@ -885,6 +886,53 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // e App.tsx, handleResolvePaymentEscalation): aqui fica só o aviso,
   // sem ação, apontando pra onde decidir de verdade.
   const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string } | null>(null);
+
+  // Issue #182 — antes disso, um agendamento fechado fora da IA (WhatsApp
+  // pessoal, telefone, presencial) era invisível pro sistema inteiro: sem
+  // linha em appointments, sem lembrete automático, e o comprovante de
+  // pagamento do cliente caía num "buraco" (nenhuma verificação disparava).
+  // Botão só aparece quando NÃO há agendamento já rastreado pra esse
+  // contato (evita tentar cadastrar dois pro mesmo número).
+  const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false);
+  const [manualServiceName, setManualServiceName] = useState('');
+  const [manualDate, setManualDate] = useState('');
+  const [manualTime, setManualTime] = useState('');
+  const [isCreatingManualAppointment, setIsCreatingManualAppointment] = useState(false);
+  const [manualAppointmentError, setManualAppointmentError] = useState<string | null>(null);
+  const [manualAppointmentSuccess, setManualAppointmentSuccess] = useState(false);
+
+  const handleCreateManualAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLead?.phone || !manualServiceName || !manualDate || !manualTime) return;
+    setIsCreatingManualAppointment(true);
+    setManualAppointmentError(null);
+    try {
+      const durationMinutes = knowledgeBase.products.find((p) => p.name === manualServiceName)?.durationMinutes || 90;
+      const startIso = `${manualDate}T${manualTime}:00`;
+      const endDate = new Date(`${manualDate}T${manualTime}:00`);
+      endDate.setMinutes(endDate.getMinutes() + durationMinutes);
+      const endIso = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}T${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}:00`;
+
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/manual-appointment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setPaymentAppointment(data.appointment);
+      setIsManualAppointmentModalOpen(false);
+      setManualServiceName('');
+      setManualDate('');
+      setManualTime('');
+      setManualAppointmentSuccess(true);
+      setTimeout(() => setManualAppointmentSuccess(false), 4000);
+    } catch (err: any) {
+      setManualAppointmentError(err.message || 'Não foi possível cadastrar o agendamento agora.');
+    } finally {
+      setIsCreatingManualAppointment(false);
+    }
+  };
 
   useEffect(() => {
     if (!selectedLead?.phone || !(selectedLead as any)?.isReal) {
@@ -2154,6 +2202,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
+      {/* Issue #182 — agendamento fechado fora da IA (WhatsApp pessoal,
+          telefone, presencial) era invisível pro sistema: sem isso, o
+          comprovante de pagamento do cliente nunca dispara verificação
+          nenhuma (webhooks.ts só marca pending_verification quando já
+          existe um agendamento ativo rastreado). Só aparece quando este
+          contato ainda não tem nenhum agendamento rastreado. */}
+      {(selectedLead as any)?.isReal && !paymentAppointment && (
+        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-slate-400">Agendamento combinado por fora (telefone, presencial)?</span>
+          <button
+            onClick={() => setIsManualAppointmentModalOpen(true)}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300 flex items-center gap-1.5 flex-shrink-0"
+          >
+            <CalendarPlus className="w-3.5 h-3.5" /> Cadastrar agendamento
+          </button>
+        </div>
+      )}
+      {manualAppointmentSuccess && (
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          Agendamento cadastrado! Já entra no lembrete automático da véspera.
+        </div>
+      )}
+
       {/* Main WhatsApp Web Application Frame — altura fixa em todo breakpoint
           (igual ao WhatsApp Web/Desktop real: a página não cresce, cada
           coluna rola por conta própria). Achado real em produção: a correção
@@ -3274,6 +3346,83 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 >
                   <Send className="w-3.5 h-3.5 mr-1" />
                   <span>Criar Lead e Analisar</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cadastro manual de agendamento fechado fora da IA (issue #182) */}
+      {isManualAppointmentModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CalendarPlus className="w-5 h-5 text-emerald-400" />
+              Cadastrar agendamento manual
+            </h3>
+            <p className="text-xs text-slate-400">
+              Pra um horário combinado fora do WhatsApp (telefone, presencial). Cria o evento real na agenda e ativa o lembrete automático — não conta como venda vinda de anúncio.
+            </p>
+
+            {manualAppointmentError && (
+              <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{manualAppointmentError}</div>
+            )}
+
+            <form onSubmit={handleCreateManualAppointment} className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Serviço *</label>
+                <select
+                  required
+                  value={manualServiceName}
+                  onChange={(e) => setManualServiceName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="">Selecione...</option>
+                  {knowledgeBase.products.map((p) => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">Data *</label>
+                  <input
+                    type="date"
+                    required
+                    value={manualDate}
+                    onChange={(e) => setManualDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">Horário *</label>
+                  <input
+                    type="time"
+                    required
+                    value={manualTime}
+                    onChange={(e) => setManualTime(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingManualAppointment}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 shadow-md shadow-emerald-950 flex items-center space-x-1 cursor-pointer"
+                >
+                  <CalendarPlus className="w-3.5 h-3.5 mr-1" />
+                  <span>{isCreatingManualAppointment ? 'Cadastrando...' : 'Cadastrar'}</span>
                 </button>
               </div>
             </form>
