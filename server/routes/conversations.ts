@@ -20,7 +20,9 @@ import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTypin
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
-import { listEscalations, resolveEscalation, deleteEscalation } from '../services/escalationStore';
+import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
+import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
+import { getDb } from '../services/db';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
@@ -39,6 +41,8 @@ interface ConversationsRouterDeps {
   evolutionInstanceName?: string;
   supabaseUrl?: string;
   supabaseKey?: string;
+  /** Issue #97 — retomada guiada pelo operador precisa da IA pra redigir a mensagem dentro da janela de 24h. */
+  getAi?: () => import('@google/genai').GoogleGenAI | null;
 }
 
 /**
@@ -66,7 +70,7 @@ function tenantOf(req: AuthenticatedRequest): string {
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi }: ConversationsRouterDeps): Router {
   const router = Router();
   // Anexa as credenciais compartilhadas ao objeto router para uso nos handlers
   (router as any).evolutionApiUrl = evolutionApiUrl;
@@ -468,13 +472,47 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // menção a pagamento/transferência, que nunca deve ser confirmada sozinha
   // pelo agente). Paraguai aparece primeiro (preferência de negócio atual).
   router.get('/api/escalations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    res.json({ escalations: await listEscalations(tenantOf(req)) });
+    const tenantId = tenantOf(req);
+    const escalations = await listEscalations(tenantId);
+    // Issue #97 — timer de janela de 24h no card, pro operador saber se a
+    // resposta dele (própria ou via orientação pra IA) sai como texto livre
+    // agora ou precisa esperar o template de reengajamento primeiro. Só
+    // calcula pros pendentes (resolvidos não precisam mais disso).
+    const withWindow = await Promise.all(
+      escalations.map(async (e) => {
+        if (e.resolved) return e;
+        const window = await getCustomerServiceWindowStatus(tenantId, e.phone);
+        return { ...e, withinServiceWindow: window.withinWindow, serviceWindowExpiresAt: window.windowExpiresAt };
+      })
+    );
+    res.json({ escalations: withWindow });
   }));
 
   router.post('/api/escalations/:id/resolve', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const e = await resolveEscalation(tenantOf(req), req.params.id);
     if (!e) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ escalation: e });
+  }));
+
+  // Issue #97 — operador deixa uma orientação em vez de assumir a conversa
+  // pessoalmente; a IA retoma o atendimento com base nela (texto livre se
+  // ainda dentro da janela de 24h da Meta, template de reengajamento se não).
+  router.post('/api/escalations/:id/operator-reply', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const reply: string = (req.body?.reply || '').trim();
+    if (!reply) return res.status(400).json({ error: 'Campo "reply" é obrigatório.' });
+
+    const escalation = await submitOperatorReply(tenantId, req.params.id, reply);
+    if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+
+    const { data: tenant } = await getDb().from('tenants').select('name').eq('id', tenantId).maybeSingle();
+    const outcome = await sendOperatorGuidedFollowUp(tenantId, escalation, {
+      ai: getAi?.() ?? null,
+      metaAccessToken,
+      metaPhoneNumberId,
+      tenantName: tenant?.name || 'nosso time',
+    });
+    res.json({ escalation, outcome });
   }));
 
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {

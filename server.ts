@@ -113,6 +113,7 @@ async function startServer() {
     evolutionInstanceName: config.evolutionInstanceName,
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
+    getAi: () => getGeminiClient(config),
   }));
   app.use(createGoogleCalendarRouter({
     authenticateToken,

@@ -350,6 +350,32 @@ export const App: React.FC = () => {
     }
   };
 
+  // Issue #97 — operador deixa uma orientação em vez de assumir a conversa
+  // pessoalmente; o backend decide se a IA já responde agora (dentro da
+  // janela de 24h) ou manda o template de reengajamento (fora dela).
+  const handleSubmitOperatorReply = async (id: string, reply: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/operator-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reply }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+      if (data.outcome?.sent && data.outcome.viaTemplate) {
+        showToast('Fora da janela de 24h — mandamos um convite pro cliente responder. A IA usa sua orientação assim que ele voltar a escrever.');
+      } else if (data.outcome?.sent) {
+        showToast('A IA já respondeu ao cliente com base na sua orientação.');
+      } else {
+        showToast(data.outcome?.reason || 'Orientação salva, mas não deu pra enviar agora. Tente de novo.');
+      }
+    } catch (err) {
+      console.error('Falha ao enviar orientação do operador:', err);
+      showToast('Não foi possível enviar sua orientação agora. Tente de novo.');
+    }
+  };
+
   const handleDeleteEscalation = async (id: string) => {
     try {
       const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -583,6 +609,7 @@ export const App: React.FC = () => {
             escalations={escalations}
             onResolve={handleResolveEscalation}
             onDelete={handleDeleteEscalation}
+            onSubmitOperatorReply={handleSubmitOperatorReply}
             onGoToConversation={(phone) => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
               setActiveTab('whatsapp');
