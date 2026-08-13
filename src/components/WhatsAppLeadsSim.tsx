@@ -2165,23 +2165,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* Issue #182 — agendamento fechado fora da IA (WhatsApp pessoal,
-          telefone, presencial) era invisível pro sistema: sem isso, o
-          comprovante de pagamento do cliente nunca dispara verificação
-          nenhuma (webhooks.ts só marca pending_verification quando já
-          existe um agendamento ativo rastreado). Só aparece quando este
-          contato ainda não tem nenhum agendamento rastreado. */}
-      {(selectedLead as any)?.isReal && !paymentAppointment && (
-        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs flex items-center justify-between gap-3 flex-wrap">
-          <span className="text-slate-400">Agendamento combinado por fora (telefone, presencial)?</span>
-          <button
-            onClick={() => setIsManualAppointmentModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300 flex items-center gap-1.5 flex-shrink-0"
-          >
-            <CalendarPlus className="w-3.5 h-3.5" /> Cadastrar agendamento
-          </button>
-        </div>
-      )}
       {manualAppointmentSuccess && (
         <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -2485,6 +2468,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     )}
                     <span className="hidden sm:inline">Analisar IA</span>
                   </button>
+
+                  {/* Cadastrar agendamento manual (issue #182, agendamento
+                      fechado fora da IA — WhatsApp pessoal, telefone,
+                      presencial). Morava numa barra sempre visível acima da
+                      lista de conversas (achado real: ficava redundante ao
+                      lado do widget de Agenda) — junta com as outras ações
+                      da conversa aberta aqui no cabeçalho. Só aparece quando
+                      este contato ainda não tem nenhum agendamento
+                      rastreado, senão a checagem do backend recusaria com
+                      409 (o operador já vê o card do agendamento ativo). */}
+                  {(selectedLead as any)?.isReal && !paymentAppointment && (
+                    <button
+                      onClick={() => setIsManualAppointmentModalOpen(true)}
+                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      title="Cadastrar agendamento manual (combinado fora do WhatsApp)"
+                    >
+                      <CalendarPlus className="w-4 h-4" />
+                    </button>
+                  )}
 
                   {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver PR #70) */}
                   <button
