@@ -173,6 +173,15 @@ export interface AgentFileDoc {
   status: 'Processado' | 'Pendente';
 }
 
+/** "HH:mm" de abertura/fechamento de um dia específico. */
+export interface DayHours {
+  open: string;
+  close: string;
+}
+
+/** Chaveado por dia da semana ("0" domingo .. "6" sábado) — dia ausente = tenant não atende nesse dia. Mesmo formato de server/services/tenantProfileStore.ts. */
+export type BusinessHours = Partial<Record<string, DayHours>>;
+
 export interface AgentKnowledgeBase {
   companyName: string;
   agentGoal: string;

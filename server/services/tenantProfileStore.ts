@@ -31,3 +31,34 @@ export async function getTenantBusinessHours(tenantId: string): Promise<Business
   const { data } = await db.from('tenants').select('business_hours').eq('id', tenantId).maybeSingle();
   return (data?.business_hours as BusinessHours | undefined) || null;
 }
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Valida a forma de `BusinessHours` antes de gravar — o agendamento real
+ * (describeBusinessHoursToday/isWithinBusinessHours em autoReply.ts e
+ * googleCalendar.ts) confia cegamente nesses valores pra decidir se pode
+ * oferecer um horário ao cliente; um "HH:mm" mal formado ou um close <= open
+ * quebraria essa lógica silenciosamente (nunca no agendamento em si, que só
+ * lança erro pra invocação isolada — quebraria a checagem proativa que
+ * sugere horários, deixando tudo parecer "sem disponibilidade nenhuma").
+ */
+export function validateBusinessHours(hours: unknown): hours is BusinessHours {
+  if (hours === null || typeof hours !== 'object' || Array.isArray(hours)) return false;
+  for (const [day, dayHours] of Object.entries(hours as Record<string, unknown>)) {
+    if (!/^[0-6]$/.test(day)) return false;
+    if (dayHours == null) continue; // dia ausente/null = tenant não atende nesse dia
+    if (typeof dayHours !== 'object') return false;
+    const { open, close } = dayHours as Record<string, unknown>;
+    if (typeof open !== 'string' || typeof close !== 'string') return false;
+    if (!HHMM_RE.test(open) || !HHMM_RE.test(close)) return false;
+    if (open >= close) return false; // "HH:mm" compara corretamente como string (largura fixa)
+  }
+  return true;
+}
+
+export async function setTenantBusinessHours(tenantId: string, hours: BusinessHours): Promise<void> {
+  const db = getDb();
+  const { error } = await db.from('tenants').update({ business_hours: hours }).eq('id', tenantId);
+  if (error) throw error;
+}

@@ -20,6 +20,7 @@ import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTypin
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
+import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
@@ -610,6 +611,25 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
     }
     await setKnowledgeBase(tenantOf(req), knowledgeBase);
+    res.json({ success: true });
+  }));
+
+  // Horário de funcionamento real do tenant (tabela `tenants`, não a base de
+  // conhecimento) — até aqui só existia via SQL direto; o agendamento
+  // automático (autoReply.ts/googleCalendar.ts) já dependia disso pra nunca
+  // oferecer horário fora do expediente, mas o operador não tinha como ver
+  // nem editar. Mesmo padrão de autenticação/tenant-escopo das rotas de
+  // knowledge-base acima.
+  router.get('/api/business-hours', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ businessHours: await getTenantBusinessHours(tenantOf(req)) });
+  }));
+
+  router.post('/api/business-hours', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { businessHours } = req.body || {};
+    if (!validateBusinessHours(businessHours)) {
+      return res.status(400).json({ error: 'Campo "businessHours" inválido — cada dia precisa de open/close em formato "HH:mm", com close depois de open.' });
+    }
+    await setTenantBusinessHours(tenantOf(req), businessHours);
     res.json({ success: true });
   }));
 
