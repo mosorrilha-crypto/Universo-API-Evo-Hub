@@ -158,6 +158,23 @@ export const App: React.FC = () => {
       const matching = tenants.find((t) => t.id === currentUser.tenantId);
       return matching || prev;
     });
+
+    // Achado real em produção (13/08/2026): a busca acima nunca encontra
+    // nada de verdade — `tenants` só carrega o mock local (INITIAL_TENANTS,
+    // 1 registro fictício da Monique com id "tenant_004"), nunca os tenants
+    // reais do Supabase (só o painel SaaS Master, restrito a saas_admin,
+    // busca a lista real via /api/admin/tenants). Sem isso, o badge do
+    // cabeçalho ficava preso no nome do mock pra qualquer operador que não
+    // fosse saas_admin, mesmo depois do fix acima. GET /api/tenant é
+    // self-scoped (resolve pelo JWT, sem exigir role nenhuma) e sempre
+    // reflete o tenant real de quem está logado.
+    apiFetch('/api/tenant')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.tenant?.id) return;
+        setActiveTenant((prev) => (prev.id === data.tenant.id && prev.name === data.tenant.name ? prev : { ...prev, id: data.tenant.id, name: data.tenant.name }));
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 

@@ -708,6 +708,24 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: true });
   }));
 
+  // Dados básicos (id/nome) do tenant do usuário autenticado — até aqui não
+  // existia rota nenhuma pra isso, e o badge de "empresa ativa" no
+  // cabeçalho (Header.tsx, `activeTenant.name`) vinha só de um mock local
+  // hardcoded no frontend (INITIAL_TENANTS, um único registro fictício da
+  // Monique) sem nenhuma ligação com o tenant real logado. Achado real em
+  // produção: um operador da Clic Piscinas logado via a tela inteira
+  // mostrando "Monique Sorrilha Beauty Studio" no cabeçalho, mesmo com os
+  // dados (conversas, CRM etc) todos corretos por baixo, porque essas rotas
+  // sempre resolveram o tenant pelo JWT — só o badge visual dependia do
+  // mock. Mesmo padrão de autenticação/tenant-escopo das rotas acima, sem
+  // exigir nenhuma role (qualquer operador pode ver o nome do próprio tenant).
+  router.get('/api/tenant', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { data, error } = await getDb().from('tenants').select('id, name').eq('id', tenantOf(req)).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: 'Tenant não encontrado.' });
+    res.json({ tenant: data });
+  }));
+
   const MAX_DOCUMENT_BYTES = 15 * 1024 * 1024; // mesmo limite já anunciado no painel (15MB)
   // Achado real: nada limitava quantos documentos ou quantos MB um tenant
   // podia acumular no bucket compartilhado "app-data" — um tenant sozinho
