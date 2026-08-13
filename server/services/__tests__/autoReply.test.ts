@@ -23,7 +23,10 @@ vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage })
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
-vi.mock('../globalPromptStore', () => ({ getGlobalPromptLayerOverride }));
+vi.mock('../globalPromptStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../globalPromptStore')>();
+  return { ...actual, getGlobalPromptLayerOverride };
+});
 
 const { generateAutoReplyForText } = await import('../autoReply');
 

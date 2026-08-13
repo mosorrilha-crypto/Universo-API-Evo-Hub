@@ -344,6 +344,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   // PR+deploy (ver server/services/globalPromptStore.ts). content null =
   // nenhum override salvo, o texto padrão do código está em vigor.
   const [globalPromptContent, setGlobalPromptContent] = useState<string | null>(null);
+  const [globalPromptDefault, setGlobalPromptDefault] = useState('');
   const [globalPromptDraft, setGlobalPromptDraft] = useState('');
   const [globalPromptUpdatedAt, setGlobalPromptUpdatedAt] = useState<string | null>(null);
   const [globalPromptLoaded, setGlobalPromptLoaded] = useState(false);
@@ -359,7 +360,11 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setGlobalPromptContent(data.content ?? null);
-      setGlobalPromptDraft(data.content || '');
+      setGlobalPromptDefault(data.defaultContent || '');
+      // Sem override salvo: pré-preenche com o texto padrão real (não deixa
+      // a caixa vazia) — achado real de UX, o saas_admin precisa ver o que
+      // está em vigor pra poder editar a partir dali, não só uma dica de texto.
+      setGlobalPromptDraft(data.content || data.defaultContent || '');
       setGlobalPromptUpdatedAt(data.updatedAt || null);
       setGlobalPromptLoaded(true);
     } catch (err: any) {
@@ -380,15 +385,19 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     setIsSavingGlobalPrompt(true);
     setGlobalPromptError(null);
     try {
+      // Salvar o texto padrão sem nenhuma edição real é equivalente a não
+      // ter override nenhum — evita criar uma linha "customizada" idêntica
+      // ao padrão só porque o admin clicou Salvar sem mudar nada.
+      const contentToSave = globalPromptDraft.trim() === globalPromptDefault.trim() ? null : globalPromptDraft.trim() || null;
       const res = await apiFetch('/api/admin/global-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: globalPromptDraft.trim() || null }),
+        body: JSON.stringify({ content: contentToSave }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setGlobalPromptContent(data.content ?? null);
-      setGlobalPromptDraft(data.content || '');
+      setGlobalPromptDraft(data.content || globalPromptDefault);
       setGlobalPromptUpdatedAt(data.updatedAt || null);
     } catch (err: any) {
       setGlobalPromptError(err.message || 'Falha ao salvar o prompt global.');
@@ -409,7 +418,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setGlobalPromptContent(null);
-      setGlobalPromptDraft('');
+      setGlobalPromptDraft(globalPromptDefault);
       setGlobalPromptUpdatedAt(new Date().toISOString());
     } catch (err: any) {
       setGlobalPromptError(err.message || 'Falha ao restaurar o padrão.');
@@ -1571,7 +1580,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   Prompt Global do Agente (Camada 1)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5 max-w-2xl">
-                  Regra fixa que vale pra TODOS os tenants/segmentos — a espinha dorsal da estrutura de vendas (fluxo de pré-reserva/pagamento, quando escalar pra humano, regras de honestidade/segurança). Editar aqui sobrescreve o texto padrão do código sem precisar de deploy. Deixe em branco e salve pra restaurar o padrão.
+                  Regra fixa que vale pra TODOS os tenants/segmentos — a espinha dorsal da estrutura de vendas (fluxo de pré-reserva/pagamento, quando escalar pra humano, regras de honestidade/segurança). O texto abaixo é o que está em vigor agora; edite e salve pra sobrescrever sem precisar de deploy, ou use "Restaurar padrão" pra voltar ao texto original do código.
                 </p>
               </div>
               <button
@@ -1593,14 +1602,14 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             <div className="text-[11px] text-slate-500">
               {globalPromptContent
                 ? `Override customizado em vigor${globalPromptUpdatedAt ? ` — última alteração em ${new Date(globalPromptUpdatedAt).toLocaleString('pt-BR')}` : ''}.`
-                : 'Nenhum override salvo — o texto padrão do código está em vigor.'}
+                : 'Texto padrão do código em vigor (mostrado abaixo) — nenhum override salvo ainda. Edite e salve pra sobrescrever.'}
             </div>
 
             <textarea
               value={globalPromptDraft}
               onChange={(e) => setGlobalPromptDraft(e.target.value)}
               rows={18}
-              placeholder="Deixe em branco pra usar o texto padrão do código (DEFAULT_GLOBAL_LAYER em autoReply.ts). Escreva aqui só se precisar sobrescrever uma regra em produção sem esperar um deploy."
+              placeholder="Carregando o texto em vigor..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-pink-500/60 resize-y"
             />
 
