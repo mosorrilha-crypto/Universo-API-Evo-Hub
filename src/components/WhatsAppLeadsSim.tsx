@@ -1986,14 +1986,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             ))}
           </div>
 
-          {/* Configurações pontuais (Calendar, Auto IA, notificações, limpar
-              testes) — mexidas uma vez e esquecidas, não no dia a dia.
-              Ficam atrás deste botão em vez de sempre visíveis, pra barra
-              não quebrar em 3-4 linhas no mobile. */}
+          {/* Agenda (Google Calendar) — achado real de uso: fica atrás de
+              "Configurações" era difícil de achar pra um item usado o tempo
+              todo (ver comentário sem seu lugar antigo abaixo). Fica sempre
+              visível aqui, ao lado de "Configurações"/"Novo Lead". */}
+          <button
+            onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
+            title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
+            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+              googleCalendarConnected
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+            }`}
+          >
+            <CalendarIcon className="w-3.5 h-3.5" />
+            <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Agenda' : 'Conectar Calendar'}</span>
+          </button>
+
+          {/* Configurações pontuais (Auto IA, notificações, limpar testes,
+              desconectar Calendar) — mexidas uma vez e esquecidas, não no
+              dia a dia. Ficam atrás deste botão em vez de sempre visíveis,
+              pra barra não quebrar em 3-4 linhas no mobile. */}
           <button
             type="button"
             onClick={() => setIsToolbarSettingsOpen((v) => !v)}
-            title="Configurações (Calendar, Auto IA, notificações, limpar testes)"
+            title="Configurações (Auto IA, notificações, limpar testes)"
             className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
               isToolbarSettingsOpen
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
@@ -2025,30 +2042,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <span>Limpar Testes</span>
             </button>
 
-            {/* Conexão do backend com Google Calendar real (usada pelo agente de agendamento) */}
-            <div className="flex items-center gap-1">
+            {/* Desconectar Google Calendar (pra trocar de conta) — ação rara,
+                o botão principal (conectar/ver agenda) já é sempre visível
+                fora de Configurações agora. */}
+            {googleCalendarConnected && (
               <button
-                onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
-                title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-                  googleCalendarConnected
-                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                    : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
-                }`}
+                onClick={handleDisconnectGoogleCalendar}
+                title="Desconectar Google Calendar (pra trocar de conta)"
+                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
               >
-                <CalendarIcon className="w-3.5 h-3.5" />
-                <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Calendar Conectado' : 'Conectar Calendar'}</span>
+                <X className="w-3.5 h-3.5" />
+                <span>Desconectar Calendar</span>
               </button>
-              {googleCalendarConnected && (
-                <button
-                  onClick={handleDisconnectGoogleCalendar}
-                  title="Desconectar Google Calendar (pra trocar de conta)"
-                  className="p-1.5 rounded-lg border border-slate-800 bg-slate-950/80 text-slate-400 hover:text-rose-300 hover:border-rose-800/60 transition-colors cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+            )}
 
             {/* Auto-analyze Toggle Switch */}
             <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
