@@ -1925,8 +1925,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             linha só em vez de quebrar, empurrando a PÁGINA INTEIRA pra
             rolar na horizontal (cortava até o cabeçalho/abas). flex-wrap
             sozinho não resolve: só quebra linha quando o container tem uma
-            largura limitada pra quebrar contra — w-full dá esse limite. */}
-        <div ref={toolbarRef} className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto w-full flex-shrink-0 flex-wrap gap-y-2">
+            largura limitada pra quebrar contra — w-full dá esse limite.
+            Achado real #2 (13/08/2026): a mesma estouração voltava em
+            larguras tablet/phone-landscape (~768-950px), onde o pai vira
+            md:flex-row — aí "md:w-auto" + "flex-shrink-0" faziam esta linha
+            assumir a largura do CONTEÚDO (todos os botões numa linha só,
+            sem nunca ativar o flex-wrap) em vez de respeitar o espaço que
+            sobra ao lado do título. Removido flex-shrink-0 (deixa encolher
+            no espaço disponível) e adicionado md:min-w-0 (min-width:auto
+            padrão de flex item barraria esse encolhimento) — só assim o
+            flex-wrap tem uma largura limitada pra quebrar contra em
+            qualquer breakpoint, não só no mobile puro. */}
+        <div ref={toolbarRef} className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto md:min-w-0 w-full flex-wrap gap-y-2">
           {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
               direto daqui, sem precisar navegar até a barra de abas do topo
               (Header.tsx já tem a aba "Escalonamentos" com o mesmo contador,
