@@ -2427,6 +2427,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <Info className="w-4 h-4" />
                   </button>
 
+                  {/* Transferir pro WhatsApp pessoal do operador — abre um
+                      link wa.me com o telefone deste lead numa aba nova, pro
+                      operador continuar a conversa pelo próprio WhatsApp em
+                      vez do painel. Só abre o link (client-side); nenhuma
+                      mensagem automática é enviada nem nada é gravado no
+                      backend. */}
+                  <button
+                    onClick={() => window.open(`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}`, '_blank', 'noopener,noreferrer')}
+                    className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                    title="Transferir pro WhatsApp pessoal do operador"
+                  >
+                    <Phone className="w-4 h-4" />
+                  </button>
+
                   {/* Achado ao vivo: as ações da conversa (bloquear IA pra
                       esse lead, fixar, marcar não lida, silenciar, arquivar)
                       só existiam no menu ⋮ de cada linha na LISTA — abrindo a
