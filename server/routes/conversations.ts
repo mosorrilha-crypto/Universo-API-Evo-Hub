@@ -21,6 +21,7 @@ import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
+import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
@@ -641,6 +642,63 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(400).json({ error: 'Campo "businessHours" inválido — cada dia precisa de open/close em formato "HH:mm", com close depois de open.' });
     }
     await setTenantBusinessHours(tenantOf(req), businessHours);
+    res.json({ success: true });
+  }));
+
+  const MAX_DOCUMENT_BYTES = 15 * 1024 * 1024; // mesmo limite já anunciado no painel (15MB)
+
+  // Upload real de documento anexado à base de conhecimento — até aqui a
+  // aba "Documentos Anexados" era só um registro visual fictício (achado
+  // real: 2 "documentos" hardcoded no preset da Monique que nunca
+  // existiram de verdade, ninguém conseguia abrir). Extrai texto quando dá
+  // (PDF/TXT/CSV/JSON/MD, ver knowledgeBaseDocumentStore.ts) pra o agente
+  // usar como contexto real (formatKnowledgeBaseForPrompt), com teto de
+  // tamanho pra nunca inflar o prompt sem limite.
+  router.post('/api/knowledge-base/documents', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { fileName, mimeType, base64 } = req.body || {};
+    if (!fileName?.trim() || !base64) {
+      return res.status(400).json({ error: 'Campos "fileName" e "base64" são obrigatórios.' });
+    }
+    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buffer.length > MAX_DOCUMENT_BYTES) {
+      return res.status(400).json({ error: `Arquivo maior que ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB.` });
+    }
+
+    const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const resolvedMimeType = mimeType || 'application/octet-stream';
+    await uploadKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId, buffer, resolvedMimeType);
+    const extractedText = await extractTextFromDocument(buffer, resolvedMimeType, fileName);
+
+    const kb = (await getKnowledgeBase(tenantId)) || {};
+    const newDoc = {
+      id: docId,
+      fileName: String(fileName).trim(),
+      fileSize: `${(buffer.length / (1024 * 1024)).toFixed(1)} MB`,
+      mimeType: resolvedMimeType,
+      uploadDate: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      status: 'Processado' as const,
+      extractedText,
+    };
+    await setKnowledgeBase(tenantId, { ...kb, documents: [...(kb.documents || []), newDoc] });
+    res.json({ document: newDoc });
+  }));
+
+  // Baixa/visualiza o arquivo real — nunca público (pode conter dado
+  // sensível do negócio), mesmo padrão autenticado de GET /api/media/:messageId.
+  router.get('/api/knowledge-base/documents/:docId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const doc = await getKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantOf(req), req.params.docId);
+    if (!doc) return res.status(404).json({ error: 'Documento não encontrado.' });
+    res.setHeader('Content-Type', doc.contentType);
+    res.send(doc.buffer);
+  }));
+
+  router.delete('/api/knowledge-base/documents/:docId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const docId = req.params.docId;
+    await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId);
+    const kb = (await getKnowledgeBase(tenantId)) || {};
+    await setKnowledgeBase(tenantId, { ...kb, documents: (kb.documents || []).filter((d) => d.id !== docId) });
     res.json({ success: true });
   }));
 

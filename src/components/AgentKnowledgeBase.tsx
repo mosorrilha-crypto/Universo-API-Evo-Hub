@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours } from '../types';
+import { apiFetch } from '../lib/apiClient';
 import {
   Brain,
   Sparkles,
@@ -22,7 +23,10 @@ import {
   Check,
   Layers,
   FileCheck,
-  Clock
+  Clock,
+  Download,
+  Loader2,
+  BrainCircuit
 } from 'lucide-react';
 
 interface AgentKnowledgeBaseProps {
@@ -469,38 +473,89 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   };
 
   const MAX_DOC_SIZE_MB = 15;
+  const [uploadingDocNames, setUploadingDocNames] = useState<string[]>([]);
+  const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
 
-  const handleSimulateFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  // Upload real (Storage do backend) — até aqui era só um registro visual
+  // fictício, sem arquivo nenhum de verdade guardado em lugar algum (achado
+  // real: os 2 "documentos" do preset da Monique nunca existiram, ninguém
+  // conseguia abrir). Cada arquivo sobe e grava direto (não fica esperando
+  // o botão "Salvar Regras no Agente" — mesmo motivo de horário de
+  // funcionamento ter save próprio: é outro recurso, não o formData local).
+  const handleRealFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
+    e.target.value = '';
     if (!files || files.length === 0) return;
 
     const fileArray = Array.from(files) as File[];
     const oversized = fileArray.filter((f) => f.size > MAX_DOC_SIZE_MB * 1024 * 1024);
     if (oversized.length > 0) {
-      alert(`Arquivo(s) maior(es) que ${MAX_DOC_SIZE_MB}MB não foram anexados: ${oversized.map((f) => f.name).join(', ')}`);
+      alert(`Arquivo(s) maior(es) que ${MAX_DOC_SIZE_MB}MB não foram enviados: ${oversized.map((f) => f.name).join(', ')}`);
     }
-
     const accepted = fileArray.filter((f) => f.size <= MAX_DOC_SIZE_MB * 1024 * 1024);
-    const newDocs: AgentFileDoc[] = accepted.map((f: File, i: number) => ({
-      id: (Date.now() + i).toString(),
-      fileName: f.name,
-      fileSize: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
-      uploadDate: 'Agora mesmo',
-      status: 'Processado'
-    }));
+    if (!accepted.length) return;
 
-    setFormData((prev) => ({
-      ...prev,
-      documents: [...prev.documents, ...newDocs]
-    }));
-    e.target.value = '';
+    setUploadingDocNames(accepted.map((f) => f.name));
+    for (const file of accepted) {
+      try {
+        const base64 = await fileToBase64(file);
+        const res = await apiFetch('/api/knowledge-base/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { document } = await res.json();
+        setFormData((prev) => ({ ...prev, documents: [...prev.documents, document] }));
+      } catch (err) {
+        console.error('Falha ao enviar documento:', err);
+        alert(`Não foi possível enviar "${file.name}". Tente novamente.`);
+      }
+    }
+    setUploadingDocNames([]);
   };
 
-  const handleDeleteDoc = (id: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      documents: prev.documents.filter((d) => d.id !== id)
-    }));
+  const handleDeleteDoc = async (id: string) => {
+    const previous = formData.documents;
+    setFormData((prev) => ({ ...prev, documents: prev.documents.filter((d) => d.id !== id) }));
+    try {
+      const res = await apiFetch(`/api/knowledge-base/documents/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao apagar documento no servidor:', err);
+      setFormData((prev) => ({ ...prev, documents: previous }));
+      alert('Não foi possível apagar o documento no servidor. Tente novamente.');
+    }
+  };
+
+  const handleDownloadDoc = async (doc: AgentFileDoc) => {
+    setDownloadingDocId(doc.id);
+    try {
+      const res = await apiFetch(`/api/knowledge-base/documents/${doc.id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.download = doc.fileName;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      console.error('Falha ao baixar documento:', err);
+      alert('Não foi possível abrir o documento.');
+    } finally {
+      setDownloadingDocId(null);
+    }
   };
 
   const handleResetToDefault = () => {
@@ -1059,7 +1114,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Documentos & Manuais de Treinamento
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Anexe arquivos PDF, manuais, termos de uso ou catálogos como referência do que a IA deve saber. ⚠️ O conteúdo do arquivo ainda NÃO é lido pelo agente automaticamente — hoje serve só como registro/checklist do que já foi entregue à equipe. Pra passar uma instrução direto pra IA, use as abas "Regras de Negócio" ou "FAQs".
+                  Anexe arquivos PDF, manuais, termos de uso ou catálogos como referência do que a IA deve saber. Documentos PDF, TXT, CSV, JSON e MD têm o conteúdo lido pelo agente automaticamente (com um limite de tamanho); outros formatos (ex: DOCX) ficam salvos e disponíveis pra baixar, mas o texto não entra no prompt da IA.
                 </p>
               </div>
             </div>
@@ -1070,15 +1125,22 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 type="file"
                 multiple
                 accept=".pdf,.doc,.docx,.txt,.csv,.json"
-                onChange={handleSimulateFileUpload}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                onChange={handleRealFileUpload}
+                disabled={uploadingDocNames.length > 0}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full disabled:cursor-not-allowed"
               />
               <div className="w-12 h-12 rounded-full bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 mx-auto">
-                <Upload className="w-6 h-6" />
+                {uploadingDocNames.length > 0 ? (
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                ) : (
+                  <Upload className="w-6 h-6" />
+                )}
               </div>
               <div>
                 <span className="text-xs font-bold text-white block">
-                  Arraste e solte arquivos aqui ou clique para selecionar
+                  {uploadingDocNames.length > 0
+                    ? `Enviando ${uploadingDocNames.join(', ')}...`
+                    : 'Arraste e solte arquivos aqui ou clique para selecionar'}
                 </span>
                 <span className="text-[11px] text-slate-400 block mt-1">
                   Formatos aceitos: PDF, DOCX, TXT, CSV, JSON (Até 15MB cada)
@@ -1109,10 +1171,38 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   </div>
 
                   <div className="flex items-center space-x-3">
+                    {doc.extractedText ? (
+                      <span
+                        className="px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 text-[10px] font-bold border border-purple-800/60 flex items-center gap-1"
+                        title="O agente lê o conteúdo deste arquivo"
+                      >
+                        <BrainCircuit className="w-3 h-3 text-purple-400" />
+                        Lido pela IA
+                      </span>
+                    ) : (
+                      <span
+                        className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-bold border border-slate-700"
+                        title="Formato sem leitura automática — só arquivo/registro"
+                      >
+                        Somente arquivo
+                      </span>
+                    )}
                     <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 text-[10px] font-bold border border-emerald-800/60 flex items-center gap-1">
                       <Check className="w-3 h-3 text-emerald-400" />
                       {doc.status}
                     </span>
+                    <button
+                      onClick={() => handleDownloadDoc(doc)}
+                      disabled={downloadingDocId === doc.id}
+                      className="text-slate-500 hover:text-purple-400 p-1 transition-colors cursor-pointer disabled:opacity-50"
+                      title="Baixar documento"
+                    >
+                      {downloadingDocId === doc.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4" />
+                      )}
+                    </button>
                     <button
                       onClick={() => handleDeleteDoc(doc.id)}
                       className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
