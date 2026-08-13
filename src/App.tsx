@@ -138,6 +138,29 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
 
+  // Bug real relatado em produção: o badge de "empresa ativa" no cabeçalho
+  // (e tudo que depende de `activeTenant`, como o polling de CRM leads —
+  // ver `[activeTenant.id]` abaixo) nunca era sincronizado com o usuário que
+  // de fato logou. `activeTenant` nascia sempre com `tenants[0]` e só mudava
+  // via seletor manual (saas_admin) — então um operador da Clic Piscinas
+  // logando no mesmo aparelho onde antes tinha logado um operador da
+  // Monique via a tela inteira mostrando "Monique Sorrilha" no cabeçalho,
+  // mesmo com os dados reais (que sempre resolvem o tenant pelo JWT no
+  // backend) corretos por baixo — a sensação de "cache misturando tenant"
+  // vinha metade daqui, metade do merge de conversas nunca descartar leads
+  // antigos (ver WhatsAppLeadsSim.tsx). Roda só quando `currentUser` muda
+  // (login/logout/troca de conta) — nunca sobrescreve uma escolha manual do
+  // seletor de tenant do saas_admin feita depois do login.
+  useEffect(() => {
+    if (!currentUser) return;
+    setActiveTenant((prev) => {
+      if (prev.id === currentUser.tenantId) return prev;
+      const matching = tenants.find((t) => t.id === currentUser.tenantId);
+      return matching || prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
+
   // CRM Leads — bug real em produção (12/08/2026): sempre que o cache local
   // estava vazio (navegador novo, aba anônima, ou depois de limpar dados do
   // site pra corrigir outro bug), essa tela caía pro conjunto inteiro de
