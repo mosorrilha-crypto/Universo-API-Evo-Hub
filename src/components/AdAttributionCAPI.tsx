@@ -70,47 +70,16 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
     }
   });
 
-  // Dispatched CAPI Events Log
+  // Dispatched CAPI Events Log — só eventos reais, disparados de verdade via
+  // POST /api/meta-capi/send-event (ver handleSendCAPIEvent abaixo). Nunca
+  // semear com dado de demonstração aqui: os cards acima (Event Match Quality
+  // Score, Eventos Enviados) usam esse array direto, então qualquer entrada
+  // fake apareceria misturada com atividade real sem nenhuma forma de
+  // diferenciar uma da outra.
   const [capiEventsLog, setCapiEventsLog] = useState<MetaCAPIEvent[]>(() => {
     try {
       const saved = localStorage.getItem('meta_capi_events_log');
-      return saved ? JSON.parse(saved) : [
-        {
-          id: 'evt-101',
-          leadId: 'lead-101',
-          leadName: 'Carlos Mendes',
-          eventName: 'Lead',
-          eventTime: new Date(Date.now() - 3600000).toISOString(),
-          pixelId: '891029384712039',
-          status: 'sent',
-          testEventCode: 'TEST98765',
-          matchQualityScore: 8.8,
-          userHash: {
-            phoneHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-            emailHash: '9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b',
-            fbc: 'fb.1.1712000000.IwAR3x90A1b2c3d4e5f6',
-            fbp: 'fb.1.1712000000.987654321',
-          },
-          eventValue: 490,
-        },
-        {
-          id: 'evt-102',
-          leadId: 'lead-102',
-          leadName: 'Juliana Rocha - Imóveis',
-          eventName: 'Contact',
-          eventTime: new Date(Date.now() - 1800000).toISOString(),
-          pixelId: '891029384712039',
-          status: 'sent',
-          testEventCode: 'TEST98765',
-          matchQualityScore: 9.1,
-          userHash: {
-            phoneHash: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8',
-            fbc: 'fb.1.1712000000.Cj0KCQiA8v_932918392183_9213',
-            fbp: 'fb.1.1712000000.123456789',
-          },
-          eventValue: 1200,
-        },
-      ];
+      return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
