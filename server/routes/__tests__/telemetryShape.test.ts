@@ -17,6 +17,7 @@ import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 
 let server: Server;
 let baseUrl: string;
+let supabase: ReturnType<typeof createFakeSupabase>;
 
 function fakeAuthenticateToken(req: any, _res: any, next: any) {
   req.user = { id: 'op-1', tenantId: 'tenant-a', role: 'saas_admin' };
@@ -24,7 +25,8 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
 }
 
 beforeAll(async () => {
-  initDb(createFakeSupabase());
+  supabase = createFakeSupabase();
+  initDb(supabase);
   const app = express();
   app.use(express.json());
   app.use(createTelemetryRouter({ authenticateToken: fakeAuthenticateToken as any }));
@@ -59,6 +61,26 @@ describe('GET /api/telemetry/tokens — formato honesto, sem dado fabricado', ()
     });
     // Nunca mais um nome fictício de tenant na resposta desta rota.
     expect(JSON.stringify(data)).not.toContain('Odonto');
+  });
+
+  it('achado real em produção (13/08/2026): cada registro por tenant tem exatamente os campos de TenantTokenTelemetry (src/types.ts) — sem "estimatedCostUSD" nenhum, campo que só o frontend achava que existia e nunca veio do backend; o frontend lia `tRecord.estimatedCostUSD.toFixed(5)` sobre `undefined` assim que telemetria real (não mais vazia) chegava, jogando a aba "Telemetria de Tokens IA" inteira em branco (React desmonta a árvore sem Error Boundary)', async () => {
+    supabase.__tables['tenants'] = [{ id: 'tenant-real-1', name: 'Cliente Real' }];
+    supabase.__tables['gemini_token_usage'] = [
+      { tenant_id: 'tenant-real-1', prompt_tokens: 100, candidates_tokens: 40, total_tokens: 140, cached_tokens: 10, created_at: new Date().toISOString() },
+    ];
+
+    const res = await fetch(`${baseUrl}/api/telemetry/tokens`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    expect(data.tenantsTelemetry).toHaveLength(1);
+    const record = data.tenantsTelemetry[0];
+    expect(Object.keys(record).sort()).toEqual(
+      ['candidatesTokens', 'cachedTokensSaved', 'lastRequestAt', 'promptTokens', 'requestCount', 'tenantId', 'tenantName', 'totalTokens'].sort()
+    );
+    expect(record).not.toHaveProperty('estimatedCostUSD');
+    expect(record.tenantName).toBe('Cliente Real');
+    expect(record.totalTokens).toBe(140);
   });
 });
 

@@ -348,6 +348,13 @@ export interface WebhookConfig {
   minUrgencyForAlert: number;
 }
 
+/** Espelha TenantTokenSummary (server/services/tokenUsageStore.ts) — sem
+ * `estimatedCostUSD`: não existe uma constante confiável de preço por token
+ * pro modelo em uso, e o backend nunca calculou isso por tenant. Esse campo
+ * chegou a existir aqui e causou uma tela branca real em produção
+ * (13/08/2026) — `tRecord.estimatedCostUSD.toFixed(5)` lançando sobre
+ * `undefined` assim que telemetria real (não mais vazia) chegava do
+ * backend, sem Error Boundary pra conter o crash. */
 export interface TenantTokenTelemetry {
   tenantId: string;
   tenantName: string;
@@ -355,7 +362,6 @@ export interface TenantTokenTelemetry {
   candidatesTokens: number;
   totalTokens: number;
   requestCount: number;
-  estimatedCostUSD: number;
   cachedTokensSaved: number;
   lastRequestAt: string;
 }
