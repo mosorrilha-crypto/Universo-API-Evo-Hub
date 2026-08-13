@@ -12,6 +12,8 @@ interface ManualAppointmentModalProps {
   onDateChange: (value: string) => void;
   time: string;
   onTimeChange: (value: string) => void;
+  notes: string;
+  onNotesChange: (value: string) => void;
   error: string | null;
   isCreating: boolean;
   onSubmit: (e: React.FormEvent) => void;
@@ -19,7 +21,7 @@ interface ManualAppointmentModalProps {
 }
 
 export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
-  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, date, onDateChange, time, onTimeChange, error, isCreating, onSubmit, onClose,
+  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, date, onDateChange, time, onTimeChange, notes, onNotesChange, error, isCreating, onSubmit, onClose,
 }) => {
   if (!isOpen) return null;
   return (
@@ -91,6 +93,17 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-slate-300 block mb-1">Descrição (opcional)</label>
+            <textarea
+              rows={3}
+              placeholder="Ex: cliente pediu pra confirmar o endereço antes, quer levar acompanhante..."
+              value={notes}
+              onChange={(e) => onNotesChange(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none resize-none"
+            />
           </div>
 
           <div className="flex justify-end space-x-2 pt-2">

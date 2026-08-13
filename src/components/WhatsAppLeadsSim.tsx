@@ -1001,6 +1001,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [manualServiceName, setManualServiceName] = useState('');
   const [manualDate, setManualDate] = useState('');
   const [manualTime, setManualTime] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
   const [isCreatingManualAppointment, setIsCreatingManualAppointment] = useState(false);
   const [manualAppointmentError, setManualAppointmentError] = useState<string | null>(null);
   const [manualAppointmentSuccess, setManualAppointmentSuccess] = useState(false);
@@ -1020,7 +1021,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/manual-appointment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso }),
+        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso, notes: manualNotes.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -1029,6 +1030,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setManualServiceName('');
       setManualDate('');
       setManualTime('');
+      setManualNotes('');
       setManualAppointmentSuccess(true);
       setTimeout(() => setManualAppointmentSuccess(false), 4000);
     } catch (err: any) {
@@ -3246,10 +3248,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onDateChange={setManualDate}
         time={manualTime}
         onTimeChange={setManualTime}
+        notes={manualNotes}
+        onNotesChange={setManualNotes}
         error={manualAppointmentError}
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
-        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); }}
+        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); }}
       />
 
       <StatusModal

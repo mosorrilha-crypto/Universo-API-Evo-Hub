@@ -531,7 +531,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const { serviceName, startIso, endIso } = req.body || {};
+    const { serviceName, startIso, endIso, notes } = req.body || {};
     if (!serviceName?.trim() || !startIso || !endIso) {
       return res.status(400).json({ error: 'Campos "serviceName", "startIso" e "endIso" são obrigatórios.' });
     }
@@ -558,9 +558,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(409).json({ error: 'Esse horário já está ocupado na agenda.' });
     }
 
+    // Observação livre do operador (ex: "cliente pediu produto X junto",
+    // "confirmar endereço antes") — some junto da tag fixa que já marca o
+    // evento como agendamento manual, não substitui ela.
+    const description = typeof notes === 'string' && notes.trim()
+      ? `Agendado manualmente pelo operador no painel.\n\n${notes.trim()}`
+      : 'Agendado manualmente pelo operador no painel.';
+
     let eventId: string;
     try {
-      eventId = await createCalendarEvent(tenantId, calendarConfig, serviceName.trim(), 'Agendado manualmente pelo operador no painel.', startIso, endIso, BUSINESS_TIMEZONE);
+      eventId = await createCalendarEvent(tenantId, calendarConfig, serviceName.trim(), description, startIso, endIso, BUSINESS_TIMEZONE);
     } catch (err: any) {
       return res.status(502).json({ error: `Falha ao criar o evento na agenda: ${err.message}` });
     }
