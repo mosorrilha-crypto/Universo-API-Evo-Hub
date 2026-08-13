@@ -751,6 +751,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // lista — sem substituir os leads de exemplo/simulados que já existirem.
   useEffect(() => {
     let cancelled = false;
+    // Zera a contagem anterior a cada (re)início do efeito — inclui a troca
+    // de tenant, pra não arriscar comparar a contagem de mensagens de um
+    // telefone contra o valor guardado de um tenant diferente.
+    lastMessageCountRef.current = new Map();
 
     const fetchRealConversations = async () => {
       try {
@@ -776,8 +780,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           lastMessageCountRef.current.set(id, conv.messages.length);
         }
 
+        // Ids de conversa real que o servidor confirmou existir AGORA, pro
+        // tenant do usuário logado — usado logo abaixo pra descartar
+        // qualquer lead "isReal" que sobrou de um tenant anterior (achado
+        // real em produção: trocar de conta no mesmo aparelho sem dar reload
+        // deixava os contatos do tenant anterior presos na lista pra sempre,
+        // porque esse merge só ADICIONAVA/ATUALIZAVA por id, nunca removia
+        // quem não vinha mais na resposta).
+        const currentRealIds = new Set(realConversations.map((conv) => `real-${conv.phone}`));
+
         setLeads((prev) => {
-          const byId = new Map(prev.map((l) => [l.id, l]));
+          const byId = new Map(
+            prev.filter((l) => !(l as any).isReal || currentRealIds.has(l.id)).map((l) => [l.id, l])
+          );
           for (const conv of realConversations) {
             const id = `real-${conv.phone}`;
             const existing = byId.get(id);
@@ -872,7 +887,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const safetyPoll = setInterval(fetchRealConversations, 90000);
 
     return () => { cancelled = true; source?.close(); clearInterval(safetyPoll); };
-  }, []);
+    // `activeTenant.id` como dependência: sem isso, trocar de conta (ou o
+    // saas_admin trocar de tenant) no mesmo componente montado (ele nunca
+    // desmonta, ver comentário em App.tsx) deixava o fetch/SSE presos no
+    // token/tenant de quando o componente montou pela primeira vez —
+    // só se atualizava depois de até 90s (o poll de segurança) ou de uma
+    // reconexão de SSE por acaso, nunca de forma imediata.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
 
   // Sugestões de etiqueta pro autocomplete — todas as já usadas nesse tenant
   // (evita "Interesada en pestañas" e "Interessada em Pestañas" como duas
