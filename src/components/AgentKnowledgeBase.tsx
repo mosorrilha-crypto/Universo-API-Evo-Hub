@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc } from '../types';
+import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours } from '../types';
 import {
   Brain,
   Sparkles,
@@ -21,14 +21,30 @@ import {
   Sliders,
   Check,
   Layers,
-  FileCheck
+  FileCheck,
+  Clock
 } from 'lucide-react';
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
   onSaveKnowledgeBase: (kb: AgentKnowledgeBase) => Promise<boolean>;
+  businessHours: BusinessHours;
+  onSaveBusinessHours: (hours: BusinessHours) => Promise<boolean>;
   onGoToWhatsAppSim: () => void;
 }
+
+/** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
+const WEEKDAY_LABELS: { key: string; label: string }[] = [
+  { key: '1', label: 'Segunda' },
+  { key: '2', label: 'Terça' },
+  { key: '3', label: 'Quarta' },
+  { key: '4', label: 'Quinta' },
+  { key: '5', label: 'Sexta' },
+  { key: '6', label: 'Sábado' },
+  { key: '0', label: 'Domingo' },
+];
+
+const DEFAULT_DAY_HOURS: DayHours = { open: '09:00', close: '18:00' };
 
 /**
  * Achado real em produção: os catálogos semeados via scripts/seed-monique-
@@ -264,6 +280,8 @@ const PRESET_TEMPLATES: { name: string; icon: string; desc: string; data: Partia
 export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   knowledgeBase,
   onSaveKnowledgeBase,
+  businessHours,
+  onSaveBusinessHours,
   onGoToWhatsAppSim
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
@@ -273,6 +291,39 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     documents: ensureUniqueIds(knowledgeBase.documents, 'doc'),
   }));
   const [isSavedToast, setIsSavedToast] = useState(false);
+
+  // Recurso separado (tabela `tenants`, não a base de conhecimento) — save
+  // próprio, não passa pelo handleSave/onSaveKnowledgeBase de cima.
+  const [hoursForm, setHoursForm] = useState<BusinessHours>(() => businessHours);
+  const [isSavingHours, setIsSavingHours] = useState(false);
+
+  const handleToggleDay = (day: string, enabled: boolean) => {
+    setHoursForm((prev) => {
+      const next = { ...prev };
+      if (enabled) {
+        next[day] = prev[day] || { ...DEFAULT_DAY_HOURS };
+      } else {
+        delete next[day];
+      }
+      return next;
+    });
+  };
+
+  const handleDayTimeChange = (day: string, field: keyof DayHours, value: string) => {
+    setHoursForm((prev) => ({
+      ...prev,
+      [day]: { ...(prev[day] || DEFAULT_DAY_HOURS), [field]: value },
+    }));
+  };
+
+  const handleSaveHours = async () => {
+    setIsSavingHours(true);
+    try {
+      await onSaveBusinessHours(hoursForm);
+    } finally {
+      setIsSavingHours(false);
+    }
+  };
   const [activeSubSection, setActiveSubSection] = useState<'general' | 'products' | 'rules' | 'faqs' | 'docs'>('general');
 
   // Input states for adding new items
@@ -681,6 +732,72 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 placeholder="Ex: Aceitamos Pix, Cartão em até 12x e Boleto bancário. Prazos de entrega de 48h úteis."
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
               />
+            </div>
+
+            {/* Horário de Funcionamento — recurso separado (tabela `tenants`),
+                usado de verdade pelo agendamento automático real (autoReply.ts/
+                googleCalendar.ts) pra nunca oferecer horário fora do
+                expediente. Save próprio, independente do botão "Salvar Regras
+                no Agente" no topo. */}
+            <div className="border-t border-slate-800 pt-5">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-emerald-400" />
+                  Horário de Funcionamento
+                </h3>
+                <button
+                  onClick={handleSaveHours}
+                  disabled={isSavingHours}
+                  className="px-3 py-1.5 rounded-lg font-bold text-[11px] bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isSavingHours ? 'Salvando...' : 'Salvar Horário'}</span>
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                O agendamento automático nunca oferece nem confirma um horário fora do expediente cadastrado aqui. Dias sem marcação = sem atendimento.
+              </p>
+              <div className="space-y-1.5">
+                {WEEKDAY_LABELS.map(({ key, label }) => {
+                  const dayHours = hoursForm[key];
+                  const enabled = !!dayHours;
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs"
+                    >
+                      <label className="flex items-center gap-2 w-28 flex-shrink-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={enabled}
+                          onChange={(e) => handleToggleDay(key, e.target.checked)}
+                          className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                        />
+                        <span className={enabled ? 'text-white font-semibold' : 'text-slate-500'}>{label}</span>
+                      </label>
+                      {enabled ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="time"
+                            value={dayHours!.open}
+                            onChange={(e) => handleDayTimeChange(key, 'open', e.target.value)}
+                            className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-emerald-500 focus:outline-none"
+                          />
+                          <span className="text-slate-500">até</span>
+                          <input
+                            type="time"
+                            value={dayHours!.close}
+                            onChange={(e) => handleDayTimeChange(key, 'close', e.target.value)}
+                            className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-emerald-500 focus:outline-none"
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-slate-600 italic">sem atendimento</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}

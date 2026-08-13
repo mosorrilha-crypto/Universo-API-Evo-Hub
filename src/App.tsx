@@ -6,6 +6,7 @@ import {
   LeadInfo,
   FinancialTransaction,
   AgentKnowledgeBase,
+  BusinessHours,
   SavedTranscriptItem,
   EscalationInfo
 } from './types';
@@ -167,6 +168,12 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : moniqueStudioKnowledgeBase;
   });
 
+  // Horário de funcionamento real do tenant (tabela `tenants`, GET/POST
+  // /api/business-hours) — usado pelo agendamento automático pra nunca
+  // oferecer horário fora do expediente; até aqui só existia via SQL direto,
+  // sem nenhuma tela pro operador ver ou editar.
+  const [businessHours, setBusinessHours] = useState<BusinessHours>({});
+
   // Transcripts
   const [savedTranscripts, setSavedTranscripts] = useState<SavedTranscriptItem[]>([]);
 
@@ -263,6 +270,17 @@ export const App: React.FC = () => {
             documents: data.knowledgeBase.documents || prev.documents || [],
           }));
         }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Busca o horário de funcionamento real salvo no backend (usado pelo
+  // agendamento automático de verdade) e sincroniza no painel, se existir.
+  useEffect(() => {
+    apiFetch('/api/business-hours')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.businessHours) setBusinessHours(data.businessHours);
       })
       .catch(() => {});
   }, []);
@@ -754,6 +772,24 @@ export const App: React.FC = () => {
         {activeTab === 'knowledge' && canSeeAdminTools && (
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
+            businessHours={businessHours}
+            onSaveBusinessHours={async (updatedHours) => {
+              try {
+                const res = await apiFetch('/api/business-hours', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ businessHours: updatedHours }),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                setBusinessHours(updatedHours);
+                showToast('Horário de funcionamento salvo!');
+                return true;
+              } catch (err) {
+                console.error('Falha ao salvar horário de funcionamento no backend:', err);
+                showToast('Não foi possível salvar o horário — o agendamento automático pode continuar usando o horário antigo. Tente novamente.');
+                return false;
+              }
+            }}
             onSaveKnowledgeBase={async (updatedKb) => {
               setKnowledgeBase(updatedKb);
               try {
