@@ -5,6 +5,7 @@ import { requireRole, isSaasAdmin } from '../middleware/rbac';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { setEvolutionWebhook } from '../services/evolutionSend';
+import { getGlobalPromptLayerRow, setGlobalPromptLayer } from '../services/globalPromptStore';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -54,9 +55,11 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
         secondary_currency: secondaryCurrency || null,
         secondary_locale: secondaryLocale || null,
         // Camada 2 do prompt do agente (docs/AGENTE-VERTICAL-ARQUITETURA.md
-        // seção 1) — default 'beauty_studio' já cobre o único segmento
-        // real hoje; passar explícito prepara pro segundo segmento.
-        segment: segment || 'beauty_studio',
+        // seção 1) — achado numa auditoria: default 'beauty_studio' aqui
+        // fazia qualquer tenant de outro ramo herdar sem querer regras de
+        // clínica de estética. 'generic' não bate com nenhuma chave de
+        // SEGMENT_LAYERS (autoReply.ts) — só a Camada 1 (Global) se aplica.
+        segment: segment || 'generic',
       })
       .select('*')
       .single();
@@ -322,6 +325,29 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     } catch (err: any) {
       res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
     }
+  }));
+
+  // ── Camada 1 (Global) do prompt do agente ───────────────────────────────
+  // Pedido real do dono do produto: poder ajustar a regra fixa do agente
+  // (docs/AGENTE-VERTICAL-ARQUITETURA.md seção 1) direto pelo painel quando
+  // encontrar um problema numa conversa real, sem depender de PR+deploy a
+  // cada vez (motivado por duas rodadas seguidas de correção de alucinação
+  // de mídia na mesma sessão de desenvolvimento). Só saas_admin — é
+  // compartilhado por TODOS os tenants, não um dado de um tenant só.
+  router.get('/api/admin/global-prompt', authenticateToken, requireRole('saas_admin'), asyncHandler(async (_req, res) => {
+    const row = await getGlobalPromptLayerRow();
+    res.json(row);
+  }));
+
+  router.post('/api/admin/global-prompt', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { content } = req.body || {};
+    if (content !== null && typeof content !== 'string') {
+      return res.status(400).json({ error: 'Campo "content" precisa ser string ou null (null reseta pro padrão).' });
+    }
+    const operatorId = req.user?.id;
+    if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });
+    await setGlobalPromptLayer(content, operatorId);
+    res.json(await getGlobalPromptLayerRow());
   }));
 
   return router;
