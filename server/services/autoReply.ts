@@ -37,6 +37,23 @@ export interface MediaSendConfig {
   supabaseKey?: string;
 }
 
+/**
+ * Bug real de produção (13/08/2026): o gate que decide se runMidiaTool roda
+ * só checava phoneNumberId/accessToken — campos exclusivos do provider Meta.
+ * Pra qualquer tenant configurado via Evolution API (QR Code, ex: Clic
+ * Piscinas), a ferramenta de foto/vídeo NUNCA rodava, mesmo com credencial
+ * Evolution completa — sobreviveu intacto às rodadas de correção de
+ * alucinação/match de nome (#222, #223) porque nenhuma delas tocou essa
+ * linha específica. Cliente pedia vídeo, o agente respondia corretamente
+ * "não tenho" (a ferramenta nunca era chamada pra sequer tentar).
+ */
+function hasMediaSendConfig(mediaConfig?: MediaSendConfig): boolean {
+  if (!mediaConfig) return false;
+  return mediaConfig.provider === 'evolution'
+    ? !!(mediaConfig.evolutionInstanceName && mediaConfig.evolutionApiUrl && mediaConfig.evolutionApiKey)
+    : !!(mediaConfig.phoneNumberId && mediaConfig.accessToken);
+}
+
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
 export type AgentType = 'triagem' | 'faq' | 'agendamento' | 'reclamacao';
 
@@ -1038,8 +1055,8 @@ export async function generateAutoReplyForText(
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
       agendamentoToolsRan = result.actionsSummary.length > 0;
-    } else if (agent !== 'agendamento' && phone && mediaConfig?.phoneNumberId && mediaConfig?.accessToken) {
-      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig, history);
+    } else if (agent !== 'agendamento' && phone && hasMediaSendConfig(mediaConfig)) {
+      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history);
       if (actionsSummary.length) {
         extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
       }

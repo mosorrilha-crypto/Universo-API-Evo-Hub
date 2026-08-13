@@ -11,6 +11,7 @@ import type { GoogleGenAI } from '@google/genai';
 
 const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
+const sendEvolutionMediaMessage = vi.fn(async () => undefined);
 const recordOutgoingMessage = vi.fn(async () => ({}) as any);
 const PRODUCT_WITH_PHOTO = { name: 'Microlips', price: 'Gs 500.000', exampleImageBase64: 'data:image/jpeg;base64,QQ==', exampleImageMimeType: 'image/jpeg' };
 const PRODUCT_WITH_VIDEO = { name: 'Efecto Volumen Brasileño', price: 'Gs 200.000', exampleVideoId: 'video-1', exampleVideoMimeType: 'video/mp4', exampleVideoFileName: 'volumen.mp4' };
@@ -20,6 +21,7 @@ const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-vid
 const getGlobalPromptLayerOverride = vi.fn(async () => null as string | null);
 
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
+vi.mock('../evolutionSend', () => ({ sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
@@ -410,6 +412,25 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
     );
 
     expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+  });
+
+  it('envia o vídeo real via Evolution API quando o tenant é configurado por QR Code — regressão do bug real (13/08/2026): o gate só reconhecia phoneNumberId/accessToken (Meta), então nenhum tenant Evolution (ex: Clic Piscinas) nunca recebia foto/vídeo, mesmo com credencial completa', async () => {
+    sendEvolutionMediaMessage.mockClear();
+    getKnowledgeBaseVideo.mockClear();
+    const { ai } = makeFakeAiWithVideoTool(true);
+
+    const result = await generateAutoReplyForText(
+      'tenant-piscinas', ai, 'tem vídeo da piscina?', 'Lucas', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio',
+      { provider: 'evolution', evolutionInstanceName: 'inst-1', evolutionApiUrl: 'https://evo.example.com', evolutionApiKey: 'evo-key', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(result).not.toBeNull();
+    expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-piscinas', 'video-1');
+    expect(sendEvolutionMediaMessage).toHaveBeenCalledWith(
+      'inst-1', 'https://evo.example.com', 'evo-key', '595981234567',
+      Buffer.from('fake-video-bytes').toString('base64'), 'video/mp4', 'volumen.mp4', 'Efecto Volumen Brasileño'
+    );
   });
 });
 
