@@ -16,11 +16,14 @@ const PRODUCT_WITH_PHOTO = { name: 'Microlips', price: 'Gs 500.000', exampleImag
 const PRODUCT_WITH_VIDEO = { name: 'Efecto Volumen Brasileño', price: 'Gs 200.000', exampleVideoId: 'video-1', exampleVideoMimeType: 'video/mp4', exampleVideoFileName: 'volumen.mp4' };
 const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO, PRODUCT_WITH_VIDEO] }));
 const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
+// null = sem override salvo pelo saas_admin — cai no DEFAULT_GLOBAL_LAYER hardcoded, que é o que os testes abaixo verificam.
+const getGlobalPromptLayerOverride = vi.fn(async () => null as string | null);
 
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
+vi.mock('../globalPromptStore', () => ({ getGlobalPromptLayerOverride }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
 
@@ -86,7 +89,30 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(userContent).not.toContain('REGRAS DE ESTILO');
   });
 
-  it('usa o segmento default (beauty_studio) quando o chamador não passa nenhum', async () => {
+  it('usa o override da Camada 1 salvo por um saas_admin (global_prompt_layer) em vez do texto padrão hardcoded, quando existir', async () => {
+    const customGlobalLayer = 'REGRA CUSTOMIZADA DE TESTE: sempre responda em maiúsculas.';
+    getGlobalPromptLayerOverride.mockResolvedValueOnce(customGlobalLayer);
+    const { ai, calls } = makeFakeAi();
+
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain(customGlobalLayer);
+    expect(systemInstruction).not.toContain('Nunca finja escassez'); // texto do DEFAULT_GLOBAL_LAYER não deveria aparecer junto
+  });
+
+  it('cai no texto padrão (DEFAULT_GLOBAL_LAYER) se a busca do override falhar (nunca derruba a resposta por causa disso)', async () => {
+    getGlobalPromptLayerOverride.mockRejectedValueOnce(new Error('Supabase fora do ar'));
+    const { ai, calls } = makeFakeAi();
+
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+
+    expect(result).not.toBeNull();
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('Nunca finja escassez');
+  });
+
+  it('usa o segmento default (generic — sem regras de segmento nenhuma) quando o chamador não passa nenhum', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
     expect(calls[1].config.systemInstruction).toBeTruthy();

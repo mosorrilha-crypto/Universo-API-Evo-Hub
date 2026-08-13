@@ -15,6 +15,7 @@ import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
+import { getGlobalPromptLayerOverride } from './globalPromptStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
@@ -161,7 +162,8 @@ DESISTÊNCIA/CANCELAMENTO: se o cliente sinalizar que quer desistir ou cancelar,
  * da Monique e foi promovido pra cá, pra não precisar ser reescrito a cada
  * novo tenant/segmento.
  */
-const GLOBAL_LAYER = `Prioridade quando houver conflito entre instruções: 1) segurança/privacidade/honestidade, 2) regras oficiais do negócio, 3) disponibilidade real e confirmação de pagamentos, 4) necessidade e segurança do cliente, 5) conversão e fechamento, 6) tom/criatividade/carinho — nunca invente informação nem sacrifique honestidade/segurança/disponibilidade real em favor da conversão.
+/** Usado quando nenhum override foi salvo em global_prompt_layer (ver globalPromptStore.ts) — texto padrão da Camada 1, nunca deletado do código, só sobreposto. */
+const DEFAULT_GLOBAL_LAYER = `Prioridade quando houver conflito entre instruções: 1) segurança/privacidade/honestidade, 2) regras oficiais do negócio, 3) disponibilidade real e confirmação de pagamentos, 4) necessidade e segurança do cliente, 5) conversão e fechamento, 6) tom/criatividade/carinho — nunca invente informação nem sacrifique honestidade/segurança/disponibilidade real em favor da conversão.
 
 Responda primeiro à dúvida direta do cliente (nunca ignore uma pergunta pra emplacar um discurso longo) e faça só UMA pergunta curta de continuidade por vez — nunca interrogatório. Nunca repita uma pergunta que o cliente já respondeu antes na conversa. Ao recomendar algo do catálogo, não despeje a tabela inteira de preços — sugira 1 ou 2 opções explicando a diferença, com base no que o cliente contou que busca.
 
@@ -203,19 +205,21 @@ Encaminhe pra atendimento humano sempre que o caso envolver: procedimento estét
 };
 
 /**
- * Camada 1 (global, fixa, nunca muda por tenant/segmento) + Camada 2
- * (segmento) combinadas — vão como `systemInstruction` da chamada ao
- * Gemini, separadas do conteúdo variável (tenant + dinâmico + histórico),
- * que vai no `contents` da mensagem. Isso é o que a Etapa 3 do roadmap do
- * agente vertical pede: parar de concatenar tudo numa string só.
+ * Camada 1 (global, fixa por padrão, mas editável por um saas_admin via
+ * global_prompt_layer — ver globalPromptStore.ts) + Camada 2 (segmento)
+ * combinadas — vão como `systemInstruction` da chamada ao Gemini, separadas
+ * do conteúdo variável (tenant + dinâmico + histórico), que vai no
+ * `contents` da mensagem. Isso é o que a Etapa 3 do roadmap do agente
+ * vertical pede: parar de concatenar tudo numa string só.
  */
-function buildGlobalAndSegmentLayer(agent: AgentType, segment: string): string {
+async function buildGlobalAndSegmentLayer(agent: AgentType, segment: string): Promise<string> {
   const segmentRules = SEGMENT_LAYERS[segment];
+  const globalLayer = (await getGlobalPromptLayerOverride().catch(() => null)) || DEFAULT_GLOBAL_LAYER;
   return `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
 
 ${AGENT_INSTRUCTIONS[agent]}
 
-${GLOBAL_LAYER}
+${globalLayer}
 ${segmentRules ? `\nRegras específicas do segmento:\n${segmentRules}\n` : ''}
 REGRAS DE ESTILO (sempre aplicar):
 1. Fracione a resposta em 1 a 3 "bolhas" curtas e sequenciais (como mensagens reais de WhatsApp), nunca um bloco único tipo e-mail/panfleto.
@@ -285,7 +289,7 @@ async function generateSpecialistReply(
   adContext?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
-  const systemInstruction = buildGlobalAndSegmentLayer(agent, segment);
+  const systemInstruction = await buildGlobalAndSegmentLayer(agent, segment);
 
   const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}

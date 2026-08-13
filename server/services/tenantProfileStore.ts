@@ -8,7 +8,15 @@
  */
 import { getDb } from './db';
 
-export const DEFAULT_SEGMENT = 'beauty_studio';
+/**
+ * Achado numa auditoria: era 'beauty_studio' — qualquer tenant sem segmento
+ * resolvido (linha não encontrada, coluna vazia) herdava sem querer as
+ * regras de clínica de estética. 'generic' não bate com nenhuma chave de
+ * SEGMENT_LAYERS (autoReply.ts) — resultado: só a Camada 1 (Global) se
+ * aplica, sem nenhuma regra de segmento errada. Ver também
+ * 0027_tenant_segment_default_generic.sql (mesmo default na coluna em si).
+ */
+export const DEFAULT_SEGMENT = 'generic';
 
 export async function getTenantSegment(tenantId: string): Promise<string> {
   const db = getDb();

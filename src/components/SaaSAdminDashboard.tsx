@@ -50,7 +50,11 @@ import {
   Activity,
   ToggleLeft,
   ToggleRight,
-  FlaskConical
+  FlaskConical,
+  Brain,
+  Save,
+  RotateCcw,
+  Loader2
 } from 'lucide-react';
 
 interface RealTenant {
@@ -334,7 +338,85 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const activeTenant = propActiveTenant || tenants[0] || INITIAL_TENANTS[0];
   const [searchTerm, setSearchTerm] = useState('');
   const [planFilter, setPlanFilter] = useState<string>('all');
-  const [activeAdminTab, setActiveAdminTab] = useState<'tenants' | 'users' | 'tokens_telemetry' | 'roadmap'>('tenants');
+  const [activeAdminTab, setActiveAdminTab] = useState<'tenants' | 'users' | 'tokens_telemetry' | 'roadmap' | 'global_prompt'>('tenants');
+
+  // Camada 1 (Global) do prompt do agente — editável por saas_admin sem
+  // PR+deploy (ver server/services/globalPromptStore.ts). content null =
+  // nenhum override salvo, o texto padrão do código está em vigor.
+  const [globalPromptContent, setGlobalPromptContent] = useState<string | null>(null);
+  const [globalPromptDraft, setGlobalPromptDraft] = useState('');
+  const [globalPromptUpdatedAt, setGlobalPromptUpdatedAt] = useState<string | null>(null);
+  const [globalPromptLoaded, setGlobalPromptLoaded] = useState(false);
+  const [isLoadingGlobalPrompt, setIsLoadingGlobalPrompt] = useState(false);
+  const [isSavingGlobalPrompt, setIsSavingGlobalPrompt] = useState(false);
+  const [globalPromptError, setGlobalPromptError] = useState<string | null>(null);
+
+  const handleLoadGlobalPrompt = async () => {
+    setIsLoadingGlobalPrompt(true);
+    setGlobalPromptError(null);
+    try {
+      const res = await apiFetch('/api/admin/global-prompt');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setGlobalPromptContent(data.content ?? null);
+      setGlobalPromptDraft(data.content || '');
+      setGlobalPromptUpdatedAt(data.updatedAt || null);
+      setGlobalPromptLoaded(true);
+    } catch (err: any) {
+      setGlobalPromptError(err.message || 'Falha ao carregar o prompt global.');
+    } finally {
+      setIsLoadingGlobalPrompt(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeAdminTab === 'global_prompt' && !globalPromptLoaded && !isLoadingGlobalPrompt) {
+      handleLoadGlobalPrompt();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAdminTab]);
+
+  const handleSaveGlobalPrompt = async () => {
+    setIsSavingGlobalPrompt(true);
+    setGlobalPromptError(null);
+    try {
+      const res = await apiFetch('/api/admin/global-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: globalPromptDraft.trim() || null }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setGlobalPromptContent(data.content ?? null);
+      setGlobalPromptDraft(data.content || '');
+      setGlobalPromptUpdatedAt(data.updatedAt || null);
+    } catch (err: any) {
+      setGlobalPromptError(err.message || 'Falha ao salvar o prompt global.');
+    } finally {
+      setIsSavingGlobalPrompt(false);
+    }
+  };
+
+  const handleResetGlobalPrompt = async () => {
+    if (!window.confirm('Restaurar o texto padrão do código? Isso apaga o override salvo — o agente volta a usar a regra fixa original em todos os tenants.')) return;
+    setIsSavingGlobalPrompt(true);
+    setGlobalPromptError(null);
+    try {
+      const res = await apiFetch('/api/admin/global-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: null }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setGlobalPromptContent(null);
+      setGlobalPromptDraft('');
+      setGlobalPromptUpdatedAt(new Date().toISOString());
+    } catch (err: any) {
+      setGlobalPromptError(err.message || 'Falha ao restaurar o padrão.');
+    } finally {
+      setIsSavingGlobalPrompt(false);
+    }
+  };
   const [isNewTenantModalOpen, setIsNewTenantModalOpen] = useState(false);
   const [copiedWebhookId, setCopiedWebhookId] = useState<string | null>(null);
 
@@ -773,6 +855,18 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         >
           <Cpu className="w-4 h-4" />
           <span>Telemetria de Tokens IA</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('global_prompt')}
+          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all cursor-pointer ${
+            activeAdminTab === 'global_prompt'
+              ? 'bg-pink-600 text-white shadow-md shadow-pink-950/30'
+              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+          }`}
+        >
+          <Brain className="w-4 h-4" />
+          <span>Prompt Global do Agente</span>
         </button>
       </div>
 
@@ -1461,6 +1555,72 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   Níveis: Master Admin, Tenant Owner, Supervisor, Operador CRM
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB CONTENT: PROMPT GLOBAL DO AGENTE (Camada 1) */}
+      {activeAdminTab === 'global_prompt' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Brain className="w-5 h-5 text-pink-400" />
+                  Prompt Global do Agente (Camada 1)
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5 max-w-2xl">
+                  Regra fixa que vale pra TODOS os tenants/segmentos — a espinha dorsal da estrutura de vendas (fluxo de pré-reserva/pagamento, quando escalar pra humano, regras de honestidade/segurança). Editar aqui sobrescreve o texto padrão do código sem precisar de deploy. Deixe em branco e salve pra restaurar o padrão.
+                </p>
+              </div>
+              <button
+                onClick={handleLoadGlobalPrompt}
+                disabled={isLoadingGlobalPrompt}
+                className="py-2 px-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs rounded-xl flex items-center gap-2 transition-all flex-shrink-0 disabled:opacity-50 cursor-pointer"
+              >
+                {isLoadingGlobalPrompt ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                <span>Recarregar</span>
+              </button>
+            </div>
+
+            {globalPromptError && (
+              <div className="p-3 rounded-xl bg-red-950/40 border border-red-800/60 text-red-300 text-xs">
+                {globalPromptError}
+              </div>
+            )}
+
+            <div className="text-[11px] text-slate-500">
+              {globalPromptContent
+                ? `Override customizado em vigor${globalPromptUpdatedAt ? ` — última alteração em ${new Date(globalPromptUpdatedAt).toLocaleString('pt-BR')}` : ''}.`
+                : 'Nenhum override salvo — o texto padrão do código está em vigor.'}
+            </div>
+
+            <textarea
+              value={globalPromptDraft}
+              onChange={(e) => setGlobalPromptDraft(e.target.value)}
+              rows={18}
+              placeholder="Deixe em branco pra usar o texto padrão do código (DEFAULT_GLOBAL_LAYER em autoReply.ts). Escreva aqui só se precisar sobrescrever uma regra em produção sem esperar um deploy."
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-pink-500/60 resize-y"
+            />
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSaveGlobalPrompt}
+                disabled={isSavingGlobalPrompt}
+                className="py-2 px-4 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isSavingGlobalPrompt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                <span>Salvar</span>
+              </button>
+              <button
+                onClick={handleResetGlobalPrompt}
+                disabled={isSavingGlobalPrompt || !globalPromptContent}
+                className="py-2 px-4 bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-300 border border-slate-700 hover:border-red-800/60 font-bold text-xs rounded-xl flex items-center gap-2 transition-all disabled:opacity-40 cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Restaurar padrão</span>
+              </button>
             </div>
           </div>
         </div>
