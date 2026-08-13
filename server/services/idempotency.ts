@@ -1,28 +1,28 @@
 /**
- * Dedupe de mensagens já processadas por message_id, em memória. Evita
- * reprocessar o mesmo áudio se a Meta/Evolution reenviar o mesmo evento
- * (comum em webhooks, que costumam reentregar em caso de timeout).
- *
- * Limitação conhecida: não sobrevive a um restart do processo, e não é
- * compartilhado entre múltiplas instâncias do servidor. Vira redundante
- * (ou é substituído por uma tabela/Redis) quando a Fase 2 trouxer
- * persistência real — ver docs/PLANO-EVOLUCAO.md, item 1.1.7.
+ * Dedupe de mensagens já processadas por message_id, compartilhado entre
+ * todas as instâncias via a tabela `processed_webhook_messages` (Postgres).
+ * Evita reprocessar o mesmo evento se a Meta/Evolution reenviar o mesmo
+ * webhook (comum em timeout/erro transitório) — inclusive quando a
+ * reentrega cai numa instância do Render diferente da que processou a
+ * primeira vez, ou depois de um restart de deploy (achado real: um Set em
+ * memória por processo não pegava esse caso, causando respostas duplicadas
+ * da IA pra leads reais).
  */
-const seenMessageIds = new Set<string>();
-const MAX_TRACKED_IDS = 5000;
+import { getDb } from './db';
 
-/** Retorna true se essa mensagem já foi processada antes (e marca como vista). */
-export function markProcessedIfNew(messageId: string): boolean {
-  if (seenMessageIds.has(messageId)) {
+/** Retorna true se essa mensagem ainda não tinha sido processada (e marca como vista agora). */
+export async function markProcessedIfNew(messageId: string): Promise<boolean> {
+  const db = getDb();
+  const { error } = await db.from('processed_webhook_messages').insert({ message_id: messageId });
+  if (!error) return true;
+  if (error.code === '23505') {
+    // Já reivindicada por outra chamada (mesma instância ou outra) — reentrega, ignora.
     return false;
   }
-
-  if (seenMessageIds.size >= MAX_TRACKED_IDS) {
-    const oldest = seenMessageIds.values().next().value;
-    if (oldest !== undefined) seenMessageIds.delete(oldest);
-  }
-
-  seenMessageIds.add(messageId);
+  // Falha inesperada de banco (ex: instabilidade transitória do Postgres):
+  // prefere processar de novo (pior caso: duplicata ocasional) a perder a
+  // mensagem do lead de vez, que seria a consequência de tratar isso como "já vista".
+  console.warn(`⚠️  [Idempotência] Falha ao checar/marcar mensagem ${messageId}, processando mesmo assim:`, error.message);
   return true;
 }
 
@@ -35,6 +35,10 @@ export function markProcessedIfNew(messageId: string): boolean {
  * do lead sumia de vez — nunca era gravada, nunca virava resposta
  * automática, sem nenhum aviso pro operador.
  */
-export function unmarkProcessed(messageId: string): void {
-  seenMessageIds.delete(messageId);
+export async function unmarkProcessed(messageId: string): Promise<void> {
+  const db = getDb();
+  const { error } = await db.from('processed_webhook_messages').delete().eq('message_id', messageId);
+  if (error) {
+    console.warn(`⚠️  [Idempotência] Falha ao desmarcar mensagem ${messageId} (reentrega pode não conseguir tentar de novo):`, error.message);
+  }
 }

@@ -99,16 +99,15 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         const pendingGuidance = await getPendingOperatorGuidance(tenantId, phone);
         const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply);
         if (!result) {
+          // Achado real em produção (issue #82, item 4; revisado depois de
+          // uma auditoria de conversas reais): mesmo com retry
+          // (autoReply.ts), o Gemini pode ficar indisponível por mais tempo.
+          // Chegou a mandar uma mensagem de espera genérica ("tivemos uma
+          // instabilidade...") — mas isso soa como bug pro cliente real, sem
+          // agregar nada que o operador não vá dizer melhor ao assumir a
+          // conversa. Escala silenciosamente: o operador vê no painel e
+          // conduz a próxima resposta do zero, sem a IA ter dito nada antes.
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
-          // Achado real em produção (issue #82, item 4): mesmo com retry
-          // (autoReply.ts), o Gemini pode ficar indisponível por mais tempo —
-          // até agora isso virava silêncio total pro cliente, que só via a
-          // fila de escalonamento (sem UI nenhuma até o item 2 desta mesma
-          // issue) ser avisada. Nunca deixa o WhatsApp mudo: manda uma
-          // mensagem de espera genérica, além do escalonamento de sempre.
-          await sendBubbles(channel, phone, ['Peço desculpa pela demora — tivemos uma instabilidade rápida aqui do nosso lado. Já te retorno em instantes!'], async (bubbleText) => {
-            await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
-          }, messageId);
           return;
         }
         if (result.agent === 'reclamacao') {
@@ -177,7 +176,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     let enqueued = 0;
     const nowLabel = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     for (const msg of parsedMessages) {
-      if (!markProcessedIfNew(msg.messageId)) {
+      if (!(await markProcessedIfNew(msg.messageId))) {
         console.log(`↩️  [Webhook ${msg.provider}] Mensagem ${msg.messageId} já processada, ignorando reentrega.`);
         continue;
       }
@@ -280,7 +279,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel });
         }
       } catch (err: any) {
-        unmarkProcessed(msg.messageId);
+        await unmarkProcessed(msg.messageId);
         console.error(`❌ [Webhook ${msg.provider}] Falha ao processar mensagem ${msg.messageId} de ${msg.from} — desmarcada pra reentrega tentar de novo:`, err.message);
       }
     }
