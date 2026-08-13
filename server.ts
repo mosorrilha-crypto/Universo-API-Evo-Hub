@@ -19,6 +19,7 @@ import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
 import { createCrmRouter } from './server/routes/crm';
+import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
@@ -135,6 +136,7 @@ async function startServer() {
   }));
   app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl }));
   app.use(createCrmRouter({ authenticateToken }));
+  app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
   app.use(createPushSubscriptionsRouter({ authenticateToken, vapidPublicKey: config.vapidPublicKey }));
 
