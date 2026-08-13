@@ -172,6 +172,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('Nunca diga que está mandando, anexando, ou que "aí vai"/"te mostro" uma foto ou vídeo');
     expect(systemInstruction).toContain('a menos que a seção "Ações reais já executadas nesta mensagem" confirme explicitamente');
   });
+
+  it('proíbe inventar desculpa/equipe/"central" que vai mandar a mídia depois (achado real em produção — 2ª rodada: bloqueada a promessa direta, o agente passou a inventar "ya le dejé dicho a los muchachos para que te lo manden al WhatsApp", uma promessa fictícia igualmente vazia)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('nunca invente desculpa, explicação interna, equipe/pessoa/"central" que cuida disso, nem prometa que alguém vai mandar depois');
+    expect(systemInstruction).not.toContain('mencione o recurso visual só se um humano puder providenciar depois');
+  });
 });
 
 describe('generateAutoReplyForText — captura o nome que a cliente diz na conversa (pesquisa de mercado: "esquecer" o nome depois de algumas mensagens é um dos sinais mais claros de bot)', () => {
