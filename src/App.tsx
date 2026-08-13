@@ -150,10 +150,15 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Financial Transactions
+  // Financial Transactions — mesmo raciocínio do fix de leads fake
+  // (12/08/2026): cache vazio nunca deveria cair pro dataset fictício
+  // INITIAL_TRANSACTIONS, senão dado de demonstração "gruda" pra sempre (o
+  // merge com transações reais, GET /api/financial/transactions abaixo, só
+  // ADICIONA por id, nunca remove). Começa vazia; "Carregar dados de
+  // demonstração" continua existindo pra quem quiser o mock de volta.
   const [transactions, setTransactions] = useState<FinancialTransaction[]>(() => {
     const saved = localStorage.getItem('saas_transactions');
-    return saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Agent Knowledge Base
@@ -307,6 +312,31 @@ export const App: React.FC = () => {
     };
     fetchCrmLeads();
     const interval = setInterval(fetchCrmLeads, 8000);
+    return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
+  // Financeiro real (mesmo padrão de fetchCrmLeads acima) — merge por id,
+  // marca isReal pra distinguir de dado de demonstração local.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchFinancialTransactions = () => {
+      apiFetch('/api/financial/transactions')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data?.transactions || cancelled) return;
+          setTransactions((prev) => {
+            const byId = new Map<string, FinancialTransaction>(prev.map((t) => [t.id, t]));
+            for (const tx of data.transactions as any[]) {
+              byId.set(tx.id, { ...tx, tenantId: activeTenant.id, isReal: true } as FinancialTransaction);
+            }
+            return Array.from(byId.values());
+          });
+        })
+        .catch(() => {});
+    };
+    fetchFinancialTransactions();
+    const interval = setInterval(fetchFinancialTransactions, 8000);
     return () => { cancelled = true; clearInterval(interval); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenant.id]);
@@ -471,18 +501,74 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleAddTransaction = (newTx: FinancialTransaction) => {
-    setTransactions((prev) => [newTx, ...prev]);
+  // Toda cobrança criada pelo botão "Gerar Nova Cobrança" do painel é uma
+  // ação real de operador (o dataset de demonstração é injetado direto via
+  // handleLoadDemoData, nunca passa por aqui) — persiste no servidor sempre,
+  // mesmo padrão de handleUpdateLead: nunca aplica local antes de confirmar.
+  const handleAddTransaction = async (newTx: FinancialTransaction) => {
+    try {
+      const res = await apiFetch('/api/financial/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: newTx.id,
+          leadId: newTx.leadId,
+          leadName: newTx.leadName,
+          leadPhone: newTx.leadPhone,
+          productName: newTx.productName,
+          amount: newTx.amount,
+          paymentMethod: newTx.paymentMethod,
+          status: newTx.status,
+          date: newTx.date,
+          operatorName: newTx.operatorName,
+          channel: newTx.channel,
+          pixQrCode: newTx.pixQrCode,
+          paymentLinkUrl: newTx.paymentLinkUrl,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao salvar cobrança no servidor:', err);
+      showToast('Não foi possível salvar essa cobrança no servidor. Tente de novo.');
+      return;
+    }
+    setTransactions((prev) => [{ ...newTx, isReal: true }, ...prev]);
     showToast('Nova fatura gerada com sucesso!');
   };
 
-  const handleUpdateTransactionStatus = (id: string, newStatus: any) => {
-    setTransactions((prev) => prev.map((tx) => (tx.id === id ? { ...tx, status: newStatus } : tx)));
+  const handleUpdateTransactionStatus = async (id: string, newStatus: any) => {
+    const tx = transactions.find((t) => t.id === id);
+    if (tx?.isReal) {
+      try {
+        const res = await apiFetch(`/api/financial/transactions/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao atualizar status da cobrança no servidor:', err);
+        showToast('Não foi possível atualizar o status no servidor. Tente de novo.');
+        return;
+      }
+    }
+    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t)));
     showToast('Status do pagamento atualizado');
   };
 
-  const handleDeleteTransaction = (txId: string) => {
-    setTransactions((prev) => prev.filter((tx) => tx.id !== txId));
+  const handleDeleteTransaction = async (txId: string) => {
+    const tx = transactions.find((t) => t.id === txId);
+    if (tx?.isReal) {
+      try {
+        const res = await apiFetch(`/api/financial/transactions/${encodeURIComponent(txId)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error('Falha ao remover cobrança no servidor:', err);
+        showToast('Não foi possível remover essa cobrança no servidor. Tente de novo.');
+        return;
+      }
+    }
+    setTransactions((prev) => prev.filter((t) => t.id !== txId));
     showToast('Fatura excluída');
   };
 

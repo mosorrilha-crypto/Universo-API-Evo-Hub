@@ -78,6 +78,8 @@ export interface FinancialTransaction {
   channel: string;
   pixQrCode?: string;
   paymentLinkUrl?: string;
+  /** true quando veio de GET /api/financial/transactions (registro real persistido no servidor) — distingue de dado de demonstração local, mesmo papel que LeadInfo.isReal. */
+  isReal?: boolean;
 }
 
 export type LeadSourceChannel = 'meta_ads' | 'instagram_ads' | 'google_ads' | 'instagram_organic' | 'google_organic' | 'whatsapp_direct';
