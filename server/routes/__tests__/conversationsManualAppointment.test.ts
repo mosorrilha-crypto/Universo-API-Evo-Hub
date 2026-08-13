@@ -10,7 +10,7 @@ import type { Server } from 'http';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const checkFreeBusy = vi.fn(async () => true);
-const createCalendarEvent = vi.fn(async () => 'evt-manual-123');
+const createCalendarEvent = vi.fn(async (_tenantId: string, _cfg: unknown, _title: string, _description: string, _startIso: string, _endIso: string, _timezone: string) => 'evt-manual-123');
 vi.mock('../../services/googleCalendar', () => ({ checkFreeBusy, createCalendarEvent }));
 
 const { createConversationsRouter } = await import('../conversations');
@@ -80,6 +80,31 @@ describe('POST /api/conversations/:phone/manual-appointment', () => {
     const rows = supabase.__tables.appointments;
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ phone: PHONE, source: 'manual', event_id: 'evt-manual-123' });
+  });
+
+  it('inclui a observação do operador na descrição do evento, junto da tag fixa', async () => {
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00', notes: 'Cliente quer levar acompanhante' }),
+    });
+    expect(res.status).toBe(201);
+    const description = createCalendarEvent.mock.calls[0][3];
+    expect(description).toContain('Agendado manualmente pelo operador no painel.');
+    expect(description).toContain('Cliente quer levar acompanhante');
+  });
+
+  it('sem observação, a descrição fica só com a tag fixa', async () => {
+    ({ server, baseUrl } = await startServer());
+
+    await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+    expect(createCalendarEvent.mock.calls[0][3]).toBe('Agendado manualmente pelo operador no painel.');
   });
 
   it('400 quando falta serviceName/startIso/endIso', async () => {
