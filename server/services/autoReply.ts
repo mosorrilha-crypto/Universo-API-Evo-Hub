@@ -14,6 +14,7 @@ import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, find
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
+import { getKbVideo } from './kbVideoStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
@@ -30,6 +31,17 @@ export interface MediaSendConfig {
   evolutionInstanceName?: string;
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
+  /** Credenciais do Supabase — só usadas pra baixar o vídeo de exemplo do produto do Storage (kbVideoStore.ts) na hora de enviar (o vídeo não vem inline na Base de Conhecimento como a foto, é grande demais). */
+  supabaseUrl?: string;
+  supabaseKey?: string;
+}
+
+/** true quando há credencial suficiente pra mandar mídia de verdade pro provider configurado (Meta ou Evolution) — usado tanto pra foto quanto pra vídeo, não repete a checagem por provider em cada chamador. */
+function hasMediaSendConfig(mediaConfig?: MediaSendConfig): boolean {
+  if (!mediaConfig) return false;
+  return mediaConfig.provider === 'evolution'
+    ? !!(mediaConfig.evolutionInstanceName && mediaConfig.evolutionApiUrl && mediaConfig.evolutionApiKey)
+    : !!(mediaConfig.phoneNumberId && mediaConfig.accessToken);
 }
 
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
@@ -863,6 +875,113 @@ Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exe
   }
 }
 
+const VIDEO_TOOLS: FunctionDeclaration[] = [
+  {
+    name: 'enviar_video_exemplo',
+    description: 'Envia pro cliente, como vídeo real no WhatsApp, o vídeo de exemplo/demonstração de um produto/serviço específico do catálogo (já cadastrado na Base de Conhecimento).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        nome_produto: { type: Type.STRING, description: 'Nome EXATO do produto/serviço, igual ao catálogo — nunca invente um nome que não está na lista.' },
+      },
+      required: ['nome_produto'],
+    },
+  },
+];
+
+/**
+ * Mesmo mecanismo de runFotoTool, pro vídeo de exemplo de produto (achado
+ * real, 13/08/2026: o vídeo de "Piscina Fapac Parati 4x2.20m" tinha sido
+ * enviado pro Storage e o produto atualizado na Base de Conhecimento, mas
+ * nenhum código nunca leu esse campo nem sabia que ele existia — a IA
+ * respondia corretamente "não tenho esse vídeo" porque, do ponto de vista
+ * dela, ele genuinamente não existia). Diferença chave pro fluxo de foto: o
+ * vídeo não vem inline em base64 na Base de Conhecimento (arquivo grande
+ * demais pra isso) — só a referência (exampleVideoId); o conteúdo real é
+ * buscado do Storage (kbVideoStore.ts) só na hora de enviar.
+ */
+async function runVideoTool(
+  tenantId: string,
+  ai: GoogleGenAI,
+  text: string,
+  phone: string,
+  mediaConfig: MediaSendConfig,
+  history?: { sender: 'lead' | 'agent'; text?: string }[]
+): Promise<{ actionsSummary: string[] }> {
+  const kb = await getKnowledgeBase(tenantId);
+  const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId);
+  if (!productsWithVideo.length) return { actionsSummary: [] };
+
+  const historyText = buildHistoryText(history);
+  const catalogList = productsWithVideo.map((p) => `- ${p.name}`).join('\n');
+
+  const prompt = `Produtos/serviços com vídeo de exemplo disponível pra enviar de verdade:
+${catalogList}
+
+${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensagem do cliente: "${text}"
+
+Só chame enviar_video_exemplo se o cliente pediu explicitamente pra ver vídeo/demonstração de um desses produtos, ou está claramente decidido sobre um produto específico dessa lista e um vídeo ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses produtos, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
+
+  const response = await withGeminiRetryAndUsage(
+    tenantId,
+    'video',
+    () =>
+      ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          tools: [{ functionDeclarations: VIDEO_TOOLS }],
+          toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+        },
+      }),
+    GEMINI_TIMEOUT_MS
+  );
+
+  const call = response.functionCalls?.[0];
+  if (!call || call.name !== 'enviar_video_exemplo') return { actionsSummary: [] };
+
+  const nomeProduto = (call.args?.nome_produto as string) || '';
+  const product = productsWithVideo.find((p) => p.name === nomeProduto);
+  if (!product?.exampleVideoId) {
+    return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse produto não tem vídeo de exemplo cadastrado.`] };
+  }
+
+  const video = await getKbVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, product.exampleVideoId);
+  if (!video) {
+    return { actionsSummary: [`Tentou enviar o vídeo de "${product.name}" mas não conseguiu recuperar o arquivo do Storage — não prometa que o vídeo foi enviado.`] };
+  }
+
+  try {
+    const mimeType = product.exampleVideoMimeType || video.contentType || 'video/mp4';
+    const filename = product.exampleVideoFileName || `${product.name}.mp4`;
+
+    if (mediaConfig.provider === 'evolution') {
+      await sendEvolutionMediaMessage(
+        mediaConfig.evolutionInstanceName,
+        mediaConfig.evolutionApiUrl,
+        mediaConfig.evolutionApiKey,
+        phone,
+        video.buffer.toString('base64'),
+        mimeType,
+        filename,
+        product.name
+      );
+    } else {
+      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
+      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
+    }
+
+    await recordOutgoingMessage(tenantId, phone, {
+      type: 'file',
+      text: `🎥 Vídeo de exemplo: ${product.name}`,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    }, 'ai');
+    return { actionsSummary: [`Enviou o vídeo de exemplo real de "${product.name}" pro cliente agora.`] };
+  } catch (err: any) {
+    return { actionsSummary: [`Tentou enviar o vídeo de "${product.name}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };
+  }
+}
+
 /**
  * Orquestra router + especialista: 1ª chamada decide qual agente
  * (triagem/faq/agendamento), 2ª chamada gera a resposta especializada.
@@ -931,8 +1050,17 @@ export async function generateAutoReplyForText(
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
       agendamentoToolsRan = result.actionsSummary.length > 0;
-    } else if (agent !== 'agendamento' && phone && mediaConfig?.phoneNumberId && mediaConfig?.accessToken) {
-      const { actionsSummary } = await runFotoTool(tenantId, ai, text, phone, mediaConfig, history);
+    } else if (agent !== 'agendamento' && phone && hasMediaSendConfig(mediaConfig)) {
+      // Achado real (13/08/2026): essa checagem só olhava phoneNumberId/
+      // accessToken (campos exclusivos do Meta) — pra qualquer tenant
+      // configurado via Evolution API (ex: Clic Piscinas), tanto a foto
+      // quanto o vídeo de exemplo NUNCA rodavam, mesmo com credencial
+      // Evolution completa. hasMediaSendConfig cobre os dois providers.
+      const [fotoResult, videoResult] = await Promise.all([
+        runFotoTool(tenantId, ai, text, phone, mediaConfig!, history),
+        runVideoTool(tenantId, ai, text, phone, mediaConfig!, history),
+      ]);
+      const actionsSummary = [...fotoResult.actionsSummary, ...videoResult.actionsSummary];
       if (actionsSummary.length) {
         extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
       }

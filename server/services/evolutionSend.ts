@@ -50,7 +50,7 @@ export async function sendEvolutionMediaMessage(
   requireCredentials(instanceName, apiUrl, apiKey);
 
   const isAudio = mimeType.startsWith('audio/');
-  const mediatype = isAudio ? 'audio' : mimeType.startsWith('image/') ? 'image' : 'document';
+  const mediatype = isAudio ? 'audio' : mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('video/') ? 'video' : 'document';
 
   const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/message/sendMedia/${instanceName}`, {
     method: 'POST',

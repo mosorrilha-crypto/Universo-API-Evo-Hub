@@ -7,7 +7,7 @@
  */
 import { getDb } from './db';
 
-export type GeminiCallSite = 'router' | 'especialista' | 'agendamento' | 'foto';
+export type GeminiCallSite = 'router' | 'especialista' | 'agendamento' | 'foto' | 'video';
 
 export interface GeminiUsageMetadata {
   promptTokenCount?: number;

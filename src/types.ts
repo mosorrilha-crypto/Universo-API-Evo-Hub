@@ -146,6 +146,11 @@ export interface AgentProduct {
   description: string;
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
+  /** Vídeo de exemplo do produto — arquivo grande demais pra inline base64 (diferente da foto), fica no Storage (bucket "app-data", kb-video/{tenantId}/{exampleVideoId}); aqui só a referência. */
+  exampleVideoId?: string;
+  exampleVideoFileName?: string;
+  exampleVideoMimeType?: string;
+  exampleVideoSizeBytes?: number;
   promoPrice?: string;
   promoUntil?: string;
   /** Valor numérico do preço regular (Etapa 2 do roadmap) — opcional, fonte de verdade pra cálculo quando preenchido. */

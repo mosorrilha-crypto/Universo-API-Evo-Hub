@@ -15,6 +15,11 @@ export interface AgentProduct {
   /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
+  /** Vídeo de exemplo do produto — arquivo grande demais pra inline base64 (diferente da foto), fica no Storage (bucket "app-data", kb-video/{tenantId}/{exampleVideoId}); aqui só a referência. */
+  exampleVideoId?: string;
+  exampleVideoFileName?: string;
+  exampleVideoMimeType?: string;
+  exampleVideoSizeBytes?: number;
   /** Preço promocional com vencimento — volta sozinho pro preço regular após promoUntil, sem precisar editar manualmente. */
   promoPrice?: string;
   promoUntil?: string; // YYYY-MM-DD

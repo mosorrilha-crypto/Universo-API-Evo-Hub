@@ -85,10 +85,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         } else {
           await markAsReadAndShowTyping(phoneNumberId, token, messageId);
         }
-        // Ferramenta de envio de foto (Epic 4.5.2) — agora suporta tanto Meta quanto Evolution.
+        // Ferramenta de envio de foto/vídeo de exemplo (Epic 4.5.2) — suporta
+        // tanto Meta quanto Evolution. supabaseUrl/supabaseKey só são usados
+        // pelo vídeo (kbVideoStore.ts) — a foto continua inline em base64.
         const mediaConfig = isEvolution
-          ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
-          : { provider: 'meta' as const, phoneNumberId, accessToken: token };
+          ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey, supabaseUrl, supabaseKey }
+          : { provider: 'meta' as const, phoneNumberId, accessToken: token, supabaseUrl, supabaseKey };
 
         const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline);
         if (!result) {

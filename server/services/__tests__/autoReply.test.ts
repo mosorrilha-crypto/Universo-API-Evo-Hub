@@ -11,13 +11,18 @@ import type { GoogleGenAI } from '@google/genai';
 
 const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
+const sendEvolutionMediaMessage = vi.fn(async () => undefined);
 const recordOutgoingMessage = vi.fn(async () => ({}) as any);
 const PRODUCT_WITH_PHOTO = { name: 'Microlips', price: 'Gs 500.000', exampleImageBase64: 'data:image/jpeg;base64,QQ==', exampleImageMimeType: 'image/jpeg' };
-const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO] }));
+const PRODUCT_WITH_VIDEO = { name: 'Piscina Fapac Parati 4x2.20m', price: 'Gs 15.500.000', exampleVideoId: 'video-abc', exampleVideoFileName: 'piscina.mp4', exampleVideoMimeType: 'video/mp4' };
+const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO, PRODUCT_WITH_VIDEO] }));
+const getKbVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
 
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
+vi.mock('../evolutionSend', () => ({ sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
+vi.mock('../kbVideoStore', () => ({ getKbVideo }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
 
@@ -257,6 +262,71 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
     // nenhuma chamada ao Gemini deveria ter usado function-calling de foto
     expect(calls.every((c) => !c.config?.tools)).toBe(true);
+  });
+});
+
+describe('generateAutoReplyForText — ferramenta de envio de vídeo (achado real 13/08/2026)', () => {
+  function makeFakeAiWithVideoTool(shouldCallTool: boolean) {
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.config?.tools?.[0]?.functionDeclarations?.[0]?.name === 'enviar_video_exemplo') {
+            return { functionCalls: shouldCallTool ? [{ name: 'enviar_video_exemplo', args: { nome_produto: PRODUCT_WITH_VIDEO.name } }] : [] } as any;
+          }
+          if (req.config?.tools) return { functionCalls: [] } as any; // ronda da ferramenta de foto: nunca chama
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Manda ver o vídeo!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return { ai, calls };
+  }
+
+  it('envia o vídeo real via Meta quando o modelo decide chamar a ferramenta', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    getKbVideo.mockClear();
+    const { ai } = makeFakeAiWithVideoTool(true);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'tem vídeo da piscina 4x2.20?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://x.supabase.co', supabaseKey: 'k' }
+    );
+
+    expect(getKbVideo).toHaveBeenCalledWith('https://x.supabase.co', 'k', 'tenant-a', 'video-abc');
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'video/mp4', 'piscina.mp4');
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', PRODUCT_WITH_VIDEO.name);
+  });
+
+  it('envia o vídeo real via Evolution API quando o tenant é configurado por QR Code (regressão do bug de gate Meta-only)', async () => {
+    sendEvolutionMediaMessage.mockClear();
+    getKbVideo.mockClear();
+    const { ai } = makeFakeAiWithVideoTool(true);
+
+    await generateAutoReplyForText(
+      'tenant-piscinas', ai, 'tem vídeo da piscina 4x2.20?', 'Lucas', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio',
+      { provider: 'evolution', evolutionInstanceName: 'inst-1', evolutionApiUrl: 'https://evo.example.com', evolutionApiKey: 'evo-key', supabaseUrl: 'https://x.supabase.co', supabaseKey: 'k' }
+    );
+
+    expect(sendEvolutionMediaMessage).toHaveBeenCalledWith(
+      'inst-1', 'https://evo.example.com', 'evo-key', '595981234567',
+      Buffer.from('fake-video-bytes').toString('base64'), 'video/mp4', 'piscina.mp4', PRODUCT_WITH_VIDEO.name
+    );
+  });
+
+  it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai } = makeFakeAiWithVideoTool(false);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'oi, td bem?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
   });
 });
 
