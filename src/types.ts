@@ -169,8 +169,11 @@ export interface AgentFileDoc {
   id: string;
   fileName: string;
   fileSize: string;
+  mimeType?: string;
   uploadDate: string;
   status: 'Processado' | 'Pendente';
+  /** Presença indica que o agente consegue usar o conteúdo deste documento como contexto real (ver formatKnowledgeBaseForPrompt no backend) — ausente pra tipos sem extração (ex: DOCX), aí o documento fica só como anexo. */
+  extractedText?: string;
 }
 
 /** "HH:mm" de abertura/fechamento de um dia específico. */

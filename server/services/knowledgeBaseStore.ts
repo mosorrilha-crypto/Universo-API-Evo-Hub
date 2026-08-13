@@ -95,6 +95,23 @@ export interface AgentFAQ {
   answer: string;
 }
 
+export interface AgentFileDoc {
+  id: string;
+  fileName: string;
+  fileSize: string;
+  mimeType?: string;
+  uploadDate: string;
+  status: 'Processado' | 'Pendente';
+  /**
+   * Texto extraído do arquivo (PDF/TXT/CSV/JSON/MD), já truncado — fonte
+   * real que formatKnowledgeBaseForPrompt injeta no prompt do agente.
+   * Ausente pra tipos sem extração implementada (ex: DOCX) ou quando a
+   * extração falhou; nesse caso o documento fica só como anexo/registro,
+   * sem o agente "ler" o conteúdo.
+   */
+  extractedText?: string;
+}
+
 export interface AgentKnowledgeBase {
   companyName?: string;
   agentGoal?: string;
@@ -104,6 +121,7 @@ export interface AgentKnowledgeBase {
   products?: AgentProduct[];
   businessRules?: string[];
   faqs?: AgentFAQ[];
+  documents?: AgentFileDoc[];
 }
 
 export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
@@ -118,6 +136,35 @@ export async function setKnowledgeBase(tenantId: string, kb: AgentKnowledgeBase)
     .from('knowledge_base')
     .upsert({ tenant_id: tenantId, data: kb, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
   if (error) throw error;
+}
+
+/**
+ * Orçamento total de caracteres pra todo o conteúdo extraído de documentos,
+ * somado — nunca por documento individual. Sem esse teto, um catálogo em
+ * PDF de várias páginas (ou vários documentos anexados) infla o prompt sem
+ * limite, exatamente o problema encontrado numa auditoria anterior (agentGoal
+ * chegando a ~4.000 tokens sozinho). Documentos mais recentes entram
+ * primeiro; o resto é cortado com aviso explícito, nunca silenciosamente.
+ */
+const DOCUMENTS_PROMPT_CHAR_BUDGET = 3000;
+
+function formatDocumentsForPrompt(documents: AgentFileDoc[] | undefined): string {
+  const withText = (documents || []).filter((d) => d.extractedText?.trim());
+  if (!withText.length) return '';
+
+  const parts: string[] = [];
+  let remaining = DOCUMENTS_PROMPT_CHAR_BUDGET;
+  for (const doc of withText) {
+    if (remaining <= 0) {
+      parts.push(`(mais ${withText.length - parts.length} documento(s) anexado(s), não incluído(s) aqui por limite de tamanho — consulte o arquivo original se precisar)`);
+      break;
+    }
+    const text = doc.extractedText!.trim();
+    const excerpt = text.length > remaining ? `${text.slice(0, remaining)}… [documento truncado]` : text;
+    remaining -= excerpt.length;
+    parts.push(`Documento "${doc.fileName}":\n${excerpt}`);
+  }
+  return `Documentos anexados (use como referência adicional, nunca acima do catálogo/políticas quando houver conflito):\n\n${parts.join('\n\n')}`;
 }
 
 /** Formata a base de conhecimento como texto pra injetar direto no prompt do Gemini. */
@@ -154,6 +201,8 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   if (kb.faqs?.length) {
     parts.push(`Perguntas frequentes:\n${kb.faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n')}`);
   }
+  const documentsContext = formatDocumentsForPrompt(kb.documents);
+  if (documentsContext) parts.push(documentsContext);
 
   if (!parts.length) return '';
   return `\nContexto real do negócio (use essas informações pra responder com precisão, nunca invente preços/regras fora daqui):\n${parts.join('\n\n')}\n`;
