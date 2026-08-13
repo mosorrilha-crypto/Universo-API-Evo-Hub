@@ -9,7 +9,7 @@ import {
   type CalendarConfig,
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
-import { DEFAULT_SEGMENT, getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
+import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
@@ -1011,7 +1011,15 @@ export async function generateAutoReplyForText(
       ? `Um atendente humano deixou esta orientação pra você usar ao responder (siga-a ao montar a resposta, sem citar que veio de um "atendente" ou de uma "nota" — fale diretamente com o cliente): "${operatorGuidance}"`
       : undefined;
     const combinedExtraContext = [extraContext, operatorGuidanceContext].filter(Boolean).join('\n');
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, knowledgeBaseContext, history, combinedExtraContext || undefined, adContext);
+    // Única fonte de horário de funcionamento que o agente consulta, pra
+    // QUALQUER tipo de mensagem — não só agendamento (ver
+    // formatBusinessHoursForPrompt em tenantProfileStore.ts). Antes disso um
+    // texto solto duplicado na base de conhecimento era o único jeito de uma
+    // pergunta casual de FAQ sobre horário ser respondida, arriscando
+    // divergir do valor real sem aviso nenhum.
+    const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
+    const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, adContext);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;

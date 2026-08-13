@@ -62,3 +62,32 @@ export async function setTenantBusinessHours(tenantId: string, hours: BusinessHo
   const { error } = await db.from('tenants').update({ business_hours: hours }).eq('id', tenantId);
   if (error) throw error;
 }
+
+const WEEKDAY_NAMES: Record<string, string> = {
+  '1': 'Segunda', '2': 'Terça', '3': 'Quarta', '4': 'Quinta', '5': 'Sexta', '6': 'Sábado', '0': 'Domingo',
+};
+const WEEKDAY_ORDER = ['1', '2', '3', '4', '5', '6', '0'];
+
+/**
+ * Texto pronto pra injetar no prompt do agente — única fonte de horário de
+ * funcionamento que o agente consulta pra QUALQUER tipo de mensagem
+ * (triagem/faq/agendamento/reclamação), sempre calculado a partir do valor
+ * real cadastrado. Antes disso o horário só chegava ao agente de duas
+ * formas: um texto solto duplicado na base de conhecimento (podia divergir
+ * do valor real sem nenhum aviso) e um status calculado em tempo real, mas
+ * só quando o roteador classificava a mensagem como "agendamento" — uma
+ * pergunta casual de FAQ ("que horas vocês abrem?") nunca via o valor real,
+ * só o texto solto (achado real: um novo tenant/funcionário sem saber que
+ * precisava atualizar os dois lugares deixaria essa pergunta respondida
+ * errado). `describeBusinessHoursToday` (autoReply.ts) continua existindo à
+ * parte — ele resolve um problema diferente e mais específico (se está
+ * aberto AGORA, pro fluxo de agendamento nunca oferecer "hoje" já fechado).
+ */
+export function formatBusinessHoursForPrompt(hours: BusinessHours | null): string {
+  if (!hours) return '';
+  const lines = WEEKDAY_ORDER
+    .filter((day) => hours[day])
+    .map((day) => `${WEEKDAY_NAMES[day]}: ${hours[day]!.open} às ${hours[day]!.close}`);
+  if (!lines.length) return '';
+  return `Horário de funcionamento:\n${lines.join('\n')}`;
+}
