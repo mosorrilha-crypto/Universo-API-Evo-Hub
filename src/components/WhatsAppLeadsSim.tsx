@@ -11,6 +11,7 @@ import { LeadListRow } from './chat/LeadListRow';
 import { AddLeadModal } from './leads/AddLeadModal';
 import { ManualAppointmentModal } from './leads/ManualAppointmentModal';
 import { StatusModal } from './status/StatusModal';
+import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import {
   Play,
   Sparkles,
@@ -490,6 +491,43 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       console.error('Falha ao desconectar Google Calendar:', err);
       setErrorMsg('Não foi possível desconectar o Google Calendar agora — tente de novo.');
     }
+  };
+
+  // Widget de agenda (atendente pedia pra ver o que a IA já marcou sem sair
+  // da plataforma) — busca só quando o painel é aberto, não em polling
+  // constante (é um "olhar por baixo demanda", não um dado que muda a cada
+  // segundo).
+  const [isUpcomingEventsPanelOpen, setIsUpcomingEventsPanelOpen] = useState(false);
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
+  const [isLoadingUpcomingEvents, setIsLoadingUpcomingEvents] = useState(false);
+  const [upcomingEventsError, setUpcomingEventsError] = useState<string | null>(null);
+
+  const fetchUpcomingEvents = () => {
+    setIsLoadingUpcomingEvents(true);
+    setUpcomingEventsError(null);
+    apiFetch('/api/google-calendar/upcoming-events')
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => setUpcomingEvents(data.events || []))
+      .catch((err) => setUpcomingEventsError(err.message || 'Não foi possível carregar a agenda agora.'))
+      .finally(() => setIsLoadingUpcomingEvents(false));
+  };
+
+  const handleOpenUpcomingEvents = () => {
+    setIsUpcomingEventsPanelOpen(true);
+    fetchUpcomingEvents();
+  };
+
+  // Escolher um lead a partir do widget de agenda (sem conversa aberta
+  // ainda) reaproveita 100% o fluxo já existente de agendamento manual —
+  // só seleciona a conversa e abre o mesmo modal que já é aberto de dentro
+  // dela.
+  const handlePickLeadForNewAppointment = (lead: LeadInfo) => {
+    setIsUpcomingEventsPanelOpen(false);
+    handleSelectLead(lead);
+    setIsManualAppointmentModalOpen(true);
   };
 
   const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
@@ -1968,8 +2006,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             {/* Conexão do backend com Google Calendar real (usada pelo agente de agendamento) */}
             <div className="flex items-center gap-1">
               <button
-                onClick={googleCalendarConnected ? fetchGoogleCalendarStatus : handleConnectGoogleCalendar}
-                title={googleCalendarConnected ? 'Conectado — clique pra atualizar status' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
+                onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
+                title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
                 className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
                   googleCalendarConnected
                     ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
@@ -3210,6 +3248,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onCaptionChange={setStatusCaption}
         onSubmit={handlePostStatus}
         onClose={() => { setIsStatusModalOpen(false); setStatusError(null); setStatusImageBase64(null); setStatusImageFileName(''); setStatusVideoBase64(null); setStatusVideoFileName(''); setStatusText(''); setStatusCaption(''); }}
+      />
+
+      <UpcomingEventsPanel
+        isOpen={isUpcomingEventsPanelOpen}
+        onClose={() => setIsUpcomingEventsPanelOpen(false)}
+        events={upcomingEvents}
+        isLoading={isLoadingUpcomingEvents}
+        error={upcomingEventsError}
+        onRefresh={fetchUpcomingEvents}
+        leads={leads}
+        onPickLeadForNewAppointment={handlePickLeadForNewAppointment}
       />
     </div>
   );

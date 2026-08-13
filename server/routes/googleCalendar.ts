@@ -6,6 +6,8 @@ import {
   disconnectGoogleCalendar,
   signOAuthState,
   verifyOAuthState,
+  listUpcomingEvents,
+  type CalendarConfig,
 } from '../services/googleCalendar';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -91,6 +93,27 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     const tenantId = tenantOf(req);
     await disconnectGoogleCalendar(tenantId);
     res.json({ success: true });
+  }));
+
+  // Widget de agenda no painel (issue: atendente pedia pra ver o que a IA já
+  // marcou sem sair da plataforma) — `listUpcomingEvents` já existia e já
+  // roda em produção pro job de lembretes; só faltava uma rota expondo isso
+  // pro frontend. `?days=N` (default 14) igual ao raciocínio de
+  // findWeeklyAvailability, sem virar um parâmetro livre demais.
+  router.get('/api/google-calendar/upcoming-events', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    if (!(await isGoogleCalendarConnected(tenantId))) {
+      return res.status(503).json({ error: 'Google Calendar não conectado pra este tenant.' });
+    }
+    if (!googleRedirectUri) {
+      return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 60);
+    const cfg: CalendarConfig = { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri };
+    const now = new Date();
+    const timeMaxIso = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+    const events = await listUpcomingEvents(tenantId, cfg, now.toISOString(), timeMaxIso);
+    res.json({ events });
   }));
 
   return router;
