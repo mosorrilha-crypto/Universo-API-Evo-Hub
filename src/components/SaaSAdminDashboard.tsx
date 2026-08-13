@@ -1,25 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell
-} from 'recharts';
-import { Tenant, TenantPlan, TenantStatus, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus } from '../types';
-import { INITIAL_TENANTS } from '../data/mockTenants';
+import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus } from '../types';
 import { apiFetch } from '../lib/apiClient';
-
-const PLAN_DISTRIBUTION = [
-  { name: 'Starter (R$ 590)', value: 12, color: '#10b981' },
-  { name: 'Pro (R$ 1.200)', value: 20, color: '#a855f7' },
-  { name: 'Enterprise (R$ 2.900)', value: 7, color: '#3b82f6' },
-];
 import {
   Building2,
   DollarSign,
@@ -536,27 +517,11 @@ interface SaaSAdminDashboardProps {
   currentUser?: UserProfile | any;
 }
 
-const MRR_HISTORY_DATA = [
-  { month: 'Mar/26', mrr: 18400, clientes: 12 },
-  { month: 'Abr/26', mrr: 24900, clientes: 18 },
-  { month: 'Mai/26', mrr: 32100, clientes: 24 },
-  { month: 'Jun/26', mrr: 41800, clientes: 31 },
-  { month: 'Jul/26', mrr: 52400, clientes: 39 },
-  { month: 'Ago/26', mrr: 68900, clientes: 48 },
-];
-
 export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
-  tenants: propTenants,
-  activeTenant: propActiveTenant,
-  onSelectTenant,
-  onAddTenant,
-  onUpdateTenant,
   currentUser,
 }) => {
-  const tenants = propTenants || INITIAL_TENANTS;
-  const activeTenant = propActiveTenant || tenants[0] || INITIAL_TENANTS[0];
   const [searchTerm, setSearchTerm] = useState('');
-  const [planFilter, setPlanFilter] = useState<string>('all');
+  const [segmentFilter, setSegmentFilter] = useState<string>('all');
   const [activeAdminTab, setActiveAdminTab] = useState<'tenants' | 'users' | 'tokens_telemetry' | 'roadmap' | 'global_prompt'>('tenants');
 
   // Camada 1 (Global) do prompt do agente — editável por saas_admin sem
@@ -645,9 +610,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       setIsSavingGlobalPrompt(false);
     }
   };
-  const [isNewTenantModalOpen, setIsNewTenantModalOpen] = useState(false);
-  const [copiedWebhookId, setCopiedWebhookId] = useState<string | null>(null);
-
   // User Management State — achado real em produção: este painel inteiro
   // era local/localStorage, sem nenhum apiFetch, apesar de já existir uma
   // API real e funcional pra isso (server/routes/admin.ts, GET/POST/DELETE
@@ -669,27 +631,52 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [isSavingUser, setIsSavingUser] = useState(false);
   const isSaasAdminUser = currentUser?.role === 'saas_admin';
 
-  // Achado real em produção (12/08/2026): esse dropdown usava `tenants`
-  // (prop vinda do App.tsx, só localStorage/mock — ex: id "tenant_004") em
-  // vez da tabela real — cadastrar operador pra QUALQUER tenant (inclusive a
-  // Monique) quebrava com "invalid input syntax for type uuid", porque o
-  // backend exige um UUID de verdade. Busca separada, só pra este dropdown,
-  // sem mexer no resto do painel (a aba "Tenants & Conexões" mistura campos
-  // decorativos — plano, MRR, engine de WhatsApp — que não existem na tabela
-  // `tenants` real; misturar os dois pediria um refactor maior, fora de
-  // escopo aqui).
-  const [realTenants, setRealTenants] = useState<{ id: string; name: string }[]>([]);
+  // Lista real de tenants (GET /api/admin/tenants, tabela `tenants` do
+  // Supabase) — achado real em produção (12/08/2026): o dropdown de
+  // cadastro de usuário usava a prop `tenants` (vinda do App.tsx, só
+  // localStorage/mock — ex: id "tenant_004") em vez da tabela real —
+  // cadastrar operador pra QUALQUER tenant (inclusive a Monique) quebrava
+  // com "invalid input syntax for type uuid", porque o backend exige um
+  // UUID de verdade. Achado numa auditoria seguinte (13/08/2026): a aba
+  // "Tenants & Conexões" inteira (cards de MRR/ARR, gráfico de crescimento,
+  // distribuição de planos, calculadora de margem de infraestrutura,
+  // tabela de clientes) rodava sobre `tenants` (a mesma prop mock) também —
+  // mostrava sempre "1 Empresa" (a Monique fictícia, tenant_004) mesmo com
+  // outros tenants reais já cadastrados no banco. Uma lista só, real, usada
+  // em todo o painel agora — sem os campos decorativos (plano, MRR, engine
+  // de WhatsApp) que nunca existiram na tabela `tenants` real.
+  const [realTenants, setRealTenants] = useState<
+    { id: string; name: string; slug: string | null; segment: string | null; currency: string; locale: string; createdAt: string; whatsappConnected: boolean }[]
+  >([]);
+  const [isLoadingRealTenants, setIsLoadingRealTenants] = useState(false);
+
+  const fetchRealTenants = async () => {
+    if (!isSaasAdminUser) return;
+    setIsLoadingRealTenants(true);
+    try {
+      const res = await apiFetch('/api/admin/tenants');
+      const data = res.ok ? await res.json() : null;
+      const list = (data?.tenants || []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        slug: t.slug ?? null,
+        segment: t.segment ?? null,
+        currency: t.currency,
+        locale: t.locale,
+        createdAt: t.created_at,
+        whatsappConnected: !!t.whatsappConnected,
+      }));
+      setRealTenants(list);
+      setNewUserTenantId((prev) => prev || list[0]?.id || '');
+    } catch (err) {
+      console.error('Falha ao carregar tenants reais:', err);
+    } finally {
+      setIsLoadingRealTenants(false);
+    }
+  };
 
   useEffect(() => {
-    if (!isSaasAdminUser) return;
-    apiFetch('/api/admin/tenants')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        const list = (data?.tenants || []).map((t: any) => ({ id: t.id, name: t.name }));
-        setRealTenants(list);
-        setNewUserTenantId((prev) => prev || list[0]?.id || '');
-      })
-      .catch((err) => console.error('Falha ao carregar tenants reais:', err));
+    fetchRealTenants();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSaasAdminUser]);
 
@@ -807,14 +794,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [queueStatus, setQueueStatus] = useState<QueueSystemStatus | null>(null);
   const [isMockAiActive, setIsMockAiActive] = useState<boolean>(false);
 
-  // New Tenant Form State
-  const [newName, setNewName] = useState('');
-  const [newPlan, setNewPlan] = useState<TenantPlan>('pro');
-  const [newPhone, setNewPhone] = useState('5511999887766');
-  const [newEngine, setNewEngine] = useState<'evolution_vps' | 'zapi_managed' | 'meta_cloud_api'>('evolution_vps');
-  const [customKey, setCustomKey] = useState('');
-  const [metaPixel, setMetaPixel] = useState('');
-
   // Fetch live token telemetry and queue state
   const fetchTelemetry = async () => {
     try {
@@ -864,154 +843,20 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     }
   };
 
-  const filteredTenants = tenants.filter((t) => {
+  // Empresas reais (GET /api/admin/tenants) filtradas por busca + segmento —
+  // `segment` é campo real da tabela `tenants` (docs/AGENTE-VERTICAL-
+  // ARQUITETURA.md, Camada 2), diferente do "plano"/MRR/engine de WhatsApp
+  // que nunca existiram de verdade no schema (ver comentário acima, na
+  // definição de `realTenants`).
+  const filteredRealTenants = realTenants.filter((t) => {
     const matchesSearch =
       t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.slug.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.whatsappPhone.includes(searchTerm);
-    const matchesPlan = planFilter === 'all' || t.plan === planFilter;
-    return matchesSearch && matchesPlan;
+      (t.slug || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSegment = segmentFilter === 'all' || t.segment === segmentFilter;
+    return matchesSearch && matchesSegment;
   });
-
-  // Calculate SaaS Global Metrics
-  const totalMRR = tenants.reduce((acc, t) => acc + (t.status === 'ativo' ? t.monthlyMRR : 0), 0);
-  const totalARR = totalMRR * 12;
-  const activeTenantsCount = tenants.filter((t) => t.status === 'ativo').length;
-  const totalProcessedLeads = tenants.reduce((acc, t) => acc + t.currentLeadsMonth, 0);
-
-
-  // Calculate Infra Costs for Hybrid Engine
-  const vpsCount = tenants.filter((t) => t.whatsappEngine === 'evolution_vps').length;
-  const zapiCount = tenants.filter((t) => t.whatsappEngine === 'zapi_managed').length;
-  const vpsCost = vpsCount > 0 ? 60 : 0; // Fixed VPS cost regardless of number of instances
-  const zapiCost = zapiCount * 99; // R$ 99/month per instance
-  const totalInfraCost = vpsCost + zapiCost;
-  const netProfitMRR = totalMRR - totalInfraCost;
-  const infraMarginPct = totalMRR > 0 ? (((totalMRR - totalInfraCost) / totalMRR) * 100).toFixed(1) : '100';
-
-  const getPlanBadge = (plan: TenantPlan) => {
-    switch (plan) {
-      case 'enterprise':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
-            Enterprise (R$ 2.900/mês)
-          </span>
-        );
-      case 'pro':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-            Pro (R$ 1.200/mês)
-          </span>
-        );
-      case 'starter':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800">
-            Starter (R$ 590/mês)
-          </span>
-        );
-    }
-  };
-
-  const getEngineBadge = (engine: 'evolution_vps' | 'zapi_managed' | 'meta_cloud_api') => {
-    switch (engine) {
-      case 'evolution_vps':
-        return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1">
-            <Zap className="w-3 h-3 text-emerald-400" /> Evolution VPS (Docker R$0/num)
-          </span>
-        );
-      case 'zapi_managed':
-        return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800 flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-purple-400" /> Z-API Managed (R$99/mês)
-          </span>
-        );
-      case 'meta_cloud_api':
-        return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-blue-400" /> Meta Cloud Direct
-          </span>
-        );
-    }
-  };
-
-  const getStatusBadge = (status: TenantStatus) => {
-    switch (status) {
-      case 'ativo':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Ativo
-          </span>
-        );
-      case 'trial':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800 flex items-center gap-1">
-            <Clock className="w-3 h-3 text-amber-400" /> Em Trial (14 dias)
-          </span>
-        );
-      case 'suspenso':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-950 text-rose-300 border border-rose-800 flex items-center gap-1">
-            <AlertCircle className="w-3 h-3 text-rose-400" /> Suspenso
-          </span>
-        );
-      default:
-        return null;
-    }
-  };
-
-  const handleCreateTenant = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-
-    const slug = newName
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]/g, '-');
-
-    const mrrByPlan: Record<TenantPlan, number> = {
-      starter: 590,
-      pro: 1200,
-      enterprise: 2900,
-    };
-
-    const newTenant: Tenant = {
-      id: `tenant_${Date.now().toString().slice(-4)}`,
-      name: newName.trim(),
-      slug,
-      plan: newPlan,
-      monthlyMRR: mrrByPlan[newPlan],
-      status: 'ativo',
-      createdAt: new Date().toLocaleDateString('pt-BR'),
-      whatsappPhone: newPhone.replace(/\D/g, '') || '5511999887766',
-      whatsappStatus: 'conectado',
-      whatsappEngine: newEngine,
-      evolutionInstanceName: newEngine === 'evolution_vps' ? `${slug}_main` : undefined,
-      zapiInstanceId: newEngine === 'zapi_managed' ? `${Date.now().toString().slice(-6)}-ZAPI` : undefined,
-      zapiToken: newEngine === 'zapi_managed' ? `${Date.now().toString().slice(-8)}-TOKEN` : undefined,
-      failoverEnabled: true,
-      autoReconnectCount: 0,
-      maxLeadsPerMonth: newPlan === 'enterprise' ? 20000 : newPlan === 'pro' ? 5000 : 1000,
-      currentLeadsMonth: 0,
-      // Deriva do domínio real em uso (produção ou preview), nunca hardcoded —
-      // um domínio de dev fixo aqui faria o webhook de todo cliente novo
-      // apontar pra um ambiente que não existe mais.
-      webhookEndpoint: `${window.location.origin}/api/webhooks/whatsapp?tenantId=tenant_${Date.now().toString().slice(-4)}`,
-      customGeminiKey: customKey ? '••••••••' : undefined,
-      metaPixelId: metaPixel || undefined,
-    };
-
-    onAddTenant(newTenant);
-    setIsNewTenantModalOpen(false);
-    setNewName('');
-  };
-
-  const copyWebhook = (tenant: Tenant) => {
-    navigator.clipboard.writeText(tenant.webhookEndpoint);
-    setCopiedWebhookId(tenant.id);
-    setTimeout(() => setCopiedWebhookId(null), 2500);
-  };
+  const whatsappConnectedCount = realTenants.filter((t) => t.whatsappConnected).length;
+  const knownSegments = Array.from(new Set(realTenants.map((t) => t.segment).filter((s): s is string => !!s)));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1019,20 +864,19 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           Master" (a aba logo acima já diz isso) e "Empresa Selecionada no
           Painel" duplicava o nome do tenant que já aparece no topo da
           página (Header.tsx). Reduzido a só o que agrega: descrição curta
-          do que esse painel controla + a ação real (onboarding). */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          do que esse painel controla. O botão "Onboarding Novo Cliente" que
+          ficava aqui abria um modal 100% local — criava um tenant fictício
+          só na memória do navegador (nunca gravava em `tenants` de verdade)
+          e chegava a coletar uma chave de API Gemini real só pra descartá-la
+          na hora (`customGeminiKey: customKey ? '••••••••' : undefined`).
+          Removido — o onboarding real (cria o tenant em `tenants` via POST
+          /api/admin/tenants e já provisiona WhatsApp) é o botão "Conectar
+          WhatsApp via QR Code" logo abaixo, na tabela. */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
         <p className="text-xs text-slate-400 flex items-center gap-2">
           <Layers className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          Controle de empresas assinantes, receitas MRR/ARR, instâncias do WhatsApp e cotas de IA Gemini.
+          Controle de empresas cadastradas, conexões de WhatsApp e cotas de IA Gemini.
         </p>
-
-        <button
-          onClick={() => setIsNewTenantModalOpen(true)}
-          className="py-2 px-3.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all flex-shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Onboarding Novo Cliente</span>
-        </button>
       </div>
 
       {/* Admin Navigation Tabs */}
@@ -1098,365 +942,138 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         </button>
       </div>
 
-      {/* TAB CONTENT: TENANTS OVERVIEW */}
+      {/* TAB CONTENT: TENANTS OVERVIEW — achado numa auditoria (13/08/2026):
+          esta aba inteira (4 cards de MRR/ARR/Leads/Uptime, gráfico de
+          crescimento de MRR, donut de distribuição de planos, calculadora
+          de margem de infraestrutura VPS x Z-API, e a própria tabela de
+          clientes) rodava sobre a prop `tenants` — só um mock local
+          (INITIAL_TENANTS, 1 tenant fictício, "Monique Sorrilha Beauty
+          Studio") — nunca a lista real do Supabase. Mostrava sempre "1
+          Empresa"/"99.9% Uptime"/margem calculada mesmo com outros tenants
+          reais já cadastrados. Reescrito pra usar só `realTenants` (GET
+          /api/admin/tenants, mesma fonte que os botões de conexão abaixo já
+          usavam) — sem inventar MRR, plano, engine de WhatsApp ou uptime,
+          nenhum dos quais existe de verdade na tabela `tenants`. */}
       {activeAdminTab === 'tenants' && (
         <div className="space-y-6">
-
-
-      {/* Global SaaS KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>MRR (Receita Mensal Recorrente)</span>
-            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-emerald-400">
-            R$ {totalMRR.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </div>
-          <p className="text-[10px] text-emerald-300 mt-2 font-medium">ARR Estimado: R$ {totalARR.toLocaleString('pt-BR')}/ano</p>
-          <span
-            className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-950/80 text-amber-300 border border-amber-700/60"
-            title="MRR por tenant é um valor fixo escolhido ao criar o cliente (por plano), não calculado a partir de pagamento real recebido."
-          >
-            <FlaskConical className="w-2.5 h-2.5" />
-            Dados de Exemplo
-          </span>
-        </div>
-
-        <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>Clientes Ativos (Tenants)</span>
-            <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-              <Building2 className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-white">{activeTenantsCount} Empresas</div>
-          <p className="text-[10px] text-slate-500 mt-2">Churn Rate: &lt; 0.8% ao mês</p>
-        </div>
-
-        <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>Leads & Áudios Processados</span>
-            <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
-              <MessageSquare className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-white">{totalProcessedLeads.toLocaleString('pt-BR')}</div>
-          <p className="text-[10px] text-slate-500 mt-2">Via Gemini 3.6 Flash Server-Side</p>
-        </div>
-
-        <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>Servidor e Conectores</span>
-            <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-emerald-400">99.9% Uptime</div>
-          <p className="text-[10px] text-emerald-300 mt-2 font-medium">Webhook Multi-Tenant Ativo</p>
-        </div>
-      </div>
-
-      {/* Charts Section: SaaS Growth & Plan Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
-                Crescimento de MRR do SaaS (R$)
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">Evolução do faturamento recorrente mensal da sua plataforma</p>
-            </div>
-          </div>
-
-          <div className="h-60 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={MRR_HISTORY_DATA}>
-                <defs>
-                  <linearGradient id="mrrGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
-                <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => `R$${v / 1000}k`} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
-                  formatter={(val: any) => [`R$ ${Number(val).toLocaleString('pt-BR')}`, 'MRR']}
-                />
-                <Area type="monotone" dataKey="mrr" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#mrrGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <div>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <PieChartIcon className="w-4 h-4 text-emerald-400" />
-              Distribuição por Planos de Assinatura
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">Composição da receita de assinantes</p>
-          </div>
-
-          <div className="h-48 w-full flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={PLAN_DISTRIBUTION}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={75}
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  {PLAN_DISTRIBUTION.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
-                  formatter={(val: any) => [`R$ ${Number(val).toLocaleString('pt-BR')}`, 'Total']}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="space-y-1.5 text-xs">
-            {PLAN_DISTRIBUTION.map((item) => (
-              <div key={item.name} className="flex items-center justify-between text-slate-300">
-                <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="truncate max-w-[150px]">{item.name}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
+              <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+                <span>Empresas Cadastradas</span>
+                <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+                  <Building2 className="w-4 h-4" />
                 </div>
-                <span className="font-bold text-white">R$ {item.value.toLocaleString('pt-BR')}</span>
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Hybrid Architecture Strategy & Infrastructure Cost Breakdown */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 pb-4 border-b border-slate-800">
-          <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Zap className="w-5 h-5 text-emerald-400" />
-              Estratégia Híbrida de Conectividade & Custos de Infraestrutura
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Optimização de margens: combinação de Servidor VPS Próprio (Evolution Docker) com Provedores Gerenciados (Z-API).
-            </p>
-          </div>
-
-          <div className="flex items-center space-x-2 bg-emerald-950/80 border border-emerald-800/80 px-3.5 py-1.5 rounded-xl">
-            <span className="text-xs text-emerald-300 font-medium">Margem Bruta de Infraestrutura:</span>
-            <span className="text-sm font-black text-emerald-400">{infraMarginPct}%</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span className="flex items-center gap-1.5 font-semibold text-emerald-400">
-                <Zap className="w-4 h-4" /> Opção A: VPS Docker (Evolution)
-              </span>
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-800">
-                {vpsCount} Tenants
-              </span>
-            </div>
-            <div className="text-lg font-bold text-white">R$ {vpsCost.toFixed(2)}/mês total</div>
-            <p className="text-[10px] text-slate-500">
-              Custo fixo do servidor VPS. Permite conectar dezenas de números de clientes sem pagar custo por número.
-            </p>
-          </div>
-
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span className="flex items-center gap-1.5 font-semibold text-purple-400">
-                <ShieldCheck className="w-4 h-4" /> Opção B: Z-API Gerenciada
-              </span>
-              <span className="text-[10px] bg-purple-950 text-purple-300 px-2 py-0.5 rounded-full border border-purple-800">
-                {zapiCount} Tenants Enterprise
-              </span>
-            </div>
-            <div className="text-lg font-bold text-white">R$ {zapiCost.toFixed(2)}/mês ({zapiCount}x R$99)</div>
-            <p className="text-[10px] text-slate-500">
-              Provedor terceirizado gerenciado de alta prioridade. Custo por número repassado ou embutido no plano Enterprise.
-            </p>
-          </div>
-
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span className="flex items-center gap-1.5 font-semibold text-blue-400">
-                <DollarSign className="w-4 h-4" /> Resultado Líquido SaaS
-              </span>
-              <span className="text-[10px] bg-blue-950 text-blue-300 px-2 py-0.5 rounded-full border border-blue-800">
-                Lucro Operacional
-              </span>
-            </div>
-            <div className="text-lg font-black text-emerald-400">
-              R$ {netProfitMRR.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/mês
-            </div>
-            <p className="text-[10px] text-slate-500">
-              MRR Bruto (R$ {totalMRR.toLocaleString('pt-BR')}) - Custo Infra (R$ {totalInfraCost.toFixed(2)})
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Tenants Management Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold text-white">Lista de Clientes SaaS (Tenants Cadastrados)</h2>
-            <p className="text-xs text-slate-400">Alterne o contexto de atendimento para gerenciar e dar suporte a qualquer empresa</p>
-          </div>
-
-          <div className="flex items-center space-x-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-64">
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar empresa ou telefone..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 pl-8"
-              />
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+              <div className="text-2xl font-black text-white">
+                {isLoadingRealTenants ? '—' : realTenants.length}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2">Tabela `tenants` real (Supabase)</p>
             </div>
 
-            <select
-              value={planFilter}
-              onChange={(e) => setPlanFilter(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
-            >
-              <option value="all">Todos os Planos</option>
-              <option value="starter">Starter</option>
-              <option value="pro">Pro</option>
-              <option value="enterprise">Enterprise</option>
-            </select>
+            <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
+              <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+                <span>WhatsApp Conectado</span>
+                <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-emerald-400">
+                {isLoadingRealTenants ? '—' : `${whatsappConnectedCount} / ${realTenants.length}`}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2">Via credencial Meta ou instância Evolution real</p>
+            </div>
           </div>
-        </div>
-<div className="mb-4 flex justify-end gap-2">
-  <GerenciarCredenciaisCapi />
-  <ConectarEvolutionQrCode />
-</div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
-              <tr>
-                <th className="p-3.5">Empresa / Tenant</th>
-                <th className="p-3.5">Plano & MRR</th>
-                <th className="p-3.5">Motor de Conexão Engine</th>
-                <th className="p-3.5">Status</th>
-                <th className="p-3.5">WhatsApp / Conexão</th>
-                <th className="p-3.5">Uso de Leads (Mês)</th>
-                <th className="p-3.5">URL Webhook Exclusivo</th>
-                <th className="p-3.5 text-right">Ação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/80">
-              {filteredTenants.map((t) => {
-                const isActiveTenant = t.id === activeTenant.id;
-                const leadsPct = Math.round((t.currentLeadsMonth / t.maxLeadsPerMonth) * 100);
 
-                return (
-                  <tr
-                    key={t.id}
-                    className={`transition-colors ${
-                      isActiveTenant ? 'bg-emerald-950/30' : 'hover:bg-slate-800/50'
-                    }`}
-                  >
-                    <td className="p-3.5">
-                      <div className="font-bold text-white text-sm flex items-center gap-1.5">
-                        {t.name}
-                        {isActiveTenant && (
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-semibold">
-                            Atual no Painel
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono">ID: {t.id} ({t.slug})</div>
-                    </td>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">Lista de Clientes SaaS (Tenants Cadastrados)</h2>
+                <p className="text-xs text-slate-400">Empresas reais cadastradas no banco — cada linha corresponde a um tenant de verdade.</p>
+              </div>
 
-                    <td className="p-3.5">
-                      {getPlanBadge(t.plan)}
-                      <div className="text-xs font-bold text-white mt-1">
-                        R$ {t.monthlyMRR.toLocaleString('pt-BR')}/mês
-                      </div>
-                    </td>
+              <div className="flex items-center space-x-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Buscar empresa..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 pl-8"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+                </div>
 
-                    <td className="p-3.5">
-                      {getEngineBadge(t.whatsappEngine || 'evolution_vps')}
-                    </td>
+                <select
+                  value={segmentFilter}
+                  onChange={(e) => setSegmentFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="all">Todos os Segmentos</option>
+                  {knownSegments.map((seg) => (
+                    <option key={seg} value={seg}>{seg}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-                    <td className="p-3.5">{getStatusBadge(t.status)}</td>
+            <div className="flex justify-end gap-2">
+              <GerenciarCredenciaisCapi />
+              <ConectarEvolutionQrCode />
+            </div>
 
-                    <td className="p-3.5">
-                      <div className="text-slate-200 font-medium">{t.whatsappPhone}</div>
-                      <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400" /> WhatsApp Conectado
-                      </span>
-                    </td>
-
-                    <td className="p-3.5 min-w-[140px]">
-                      <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                        <span>{t.currentLeadsMonth} / {t.maxLeadsPerMonth}</span>
-                        <span>{leadsPct}%</span>
-                      </div>
-                      <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
-                        <div
-                          className="bg-emerald-500 h-full rounded-full transition-all"
-                          style={{ width: `${Math.min(leadsPct, 100)}%` }}
-                        />
-                      </div>
-                    </td>
-
-                    <td className="p-3.5 max-w-xs">
-                      <div className="flex items-center justify-between bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 font-mono text-[10px] text-slate-400">
-                        <span className="truncate mr-2">{t.webhookEndpoint}</span>
-                        <button
-                          type="button"
-                          onClick={() => copyWebhook(t)}
-                          className="text-emerald-400 hover:text-emerald-300"
-                          title="Copiar URL Webhook"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      {copiedWebhookId === t.id && (
-                        <span className="text-[9px] text-emerald-400 block mt-0.5">Copiado!</span>
-                      )}
-                    </td>
-
-                    <td className="p-3.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => onSelectTenant(t)}
-                        disabled={isActiveTenant}
-                        className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-1 ml-auto ${
-                          isActiveTenant
-                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                            : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 shadow'
-                        }`}
-                      >
-                        <span>{isActiveTenant ? 'Ativo' : 'Acessar Painel'}</span>
-                        {!isActiveTenant && <ChevronRight className="w-3.5 h-3.5" />}
-                      </button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
+                  <tr>
+                    <th className="p-3.5">Empresa / Tenant</th>
+                    <th className="p-3.5">Segmento</th>
+                    <th className="p-3.5">Moeda / Idioma</th>
+                    <th className="p-3.5">WhatsApp</th>
+                    <th className="p-3.5">Criado em</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {isLoadingRealTenants ? (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">Carregando tenants...</td>
+                    </tr>
+                  ) : filteredRealTenants.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">
+                        {realTenants.length === 0 ? 'Nenhum tenant cadastrado ainda.' : 'Nenhum tenant corresponde à busca/filtro.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRealTenants.map((t) => (
+                      <tr key={t.id} className="hover:bg-slate-800/50 transition-colors">
+                        <td className="p-3.5">
+                          <div className="font-bold text-white text-sm">{t.name}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">ID: {t.id}{t.slug ? ` (${t.slug})` : ''}</div>
+                        </td>
+                        <td className="p-3.5 text-slate-300">{t.segment || '—'}</td>
+                        <td className="p-3.5 text-slate-300">{t.currency} / {t.locale}</td>
+                        <td className="p-3.5">
+                          {t.whatsappConnected ? (
+                            <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Conectado
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" /> Não conectado
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-slate-400">
+                          {t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
-      </div>
       )}
 
       {/* TAB CONTENT: ESTRATÉGIA DE TOKENS & ARQUITETURA SAAS */}
@@ -1940,7 +1557,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                         return matchesSearch && matchesRole;
                       })
                       .map((usr) => {
-                        const tenantObj = tenants.find((t) => t.id === usr.tenantId);
+                        const tenantObj = realTenants.find((t) => t.id === usr.tenantId);
                         return (
                           <tr key={usr.id} className="hover:bg-slate-800/40 transition-colors">
                             <td className="p-3 font-semibold text-white flex items-center space-x-3">
@@ -2117,116 +1734,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         </div>
       )}
 
-      {/* NEW TENANT ONBOARDING MODAL */}
-
-      {isNewTenantModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-5">
-            <button
-              onClick={() => setIsNewTenantModalOpen(false)}
-              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center space-x-3 pb-3 border-b border-slate-800">
-              <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                <Building2 className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-white">Cadastrar Novo Cliente SaaS (Tenant)</h2>
-                <p className="text-xs text-slate-400">Onboarding instantâneo de uma nova empresa assinante</p>
-              </div>
-            </div>
-
-            <form onSubmit={handleCreateTenant} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Nome da Empresa / Cliente</label>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Ex: Clínica Odontológica Sorriso Perfeito"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Plano Escolhido</label>
-                  <select
-                    value={newPlan}
-                    onChange={(e) => setNewPlan(e.target.value as TenantPlan)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="starter">Starter (R$ 590/mês)</option>
-                    <option value="pro">Pro (R$ 1.200/mês)</option>
-                    <option value="enterprise">Enterprise (R$ 2.900/mês)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Número do WhatsApp (API)</label>
-                  <input
-                    type="text"
-                    value={newPhone}
-                    onChange={(e) => setNewPhone(e.target.value)}
-                    placeholder="5511999887766"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Motor de Conexão (Estratégia Híbrida)</label>
-                <select
-                  value={newEngine}
-                  onChange={(e) => setNewEngine(e.target.value as 'evolution_vps' | 'zapi_managed' | 'meta_cloud_api')}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="evolution_vps">Opção A: Evolution API VPS Docker (Custo R$ 0/num - Alta Margem)</option>
-                  <option value="zapi_managed">Opção B: Z-API Gerenciada (Custo R$ 99/mês - 99.9% Uptime Terceirizado)</option>
-                  <option value="meta_cloud_api">Meta Cloud API Direct (WhatsApp Business API)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Chave de API Gemini Própria (Opcional - usa a global do SaaS se vazia)
-                </label>
-                <input
-                  type="password"
-                  value={customKey}
-                  onChange={(e) => setCustomKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Pixel ID da Meta / Facebook (Meta CAPI)</label>
-                <input
-                  type="text"
-                  value={metaPixel}
-                  onChange={(e) => setMetaPixel(e.target.value)}
-                  placeholder="Ex: 987654321012345"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg flex items-center justify-center space-x-2 transition-all"
-              >
-                <Building2 className="w-4 h-4" />
-                <span>Ativar Empresa & Gerar Webhook</span>
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
