@@ -108,6 +108,28 @@ describe('POST /api/conversations/:phone/manual-appointment', () => {
     expect(createCalendarEvent).not.toHaveBeenCalled();
   });
 
+  it('permite agendar quando o único existente já passou, e reseta o estado de pagamento (mesmo bug real do PR #203, corrigido aqui pro caminho manual)', async () => {
+    supabase.__tables.appointments = [
+      {
+        tenant_id: TENANT_ID, phone: PHONE, event_id: 'evt-antigo', summary: 'Cejas', start_iso: '2020-01-01T09:00:00', end_iso: '2020-01-01T10:00:00',
+        created_at: new Date().toISOString(), source: 'ai', payment_status: 'confirmed',
+      },
+    ];
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+    expect(res.status).toBe(201);
+    expect(createCalendarEvent).toHaveBeenCalledTimes(1);
+
+    const rows = supabase.__tables.appointments;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ phone: PHONE, source: 'manual', event_id: 'evt-manual-123', payment_status: null });
+  });
+
   it('409 quando o horário está ocupado na agenda', async () => {
     checkFreeBusy.mockResolvedValue(false);
     ({ server, baseUrl } = await startServer());
