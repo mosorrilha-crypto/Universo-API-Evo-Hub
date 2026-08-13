@@ -77,21 +77,43 @@ export async function getAppointmentForPhone(tenantId: string, phone: string): P
   return data ? toTracked(data as AppointmentRow) : undefined;
 }
 
-export async function setAppointmentForPhone(tenantId: string, phone: string, appt: Omit<TrackedAppointment, 'createdAt'>): Promise<void> {
+/**
+ * `resetPaymentState`: true só quando esta chamada representa um
+ * agendamento genuinamente NOVO (criar_agendamento) — nunca uma remarcação
+ * (remarcar_agendamento chama isto sem essa flag). Sem isso, um upsert pra
+ * um telefone que já tinha uma linha antiga (ex: agendamento passado, já
+ * pago) mantinha o payment_status velho grudado no agendamento novo, porque
+ * o upsert só escreve as colunas listadas aqui — colunas de pagamento nunca
+ * apareciam no payload, então o Postgres simplesmente preservava o valor
+ * anterior (achado real em produção, ver criar_agendamento em autoReply.ts).
+ */
+export async function setAppointmentForPhone(
+  tenantId: string,
+  phone: string,
+  appt: Omit<TrackedAppointment, 'createdAt'>,
+  opts?: { resetPaymentState?: boolean }
+): Promise<void> {
   const db = getDb();
-  const { error } = await db.from('appointments').upsert(
-    {
-      tenant_id: tenantId,
-      phone,
-      event_id: appt.eventId,
-      summary: appt.summary,
-      start_iso: appt.startIso,
-      end_iso: appt.endIso,
-      created_at: new Date().toISOString(),
-      source: appt.source || 'ai',
-    },
-    { onConflict: 'tenant_id,phone' }
-  );
+  const payload: Record<string, unknown> = {
+    tenant_id: tenantId,
+    phone,
+    event_id: appt.eventId,
+    summary: appt.summary,
+    start_iso: appt.startIso,
+    end_iso: appt.endIso,
+    created_at: new Date().toISOString(),
+    source: appt.source || 'ai',
+  };
+  if (opts?.resetPaymentState) {
+    payload.payment_status = null;
+    payload.payment_proof_message_id = null;
+    payload.payment_verified_by = null;
+    payload.payment_verified_at = null;
+    payload.payment_pending_since = null;
+    payload.payment_pending_alerted_at = null;
+    payload.payment_receipt_hint = null;
+  }
+  const { error } = await db.from('appointments').upsert(payload, { onConflict: 'tenant_id,phone' });
   if (error) throw error;
 }
 

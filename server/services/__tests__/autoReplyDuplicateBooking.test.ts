@@ -64,8 +64,10 @@ function makeFakeAiCriarAgendamento(): GoogleGenAI {
 }
 
 describe('criar_agendamento — nunca sobrescreve um agendamento ativo (auditoria pós-lançamento)', () => {
-  it('recusa criar um segundo agendamento quando já existe um ativo pro contato', async () => {
-    mockAppointment = { eventId: 'evt-antigo', summary: 'Efecto 30+', startIso: '2026-08-09T09:00:00', endIso: '2026-08-09T10:30:00' };
+  it('recusa criar um segundo agendamento quando já existe um ativo (futuro) pro contato', async () => {
+    // Data bem no futuro de propósito — o teste não mocka o relógio, e a
+    // checagem agora é "o agendamento existente ainda não passou?".
+    mockAppointment = { eventId: 'evt-antigo', summary: 'Efecto 30+', startIso: '2030-08-09T09:00:00', endIso: '2030-08-09T10:30:00' };
     createCalendarEvent.mockClear();
     setAppointmentForPhone.mockClear();
 
@@ -90,5 +92,29 @@ describe('criar_agendamento — nunca sobrescreve um agendamento ativo (auditori
 
     expect(createCalendarEvent).toHaveBeenCalledTimes(1);
     expect(setAppointmentForPhone).toHaveBeenCalledTimes(1);
+  });
+
+  it('permite criar um agendamento novo quando o único existente já passou, e reseta o estado de pagamento', async () => {
+    // Achado real em produção: cliente com um agendamento antigo (já
+    // atendido e pago) volta por um serviço diferente — isso não pode cair
+    // em "já tem um ativo", e o novo registro não pode herdar o
+    // payment_status do ciclo antigo.
+    mockAppointment = { eventId: 'evt-antigo', summary: 'Pelo a Pelo', startIso: '2026-08-09T09:00:00', endIso: '2026-08-09T10:30:00' };
+    createCalendarEvent.mockClear();
+    setAppointmentForPhone.mockClear();
+
+    await generateAutoReplyForText(
+      'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(createCalendarEvent).toHaveBeenCalledTimes(1);
+    expect(setAppointmentForPhone).toHaveBeenCalledTimes(1);
+    expect(setAppointmentForPhone).toHaveBeenCalledWith(
+      'tenant-a',
+      '595981234567',
+      expect.objectContaining({ summary: 'Microlips' }),
+      { resetPaymentState: true }
+    );
   });
 });

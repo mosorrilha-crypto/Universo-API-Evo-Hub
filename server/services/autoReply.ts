@@ -539,15 +539,32 @@ async function executeCalendarTool(
         // chaveada por tenant_id+phone) — o evento antigo ficava órfão na
         // agenda real (continua ocupando o horário, mas remarcar_agendamento/
         // cancelar_agendamento/o job de lembretes só enxergam o novo).
+        //
+        // Achado real em produção (12/08, cliente recorrente): essa checagem
+        // não distinguia um agendamento REALMENTE ativo de um que já
+        // aconteceu no passado — nada nunca limpa a linha depois que a data
+        // passa (só cancelar_agendamento limpa, e só no fluxo de <24h). Uma
+        // cliente que já teve um serviço atendido e pago, e volta por um
+        // serviço NOVO e diferente, caía sempre em remarcar_agendamento por
+        // engano: o evento real no Google Calendar ficava com o título do
+        // serviço VELHO (rescheduleCalendarEvent só muda data/hora, nunca o
+        // título) e o operador via o status de pagamento do ciclo antigo no
+        // painel. Só um agendamento cujo horário ainda não passou bloqueia
+        // um criar_agendamento novo.
         const existingBeforeCreate = await getAppointmentForPhone(tenantId, phone);
-        if (existingBeforeCreate) {
+        const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
+        const existingIsUpcoming = existingBeforeCreate && Date.parse(`${existingBeforeCreate.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
+        if (existingIsUpcoming) {
           return {
             response: { erro: 'Este contato já tem um agendamento ativo — use remarcar_agendamento pra mudar o horário, nunca criar_agendamento de novo.' },
-            summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate.summary}" em ${existingBeforeCreate.startIso}) — precisa remarcar em vez de criar outro.`,
+            summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate!.summary}" em ${existingBeforeCreate!.startIso}) — precisa remarcar em vez de criar outro.`,
           };
         }
         const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
-        await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim });
+        // resetPaymentState: true — é sempre um agendamento novo aqui (o
+        // caso "já ativo" já foi recusado acima), nunca deve herdar
+        // payment_status de um ciclo anterior, existente ou não.
+        await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim }, { resetPaymentState: true });
         notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
         return {
           response: { sucesso: true, evento_id: eventId },
