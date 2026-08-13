@@ -281,11 +281,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // resolveCredentialsForTenant precisa achar provider 'evolution' pra esse
   // tenant, senão não tem como cumprir o pedido.
   router.post('/api/status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { text, imageBase64, caption, backgroundColor } = req.body || {};
+    const { text, imageBase64, videoBase64, caption, backgroundColor } = req.body || {};
     const hasText = typeof text === 'string' && text.trim();
     const hasImage = typeof imageBase64 === 'string' && imageBase64.trim();
-    if (!hasText && !hasImage) {
-      return res.status(400).json({ error: 'Informe um texto ou uma imagem pro Status.' });
+    const hasVideo = typeof videoBase64 === 'string' && videoBase64.trim();
+    if (!hasText && !hasImage && !hasVideo) {
+      return res.status(400).json({ error: 'Informe um texto, uma imagem ou um vídeo pro Status.' });
     }
 
     const tenantId = tenantOf(req);
@@ -299,7 +300,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
 
     try {
-      if (hasImage) {
+      if (hasVideo) {
+        await sendEvolutionStatus(credentials.evolutionInstanceName, credentials.evolutionApiUrl, credentials.evolutionApiKey, {
+          type: 'video',
+          content: videoBase64,
+          caption: typeof caption === 'string' && caption.trim() ? caption.trim() : undefined,
+        });
+      } else if (hasImage) {
         await sendEvolutionStatus(credentials.evolutionInstanceName, credentials.evolutionApiUrl, credentials.evolutionApiKey, {
           type: 'image',
           content: imageBase64,
