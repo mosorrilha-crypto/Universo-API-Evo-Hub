@@ -13,11 +13,14 @@ const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
 const recordOutgoingMessage = vi.fn(async () => ({}) as any);
 const PRODUCT_WITH_PHOTO = { name: 'Microlips', price: 'Gs 500.000', exampleImageBase64: 'data:image/jpeg;base64,QQ==', exampleImageMimeType: 'image/jpeg' };
-const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO] }));
+const PRODUCT_WITH_VIDEO = { name: 'Efecto Volumen Brasileño', price: 'Gs 200.000', exampleVideoId: 'video-1', exampleVideoMimeType: 'video/mp4', exampleVideoFileName: 'volumen.mp4' };
+const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO, PRODUCT_WITH_VIDEO] }));
+const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
 
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
+vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
 
@@ -285,6 +288,56 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
     // nenhuma chamada ao Gemini deveria ter usado function-calling de foto
     expect(calls.every((c) => !c.config?.tools)).toBe(true);
+  });
+});
+
+describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade com Epic 4.5.2)', () => {
+  function makeFakeAiWithVideoTool(shouldCallTool: boolean) {
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.config?.tools) {
+            return { functionCalls: shouldCallTool ? [{ name: 'enviar_video_exemplo', args: { nome_produto: 'Efecto Volumen Brasileño' } }] : [] } as any;
+          }
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Manda ver o vídeo!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return { ai, calls };
+  }
+
+  it('envia o vídeo real via Meta (busca o binário no Storage) quando o modelo decide chamar a ferramenta', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    recordOutgoingMessage.mockClear();
+    getKnowledgeBaseVideo.mockClear();
+    const { ai } = makeFakeAiWithVideoTool(true);
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'tem vídeo do efecto volumen?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(result).not.toBeNull();
+    expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-a', 'video-1');
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'video/mp4', 'volumen.mp4');
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', 'Efecto Volumen Brasileño');
+    expect(recordOutgoingMessage).toHaveBeenCalled();
+  });
+
+  it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai } = makeFakeAiWithVideoTool(false);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'oi, td bem?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
   });
 });
 

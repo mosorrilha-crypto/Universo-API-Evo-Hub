@@ -289,7 +289,7 @@ export async function sendWhatsAppMediaMessage(
   // voice note) — só se aplica a Ogg/Opus, o único formato real de voice note
   // do WhatsApp; pra outros formatos de áudio (ex: MP3, usado no experimento
   // de controle do erro 131053) a mensagem vira um "áudio básico" normal.
-  const type = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'document';
+  const type = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : mimeType.startsWith('video/') ? 'video' : 'document';
   const isVoiceNote = mimeType.startsWith('audio/ogg');
   const payload: any = {
     messaging_product: 'whatsapp',

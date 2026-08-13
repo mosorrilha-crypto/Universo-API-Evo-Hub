@@ -26,7 +26,9 @@ import {
   Clock,
   Download,
   Loader2,
-  BrainCircuit
+  BrainCircuit,
+  Video,
+  Play
 } from 'lucide-react';
 
 interface AgentKnowledgeBaseProps {
@@ -430,6 +432,83 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       }));
     };
     reader.readAsDataURL(file);
+  };
+
+  const MAX_VIDEO_SIZE_MB = 16; // mesmo limite real da Meta Cloud API pra mensagem de vídeo, validado de novo no servidor
+  const ALLOWED_VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/3gpp']);
+  const [uploadingVideoForId, setUploadingVideoForId] = useState<string | null>(null);
+  const [previewingVideoId, setPreviewingVideoId] = useState<string | null>(null);
+
+  const fileToBase64Local = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  // Diferente da foto (inline no formData): o vídeo sobe pro Storage do
+  // backend na hora (não espera "Salvar Regras no Agente") e só a
+  // referência (videoId) fica no formData local — mesmo motivo documentado
+  // em knowledgeBaseVideoStore.ts: guardar um vídeo inteiro em base64 no
+  // formData repetiria o incidente real de estouro de cota do localStorage
+  // que já aconteceu com foto (ver App.tsx/safeSetLocalStorage).
+  const handleProductVideoUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!ALLOWED_VIDEO_MIME_TYPES.has(file.type)) {
+      alert(`Formato de vídeo não suportado pelo WhatsApp (${file.type || 'desconhecido'}). Envie um MP4.`);
+      return;
+    }
+    if (file.size > MAX_VIDEO_SIZE_MB * 1024 * 1024) {
+      alert(`Vídeo maior que ${MAX_VIDEO_SIZE_MB}MB (limite da Meta pra mensagem de vídeo). Comprima antes de enviar.`);
+      return;
+    }
+
+    const oldVideoId = formData.products.find((p) => p.id === id)?.exampleVideoId;
+    setUploadingVideoForId(id);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64, oldVideoId }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { videoId, mimeType, fileName, sizeBytes } = await res.json();
+      setFormData((prev) => ({
+        ...prev,
+        products: prev.products.map((p) =>
+          p.id === id ? { ...p, exampleVideoId: videoId, exampleVideoMimeType: mimeType, exampleVideoFileName: fileName, exampleVideoSizeBytes: sizeBytes } : p
+        ),
+      }));
+    } catch (err: any) {
+      console.error('Falha ao enviar vídeo:', err);
+      alert(`Não foi possível enviar o vídeo: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingVideoForId(null);
+    }
+  };
+
+  const handlePreviewProductVideo = async (videoId: string) => {
+    setPreviewingVideoId(videoId);
+    try {
+      const res = await apiFetch(`/api/knowledge-base/videos/${videoId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      console.error('Falha ao abrir vídeo:', err);
+      alert('Não foi possível abrir o vídeo.');
+    } finally {
+      setPreviewingVideoId(null);
+    }
   };
 
   const handleAddRule = (e: React.FormEvent) => {
@@ -932,7 +1011,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Catálogo de Produtos, Serviços & Tabela de Preços
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Permite ao Gemini consultar preços e especificações exatas durante o atendimento comercial.
+                  Permite ao Gemini consultar preços e especificações exatas durante o atendimento comercial. Foto e vídeo de exemplo (MP4, até {MAX_VIDEO_SIZE_MB}MB, geralmente até ~1 minuto) o agente manda de verdade pro cliente quando perguntarem sobre o serviço.
                 </p>
               </div>
             </div>
@@ -1035,6 +1114,46 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       {prod.exampleImageBase64 ? 'Trocar foto' : 'Adicionar foto de exemplo'}
                       <input type="file" accept="image/*" className="hidden" onChange={(e) => handleProductImageChange(prod.id, e)} />
                     </label>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    {prod.exampleVideoId ? (
+                      <button
+                        type="button"
+                        onClick={() => handlePreviewProductVideo(prod.exampleVideoId!)}
+                        disabled={previewingVideoId === prod.exampleVideoId}
+                        title={prod.exampleVideoFileName || 'Ver vídeo'}
+                        className="w-10 h-10 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
+                      >
+                        {previewingVideoId === prod.exampleVideoId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                      </button>
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px]">sem vídeo</div>
+                    )}
+                    <label className="text-[10px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold flex items-center gap-1">
+                      {uploadingVideoForId === prod.id ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Enviando...
+                        </>
+                      ) : (
+                        <>
+                          <Video className="w-3 h-3" />
+                          {prod.exampleVideoId ? 'Trocar vídeo' : 'Adicionar vídeo de exemplo'}
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="video/mp4,video/3gpp"
+                        className="hidden"
+                        disabled={uploadingVideoForId === prod.id}
+                        onChange={(e) => handleProductVideoUpload(prod.id, e)}
+                      />
+                    </label>
+                    {prod.exampleVideoId && (
+                      <span className="text-[9px] text-slate-500">
+                        {prod.exampleVideoSizeBytes ? `${(prod.exampleVideoSizeBytes / (1024 * 1024)).toFixed(1)} MB` : ''}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
