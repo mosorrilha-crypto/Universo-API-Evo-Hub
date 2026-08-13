@@ -530,6 +530,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setIsManualAppointmentModalOpen(true);
   };
 
+  // Contato que veio de outra fonte (indicação, telefone, presencial) e
+  // ainda não tem conversa/lead nenhum registrado aqui — achado real de uso
+  // do widget de agenda: nem todo agendamento manual é de alguém que já
+  // mandou mensagem no WhatsApp. Cria um lead local mínimo (mesmo padrão de
+  // "+ Novo Lead", que também injeta na lista sem depender do backend) só
+  // pra dar um `phone` real pro fluxo de agendamento manual já existente —
+  // o backend (POST .../manual-appointment) não exige que o telefone já
+  // tenha conversa ou estado de CRM.
+  const handleCreateAdHocContactForAppointment = (name: string, phone: string) => {
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!cleanPhone) return;
+    const adHocLead: LeadInfo = {
+      id: `manual-${cleanPhone}-${Date.now()}`,
+      name: name.trim() || cleanPhone,
+      phone: cleanPhone,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      status: 'transcribed',
+    };
+    setLeads((prev) => [adHocLead, ...prev]);
+    handlePickLeadForNewAppointment(adHocLead);
+  };
+
   const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
     const previous = agentStatus;
     setAgentStatusState(status);
@@ -3258,6 +3280,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         error={upcomingEventsError}
         onRefresh={fetchUpcomingEvents}
         leads={leads}
+        onCreateAdHocContactForAppointment={handleCreateAdHocContactForAppointment}
         onPickLeadForNewAppointment={handlePickLeadForNewAppointment}
       />
     </div>
