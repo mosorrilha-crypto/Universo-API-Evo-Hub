@@ -336,6 +336,33 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
     expect(recordOutgoingMessage).toHaveBeenCalled();
   });
 
+  it('acha o produto mesmo quando o Gemini devolve o nome com caixa/espaçamento diferente do catálogo (achado real em produção: match exato falhava silenciosamente)', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    getKnowledgeBaseVideo.mockClear();
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.config?.tools) {
+            return { functionCalls: [{ name: 'enviar_video_exemplo', args: { nome_produto: '  efecto volumen brasileño  ' } }] } as any;
+          }
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Manda ver o vídeo!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'tem vídeo?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-a', 'video-1');
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', 'Efecto Volumen Brasileño');
+  });
+
   it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {
     uploadWhatsAppMedia.mockClear();
     const { ai } = makeFakeAiWithVideoTool(false);

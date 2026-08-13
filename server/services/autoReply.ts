@@ -883,10 +883,20 @@ Só chame enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explici
   if (!call || (call.name !== 'enviar_foto_exemplo' && call.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
 
   const nomeProduto = (call.args?.nome_produto as string) || '';
+  // Achado real em produção: o Gemini nem sempre devolve o nome EXATO
+  // (mesma caixa/espaçamento) do catálogo — comparação estrita (p.name ===
+  // nomeProduto) já causou "produto não tem mídia cadastrada" pra um
+  // produto que TINHA vídeo cadastrado de verdade, silenciosamente. Mesma
+  // normalização já usada em isNonBookableProduct/findProductDurationMinutes
+  // (knowledgeBaseStore.ts) pra esse tipo de match vindo de texto livre da IA.
+  const normalizedNomeProduto = nomeProduto.trim().toLowerCase();
+  const findByName = <T extends { name: string }>(list: T[]): T | undefined =>
+    list.find((p) => p.name.trim().toLowerCase() === normalizedNomeProduto);
 
   if (call.name === 'enviar_video_exemplo') {
-    const product = productsWithVideo.find((p) => p.name === nomeProduto);
+    const product = findByName(productsWithVideo);
     if (!product?.exampleVideoId) {
+      console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: "${nomeProduto}" não bateu com nenhum produto com vídeo cadastrado (tenant=${tenantId}). Catálogo com vídeo: [${productsWithVideo.map((p) => p.name).join(', ')}]`);
       return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse produto não tem vídeo de exemplo cadastrado.`] };
     }
     const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, product.exampleVideoId);
@@ -925,8 +935,9 @@ Só chame enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explici
     }
   }
 
-  const product = productsWithPhoto.find((p) => p.name === nomeProduto);
+  const product = findByName(productsWithPhoto);
   if (!product?.exampleImageBase64) {
+    console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: "${nomeProduto}" não bateu com nenhum produto com foto cadastrada (tenant=${tenantId}). Catálogo com foto: [${productsWithPhoto.map((p) => p.name).join(', ')}]`);
     return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse produto não tem foto de exemplo cadastrada.`] };
   }
 
