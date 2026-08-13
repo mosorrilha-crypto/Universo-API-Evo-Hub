@@ -38,7 +38,25 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   router.get('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
     const { data, error } = await db().from('tenants').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ tenants: data });
+    const tenants = data || [];
+
+    // whatsappConnected: achado numa auditoria (13/08/2026) — o painel
+    // ("Tenants & Conexões") mostrava "WhatsApp Conectado" fixo pra todo
+    // tenant, sem checar nada de verdade. Conectado de verdade = tem
+    // phone_number_id real (Meta Cloud API) OU uma instância Evolution
+    // provisionada (Epic 4.6, QR Code) — as duas formas suportadas hoje.
+    const tenantIds = tenants.map((t: any) => t.id);
+    const connectedIds = new Set<string>();
+    if (tenantIds.length) {
+      const [{ data: metaCreds }, { data: evoCreds }] = await Promise.all([
+        db().from('tenant_meta_credentials').select('tenant_id, phone_number_id').in('tenant_id', tenantIds),
+        db().from('tenant_evolution_credentials').select('tenant_id').in('tenant_id', tenantIds),
+      ]);
+      (metaCreds || []).forEach((c: any) => { if (c.phone_number_id) connectedIds.add(c.tenant_id); });
+      (evoCreds || []).forEach((c: any) => connectedIds.add(c.tenant_id));
+    }
+
+    res.json({ tenants: tenants.map((t: any) => ({ ...t, whatsappConnected: connectedIds.has(t.id) })) });
   }));
 
   router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
