@@ -87,7 +87,10 @@ export async function sendEvolutionStatus(
   instanceName: string | undefined,
   apiUrl: string | undefined,
   apiKey: string | undefined,
-  status: { type: 'text'; content: string; backgroundColor?: string; font?: number } | { type: 'image'; content: string; caption?: string }
+  status:
+    | { type: 'text'; content: string; backgroundColor?: string; font?: number }
+    | { type: 'image'; content: string; caption?: string }
+    | { type: 'video'; content: string; caption?: string }
 ): Promise<void> {
   requireCredentials(instanceName, apiUrl, apiKey);
 

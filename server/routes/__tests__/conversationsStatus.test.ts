@@ -172,6 +172,31 @@ describe('POST /api/status', () => {
     server.close();
   });
 
+  it('posta status de vídeo com legenda', async () => {
+    seed();
+    const app = makeApp(TENANT_EVOLUTION);
+    server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    baseUrl = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
+
+    let capturedBody: any;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      capturedBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+
+    const res = await fetch(`${baseUrl}/api/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoBase64: 'ZmFrZS12aWRlbw==', caption: 'Antes e depois em vídeo 🎥' }),
+    });
+    expect(res.status).toBe(200);
+    expect(capturedBody).toEqual({ type: 'video', content: 'ZmFrZS12aWRlbw==', caption: 'Antes e depois em vídeo 🎥', allContacts: true });
+    server.close();
+  });
+
   it('502 quando a Evolution API responde com falha', async () => {
     seed();
     const app = makeApp(TENANT_EVOLUTION);
