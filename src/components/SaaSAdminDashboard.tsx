@@ -460,6 +460,34 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     }
   };
 
+  // Troca de função direto no painel — antes só dava pra corrigir via SQL
+  // direto no banco (achado real: um operador cadastrado como "Operador"
+  // não enxergava a aba Base de Conhecimento, que exige "Administrador" ou
+  // acima, e não tinha como consertar isso sozinho no painel).
+  const [savingRoleForUserId, setSavingRoleForUserId] = useState<string | null>(null);
+  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
+    const previous = usersList;
+    setSavingRoleForUserId(userId);
+    setUsersList((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
+    try {
+      const res = await apiFetch(`/api/admin/operators/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
+    } catch (err: any) {
+      console.error('Falha ao atualizar função do operador:', err);
+      setUsersList(previous);
+      alert(`Não foi possível atualizar a função: ${err?.message || 'tente de novo.'}`);
+    } finally {
+      setSavingRoleForUserId(null);
+    }
+  };
+
   // Advanced Token Strategy & Telemetry state
   const [telemetryData, setTelemetryData] = useState<{
     summary: { totalSaaSTokens: number; totalSaaSCostUSD: number; totalCachedSaved: number; totalRequests: number };
@@ -1536,26 +1564,32 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                             </td>
                             <td className="p-3 text-slate-300 font-mono text-[11px]">{usr.email}</td>
                             <td className="p-3">
-                              {usr.role === 'saas_admin' && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800">
-                                  SaaS Master Admin
-                                </span>
-                              )}
-                              {usr.role === 'admin' && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/80">
-                                  Administrador
-                                </span>
-                              )}
-                              {usr.role === 'manager' && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-800/80">
-                                  Gerente
-                                </span>
-                              )}
-                              {usr.role === 'operator' && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/80">
-                                  Operador
-                                </span>
-                              )}
+                              {(() => {
+                                const roleColors: Record<UserRole, string> = {
+                                  saas_admin: 'bg-purple-950 text-purple-300 border-purple-800',
+                                  admin: 'bg-purple-950 text-purple-300 border-purple-800/80',
+                                  manager: 'bg-blue-950 text-blue-300 border-blue-800/80',
+                                  operator: 'bg-emerald-950 text-emerald-300 border-emerald-800/80',
+                                };
+                                return (
+                                  <select
+                                    value={usr.role}
+                                    disabled={savingRoleForUserId === usr.id}
+                                    onChange={(e) => handleUpdateUserRole(usr.id, e.target.value as UserRole)}
+                                    title="Alterar função e permissão deste usuário"
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer disabled:opacity-50 disabled:cursor-wait focus:outline-none ${roleColors[usr.role]}`}
+                                  >
+                                    <option value="operator">Operador</option>
+                                    <option value="manager">Gerente</option>
+                                    <option value="admin">Administrador</option>
+                                    {/* Sempre renderizada (senão uma linha já saas_admin ficaria sem
+                                        opção correspondente pra quem não é saas_admin) — mas
+                                        desabilitada pra quem não pode escolhê-la, mesma regra do
+                                        backend (PATCH /api/admin/operators/:id). */}
+                                    <option value="saas_admin" disabled={!isSaasAdminUser}>SaaS Master Admin</option>
+                                  </select>
+                                );
+                              })()}
                             </td>
                             <td className="p-3">
                               <span className="text-slate-300 font-medium">

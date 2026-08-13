@@ -119,6 +119,31 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     res.status(201).json({ operator: data });
   }));
 
+  // Troca de função de um operador já existente — até aqui só dava pra
+  // fazer via SQL direto no Supabase (achado real: um operador cadastrado
+  // como "Operador" não enxergava a aba Base de Conhecimento, que exige
+  // "Administrador" ou acima, e não existia nenhum jeito no painel de
+  // corrigir isso sem alguém mexer no banco). Mesma regra de escopo/
+  // escalonamento de privilégio da criação (POST acima): admin comum só
+  // edita dentro do próprio tenant e nunca promove ninguém a saas_admin.
+  router.patch('/api/admin/operators/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { role } = req.body || {};
+    if (!['operator', 'manager', 'admin', 'saas_admin'].includes(role)) {
+      return res.status(400).json({ error: `Role inválida: ${role}` });
+    }
+    const saasAdmin = isSaasAdmin(req);
+    if (!saasAdmin && role === 'saas_admin') {
+      return res.status(403).json({ error: 'Só saas_admin pode promover alguém a saas_admin.' });
+    }
+    let query = db().from('operators').update({ role }).eq('id', req.params.id);
+    if (!saasAdmin) {
+      query = query.eq('tenant_id', req.user?.tenantId);
+    }
+    const { data, error } = await query.select('id, tenant_id, email, name, role, created_at').single();
+    if (error || !data) return res.status(404).json({ error: 'Operador não encontrado.' });
+    res.json({ operator: data });
+  }));
+
   router.delete('/api/admin/operators/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     let query = db().from('operators').delete().eq('id', req.params.id);
     if (!isSaasAdmin(req)) {
