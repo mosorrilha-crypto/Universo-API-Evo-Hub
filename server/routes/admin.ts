@@ -350,5 +350,63 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     res.json(await getGlobalPromptLayerRow());
   }));
 
+  // ── Credenciais Meta Conversions API (CAPI) por tenant ──────────────────
+  // Achado numa auditoria (13/08/2026): fireMetaCapiEventForTenant já dispara
+  // sozinho os eventos "Schedule"/"Purchase" quando o agente confirma um
+  // agendamento/pagamento real (metaCapiService.ts), mas as colunas que ele
+  // lê (tenant_meta_credentials.capi_dataset_id/capi_access_token/
+  // capi_page_id, migration 0005) nunca tinham rota nem tela que as
+  // gravasse — getTenantCapiCredentials sempre devolvia null, e o painel
+  // "Central & Disparo Meta CAPI" (aba de operador) exigia clique manual
+  // toda vez, mesmo pra lead vindo de anúncio Clique-para-WhatsApp. O
+  // accessToken nunca volta em texto puro no GET — só um indicador de que já
+  // está configurado — pra não deixar o segredo trafegando de volta pro
+  // painel toda vez que a tela é carregada.
+  router.get('/api/admin/tenants/:id/capi-credentials', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { data, error } = await db()
+      .from('tenant_meta_credentials')
+      .select('capi_dataset_id, capi_page_id, capi_access_token')
+      .eq('tenant_id', req.params.id)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({
+      capiDatasetId: data?.capi_dataset_id || null,
+      capiPageId: data?.capi_page_id || null,
+      capiAccessTokenSet: !!data?.capi_access_token,
+    });
+  }));
+
+  router.put('/api/admin/tenants/:id/capi-credentials', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { capiDatasetId, capiPageId, capiAccessToken } = req.body || {};
+    if (capiDatasetId !== undefined && capiDatasetId !== null && typeof capiDatasetId !== 'string') {
+      return res.status(400).json({ error: 'Campo "capiDatasetId" precisa ser string ou null.' });
+    }
+    if (capiPageId !== undefined && capiPageId !== null && typeof capiPageId !== 'string') {
+      return res.status(400).json({ error: 'Campo "capiPageId" precisa ser string ou null.' });
+    }
+    if (capiAccessToken !== undefined && capiAccessToken !== null && typeof capiAccessToken !== 'string') {
+      return res.status(400).json({ error: 'Campo "capiAccessToken" precisa ser string ou null.' });
+    }
+
+    const { data: tenant, error: tenantError } = await db().from('tenants').select('id').eq('id', req.params.id).maybeSingle();
+    if (tenantError) return res.status(500).json({ error: tenantError.message });
+    if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
+
+    const update: Record<string, string | null> = {};
+    if (capiDatasetId !== undefined) update.capi_dataset_id = capiDatasetId || null;
+    if (capiPageId !== undefined) update.capi_page_id = capiPageId || null;
+    // Campo em branco no formulário nunca apaga um token já salvo — só troca
+    // de verdade quando o admin digita um valor novo (ver comentário do GET
+    // acima sobre nunca devolver o token em texto puro).
+    if (capiAccessToken) update.capi_access_token = capiAccessToken;
+
+    const { error: upsertError } = await db()
+      .from('tenant_meta_credentials')
+      .upsert({ tenant_id: tenant.id, ...update }, { onConflict: 'tenant_id' });
+    if (upsertError) return res.status(500).json({ error: upsertError.message });
+
+    res.json({ success: true });
+  }));
+
   return router;
 }
