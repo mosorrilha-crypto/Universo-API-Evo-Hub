@@ -169,6 +169,8 @@ export interface AgentFileDoc {
   id: string;
   fileName: string;
   fileSize: string;
+  /** Tamanho real em bytes — usado só pra somar o total ocupado pelo tenant na UI. */
+  sizeBytes?: number;
   mimeType?: string;
   uploadDate: string;
   status: 'Processado' | 'Pendente';
