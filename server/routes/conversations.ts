@@ -29,6 +29,7 @@ import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
 import { checkFreeBusy, createCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
+import { getNowLocalNaive } from '../services/autoReply';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -535,9 +536,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(400).json({ error: 'Campos "serviceName", "startIso" e "endIso" são obrigatórios.' });
     }
 
+    // Mesmo bug real de produção corrigido em autoReply.ts/criar_agendamento
+    // (PR #203): um agendamento antigo, já passado, nunca some da tabela
+    // sozinho (só cancelar_agendamento limpa, e só no fluxo de <24h) — um
+    // cliente recorrente voltando por um serviço novo não pode ser
+    // bloqueado por um agendamento que já aconteceu há dias.
     const existing = await getAppointmentForPhone(tenantId, phone);
-    if (existing) {
-      return res.status(409).json({ error: `Este contato já tem um agendamento ativo ("${existing.summary}" em ${existing.startIso}).` });
+    const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
+    const existingIsUpcoming = existing && Date.parse(`${existing.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
+    if (existingIsUpcoming) {
+      return res.status(409).json({ error: `Este contato já tem um agendamento ativo ("${existing!.summary}" em ${existing!.startIso}).` });
     }
 
     let disponivel: boolean;
@@ -557,7 +565,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(502).json({ error: `Falha ao criar o evento na agenda: ${err.message}` });
     }
 
-    await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' });
+    // resetPaymentState: true — o caso "já ativo" já foi recusado acima, então
+    // isto é sempre um ciclo de pagamento novo (nunca deve herdar payment_status
+    // de um agendamento antigo, existente ou não), mesmo raciocínio do PR #203.
+    await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: true });
     const appointment = await getAppointmentForPhone(tenantId, phone);
     res.status(201).json({ appointment });
   }));

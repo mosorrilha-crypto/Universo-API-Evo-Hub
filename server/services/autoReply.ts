@@ -312,8 +312,15 @@ Nova mensagem do cliente: "${text}"`;
   return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName };
 }
 
-/** Data/hora atual "de parede" no fuso do negócio — dá ao agente uma âncora real pra resolver referências relativas ("amanhã às 15h") sem precisar calcular fuso horário sozinho. */
-function getNowLocalNaive(timeZone: string): { naive: string; weekday: string; weekdayNum: number } {
+/**
+ * Data/hora atual "de parede" no fuso do negócio — dá ao agente uma âncora
+ * real pra resolver referências relativas ("amanhã às 15h") sem precisar
+ * calcular fuso horário sozinho. Exportada porque `conversations.ts`
+ * (agendamento manual, issue #182) reusa a mesma técnica de comparação de
+ * "já passou?" contra um agendamento existente — mesmo bug corrigido nos
+ * dois lugares, ver PR #203.
+ */
+export function getNowLocalNaive(timeZone: string): { naive: string; weekday: string; weekdayNum: number } {
   const parts = new Intl.DateTimeFormat('pt-BR', {
     timeZone,
     year: 'numeric', month: '2-digit', day: '2-digit',
