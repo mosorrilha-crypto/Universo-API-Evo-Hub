@@ -3,6 +3,8 @@ import { CalendarPlus } from 'lucide-react';
 
 interface ManualAppointmentModalProps {
   isOpen: boolean;
+  leadName?: string;
+  leadPhone?: string;
   products: Array<{ id: string; name: string }>;
   serviceName: string;
   onServiceNameChange: (value: string) => void;
@@ -17,7 +19,7 @@ interface ManualAppointmentModalProps {
 }
 
 export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
-  isOpen, products, serviceName, onServiceNameChange, date, onDateChange, time, onTimeChange, error, isCreating, onSubmit, onClose,
+  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, date, onDateChange, time, onTimeChange, error, isCreating, onSubmit, onClose,
 }) => {
   if (!isOpen) return null;
   return (
@@ -30,6 +32,23 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
         <p className="text-xs text-slate-400">
           Pra um horário combinado fora do WhatsApp (telefone, presencial). Cria o evento real na agenda e ativa o lembrete automático — não conta como venda vinda de anúncio.
         </p>
+
+        {/* Achado real: este modal sempre foi aberto de dentro de uma
+            conversa já selecionada (o operador via o nome no cabeçalho por
+            trás) — sem indicação nenhuma de "pra quem" dentro do próprio
+            modal. Ficou confuso quando o widget de agenda (#209) passou a
+            abrir este mesmo modal fora do contexto de uma conversa. */}
+        {leadName || leadPhone ? (
+          <div className="bg-slate-950 border border-emerald-800/40 rounded-xl p-2.5 text-xs">
+            <span className="text-slate-500">Agendamento para: </span>
+            <span className="text-emerald-300 font-semibold">{leadName || leadPhone}</span>
+            {leadName && leadPhone && <span className="text-slate-500"> · {leadPhone}</span>}
+          </div>
+        ) : (
+          <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">
+            Nenhum contato selecionado — feche e escolha um contato antes de cadastrar.
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{error}</div>
@@ -84,7 +103,7 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isCreating}
+              disabled={isCreating || (!leadName && !leadPhone)}
               className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 shadow-md shadow-emerald-950 flex items-center space-x-1 cursor-pointer"
             >
               <CalendarPlus className="w-3.5 h-3.5 mr-1" />

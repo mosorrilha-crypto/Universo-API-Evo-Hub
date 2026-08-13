@@ -3215,6 +3215,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       {/* Cadastro manual de agendamento fechado fora da IA (issue #182) */}
       <ManualAppointmentModal
         isOpen={isManualAppointmentModalOpen}
+        leadName={selectedLead?.name}
+        leadPhone={selectedLead?.phone}
         products={knowledgeBase.products}
         serviceName={manualServiceName}
         onServiceNameChange={setManualServiceName}
