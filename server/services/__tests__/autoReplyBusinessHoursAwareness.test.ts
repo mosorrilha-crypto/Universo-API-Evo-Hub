@@ -40,21 +40,28 @@ vi.mock('../knowledgeBaseStore', () => ({
 }));
 
 const getTenantBusinessHours = vi.fn(async () => ({ '0': { open: '09:00', close: '17:00' } }));
-vi.mock('../tenantProfileStore', () => ({
-  DEFAULT_SEGMENT: 'beauty_studio',
-  getTenantBusinessHours,
-}));
+vi.mock('../tenantProfileStore', async () => {
+  // importActual: mantém a formatação REAL de formatBusinessHoursForPrompt
+  // (senão o teste novo que confere o texto injetado testaria um mock, não
+  // o comportamento de verdade) — só getTenantBusinessHours é controlado.
+  const actual = await vi.importActual<typeof import('../tenantProfileStore')>('../tenantProfileStore');
+  return {
+    ...actual,
+    DEFAULT_SEGMENT: 'beauty_studio',
+    getTenantBusinessHours,
+  };
+});
 
 const { generateAutoReplyForText } = await import('../autoReply');
 
 const CALENDAR_CONFIG = { clientId: 'id', clientSecret: 'secret', redirectUri: 'https://x/redirect' };
 
-function makeFakeAiCapturingSpecialistPrompt(capturedUserContents: string[], specialistBubble: string): GoogleGenAI {
+function makeFakeAiCapturingSpecialistPrompt(capturedUserContents: string[], specialistBubble: string, classifiedAgent: string = 'agendamento'): GoogleGenAI {
   return {
     models: {
       generateContent: async (req: any) => {
         if (req.contents?.[0]?.text?.includes('Classifique a intenção principal')) {
-          return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          return { text: JSON.stringify({ agent: classifiedAgent }) } as any;
         }
         if (req.config?.tools) {
           // Mensagem vaga ("hoje?" sem horário) — o próprio prompt de ferramentas
@@ -108,5 +115,19 @@ describe('generateAutoReplyForText — consciência de horário de funcionamento
 
     const prompt = captured.join(' ');
     expect(prompt).toContain('dentro do horário de atendimento');
+  });
+
+  it('injeta o horário de funcionamento real no contexto mesmo pra mensagem classificada como "faq" (não agendamento) — única fonte, não só um texto solto na base de conhecimento', async () => {
+    const captured: string[] = [];
+    const ai = makeFakeAiCapturingSpecialistPrompt(captured, 'A gente atende segunda a sexta, das 07h30 às 20h.', 'faq');
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'que horas vocês abrem?', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(getTenantBusinessHours).toHaveBeenCalledWith('tenant-a');
+    const prompt = captured.join(' ');
+    expect(prompt).toContain('Horário de funcionamento');
   });
 });
