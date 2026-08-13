@@ -99,6 +99,8 @@ export interface AgentFileDoc {
   id: string;
   fileName: string;
   fileSize: string;
+  /** Tamanho real em bytes — usado pra somar o total ocupado pelo tenant (ver MAX_TOTAL_BYTES_PER_TENANT em conversations.ts); `fileSize` é só o texto formatado pra exibição. */
+  sizeBytes?: number;
   mimeType?: string;
   uploadDate: string;
   status: 'Processado' | 'Pendente';

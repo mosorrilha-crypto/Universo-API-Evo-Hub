@@ -473,6 +473,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   };
 
   const MAX_DOC_SIZE_MB = 15;
+  // Espelha MAX_DOCUMENTS_PER_TENANT/MAX_TOTAL_BYTES_PER_TENANT em
+  // server/routes/conversations.ts — só pra mostrar o uso na UI antes do
+  // upload falhar; o teto real é sempre validado no backend.
+  const MAX_DOCUMENTS_PER_TENANT = 30;
+  const MAX_TOTAL_MB_PER_TENANT = 200;
   const [uploadingDocNames, setUploadingDocNames] = useState<string[]>([]);
   const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
 
@@ -512,12 +517,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error || `HTTP ${res.status}`);
+        }
         const { document } = await res.json();
         setFormData((prev) => ({ ...prev, documents: [...prev.documents, document] }));
-      } catch (err) {
+      } catch (err: any) {
         console.error('Falha ao enviar documento:', err);
-        alert(`Não foi possível enviar "${file.name}". Tente novamente.`);
+        alert(`Não foi possível enviar "${file.name}": ${err?.message || 'tente novamente.'}`);
       }
     }
     setUploadingDocNames([]);
@@ -1117,6 +1125,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Anexe arquivos PDF, manuais, termos de uso ou catálogos como referência do que a IA deve saber. Documentos PDF, TXT, CSV, JSON e MD têm o conteúdo lido pelo agente automaticamente (com um limite de tamanho); outros formatos (ex: DOCX) ficam salvos e disponíveis pra baixar, mas o texto não entra no prompt da IA.
                 </p>
               </div>
+            </div>
+
+            {/* Usage indicator — teto por tenant (MAX_DOCUMENTS_PER_TENANT / MAX_TOTAL_BYTES_PER_TENANT em conversations.ts), pra ninguém ser pego de surpresa pelo limite só quando o upload já falhar */}
+            <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2">
+              <span>
+                {formData.documents.length}/{MAX_DOCUMENTS_PER_TENANT} documentos
+              </span>
+              <span>
+                {(formData.documents.reduce((sum, d) => sum + (d.sizeBytes || 0), 0) / (1024 * 1024)).toFixed(1)}MB / {MAX_TOTAL_MB_PER_TENANT}MB usados
+              </span>
             </div>
 
             {/* Drag and Drop File Upload Area */}

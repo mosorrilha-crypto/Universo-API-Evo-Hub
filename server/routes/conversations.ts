@@ -653,6 +653,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   const MAX_DOCUMENT_BYTES = 15 * 1024 * 1024; // mesmo limite já anunciado no painel (15MB)
+  // Achado real: nada limitava quantos documentos ou quantos MB um tenant
+  // podia acumular no bucket compartilhado "app-data" — um tenant sozinho
+  // subindo muitos arquivos grandes consumiria o espaço de todo mundo, sem
+  // aviso nenhum. Esses dois tetos por tenant existem só pra isso.
+  const MAX_DOCUMENTS_PER_TENANT = 30;
+  const MAX_TOTAL_BYTES_PER_TENANT = 200 * 1024 * 1024; // 200MB
 
   // Upload real de documento anexado à base de conhecimento — até aqui a
   // aba "Documentos Anexados" era só um registro visual fictício (achado
@@ -672,22 +678,33 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(400).json({ error: `Arquivo maior que ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB.` });
     }
 
+    const kb = (await getKnowledgeBase(tenantId)) || {};
+    const existingDocs = kb.documents || [];
+    if (existingDocs.length >= MAX_DOCUMENTS_PER_TENANT) {
+      return res.status(400).json({ error: `Limite de ${MAX_DOCUMENTS_PER_TENANT} documentos atingido. Apague algum documento antigo antes de enviar um novo.` });
+    }
+    const existingTotalBytes = existingDocs.reduce((sum, d) => sum + (d.sizeBytes || 0), 0);
+    if (existingTotalBytes + buffer.length > MAX_TOTAL_BYTES_PER_TENANT) {
+      const remainingMb = Math.max(0, (MAX_TOTAL_BYTES_PER_TENANT - existingTotalBytes) / (1024 * 1024)).toFixed(1);
+      return res.status(400).json({ error: `Limite de ${MAX_TOTAL_BYTES_PER_TENANT / (1024 * 1024)}MB no total atingido (restam ${remainingMb}MB). Apague algum documento antigo antes de enviar um novo.` });
+    }
+
     const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const resolvedMimeType = mimeType || 'application/octet-stream';
     await uploadKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId, buffer, resolvedMimeType);
     const extractedText = await extractTextFromDocument(buffer, resolvedMimeType, fileName);
 
-    const kb = (await getKnowledgeBase(tenantId)) || {};
     const newDoc = {
       id: docId,
       fileName: String(fileName).trim(),
       fileSize: `${(buffer.length / (1024 * 1024)).toFixed(1)} MB`,
+      sizeBytes: buffer.length,
       mimeType: resolvedMimeType,
       uploadDate: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       status: 'Processado' as const,
       extractedText,
     };
-    await setKnowledgeBase(tenantId, { ...kb, documents: [...(kb.documents || []), newDoc] });
+    await setKnowledgeBase(tenantId, { ...kb, documents: [...existingDocs, newDoc] });
     res.json({ document: newDoc });
   }));
 
