@@ -134,7 +134,7 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
     jwtSecret: config.jwtSecret,
   }));
-  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl }));
+  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
   app.use(createCrmRouter({ authenticateToken }));
   app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });

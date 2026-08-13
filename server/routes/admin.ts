@@ -6,6 +6,7 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { setEvolutionWebhook } from '../services/evolutionSend';
 import { getGlobalPromptLayerRow, setGlobalPromptLayer } from '../services/globalPromptStore';
+import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -15,6 +16,12 @@ interface AdminRouterDeps {
   evolutionApiKey?: string;
   /** URL pública deste backend — usada pra registrar o webhook da instância recém-criada apontando de volta pra cá (ver setEvolutionWebhook). */
   publicBaseUrl: string;
+  /** META_PHONE_NUMBER_ID (env) — número compartilhado cujo dono real é o
+   * tenant legado (LEGACY_DEFAULT_TENANT_ID), que nunca teve linha própria
+   * em tenant_meta_credentials (ver tenantResolver.ts, resolveTenantByPhoneNumberId).
+   * Sem isso, o tenant legado aparecia como "Não conectado" no painel mesmo
+   * recebendo/respondendo mensagens reais pelo número compartilhado. */
+  sharedMetaPhoneNumberId?: string;
 }
 
 /**
@@ -24,7 +31,7 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
-export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl }: AdminRouterDeps): Router {
+export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl, sharedMetaPhoneNumberId }: AdminRouterDeps): Router {
   const router = Router();
 
   function db() {
@@ -45,6 +52,14 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     // tenant, sem checar nada de verdade. Conectado de verdade = tem
     // phone_number_id real (Meta Cloud API) OU uma instância Evolution
     // provisionada (Epic 4.6, QR Code) — as duas formas suportadas hoje.
+    //
+    // Achado real em produção logo em seguida (usuário reportou "1/3"
+    // quando deveria ser "2/3"): o tenant legado (LEGACY_DEFAULT_TENANT_ID,
+    // a Monique) nunca teve linha própria em tenant_meta_credentials — ele
+    // usa a credencial Meta COMPARTILHADA (env META_PHONE_NUMBER_ID, ver
+    // tenantResolver.ts) pra receber/responder mensagens reais. Sem esse
+    // caso especial, ele contava como "não conectado" mesmo estando de
+    // verdade em produção.
     const tenantIds = tenants.map((t: any) => t.id);
     const connectedIds = new Set<string>();
     if (tenantIds.length) {
@@ -54,6 +69,9 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       ]);
       (metaCreds || []).forEach((c: any) => { if (c.phone_number_id) connectedIds.add(c.tenant_id); });
       (evoCreds || []).forEach((c: any) => connectedIds.add(c.tenant_id));
+      if (sharedMetaPhoneNumberId && tenantIds.includes(LEGACY_DEFAULT_TENANT_ID)) {
+        connectedIds.add(LEGACY_DEFAULT_TENANT_ID);
+      }
     }
 
     res.json({ tenants: tenants.map((t: any) => ({ ...t, whatsappConnected: connectedIds.has(t.id) })) });
