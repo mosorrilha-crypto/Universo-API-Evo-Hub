@@ -164,6 +164,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const systemInstruction: string = calls[1].config.systemInstruction;
     expect(systemInstruction).toContain('nunca um script pra repetir palavra por palavra');
   });
+
+  it('reforça a regra anti-alucinação de foto/vídeo prometido (achado real em produção: agente de uma piscineira disse "ahí te muestro el video" sem NENHUMA ferramenta de mídia ter rodado — o cliente nunca recebeu nada)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('Nunca diga que está mandando, anexando, ou que "aí vai"/"te mostro" uma foto ou vídeo');
+    expect(systemInstruction).toContain('a menos que a seção "Ações reais já executadas nesta mensagem" confirme explicitamente');
+  });
 });
 
 describe('generateAutoReplyForText — captura o nome que a cliente diz na conversa (pesquisa de mercado: "esquecer" o nome depois de algumas mensagens é um dos sinais mais claros de bot)', () => {
