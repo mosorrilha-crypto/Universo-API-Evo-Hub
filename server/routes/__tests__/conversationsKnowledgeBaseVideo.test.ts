@@ -18,6 +18,7 @@ const getKnowledgeBaseVideo = vi.fn(async (_url?: string, _key?: string, _tenant
   videoId === 'video-existing' ? { buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' } : null
 );
 const deleteKnowledgeBaseVideo = vi.fn(async () => undefined);
+const transcodeToWhatsAppVideo = vi.fn(async (buffer: Buffer, _mimeType: string) => ({ buffer, mimeType: 'video/mp4' }));
 const getKnowledgeBase = vi.fn(async () => ({
   products: [
     { name: 'Microlips', price: 'R$ 500', exampleVideoId: 'video-existing', exampleVideoMimeType: 'video/mp4', exampleVideoFileName: 'microlips.mp4' },
@@ -33,6 +34,7 @@ vi.mock('../../services/knowledgeBaseVideoStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/knowledgeBaseVideoStore')>();
   return { ...actual, uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo };
 });
+vi.mock('../../services/videoTranscode', () => ({ transcodeToWhatsAppVideo }));
 vi.mock('../../services/knowledgeBaseStore', () => ({ getKnowledgeBase, setKnowledgeBase: vi.fn() }));
 
 const { createConversationsRouter } = await import('../conversations');
@@ -49,7 +51,7 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
 
 beforeAll(async () => {
   const app = express();
-  app.use(express.json({ limit: '30mb' })); // >16MB (limite real testado) + margem do inflate do base64 (~33%)
+  app.use(express.json({ limit: '55mb' })); // maior teste sobe ~36MB brutos; base64 infla ~33% (~48MB) + margem
   app.use(
     createConversationsRouter({
       authenticateToken: fakeAuthenticateToken as any,
@@ -77,6 +79,8 @@ beforeEach(() => {
   sendWhatsAppMediaMessage.mockClear();
   uploadKnowledgeBaseVideo.mockClear();
   deleteKnowledgeBaseVideo.mockClear();
+  transcodeToWhatsAppVideo.mockClear();
+  transcodeToWhatsAppVideo.mockImplementation(async (buffer: Buffer) => ({ buffer, mimeType: 'video/mp4' }));
   initDb(createFakeSupabase({
     conversations: [{ id: 'conv-1', tenant_id: TENANT_A, phone: '595981111111', name: 'Cliente A', updated_at: new Date().toISOString(), geo_restriction: null }],
   }));
@@ -109,13 +113,51 @@ describe('POST /api/knowledge-base/videos', () => {
     expect(deleteKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', TENANT_A, 'video-existing');
   });
 
-  it('rejeita formato não suportado pela Meta (ex: webm)', async () => {
+  it('converte automaticamente um formato que a Meta não aceita direto (ex: .MOV/video-quicktime) via ffmpeg antes de subir', async () => {
+    const res = await fetch(`${baseUrl}/api/knowledge-base/videos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: 'video.mov', mimeType: 'video/quicktime', base64: Buffer.from('conteudo-mov-fake').toString('base64') }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mimeType).toBe('video/mp4');
+    expect(transcodeToWhatsAppVideo).toHaveBeenCalledTimes(1);
+    expect(transcodeToWhatsAppVideo).toHaveBeenCalledWith(expect.any(Buffer), 'video/quicktime');
+    expect(uploadKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', TENANT_A, expect.any(String), expect.any(Buffer), 'video/mp4');
+  });
+
+  it('rejeita quando a conversão do formato não suportado falha', async () => {
+    transcodeToWhatsAppVideo.mockRejectedValueOnce(new Error('ffmpeg falhou (código 1): entrada corrompida'));
     const res = await fetch(`${baseUrl}/api/knowledge-base/videos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileName: 'video.webm', mimeType: 'video/webm', base64: Buffer.from('x').toString('base64') }),
     });
     expect(res.status).toBe(400);
+    expect(uploadKnowledgeBaseVideo).not.toHaveBeenCalled();
+  });
+
+  it('rejeita arquivo que não é vídeo (mimeType fora de video/*) sem tentar converter', async () => {
+    const res = await fetch(`${baseUrl}/api/knowledge-base/videos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: 'documento.pdf', mimeType: 'application/pdf', base64: Buffer.from('x').toString('base64') }),
+    });
+    expect(res.status).toBe(400);
+    expect(transcodeToWhatsAppVideo).not.toHaveBeenCalled();
+    expect(uploadKnowledgeBaseVideo).not.toHaveBeenCalled();
+  });
+
+  it('rejeita vídeo original maior que o teto de entrada (35MB), antes mesmo de tentar converter', async () => {
+    const hugeBuffer = Buffer.alloc(36 * 1024 * 1024, 1);
+    const res = await fetch(`${baseUrl}/api/knowledge-base/videos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: 'video.mov', mimeType: 'video/quicktime', base64: hugeBuffer.toString('base64') }),
+    });
+    expect(res.status).toBe(400);
+    expect(transcodeToWhatsAppVideo).not.toHaveBeenCalled();
     expect(uploadKnowledgeBaseVideo).not.toHaveBeenCalled();
   });
 

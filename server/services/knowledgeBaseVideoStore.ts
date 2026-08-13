@@ -19,15 +19,26 @@
 const BUCKET = 'app-data';
 
 /**
- * Formatos que a Meta Cloud API aceita pra mensagem de vídeo do WhatsApp
- * (MP4/3GPP, H.264+AAC) — outros formatos (webm, mov, avi...) sobem sem
- * erro no upload mas falham ou não reproduzem no envio real. Barrado já no
- * upload em vez de só na hora de enviar, pra dar um erro claro cedo.
+ * Formatos que a Meta Cloud API aceita DIRETO pra mensagem de vídeo do
+ * WhatsApp (MP4/3GPP, H.264+AAC). Qualquer outro formato de vídeo (ex: .MOV
+ * do iPhone, "video/quicktime") passa primeiro por videoTranscode.ts antes
+ * de chegar até aqui — ver POST /api/knowledge-base/videos em
+ * conversations.ts.
  */
 export const ALLOWED_VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/3gpp']);
 
-/** Limite real da Meta Cloud API pra mídia de vídeo (16MB) — um vídeo de ~1 minuto bem comprimido fica bem abaixo disso. */
+/** Limite real da Meta Cloud API pra mídia de vídeo (16MB) — checado no arquivo FINAL (já convertido, se precisou). Um vídeo de ~1 minuto bem comprimido fica bem abaixo disso. */
 export const MAX_VIDEO_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Teto do arquivo ORIGINAL antes de qualquer conversão — bem mais folgado
+ * que MAX_VIDEO_BYTES porque um .MOV de iPhone sem compressão de verdade
+ * (o cenário mais comum que passa por aqui) é bem maior que o MP4 final.
+ * Limitado pelo próprio corpo da requisição (express.json, 50MB em
+ * server.ts) — em base64 (~33% maior que o binário), 35MB de vídeo bruto
+ * viram ~47MB de JSON, com folga pros outros campos do payload.
+ */
+export const MAX_VIDEO_INPUT_BYTES = 35 * 1024 * 1024;
 
 function storagePath(tenantId: string, videoId: string): string {
   return `kb-video/${encodeURIComponent(tenantId)}/${encodeURIComponent(videoId)}`;

@@ -434,8 +434,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const MAX_VIDEO_SIZE_MB = 16; // mesmo limite real da Meta Cloud API pra mensagem de vídeo, validado de novo no servidor
-  const ALLOWED_VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/3gpp']);
+  const MAX_VIDEO_INPUT_SIZE_MB = 35; // teto do arquivo ORIGINAL antes de converter (ex: .MOV do iPhone) — mesmo valor de MAX_VIDEO_INPUT_BYTES no servidor; o servidor converte pro limite final de 16MB da Meta se precisar
   const [uploadingVideoForId, setUploadingVideoForId] = useState<string | null>(null);
   const [previewingVideoId, setPreviewingVideoId] = useState<string | null>(null);
 
@@ -453,16 +452,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // em knowledgeBaseVideoStore.ts: guardar um vídeo inteiro em base64 no
   // formData repetiria o incidente real de estouro de cota do localStorage
   // que já aconteceu com foto (ver App.tsx/safeSetLocalStorage).
+  //
+  // Aceita qualquer formato de vídeo aqui (inclusive .MOV do iPhone,
+  // "video/quicktime") — quem decide se precisa converter pro formato que
+  // a Meta aceita (MP4/3GPP) é o servidor, via ffmpeg (videoTranscode.ts).
   const handleProductVideoUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!ALLOWED_VIDEO_MIME_TYPES.has(file.type)) {
-      alert(`Formato de vídeo não suportado pelo WhatsApp (${file.type || 'desconhecido'}). Envie um MP4.`);
+    if (!file.type.startsWith('video/')) {
+      alert(`Arquivo não é um vídeo (${file.type || 'formato desconhecido'}).`);
       return;
     }
-    if (file.size > MAX_VIDEO_SIZE_MB * 1024 * 1024) {
-      alert(`Vídeo maior que ${MAX_VIDEO_SIZE_MB}MB (limite da Meta pra mensagem de vídeo). Comprima antes de enviar.`);
+    if (file.size > MAX_VIDEO_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Vídeo maior que ${MAX_VIDEO_INPUT_SIZE_MB}MB. Comprima ou corte antes de enviar.`);
       return;
     }
 
@@ -1019,7 +1022,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Catálogo de Produtos, Serviços & Tabela de Preços
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Permite ao Gemini consultar preços e especificações exatas durante o atendimento comercial. Foto e vídeo de exemplo (MP4, até {MAX_VIDEO_SIZE_MB}MB, geralmente até ~1 minuto) o agente manda de verdade pro cliente quando perguntarem sobre o serviço.
+                  Permite ao Gemini consultar preços e especificações exatas durante o atendimento comercial. Foto e vídeo de exemplo (qualquer formato, inclusive .MOV do iPhone — convertido automaticamente; até {MAX_VIDEO_INPUT_SIZE_MB}MB, geralmente até ~1 minuto) o agente manda de verdade pro cliente quando perguntarem sobre o serviço.
                 </p>
               </div>
             </div>
@@ -1151,7 +1154,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       )}
                       <input
                         type="file"
-                        accept="video/mp4,video/3gpp"
+                        accept="video/*"
                         className="hidden"
                         disabled={uploadingVideoForId === prod.id}
                         onChange={(e) => handleProductVideoUpload(prod.id, e)}
