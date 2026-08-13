@@ -26,12 +26,22 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
   next();
 }
 
-function startServer(deps: { evolutionApiUrl?: string; evolutionApiKey?: string } = { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY }) {
+function fakeAuthenticateAs(role: string, tenantId: string) {
+  return (req: any, _res: any, next: any) => {
+    req.user = { id: 'op-1', tenantId, role };
+    next();
+  };
+}
+
+function startServer(
+  deps: { evolutionApiUrl?: string; evolutionApiKey?: string } = { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY },
+  authenticateToken: any = fakeAuthenticateToken
+) {
   const app = express();
   app.use(express.json());
   app.use(
     createAdminRouter({
-      authenticateToken: fakeAuthenticateToken as any,
+      authenticateToken,
       supabase: supabase as any,
       ...deps,
     })
@@ -106,6 +116,45 @@ describe('POST /api/admin/tenants/:id/evolution-instance', () => {
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
     expect(res.status).toBe(503);
   });
+
+  it('admin do próprio tenant também pode provisionar (não só saas_admin)', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      return {
+        ok: true,
+        json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { base64: 'data:image/png;base64,ABC123' } }),
+      } as any;
+    }) as any;
+    ({ server, baseUrl } = await startServer(
+      { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY },
+      fakeAuthenticateAs('admin', TENANT_ID)
+    ));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(201);
+  });
+
+  it('403 quando um admin tenta provisionar instância de OUTRO tenant', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer(
+      { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY },
+      fakeAuthenticateAs('admin', 'outro-tenant-id')
+    ));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+
+  it('403 quando o papel é abaixo de admin (operator/manager)', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer(
+      { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY },
+      fakeAuthenticateAs('manager', TENANT_ID)
+    ));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
@@ -132,5 +181,19 @@ describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode`);
     expect(res.status).toBe(404);
+  });
+
+  it('403 quando um admin tenta buscar o QR Code de OUTRO tenant', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer(
+      { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY },
+      fakeAuthenticateAs('admin', 'outro-tenant-id')
+    ));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode`);
+    expect(res.status).toBe(403);
   });
 });

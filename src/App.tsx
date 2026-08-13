@@ -17,7 +17,6 @@ import { EscalationsPanel } from './components/EscalationsPanel';
 import { FinancialDashboard } from './components/FinancialDashboard';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
-import { EvoHubIntegration } from './components/EvoHubIntegration';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch } from './lib/apiClient';
@@ -115,7 +114,7 @@ export const App: React.FC = () => {
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (activeTab === 'financial' && !canSeeFinancial) ||
-      (['attribution', 'knowledge', 'evohub', 'integration'].includes(activeTab) && !canSeeAdminTools);
+      (['attribution', 'knowledge', 'integration'].includes(activeTab) && !canSeeAdminTools);
     if (blocked) setActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
@@ -495,6 +494,7 @@ export const App: React.FC = () => {
           <WhatsAppLeadsSim
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
+            userRole={currentUser?.role}
             onSaveTranscript={(item) => {
               setSavedTranscripts((prev) => [item, ...prev]);
               showToast('Atendimento salvo no histórico');
@@ -587,13 +587,6 @@ export const App: React.FC = () => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
               setActiveTab('whatsapp');
             }}
-          />
-        )}
-
-        {activeTab === 'evohub' && canSeeAdminTools && (
-          <EvoHubIntegration
-            activeTenant={activeTenant}
-            showToast={showToast}
           />
         )}
 

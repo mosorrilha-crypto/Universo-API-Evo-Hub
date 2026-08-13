@@ -460,11 +460,6 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   router.get('/api/webhooks/evolution', handleWebhookVerification);
   router.post('/api/webhooks/evolution', handleWebhookPayload);
 
-  // Alias: o EvoHubIntegration.tsx usa esse caminho como URL padrão de webhook
-  // no frontend — sem essa rota, ele apontava pra um endpoint inexistente (404).
-  router.get('/api/webhooks/evolution_hub', handleWebhookVerification);
-  router.post('/api/webhooks/evolution_hub', handleWebhookPayload);
-
   router.get('/api/webhooks/whatsapp', handleWebhookVerification);
   router.post('/api/webhooks/whatsapp', handleWebhookPayload);
 

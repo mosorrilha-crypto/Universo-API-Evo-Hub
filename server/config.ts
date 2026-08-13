@@ -6,7 +6,6 @@ export interface ServerConfig {
   jwtSecret: string;
   supabaseUrl?: string;
   supabaseKey?: string;
-  evohubApiKey?: string;
   metaWebhookVerifyToken: string;
   geminiApiKey?: string;
   /** Token de acesso à Graph API pra baixar mídia (diferente do META_APP_SECRET usado no HMAC). */
@@ -63,11 +62,6 @@ export function loadConfig(): ServerConfig {
     console.warn('⚠️  META_WEBHOOK_VERIFY_TOKEN não configurada — usando um valor temporário (dev only), a integração real com a Meta não vai funcionar até configurar um token fixo.');
   }
 
-  const evohubApiKey = process.env.EVOHUB_API_KEY;
-  if (!evohubApiKey && !isProduction) {
-    console.warn('⚠️  EVOHUB_API_KEY não configurada — rotas /api/v1/* do Evo Hub aceitam qualquer chamada (dev only).');
-  }
-
   if (!process.env.EVO_HUB_WEBHOOK_SECRET && !isProduction) {
     console.warn('⚠️  EVO_HUB_WEBHOOK_SECRET não configurado — /api/webhooks/evohub aceita chamadas sem verificar assinatura (dev only).');
   }
@@ -82,7 +76,6 @@ export function loadConfig(): ServerConfig {
     jwtSecret,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseKey: process.env.SUPABASE_KEY,
-    evohubApiKey,
     metaWebhookVerifyToken,
     geminiApiKey: process.env.GEMINI_API_KEY,
     metaAccessToken: process.env.META_ACCESS_TOKEN,

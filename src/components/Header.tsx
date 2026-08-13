@@ -71,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
   // Lucas: funcionário de atendimento não deve ver Financeiro nem telas
   // administrativas. "Gerente" já enxerga Financeiro, mas só
   // "Administrador"+ vê as ferramentas mais técnicas (Meta CAPI, Base de
-  // Conhecimento, Evo Hub, Guia de API), e só "SaaS Master Admin" vê o
+  // Conhecimento, Guia de API), e só "SaaS Master Admin" vê o
   // painel multi-tenant. display-mode não muda durante a sessão, então um
   // cálculo só (não precisa reavaliar em cada render) já é suficiente.
   const [isInstalledApp] = useState(() => isStandalonePwa());
@@ -494,19 +494,6 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Brain className="w-4 h-4 text-emerald-400" />
                   <span>Base de Conhecimento</span>
-                </button>
-
-                <button
-                  id="tab-evohub"
-                  onClick={() => setActiveTab('evohub')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                    activeTab === 'evohub'
-                      ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
-                      : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
-                  }`}
-                >
-                  <Zap className="w-4 h-4 text-purple-400" />
-                  <span>Evo Hub (Meta API)</span>
                 </button>
 
                 <button

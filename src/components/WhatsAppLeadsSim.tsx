@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, UserRole } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken } from '../lib/apiClient';
+import { hasRoleAtLeast } from '../lib/roles';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { TranscriptionCard } from './TranscriptionCard';
 import { ConversationAnalysisPanel } from './ConversationAnalysisPanel';
@@ -21,6 +22,7 @@ import {
   FileText,
   Mic,
   Zap,
+  QrCode,
   Volume2,
   Paperclip,
   CheckCheck,
@@ -158,6 +160,8 @@ interface WhatsAppLeadsSimProps {
   openLeadPhone?: string;
   /** Muda a cada clique em "Voltar pra conversa", mesmo pro mesmo telefone — garante que clicar de novo no mesmo lead depois de já ter navegado manualmente reabra a conversa mesmo assim. */
   openLeadRequestId?: number;
+  /** Papel do operador logado — controla quem vê o botão de conectar WhatsApp via Evolution API (QR Code), 'admin'+ apenas. */
+  userRole?: UserRole;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -208,6 +212,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onGoToEscalations,
   openLeadPhone,
   openLeadRequestId,
+  userRole,
 }) => {
   const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis })[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
@@ -448,6 +453,49 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       console.error('Falha ao desconectar Google Calendar:', err);
       setErrorMsg('Não foi possível desconectar o Google Calendar agora — tente de novo.');
     }
+  };
+
+  // Conexão real do número de WhatsApp via Evolution API (self-hosted,
+  // QR Code) — server/routes/admin.ts, Epic 4.6. Substitui o antigo painel
+  // decorativo (ver comentário no topo do JSX) por uma chamada de verdade:
+  // primeiro tenta renovar o QR de uma instância já existente; se o tenant
+  // ainda não tem nenhuma (404), provisiona uma nova.
+  const [showEvolutionModal, setShowEvolutionModal] = useState(false);
+  const [evolutionQr, setEvolutionQr] = useState<string | null>(null);
+  const [evolutionInstanceName, setEvolutionInstanceName] = useState<string | null>(null);
+  const [evolutionBusy, setEvolutionBusy] = useState(false);
+  const [evolutionError, setEvolutionError] = useState<string | null>(null);
+
+  const handleConnectEvolution = async () => {
+    if (!activeTenant?.id) {
+      setEvolutionError('Nenhum tenant ativo — não sei pra quem provisionar a instância.');
+      return;
+    }
+    setEvolutionBusy(true);
+    setEvolutionError(null);
+    try {
+      let res = await apiFetch(`/api/admin/tenants/${activeTenant.id}/evolution-instance/qrcode`);
+      if (res.status === 404) {
+        res = await apiFetch(`/api/admin/tenants/${activeTenant.id}/evolution-instance`, { method: 'POST' });
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setEvolutionInstanceName(data.instanceName || null);
+      setEvolutionQr(data.qrCodeBase64 || null);
+      if (!data.qrCodeBase64) setEvolutionError(data.warning || 'Instância pronta, mas sem QR Code — clique em "Renovar QR" pra tentar de novo.');
+    } catch (err: any) {
+      console.error('Falha ao conectar via Evolution API:', err);
+      setEvolutionError(err.message || 'Falha ao falar com a Evolution API.');
+    } finally {
+      setEvolutionBusy(false);
+    }
+  };
+
+  const handleOpenEvolutionModal = () => {
+    setShowEvolutionModal(true);
+    setEvolutionQr(null);
+    setEvolutionError(null);
+    handleConnectEvolution();
   };
 
   const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
@@ -2071,6 +2119,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               )}
             </div>
 
+            {/* Conectar número de WhatsApp via Evolution API (QR Code real,
+                server/routes/admin.ts) — 'admin'+ apenas (pedido do gestor,
+                13/08/2026: um admin de tenant conecta o próprio número sem
+                depender de saas_admin; o backend também garante que só
+                consegue provisionar o próprio tenant). */}
+            {hasRoleAtLeast(userRole, 'admin') && (
+              <button
+                onClick={handleOpenEvolutionModal}
+                title="Conectar um número de WhatsApp via Evolution API (QR Code)"
+                className="px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Conectar WhatsApp (QR Code)</span>
+              </button>
+            )}
+
             {/* Auto-analyze Toggle Switch */}
             <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
               <input
@@ -3209,6 +3273,63 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </button>
                 ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conectar WhatsApp via Evolution API (QR Code real) */}
+      {showEvolutionModal && (
+        <div
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setShowEvolutionModal(false)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-emerald-400" />
+                Conectar WhatsApp
+              </h3>
+              <button onClick={() => setShowEvolutionModal(false)} className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              Escaneie com o WhatsApp do número que vai atender este tenant ({activeTenant?.name || 'tenant atual'}).
+              Aponte a câmera em Configurações → Aparelhos conectados → Conectar um aparelho.
+            </p>
+
+            <div className="flex flex-col items-center justify-center min-h-[220px]">
+              {evolutionBusy && (
+                <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+              )}
+              {!evolutionBusy && evolutionQr && (
+                <img
+                  src={evolutionQr}
+                  alt="QR Code do WhatsApp"
+                  className="w-52 h-52 rounded-xl border border-slate-700 bg-white p-2"
+                />
+              )}
+              {!evolutionBusy && !evolutionQr && evolutionError && (
+                <p className="text-xs text-amber-300 text-center px-2">{evolutionError}</p>
+              )}
+            </div>
+
+            {evolutionInstanceName && (
+              <p className="text-[10px] text-slate-500 text-center font-mono">Instância: {evolutionInstanceName}</p>
+            )}
+
+            <button
+              onClick={handleConnectEvolution}
+              disabled={evolutionBusy}
+              className="w-full px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${evolutionBusy ? 'animate-spin' : ''}`} />
+              <span>Renovar QR Code</span>
+            </button>
           </div>
         </div>
       )}
