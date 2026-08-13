@@ -86,10 +86,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         } else {
           await markAsReadAndShowTyping(phoneNumberId, token, messageId);
         }
-        // Ferramenta de envio de foto (Epic 4.5.2) — agora suporta tanto Meta quanto Evolution.
+        // Ferramenta de envio de foto/vídeo (Epic 4.5.2) — agora suporta tanto
+        // Meta quanto Evolution. supabaseUrl/supabaseKey só são usados pra
+        // buscar o binário do vídeo de exemplo no Storage na hora de enviar
+        // (a foto já vem inline na Base de Conhecimento, não precisa disso).
         const mediaConfig = isEvolution
-          ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
-          : { provider: 'meta' as const, phoneNumberId, accessToken: token };
+          ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey, supabaseUrl, supabaseKey }
+          : { provider: 'meta' as const, phoneNumberId, accessToken: token, supabaseUrl, supabaseKey };
 
         // Issue #97 — orientação que um operador deixou num escalonamento,
         // ainda não usada numa resposta real (ex: foi deixada fora da

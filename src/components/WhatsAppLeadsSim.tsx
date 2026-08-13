@@ -738,6 +738,33 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Mesma ideia do handleSendExamplePhoto acima, pro vídeo de exemplo de um
+  // serviço (cadastrado na Base de Conhecimento, upload real no Storage —
+  // ver AgentKnowledgeBase.tsx).
+  const handleSendExampleVideo = async (productName: string) => {
+    if (!selectedLead || !(selectedLead as any).isReal) return;
+    const newMsg: ChatMessage = {
+      id: `msg-example-video-${Date.now()}`,
+      sender: 'agent',
+      type: 'file',
+      text: `🎥 Vídeo de exemplo: ${productName}`,
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    };
+    setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
+
+    try {
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-example-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productName }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao enviar vídeo de exemplo:', err);
+      markMessageFailed(selectedLead.id, newMsg.id, `Falha ao enviar o vídeo de exemplo pro cliente — ele NÃO recebeu. Tente reenviar.`);
+    }
+  };
+
   // Última contagem de mensagens vista por lead — bookkeeping simples fora
   // do estado do React (ref, não state) pra detectar "chegou mensagem nova"
   // de forma síncrona e confiável. Guardar esse cálculo dentro do updater
@@ -3067,6 +3094,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       >
                         <option value="" disabled>📷 Foto do serviço...</option>
                         {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                          <option key={p.id} value={p.name}>{p.name}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                      <select
+                        onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
+                        defaultValue=""
+                        className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-emerald-400 text-[10px] font-semibold cursor-pointer"
+                        title="Enviar vídeo de exemplo de um serviço"
+                      >
+                        <option value="" disabled>🎥 Vídeo do serviço...</option>
+                        {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
                           <option key={p.id} value={p.name}>{p.name}</option>
                         ))}
                       </select>

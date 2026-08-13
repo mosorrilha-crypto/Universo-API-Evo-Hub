@@ -14,6 +14,7 @@ import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, find
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
+import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
@@ -30,6 +31,9 @@ export interface MediaSendConfig {
   evolutionInstanceName?: string;
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
+  /** Só pra buscar o binário do vídeo de exemplo no Storage (knowledgeBaseVideoStore.ts) na hora de enviar — o vídeo, ao contrário da foto, não vem inline na Base de Conhecimento. */
+  supabaseUrl?: string;
+  supabaseKey?: string;
 }
 
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
@@ -811,21 +815,33 @@ const FOTO_TOOLS: FunctionDeclaration[] = [
       required: ['nome_produto'],
     },
   },
+  {
+    name: 'enviar_video_exemplo',
+    description: 'Envia pro cliente, como vídeo real no WhatsApp, o vídeo de exemplo de um serviço específico do catálogo (já cadastrado na Base de Conhecimento) — geralmente até ~1 minuto, mostra o procedimento/resultado de verdade, mais persuasivo que uma foto parada.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        nome_produto: { type: Type.STRING, description: 'Nome EXATO do produto/serviço, igual ao catálogo — nunca invente um nome que não está na lista.' },
+      },
+      required: ['nome_produto'],
+    },
+  },
 ];
 
 /**
- * Ferramenta nova (Epic 4.5.2, paridade com o projeto antigo da Monique):
- * decide se a mensagem do cliente pede/justifica mandar a foto de exemplo
- * de um serviço específico e, se sim, envia de verdade via Meta Cloud API
- * (mesmo upload usado no envio manual do painel,
- * `server/routes/conversations.ts` `/send-example-photo`). Chamada só uma
- * vez por mensagem recebida (não é um loop como `runAgendamentoTools`) e
- * executa no máximo 1 chamada de ferramenta — nunca manda mais de 1 foto
- * pra mesma mensagem do cliente. Limite de "no máximo 1 foto por conversa
- * inteira" é regra de segmento (camada 2, Etapa 4 — ainda não escrita),
- * não está garantido aqui.
+ * Ferramenta nova (Epic 4.5.2, paridade com o projeto antigo da Monique;
+ * vídeo adicionado depois, mesmo espírito): decide se a mensagem do cliente
+ * pede/justifica mandar a foto OU o vídeo de exemplo de um serviço
+ * específico e, se sim, envia de verdade via Meta Cloud API (mesmo upload
+ * usado no envio manual do painel, `server/routes/conversations.ts`
+ * `/send-example-photo` e `/send-example-video`). Chamada só uma vez por
+ * mensagem recebida (não é um loop como `runAgendamentoTools`) e executa no
+ * máximo 1 chamada de ferramenta — nunca manda mais de 1 mídia pra mesma
+ * mensagem do cliente. Limite de "no máximo 1 mídia por conversa inteira" é
+ * regra de segmento (camada 2, Etapa 4 — ainda não escrita), não está
+ * garantido aqui.
  */
-async function runFotoTool(
+async function runMidiaTool(
   tenantId: string,
   ai: GoogleGenAI,
   text: string,
@@ -835,17 +851,16 @@ async function runFotoTool(
 ): Promise<{ actionsSummary: string[] }> {
   const kb = await getKnowledgeBase(tenantId);
   const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64);
-  if (!productsWithPhoto.length) return { actionsSummary: [] };
+  const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId);
+  if (!productsWithPhoto.length && !productsWithVideo.length) return { actionsSummary: [] };
 
   const historyText = buildHistoryText(history);
-  const catalogList = productsWithPhoto.map((p) => `- ${p.name}`).join('\n');
+  const photoList = productsWithPhoto.map((p) => `- ${p.name}`).join('\n');
+  const videoList = productsWithVideo.map((p) => `- ${p.name}`).join('\n');
 
-  const prompt = `Produtos/serviços com foto de exemplo disponível pra enviar de verdade:
-${catalogList}
+  const prompt = `${productsWithPhoto.length ? `Produtos/serviços com FOTO de exemplo disponível pra enviar de verdade:\n${photoList}\n\n` : ''}${productsWithVideo.length ? `Produtos/serviços com VÍDEO de exemplo disponível pra enviar de verdade (prefira vídeo quando o mesmo produto tiver os dois — é mais persuasivo):\n${videoList}\n\n` : ''}${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensagem do cliente: "${text}"
 
-${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensagem do cliente: "${text}"
-
-Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e uma foto ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
+Só chame enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explicitamente pra ver foto/vídeo/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e isso ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
 
   const response = await withGeminiRetryAndUsage(
     tenantId,
@@ -863,9 +878,51 @@ Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exe
   );
 
   const call = response.functionCalls?.[0];
-  if (!call || call.name !== 'enviar_foto_exemplo') return { actionsSummary: [] };
+  if (!call || (call.name !== 'enviar_foto_exemplo' && call.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
 
   const nomeProduto = (call.args?.nome_produto as string) || '';
+
+  if (call.name === 'enviar_video_exemplo') {
+    const product = productsWithVideo.find((p) => p.name === nomeProduto);
+    if (!product?.exampleVideoId) {
+      return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse produto não tem vídeo de exemplo cadastrado.`] };
+    }
+    const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, product.exampleVideoId);
+    if (!video) {
+      return { actionsSummary: [`Tentou enviar vídeo de "${product.name}" mas o arquivo não foi encontrado no Storage.`] };
+    }
+
+    try {
+      const mimeType = product.exampleVideoMimeType || video.contentType;
+      const filename = product.exampleVideoFileName || `${product.name}.mp4`;
+
+      if (mediaConfig.provider === 'evolution') {
+        await sendEvolutionMediaMessage(
+          mediaConfig.evolutionInstanceName,
+          mediaConfig.evolutionApiUrl,
+          mediaConfig.evolutionApiKey,
+          phone,
+          video.buffer.toString('base64'),
+          mimeType,
+          filename,
+          product.name
+        );
+      } else {
+        const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
+        await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
+      }
+
+      await recordOutgoingMessage(tenantId, phone, {
+        type: 'file',
+        text: `🎥 Vídeo de exemplo: ${product.name}`,
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      }, 'ai');
+      return { actionsSummary: [`Enviou o vídeo de exemplo real de "${product.name}" pro cliente agora.`] };
+    } catch (err: any) {
+      return { actionsSummary: [`Tentou enviar o vídeo de "${product.name}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };
+    }
+  }
+
   const product = productsWithPhoto.find((p) => p.name === nomeProduto);
   if (!product?.exampleImageBase64) {
     return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse produto não tem foto de exemplo cadastrada.`] };
@@ -874,7 +931,7 @@ Só chame enviar_foto_exemplo se o cliente pediu explicitamente pra ver foto/exe
   try {
     const mimeType = product.exampleImageMimeType || 'image/jpeg';
     const filename = `${product.name}.jpg`;
-    
+
     if (mediaConfig.provider === 'evolution') {
       await sendEvolutionMediaMessage(
         mediaConfig.evolutionInstanceName,
@@ -981,7 +1038,7 @@ export async function generateAutoReplyForText(
       confirmedTimes = result.confirmedTimes;
       agendamentoToolsRan = result.actionsSummary.length > 0;
     } else if (agent !== 'agendamento' && phone && mediaConfig?.phoneNumberId && mediaConfig?.accessToken) {
-      const { actionsSummary } = await runFotoTool(tenantId, ai, text, phone, mediaConfig, history);
+      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig, history);
       if (actionsSummary.length) {
         extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
       }

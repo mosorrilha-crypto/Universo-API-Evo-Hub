@@ -22,6 +22,7 @@ import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/ag
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
+import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES } from '../services/knowledgeBaseVideoStore';
 import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
@@ -506,6 +507,61 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
   }));
 
+  // Mesma ideia do /send-example-photo acima, pro vídeo de exemplo — o
+  // vídeo não fica inline na base (ver knowledgeBaseVideoStore.ts), então
+  // busca o binário do Storage antes de mandar. Não salva uma cópia sob o
+  // messageId (diferente da foto): o histórico do painel mostra só o texto
+  // placeholder — o vídeo real chega no WhatsApp do cliente, que é o canal
+  // que importa aqui; tocar de novo dentro do painel fica pra uma
+  // iteração futura se vier a ser pedido.
+  router.post('/api/conversations/:phone/send-example-video', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { productName } = req.body || {};
+    if (!productName) return res.status(400).json({ error: 'Campo "productName" é obrigatório.' });
+    const tenantId = tenantOf(req);
+
+    const kb = await getKnowledgeBase(tenantId);
+    const product = kb?.products?.find((p) => p.name === productName);
+    if (!product?.exampleVideoId) {
+      return res.status(404).json({ error: 'Esse serviço não tem vídeo de exemplo cadastrado na Base de Conhecimento.' });
+    }
+    const video = await getKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, product.exampleVideoId);
+    if (!video) {
+      return res.status(404).json({ error: 'O vídeo cadastrado não foi encontrado no Storage — tente subir de novo na Base de Conhecimento.' });
+    }
+
+    try {
+      const mimeType = product.exampleVideoMimeType || video.contentType;
+      const filename = product.exampleVideoFileName || `${productName}.mp4`;
+      const channel = await resolveCredentialsForTenant(
+        tenantId,
+        { metaAccessToken, metaPhoneNumberId },
+        { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+      );
+      if (channel.provider === 'evolution') {
+        await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, video.buffer.toString('base64'), mimeType, filename, productName);
+      } else {
+        const mediaId = await uploadWhatsAppMedia(channel.metaPhoneNumberId, channel.metaAccessToken, video.buffer, mimeType, filename);
+        await sendWhatsAppMediaMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, mediaId, mimeType, productName);
+      }
+
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        req.params.phone,
+        {
+          type: 'file',
+          text: `🎥 Vídeo de exemplo: ${productName}`,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        'operator'
+      );
+      res.json({ success: true, conversation: conv });
+    } catch (err: any) {
+      if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
+      console.error('❌ [Conversas] Falha ao enviar vídeo de exemplo:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  }));
+
   // Issue #82, item 3: o fluxo de verificação de pagamento (setPaymentVerification
   // abaixo) já existia e funcionava, mas o agendamento/status de pagamento
   // nunca chegava ao frontend pra alguém ver e agir — não existia nenhuma
@@ -724,6 +780,57 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const kb = (await getKnowledgeBase(tenantId)) || {};
     await setKnowledgeBase(tenantId, { ...kb, documents: (kb.documents || []).filter((d) => d.id !== docId) });
     res.json({ success: true });
+  }));
+
+  // Upload real de vídeo de exemplo de produto/serviço (pedido real do dono
+  // do produto: agente/operador mandarem vídeo, não só foto). Diferente do
+  // upload de documento acima: não recebe nem grava productName aqui — só
+  // sobe o binário e devolve a referência (videoId), pra funcionar mesmo
+  // pra um produto ainda não salvo no servidor (ver knowledgeBaseVideoStore.ts).
+  // Quem associa a referência a um produto é o cliente (AgentKnowledgeBase.tsx),
+  // no mesmo formData local que já guarda exampleImageBase64 — só persiste
+  // de verdade quando a base inteira é salva (POST /api/knowledge-base acima).
+  router.post('/api/knowledge-base/videos', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { fileName, mimeType, base64, oldVideoId } = req.body || {};
+    if (!fileName?.trim() || !base64 || !mimeType) {
+      return res.status(400).json({ error: 'Campos "fileName", "mimeType" e "base64" são obrigatórios.' });
+    }
+    const resolvedMimeType = String(mimeType).split(';')[0].trim();
+    if (!ALLOWED_VIDEO_MIME_TYPES.has(resolvedMimeType)) {
+      return res.status(400).json({ error: `Formato de vídeo não suportado pelo WhatsApp (${resolvedMimeType}). Envie um MP4.` });
+    }
+    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buffer.length > MAX_VIDEO_BYTES) {
+      return res.status(400).json({ error: `Vídeo maior que ${MAX_VIDEO_BYTES / (1024 * 1024)}MB (limite da Meta pra mensagem de vídeo).` });
+    }
+
+    const videoId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await uploadKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId, buffer, resolvedMimeType);
+
+    // Substituindo o vídeo anterior do mesmo produto — apaga o antigo do
+    // Storage pra não acumular lixo a cada troca (melhor esforço, nunca
+    // falha o upload novo por causa disso).
+    if (typeof oldVideoId === 'string' && oldVideoId.trim()) {
+      await deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, oldVideoId.trim());
+    }
+
+    res.json({
+      videoId,
+      mimeType: resolvedMimeType,
+      fileName: String(fileName).trim(),
+      sizeBytes: buffer.length,
+    });
+  }));
+
+  // Baixa/visualiza o vídeo real — nunca público (autenticado + escopado
+  // por tenant já pela própria chave de Storage), mesmo padrão de
+  // GET /api/knowledge-base/documents/:docId acima.
+  router.get('/api/knowledge-base/videos/:videoId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const video = await getKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantOf(req), req.params.videoId);
+    if (!video) return res.status(404).json({ error: 'Vídeo não encontrado.' });
+    res.setHeader('Content-Type', video.contentType);
+    res.send(video.buffer);
   }));
 
   // Escalonamentos pra atendimento humano — "isso precisa de você"

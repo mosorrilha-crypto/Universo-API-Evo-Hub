@@ -148,6 +148,18 @@ export interface AgentProduct {
   description: string;
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
+  /**
+   * Vídeo de exemplo do serviço — diferente da foto (exampleImageBase64,
+   * guardada inline como base64), o vídeo fica no Storage do backend
+   * (server/services/knowledgeBaseVideoStore.ts) e aqui só guarda a
+   * referência (id opaco), pra nunca repetir o incidente real de produção
+   * documentado em App.tsx (base64 de imagem já estourou a cota de
+   * localStorage — vídeo inline seria dramaticamente pior).
+   */
+  exampleVideoId?: string;
+  exampleVideoMimeType?: string;
+  exampleVideoFileName?: string;
+  exampleVideoSizeBytes?: number;
   promoPrice?: string;
   promoUntil?: string;
   /** Valor numérico do preço regular (Etapa 2 do roadmap) — opcional, fonte de verdade pra cálculo quando preenchido. */

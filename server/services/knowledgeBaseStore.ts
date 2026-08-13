@@ -15,6 +15,17 @@ export interface AgentProduct {
   /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
+  /**
+   * Vídeo de exemplo do serviço — ao contrário da foto (inline base64
+   * acima), o binário fica no Storage (server/services/knowledgeBaseVideoStore.ts,
+   * bucket "app-data", prefixo kb-video/{tenantId}/{videoId}); aqui só a
+   * referência. Pedido real do dono do produto: vídeos geralmente de até
+   * ~1 minuto, ainda mais persuasivo que foto pra mostrar o procedimento.
+   */
+  exampleVideoId?: string;
+  exampleVideoMimeType?: string;
+  exampleVideoFileName?: string;
+  exampleVideoSizeBytes?: number;
   /** Preço promocional com vencimento — volta sozinho pro preço regular após promoUntil, sem precisar editar manualmente. */
   promoPrice?: string;
   promoUntil?: string; // YYYY-MM-DD
