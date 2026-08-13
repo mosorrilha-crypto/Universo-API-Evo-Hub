@@ -22,7 +22,8 @@ import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/ag
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
-import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES } from '../services/knowledgeBaseVideoStore';
+import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
+import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
@@ -814,13 +815,32 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!fileName?.trim() || !base64 || !mimeType) {
       return res.status(400).json({ error: 'Campos "fileName", "mimeType" e "base64" são obrigatórios.' });
     }
-    const resolvedMimeType = String(mimeType).split(';')[0].trim();
-    if (!ALLOWED_VIDEO_MIME_TYPES.has(resolvedMimeType)) {
-      return res.status(400).json({ error: `Formato de vídeo não suportado pelo WhatsApp (${resolvedMimeType}). Envie um MP4.` });
+    let resolvedMimeType = String(mimeType).split(';')[0].trim();
+    if (!resolvedMimeType.startsWith('video/')) {
+      return res.status(400).json({ error: `Arquivo não é um vídeo (${resolvedMimeType}).` });
     }
-    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    let buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buffer.length > MAX_VIDEO_INPUT_BYTES) {
+      return res.status(400).json({ error: `Vídeo original maior que ${MAX_VIDEO_INPUT_BYTES / (1024 * 1024)}MB — comprima antes de enviar.` });
+    }
+
+    // Formato que a Meta não aceita direto (ex: .MOV do iPhone, mimeType
+    // "video/quicktime") — converte pra MP4 (H.264/AAC) via ffmpeg antes de
+    // seguir, mesmo padrão de audioTranscode.ts pra nota de voz. Pedido real
+    // do dono do produto: não exigir que o operador converta na mão.
+    if (!ALLOWED_VIDEO_MIME_TYPES.has(resolvedMimeType)) {
+      try {
+        const transcoded = await transcodeToWhatsAppVideo(buffer, resolvedMimeType);
+        buffer = transcoded.buffer;
+        resolvedMimeType = transcoded.mimeType;
+      } catch (err: any) {
+        console.error('❌ [KB Vídeo] Falha ao converter vídeo pro formato aceito pela Meta:', err.message);
+        return res.status(400).json({ error: `Não foi possível converter esse vídeo pro formato aceito pelo WhatsApp: ${err.message}` });
+      }
+    }
+
     if (buffer.length > MAX_VIDEO_BYTES) {
-      return res.status(400).json({ error: `Vídeo maior que ${MAX_VIDEO_BYTES / (1024 * 1024)}MB (limite da Meta pra mensagem de vídeo).` });
+      return res.status(400).json({ error: `Vídeo maior que ${MAX_VIDEO_BYTES / (1024 * 1024)}MB (limite da Meta pra mensagem de vídeo) mesmo depois de convertido.` });
     }
 
     const videoId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
