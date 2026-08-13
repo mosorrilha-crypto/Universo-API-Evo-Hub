@@ -55,7 +55,9 @@ describe('GET/POST /api/admin/global-prompt', () => {
 
     const getBefore = await fetch(`${baseUrl}/api/admin/global-prompt`);
     expect(getBefore.status).toBe(200);
-    expect((await getBefore.json()).content).toBeNull();
+    const beforeBody = await getBefore.json();
+    expect(beforeBody.content).toBeNull();
+    expect(beforeBody.defaultContent).toBeTruthy();
 
     const post = await fetch(`${baseUrl}/api/admin/global-prompt`, {
       method: 'POST',

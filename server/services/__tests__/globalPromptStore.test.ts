@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
-import { getGlobalPromptLayerOverride, getGlobalPromptLayerRow, setGlobalPromptLayer } from '../globalPromptStore';
+import { DEFAULT_GLOBAL_LAYER, getGlobalPromptLayerOverride, getGlobalPromptLayerRow, setGlobalPromptLayer } from '../globalPromptStore';
 
 beforeEach(() => {
   initDb(createFakeSupabase());
@@ -46,5 +46,15 @@ describe('setGlobalPromptLayer / getGlobalPromptLayerRow', () => {
     expect(await getGlobalPromptLayerOverride()).toBeNull();
     const row = await getGlobalPromptLayerRow();
     expect(row.content).toBeNull();
+  });
+
+  it('defaultContent sempre traz o texto padrão real, com ou sem override salvo (achado real de UX: o painel precisa mostrar o que está em vigor, não uma caixa vazia)', async () => {
+    const rowWithoutOverride = await getGlobalPromptLayerRow();
+    expect(rowWithoutOverride.defaultContent).toBe(DEFAULT_GLOBAL_LAYER);
+
+    await setGlobalPromptLayer('Override qualquer', 'op-1');
+    const rowWithOverride = await getGlobalPromptLayerRow();
+    expect(rowWithOverride.defaultContent).toBe(DEFAULT_GLOBAL_LAYER);
+    expect(rowWithOverride.content).toBe('Override qualquer');
   });
 });

@@ -307,6 +307,225 @@ export function ConectarEvolutionQrCode() {
     </>
   );
 }
+/**
+ * Credenciais Meta Conversions API (CAPI) por tenant — achado numa
+ * auditoria (13/08/2026): o backend já dispara sozinho os eventos
+ * "Schedule"/"Purchase" quando o agente confirma um agendamento/pagamento
+ * real (server/services/metaCapiService.ts, fireMetaCapiEventForTenant),
+ * mas as credenciais que esse disparo automático lê
+ * (tenant_meta_credentials.capi_dataset_id/capi_access_token/capi_page_id)
+ * nunca tinham nenhuma tela que as gravasse — o operador ficava sempre
+ * dependendo do botão manual da aba "Central & Disparo Meta CAPI", mesmo
+ * pra lead vindo de anúncio Clique-para-WhatsApp. Mesmo padrão de
+ * `ConectarEvolutionQrCode` acima: busca a lista REAL de tenants (GET
+ * /api/admin/tenants), não a tabela local/mock desta tela.
+ */
+function GerenciarCredenciaisCapi() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [realTenants, setRealTenants] = useState<RealTenant[]>([]);
+  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('');
+  const [isLoadingCreds, setIsLoadingCreds] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [datasetId, setDatasetId] = useState('');
+  const [pageId, setPageId] = useState('');
+  const [accessToken, setAccessToken] = useState('');
+  const [accessTokenSet, setAccessTokenSet] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const fetchRealTenants = async () => {
+    setIsLoadingTenants(true);
+    try {
+      const res = await apiFetch('/api/admin/tenants');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const tenants: RealTenant[] = (data.tenants || []).map((t: any) => ({ id: t.id, name: t.name, slug: t.slug }));
+      setRealTenants(tenants);
+      if (tenants.length && !selectedTenantId) setSelectedTenantId(tenants[0].id);
+    } catch (err) {
+      console.error('Falha ao carregar tenants reais:', err);
+    } finally {
+      setIsLoadingTenants(false);
+    }
+  };
+
+  // Nunca limpa successMsg aqui — handleSave chama isso logo depois de setar
+  // a mensagem de sucesso pra atualizar os campos com o que ficou salvo, e
+  // um setSuccessMsg(null) aqui apagaria o banner antes do operador
+  // conseguir ver (achado num smoke test manual: o banner nunca aparecia).
+  const fetchCredentials = async (tenantId: string) => {
+    if (!tenantId) return;
+    setIsLoadingCreds(true);
+    setErrorMsg(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/capi-credentials`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setDatasetId(data.capiDatasetId || '');
+      setPageId(data.capiPageId || '');
+      setAccessTokenSet(!!data.capiAccessTokenSet);
+      setAccessToken('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao carregar credenciais.');
+    } finally {
+      setIsLoadingCreds(false);
+    }
+  };
+
+  const openModal = () => {
+    setIsModalOpen(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    fetchRealTenants();
+  };
+
+  useEffect(() => {
+    if (isModalOpen && selectedTenantId) fetchCredentials(selectedTenantId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen, selectedTenantId]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTenantId) return;
+    setIsSaving(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/capi-credentials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          capiDatasetId: datasetId.trim() || null,
+          capiPageId: pageId.trim() || null,
+          // Em branco = manter o token já salvo (nunca volta em texto puro
+          // do GET, então "em branco" é a única forma de expressar "não mexi
+          // nisso" sem o admin precisar re-digitar um segredo que já sabe
+          // que está configurado).
+          ...(accessToken.trim() ? { capiAccessToken: accessToken.trim() } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setSuccessMsg('Credenciais salvas! Agendamento/pagamento confirmado por leads vindos de anúncio agora disparam CAPI automaticamente.');
+      await fetchCredentials(selectedTenantId);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao salvar credenciais.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openModal}
+        className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
+      >
+        <Zap className="w-3.5 h-3.5" />
+        Credenciais Meta CAPI
+      </button>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsModalOpen(false)}>
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-bold text-sm flex items-center gap-2">
+                <Zap className="w-4 h-4 text-blue-400" /> Credenciais Meta CAPI (disparo automático)
+              </h3>
+              <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-500">
+              Com isso configurado, o Universo dispara "Schedule"/"Purchase" pro Meta Conversions API sozinho quando o agente
+              confirma um agendamento ou pagamento de um lead que veio de anúncio Clique-para-WhatsApp — sem depender de clique
+              manual na aba "Central &amp; Disparo Meta CAPI".
+            </p>
+
+            {errorMsg && (
+              <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{errorMsg}</div>
+            )}
+            {successMsg && (
+              <div className="bg-emerald-950/60 border border-emerald-800 rounded-lg p-2.5 text-xs text-emerald-300">{successMsg}</div>
+            )}
+
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Tenant</label>
+              <select
+                value={selectedTenantId}
+                onChange={(e) => {
+                  setSuccessMsg(null);
+                  setSelectedTenantId(e.target.value);
+                }}
+                disabled={isLoadingTenants || !realTenants.length}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              >
+                {!realTenants.length && <option value="">{isLoadingTenants ? 'Carregando...' : 'Nenhum tenant cadastrado ainda'}</option>}
+                {realTenants.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Dataset ID (Conjunto de Dados)</label>
+                <input
+                  type="text"
+                  value={datasetId}
+                  onChange={(e) => setDatasetId(e.target.value)}
+                  disabled={isLoadingCreds}
+                  placeholder="Ex: 891029384712039"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Page ID (Facebook)</label>
+                <input
+                  type="text"
+                  value={pageId}
+                  onChange={(e) => setPageId(e.target.value)}
+                  disabled={isLoadingCreds}
+                  placeholder="Ex: 102345678901234"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block flex items-center gap-1.5">
+                  <Key className="w-3 h-3" /> System User Access Token
+                </label>
+                <input
+                  type="password"
+                  value={accessToken}
+                  onChange={(e) => setAccessToken(e.target.value)}
+                  disabled={isLoadingCreds}
+                  placeholder={accessTokenSet ? 'Já configurado — deixe em branco pra manter' : 'Cole o token aqui'}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={!selectedTenantId || isSaving || isLoadingCreds}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {isSaving ? 'Salvando...' : 'Salvar credenciais'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 interface SaaSAdminDashboardProps {
   tenants?: Tenant[];
   activeTenant?: Tenant;
@@ -344,6 +563,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   // PR+deploy (ver server/services/globalPromptStore.ts). content null =
   // nenhum override salvo, o texto padrão do código está em vigor.
   const [globalPromptContent, setGlobalPromptContent] = useState<string | null>(null);
+  const [globalPromptDefault, setGlobalPromptDefault] = useState('');
   const [globalPromptDraft, setGlobalPromptDraft] = useState('');
   const [globalPromptUpdatedAt, setGlobalPromptUpdatedAt] = useState<string | null>(null);
   const [globalPromptLoaded, setGlobalPromptLoaded] = useState(false);
@@ -359,7 +579,11 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setGlobalPromptContent(data.content ?? null);
-      setGlobalPromptDraft(data.content || '');
+      setGlobalPromptDefault(data.defaultContent || '');
+      // Sem override salvo: pré-preenche com o texto padrão real (não deixa
+      // a caixa vazia) — achado real de UX, o saas_admin precisa ver o que
+      // está em vigor pra poder editar a partir dali, não só uma dica de texto.
+      setGlobalPromptDraft(data.content || data.defaultContent || '');
       setGlobalPromptUpdatedAt(data.updatedAt || null);
       setGlobalPromptLoaded(true);
     } catch (err: any) {
@@ -380,15 +604,19 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     setIsSavingGlobalPrompt(true);
     setGlobalPromptError(null);
     try {
+      // Salvar o texto padrão sem nenhuma edição real é equivalente a não
+      // ter override nenhum — evita criar uma linha "customizada" idêntica
+      // ao padrão só porque o admin clicou Salvar sem mudar nada.
+      const contentToSave = globalPromptDraft.trim() === globalPromptDefault.trim() ? null : globalPromptDraft.trim() || null;
       const res = await apiFetch('/api/admin/global-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: globalPromptDraft.trim() || null }),
+        body: JSON.stringify({ content: contentToSave }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setGlobalPromptContent(data.content ?? null);
-      setGlobalPromptDraft(data.content || '');
+      setGlobalPromptDraft(data.content || globalPromptDefault);
       setGlobalPromptUpdatedAt(data.updatedAt || null);
     } catch (err: any) {
       setGlobalPromptError(err.message || 'Falha ao salvar o prompt global.');
@@ -409,7 +637,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setGlobalPromptContent(null);
-      setGlobalPromptDraft('');
+      setGlobalPromptDraft(globalPromptDefault);
       setGlobalPromptUpdatedAt(new Date().toISOString());
     } catch (err: any) {
       setGlobalPromptError(err.message || 'Falha ao restaurar o padrão.');
@@ -1114,7 +1342,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             </select>
           </div>
         </div>
-<div className="mb-4 flex justify-end">
+<div className="mb-4 flex justify-end gap-2">
+  <GerenciarCredenciaisCapi />
   <ConectarEvolutionQrCode />
 </div>
         <div className="overflow-x-auto">
@@ -1571,7 +1800,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   Prompt Global do Agente (Camada 1)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5 max-w-2xl">
-                  Regra fixa que vale pra TODOS os tenants/segmentos — a espinha dorsal da estrutura de vendas (fluxo de pré-reserva/pagamento, quando escalar pra humano, regras de honestidade/segurança). Editar aqui sobrescreve o texto padrão do código sem precisar de deploy. Deixe em branco e salve pra restaurar o padrão.
+                  Regra fixa que vale pra TODOS os tenants/segmentos — a espinha dorsal da estrutura de vendas (fluxo de pré-reserva/pagamento, quando escalar pra humano, regras de honestidade/segurança). O texto abaixo é o que está em vigor agora; edite e salve pra sobrescrever sem precisar de deploy, ou use "Restaurar padrão" pra voltar ao texto original do código.
                 </p>
               </div>
               <button
@@ -1593,14 +1822,14 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             <div className="text-[11px] text-slate-500">
               {globalPromptContent
                 ? `Override customizado em vigor${globalPromptUpdatedAt ? ` — última alteração em ${new Date(globalPromptUpdatedAt).toLocaleString('pt-BR')}` : ''}.`
-                : 'Nenhum override salvo — o texto padrão do código está em vigor.'}
+                : 'Texto padrão do código em vigor (mostrado abaixo) — nenhum override salvo ainda. Edite e salve pra sobrescrever.'}
             </div>
 
             <textarea
               value={globalPromptDraft}
               onChange={(e) => setGlobalPromptDraft(e.target.value)}
               rows={18}
-              placeholder="Deixe em branco pra usar o texto padrão do código (DEFAULT_GLOBAL_LAYER em autoReply.ts). Escreva aqui só se precisar sobrescrever uma regra em produção sem esperar um deploy."
+              placeholder="Carregando o texto em vigor..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-200 font-mono leading-relaxed focus:outline-none focus:border-pink-500/60 resize-y"
             />
 
