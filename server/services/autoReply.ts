@@ -130,8 +130,8 @@ async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, hi
   const historyText = buildHistoryText(history);
   const prompt = `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
-- "faq": pergunta específica sobre preço, procedimento, horário de funcionamento, política de pagamento/cancelamento.
-- "agendamento": o cliente quer marcar, confirmar, remarcar ou cancelar um horário específico.
+- "faq": pergunta específica sobre preço, procedimento, horário de funcionamento, endereço/localização do negócio, ou política de pagamento/cancelamento — mesmo que a conversa esteja no meio de um agendamento, uma pergunta factual como essa é sempre "faq", nunca "agendamento".
+- "agendamento": o cliente quer marcar, confirmar, remarcar ou cancelar um horário específico — não classifique como agendamento uma pergunta que só busca informação (ex: onde fica, que horas abre), mesmo que relacionada a uma visita já combinada.
 - "reclamacao": o cliente está insatisfeito ou reclamando de um serviço JÁ REALIZADO (resultado, dor, alergia, reação), ou claramente irritado/chateado com o negócio.
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
