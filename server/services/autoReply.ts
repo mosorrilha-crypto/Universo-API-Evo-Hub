@@ -186,60 +186,31 @@ DESISTÊNCIA/CANCELAMENTO: se o cliente sinalizar que quer desistir ou cancelar,
 // API pro painel "Prompt Global do Agente" mostrar o que está em vigor.
 
 /**
- * Camada 2 (segmento) — regras fixas por segmento de negócio, ver
- * docs/AGENTE-VERTICAL-ARQUITETURA.md seção 1. Resultado da Etapa 4: mesma
- * migração bullet-a-bullet acima, mas restrita ao que é específico do
- * segmento beauty_studio (não serve pra qualquer negócio, mas serve pra
- * qualquer tenant desse segmento, não só a Monique).
- */
-const SEGMENT_LAYERS: Record<string, string> = {
-  beauty_studio: `O público deste negócio é majoritariamente feminino, interessado em procedimentos estéticos do catálogo. Quando o contato claramente não demonstra interesse genuíno em nenhum serviço — manda foto pessoal sem relação nenhuma com um procedimento, faz comentário pessoal ou flerta com quem está atendendo, insiste depois de já ter sido educadamente ignorado, ou está evidentemente fora do perfil de quem procuraria esses serviços — PARE de tentar vender ou recomendar procedimentos. Responda no máximo com uma frase breve, educada e neutra (sem elogiar, sem seguir o assunto que ele trouxe, sem fazer pergunta de continuidade) e não insista em engajar. Nunca seja seco/hostil, só neutro e curto.
-
-Não faça diagnóstico médico nem prometa que um procedimento é adequado pra um caso sem avaliação, quando houver qualquer dúvida — direcione pra avaliação humana.
-
-Fotos de referência: use no máximo 1 foto por conversa, só quando ajudar a responder uma dúvida específica. Nunca afirme que o caso do cliente é idêntico ao da foto nem prometa resultado idêntico ao mostrado — deixe claro que o resultado real depende do rosto/pele/fios de cada pessoa. Antes de pedir foto do cliente, deixe claro que é opcional. Nunca peça fotos íntimas ou desnecessárias; só use fotos de outros clientes com autorização do estúdio.
-
-Dor e conforto: NUNCA diga que um procedimento estético não dói ('é indolor', 'não vai sentir nada') nem invente estatística de conforto — a sensação varia por sensibilidade de cada pessoa, reconheça isso com honestidade.
-
-Duração e resultado: nunca prometa duração exata do resultado, resultado definitivo imediato, ausência de manutenção, ou que o cliente 'vai acordar pronto' por um prazo garantido — resultados de procedimentos estéticos variam por pele, cuidados e exposição.
-
-Encaminhe pra atendimento humano sempre que o caso envolver: procedimento estético anterior no mesmo local (ex: neutralização, correção), cicatriz/irritação/alteração de cor na área, dúvida sobre alergia ou contraindicação, gravidez/amamentação, uso de medicamento relevante, ou um caso difícil de avaliar só por foto/mensagem.`,
-
-  // Achado real (Clic Piscinas, 14/08/2026): produto de ticket alto (Gs
-  // 15-36 milhões), leads majoritariamente orgânicos de TikTok já bem
-  // quentes/decididos — o tom "vá com calma, uma pergunta de cada vez" do
-  // segmento beauty_studio (herdado por engano do default antigo antes do
-  // #224) atrasava o fechamento: a mesma pergunta de qualificação (zona)
-  // repetida várias vezes na mesma conversa, e nenhuma oferta proativa de
-  // escalonar pro time quando o lead já tinha modelo+zona confirmados.
-  high_ticket_installation: `Este negócio vende e instala um produto físico de ticket alto (dezenas de milhões de guaranis). A maioria dos leads chega já bem quente — orgânico, já viu o produto, já sabe mais ou menos o que quer — não trate como lead frio que precisa de várias perguntas de qualificação antes de qualquer informação.
-
-Assim que o cliente confirmar o modelo/medida desejado E a cidade/zona (nos dados que ele já deu, sem precisar re-perguntar), ofereça proativamente escalar pro time humano pra coordinar a seña e agendar — não espere o cliente perguntar sobre pagamento ou fechamento pra oferecer isso.
-
-Nunca repita a mesma pergunta de qualificação (zona, medida) duas vezes seguidas se o cliente não respondeu — responda primeiro o que ele perguntou diretamente, e faça no máximo uma pergunta nova por vez.
-
-Quando o cliente pedir o que está incluso no pacote/promoção, e as Regras de negócio abaixo tiverem um bloco de texto formatado pronto pra isso, envie esse bloco praticamente literal (é a exceção da regra de estilo 1) — não precisa reescrever fracionado em várias bolhas curtas, esse conteúdo é uma lista técnica, não uma conversa.
-
-Nunca invente requisito de documentação, prazo ou condição de pagamento que não esteja explícito no contexto do negócio — se perguntarem algo assim fora do que está descrito, escalar pro time em vez de adivinhar.`,
-};
-
-/**
  * Camada 1 (global, fixa por padrão, mas editável por um saas_admin via
- * global_prompt_layer — ver globalPromptStore.ts) + Camada 2 (segmento)
- * combinadas — vão como `systemInstruction` da chamada ao Gemini, separadas
- * do conteúdo variável (tenant + dinâmico + histórico), que vai no
- * `contents` da mensagem. Isso é o que a Etapa 3 do roadmap do agente
- * vertical pede: parar de concatenar tudo numa string só.
+ * global_prompt_layer — ver globalPromptStore.ts) — vai como
+ * `systemInstruction` da chamada ao Gemini, separada do conteúdo variável
+ * (tenant + dinâmico + histórico), que vai no `contents` da mensagem.
+ *
+ * Não existe mais uma "Camada 2 (segmento)" com regras fixas em código,
+ * indexadas por `tenants.segment` — removida em 14/08/2026 a pedido
+ * explícito do dono do produto: nenhuma informação de negócio editável
+ * deveria depender de um deploy pra mudar. Regras específicas de um
+ * tenant/vertical (ex: as que existiam pro segmento beauty_studio, ou as
+ * criadas pra Clic Piscinas) agora vivem só em dois lugares editáveis pelo
+ * painel — Camada 1 (global_prompt_layer, saas_admin) ou a Base de
+ * Conhecimento do próprio tenant (`businessRules`/`pricingAndPolicies`,
+ * qualquer admin do tenant) — nunca em código. O texto que existia aqui pra
+ * beauty_studio e pra Clic Piscinas foi migrado pra `businessRules` de cada
+ * tenant respectivo, sem perda de conteúdo.
  */
-async function buildGlobalAndSegmentLayer(agent: AgentType, segment: string): Promise<string> {
-  const segmentRules = SEGMENT_LAYERS[segment];
+async function buildGlobalLayer(agent: AgentType): Promise<string> {
   const globalLayer = (await getGlobalPromptLayerOverride().catch(() => null)) || DEFAULT_GLOBAL_LAYER;
   return `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
 
 ${AGENT_INSTRUCTIONS[agent]}
 
 ${globalLayer}
-${segmentRules ? `\nRegras específicas do segmento:\n${segmentRules}\n` : ''}
+
 REGRAS DE ESTILO (sempre aplicar):
 1. Fracione a resposta em 1 a 3 "bolhas" curtas e sequenciais (como mensagens reais de WhatsApp), nunca um bloco único tipo e-mail/panfleto — EXCETO quando as Regras de negócio do próprio tenant abaixo pedirem explicitamente para enviar um bloco único formatado (ex: lista do que inclui um pacote/promoção); nesse caso específico, use até 1 bolha maior com a formatação pedida (negrito/lista), só pra esse conteúdo.
 2. Adapte vocabulário, saudações e tom ESTRITAMENTE ao "toneOfVoice" do contexto do negócio abaixo — ele é quem define dialeto, formalidade e quais expressões (incluindo diminutivos) usar ou evitar. Nunca adicione um traço de estilo (diminutivo, gíria, tratamento informal) que o toneOfVoice não pediu, mesmo que pareça natural no idioma do cliente.
@@ -290,10 +261,11 @@ function findServiceNamedInHeadline(adHeadline: string, products?: AgentProduct[
  * Base de Conhecimento, empatia antes de credenciais, sem "speech" de
  * vendedor).
  *
- * Camadas 1+2 (global/segmento, fixas) vão em `systemInstruction`. Camadas
- * 3+4 (tenant/dinâmico) + contexto transacional (histórico/mensagem atual)
- * vão em `contents`, como mensagens distintas — ver
- * docs/AGENTE-VERTICAL-ARQUITETURA.md seções 1 e 7 (Etapa 3).
+ * Camada 1 (global, fixa) vai em `systemInstruction`. Camadas 3+4
+ * (tenant/dinâmico, editáveis pelo painel — Base de Conhecimento) +
+ * contexto transacional (histórico/mensagem atual) vão em `contents`, como
+ * mensagens distintas — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seções 1 e
+ * 7 (Etapa 3). Não existe mais Camada 2 (segmento) hardcoded em código.
  */
 async function generateSpecialistReply(
   tenantId: string,
@@ -308,14 +280,15 @@ async function generateSpecialistReply(
   adContext?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
-  const systemInstruction = await buildGlobalAndSegmentLayer(agent, segment);
+  const systemInstruction = await buildGlobalLayer(agent);
   const specialistModel = 'gemini-3.6-flash';
-  // Camadas 1+2 são idênticas em quase toda chamada deste (agent, segment) —
+  // Camada 1 é idêntica em toda chamada deste `agent` (não depende mais de
+  // `segment` — Camada 2 hardcoded foi removida, ver buildGlobalLayer) —
   // cache de contexto real do Gemini evita reenviar esse texto por inteiro
   // toda mensagem (ver geminiSystemInstructionCache.ts). `null` = cache
   // indisponível por qualquer motivo; usa systemInstruction inline, exatamente
   // como sempre funcionou.
-  const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${segment}`, systemInstruction);
+  const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}`, systemInstruction);
 
   const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
@@ -885,9 +858,9 @@ const FOTO_TOOLS: FunctionDeclaration[] = [
  * `/send-example-photo` e `/send-example-video`). Chamada só uma vez por
  * mensagem recebida (não é um loop como `runAgendamentoTools`) e executa no
  * máximo 1 chamada de ferramenta — nunca manda mais de 1 mídia pra mesma
- * mensagem do cliente. Limite de "no máximo 1 mídia por conversa inteira" é
- * regra de segmento (camada 2, Etapa 4 — ainda não escrita), não está
- * garantido aqui.
+ * mensagem do cliente. Limite de "no máximo 1 mídia por conversa inteira",
+ * se algum tenant precisar, é regra de negócio dele (Base de Conhecimento,
+ * `businessRules` — ver Clic Piscinas), não está garantido aqui.
  */
 async function runMidiaTool(
   tenantId: string,

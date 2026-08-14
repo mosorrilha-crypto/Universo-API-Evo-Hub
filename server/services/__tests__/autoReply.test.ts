@@ -85,20 +85,15 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const systemInstruction: string = specialistCall.config.systemInstruction;
     const userContent: string = specialistCall.contents[0].text;
 
-    // Camada 1 (global): regras fixas, nunca dado do tenant.
+    // Camada 1 (global): regras fixas, nunca dado do tenant. Não existe mais
+    // Camada 2 (segmento) hardcoded — regras específicas de vertical/tenant
+    // (ex: as que existiam pro segmento beauty_studio) foram migradas pra
+    // `businessRules` da Base de Conhecimento de cada tenant (14/08/2026,
+    // pedido explícito: nenhuma regra de negócio editável deveria depender
+    // de deploy pra mudar).
     expect(systemInstruction).toContain('REGRAS DE ESTILO');
     expect(systemInstruction).not.toContain(KB_MARKER);
-
-    // Etapa 4: conteúdo real das camadas 1 (global) e 2 (segmento) precisa
-    // estar sendo injetado de verdade, não só a seção fixa de estilo.
     expect(systemInstruction).toContain('Nunca finja escassez');
-    expect(systemInstruction).toContain('Fotos de referência');
-
-    // Achado real em produção: a IA tentava vender procedimento pra um
-    // contato que claramente não era um lead genuíno (mandando foto pessoal
-    // sem relação com o serviço, assediando a atendente) — regra nova pra
-    // reconhecer isso e parar de tentar vender.
-    expect(systemInstruction).toContain('não demonstra interesse genuíno');
 
     // Camadas 3+4 (tenant/dinâmico) + histórico: nunca a instrução fixa.
     expect(userContent).toContain(KB_MARKER);
@@ -129,19 +124,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('Nunca finja escassez');
   });
 
-  it('usa o segmento default (generic — sem regras de segmento nenhuma) quando o chamador não passa nenhum', async () => {
-    const { ai, calls } = makeFakeAi();
-    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
-    expect(calls[1].config.systemInstruction).toBeTruthy();
-  });
+  it('parâmetro segment não afeta mais o conteúdo do systemInstruction (Camada 2 removida) — mesmo texto pra "generic" e pra qualquer outro valor', async () => {
+    const { ai: aiA, calls: callsA } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', aiA, 'oi', undefined, undefined, undefined);
 
-  it('segmento high_ticket_installation (achado real, Clic Piscinas): abre a exceção de bloco único e a regra de escalonamento proativo', async () => {
-    const { ai, calls } = makeFakeAi();
-    await generateAutoReplyForText('tenant-piscinas', ai, 'oi', undefined, undefined, undefined, undefined, undefined, 'high_ticket_installation');
-    const systemInstruction: string = calls[1].config.systemInstruction;
-    expect(systemInstruction).toContain('ticket alto');
-    expect(systemInstruction).toContain('escalar pro time humano');
-    expect(systemInstruction).toContain('EXCETO quando as Regras de negócio do próprio tenant');
+    const { ai: aiB, calls: callsB } = makeFakeAi();
+    await generateAutoReplyForText('tenant-piscinas', aiB, 'oi', undefined, undefined, undefined, undefined, undefined, 'qualquer-coisa-inventada');
+
+    expect(callsB[1].config.systemInstruction).toBe(callsA[1].config.systemInstruction);
   });
 
   it('issue #97: orientação de operador humano (retomada guiada) entra em contents, nunca em systemInstruction, e não muda a classificação do roteador', async () => {
