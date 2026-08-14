@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours } from '../types';
 import { apiFetch } from '../lib/apiClient';
+import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Brain,
   Sparkles,
@@ -831,12 +832,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 <label className="block text-xs font-bold text-slate-300 mb-1">
                   Tom de Voz do Agente:
                 </label>
-                <input
-                  type="text"
+                <AutoResizeTextarea
+                  minRows={1}
                   value={formData.toneOfVoice}
                   onChange={(e) => setFormData({ ...formData, toneOfVoice: e.target.value })}
                   placeholder="Ex: Consultivo, cordial, objetivo e persuasivo com uso moderado de emojis"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
                 />
               </div>
             </div>
@@ -845,8 +846,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <label className="block text-xs font-bold text-slate-300 mb-1">
                 Objetivo Principal do Agente no WhatsApp:
               </label>
-              <textarea
-                rows={2}
+              <AutoResizeTextarea
+                minRows={2}
                 value={formData.agentGoal}
                 onChange={(e) => setFormData({ ...formData, agentGoal: e.target.value })}
                 placeholder="Ex: Qualificar leads B2B, identificar orçamento e agendar reuniões de demonstração comercial."
@@ -858,8 +859,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <label className="block text-xs font-bold text-slate-300 mb-1">
                 Descrição Geral do Modelo de Negócio:
               </label>
-              <textarea
-                rows={3}
+              <AutoResizeTextarea
+                minRows={3}
                 value={formData.businessModel}
                 onChange={(e) => setFormData({ ...formData, businessModel: e.target.value })}
                 placeholder="Descreva o que sua empresa vende, para quem vende e quais são os principais diferenciais competitivos..."
@@ -885,8 +886,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <label className="block text-xs font-bold text-slate-300 mb-1">
                 Políticas Comerciais e Formas de Pagamento:
               </label>
-              <textarea
-                rows={2}
+              <AutoResizeTextarea
+                minRows={2}
                 value={formData.pricingAndPolicies}
                 onChange={(e) => setFormData({ ...formData, pricingAndPolicies: e.target.value })}
                 placeholder="Ex: Aceitamos Pix, Cartão em até 12x e Boleto bancário. Prazos de entrega de 48h úteis."
@@ -1104,11 +1105,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar preço"
                     />
-                    <textarea
-                      rows={2}
+                    <AutoResizeTextarea
+                      minRows={2}
                       value={prod.description}
                       onChange={(e) => handleProductFieldChange(prod.id, 'description', e.target.value)}
-                      className="w-full bg-transparent text-[11px] text-slate-400 leading-relaxed focus:outline-none focus:bg-slate-900 rounded py-0.5 resize-none"
+                      className="w-full bg-transparent text-[11px] text-slate-400 leading-relaxed focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar descrição"
                     />
                   </div>
@@ -1212,8 +1213,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 placeholder="Pergunta comum do cliente (Ex: Vocês emitem nota fiscal?)"
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
               />
-              <textarea
-                rows={2}
+              <AutoResizeTextarea
+                minRows={2}
                 value={newFaqAnswer}
                 onChange={(e) => setNewFaqAnswer(e.target.value)}
                 placeholder="Resposta oficial da empresa..."

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus, RoadmapItem, RoadmapPriority } from '../types';
 import { apiFetch } from '../lib/apiClient';
+import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Building2,
   DollarSign,
@@ -1877,12 +1878,12 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Descrição</label>
-                <textarea
+                <AutoResizeTextarea
                   value={newRoadmapDescription}
                   onChange={(e) => setNewRoadmapDescription(e.target.value)}
-                  rows={4}
+                  minRows={4}
                   placeholder="Detalhe o que precisa ser feito..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500 resize-y"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
                 />
               </div>
 
