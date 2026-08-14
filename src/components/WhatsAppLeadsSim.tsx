@@ -285,11 +285,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Status do agente automático real (active/paused/restricted) — controla
   // se o backend responde sozinho às mensagens recebidas (ver Epic 1.3).
   const [agentStatus, setAgentStatusState] = useState<'active' | 'paused' | 'restricted'>('active');
+  // Modo "somente anúncios" (pedido real, 14/08/2026): quando ativo, o
+  // agente só responde automaticamente contatos com atribuição de anúncio
+  // real (ctwa_clid) — nunca contatos pessoais. Útil quando o dono do
+  // negócio conecta o número pessoal dele além do número dedicado do
+  // agente, pra não perder mensagem enquanto valida confiança no agente.
+  const [adsOnly, setAdsOnlyState] = useState(false);
 
   useEffect(() => {
     apiFetch('/api/agent-status')
       .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data?.status) setAgentStatusState(data.status); })
+      .then((data) => {
+        if (data?.status) setAgentStatusState(data.status);
+        if (typeof data?.adsOnly === 'boolean') setAdsOnlyState(data.adsOnly);
+      })
       .catch(() => {});
   }, []);
 
@@ -566,6 +575,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       console.error('Falha ao atualizar status do agente:', err);
       setAgentStatusState(previous);
       setErrorMsg('Não foi possível atualizar o status do agente no servidor — tente de novo (o agente continua com o status anterior).');
+    }
+  };
+
+  const handleToggleAdsOnly = async () => {
+    const previous = adsOnly;
+    const next = !adsOnly;
+    setAdsOnlyState(next);
+    try {
+      const res = await apiFetch('/api/agent-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adsOnly: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao atualizar modo somente anúncios:', err);
+      setAdsOnlyState(previous);
+      setErrorMsg('Não foi possível atualizar o modo "somente anúncios" no servidor — tente de novo.');
     }
   };
 
@@ -2046,6 +2073,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
             ))}
           </div>
+
+          {/* Modo "somente anúncios" (pedido real, 14/08/2026): a Monique tem
+              dois números ligados hoje — o pessoal dela (conectado
+              temporariamente pra não perder mensagem) e o dedicado do agente.
+              Ativando isso, o agente só responde automaticamente contatos
+              identificados como vindos de anúncio (ctwa_clid gravado na
+              conversa); contatos pessoais continuam sendo gravados no painel,
+              só não recebem resposta automática. Ortogonal ao status
+              active/restricted/paused acima — combina com qualquer um deles. */}
+          <button
+            onClick={handleToggleAdsOnly}
+            title={
+              adsOnly
+                ? 'Somente anúncios ATIVO — agente só responde contatos vindos de anúncio, silêncio pra contatos pessoais'
+                : 'Ativar modo somente anúncios — agente para de responder contatos pessoais automaticamente'
+            }
+            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+              adsOnly
+                ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>{adsOnly ? 'Só Anúncios' : 'Todos os Contatos'}</span>
+          </button>
 
           {/* Agenda (Google Calendar) — achado real de uso: fica atrás de
               "Configurações" era difícil de achar pra um item usado o tempo

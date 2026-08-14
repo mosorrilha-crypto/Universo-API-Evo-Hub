@@ -3,12 +3,12 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, getConversationCtwaClid, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing } from '../services/conversationStore';
 import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
 import { showEvolutionTyping } from '../services/evolutionSend';
-import { isAgentPaused } from '../services/agentStatus';
+import { isAgentPaused, isAdsOnlyMode } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
@@ -75,6 +75,15 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       // qualquer outro. Bloqueio é só desse número, não do tenant inteiro
       // (isAgentPaused acima continua valendo pra todos).
       if (conversation?.aiBlockedAt) return;
+      // Modo "somente anúncios" (pedido real, 14/08/2026): quando o
+      // proprietário conecta um número pessoal além do número dedicado do
+      // agente (pra não perder mensagem enquanto valida confiança no
+      // agente sozinho), essa chave restringe a resposta automática a
+      // contatos com atribuição de anúncio real (ctwa_clid gravado nesta
+      // conversa) — nunca contatos pessoais. Mensagem já foi gravada acima
+      // (recordIncomingMessage, antes de chegar aqui) — só a resposta
+      // automática fica em silêncio, nunca perde o dado.
+      if ((await isAdsOnlyMode(tenantId)) && !(await getConversationCtwaClid(tenantId, phone))) return;
       const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
       const segment = await getTenantSegment(tenantId);
       const history = conversation?.messages.slice(0, -historyExclude);
