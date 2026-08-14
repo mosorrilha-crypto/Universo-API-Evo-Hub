@@ -138,8 +138,18 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   const data = body.data;
   if (!data?.key?.id || data?.key?.fromMe) return [];
 
+  const remoteJid: string = String(data.key.remoteJid || '');
+  // Mensagem de grupo do WhatsApp (JID termina em "@g.us") — nunca deve virar
+  // lead/conversa: é bate-papo de grupo, não atendimento 1:1 com cliente.
+  // Achado real: sem esse filtro, o ID numérico do grupo (formato
+  // "120363...") virava "telefone" do lead, poluindo a lista de conversas
+  // com assunto de grupo sem relação nenhuma com o negócio — e imagem de
+  // grupo nunca tinha como baixar (nenhum campo de mídia é populado pra esse
+  // tipo), gerando "Imagem indisponível" pra sempre.
+  if (remoteJid.endsWith('@g.us')) return [];
+
   const messageId: string = data.key.id;
-  const from: string = String(data.key.remoteJid || '').split('@')[0];
+  const from: string = remoteJid.split('@')[0];
   const contactName: string | undefined = data.pushName;
   const message = data.message || {};
 
