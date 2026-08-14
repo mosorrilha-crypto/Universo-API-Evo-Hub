@@ -92,15 +92,17 @@ export const App: React.FC = () => {
   const [tenants, setTenants] = useState<Tenant[]>(() => {
     const saved = localStorage.getItem('saas_tenants');
     if (!saved) return INITIAL_TENANTS;
-    // Migração (07/08/2026): navegadores que já tinham os tenants fictícios
-    // de demonstração salvos no localStorage (Drogaria, MetaLeads, FitLife)
-    // continuariam vendo esses cards mesmo depois de removidos do código —
-    // filtra pra manter só os IDs conhecidos (o real da Monique) e cai pro
-    // INITIAL_TENANTS atual se não sobrar nenhum tenant reconhecido.
+    // Migração antiga (07/08/2026) filtrava o cache pra manter só o ID
+    // fictício da Monique (tenant_004), descartando qualquer outro tenant —
+    // isso resolvia o problema de então (tenants 100% fictícios do template
+    // original: Drogaria, MetaLeads, FitLife) mas também descarta tenants
+    // REAIS cacheados (ex: Clic Piscinas, IDs UUID de verdade vindos de
+    // /api/admin/tenants — ver efeito abaixo) a cada reload, fazendo o
+    // seletor de empresa (saas_admin) nunca conseguir mostrar/marcar um
+    // tenant real como ativo. Cache velho de tenant fictício, se sobrar
+    // algum, se autocorrige assim que o efeito abaixo buscar a lista real.
     const parsed = JSON.parse(saved) as Tenant[];
-    const knownIds = new Set(INITIAL_TENANTS.map((t) => t.id));
-    const filtered = parsed.filter((t) => knownIds.has(t.id));
-    return filtered.length ? filtered : INITIAL_TENANTS;
+    return parsed.length ? parsed : INITIAL_TENANTS;
   });
   const [activeTenant, setActiveTenant] = useState<Tenant>(tenants[0] || INITIAL_TENANTS[0]);
 
@@ -175,6 +177,43 @@ export const App: React.FC = () => {
         setActiveTenant((prev) => (prev.id === data.tenant.id && prev.name === data.tenant.name ? prev : { ...prev, id: data.tenant.id, name: data.tenant.name }));
       })
       .catch(() => {});
+
+    // Achado real em produção (14/08/2026, print do seletor): mesmo com o
+    // fix acima, o seletor de empresa (Header.tsx, só visível pra
+    // saas_admin) continuava sempre mostrando só "Monique" marcada como
+    // ativa — porque a LISTA do seletor (`tenants`) nunca era populada com
+    // os tenants reais (ex: Clic Piscinas), só o mock local de 1 item
+    // seguia ali; o id real vindo de /api/tenant acima nunca batia com
+    // nenhum item da lista, mas como havia só UM item na lista mesmo assim
+    // ele aparecia (visualmente) como se fosse o único/selecionado. Busca a
+    // lista real (mesmo endpoint que a aba SaaS Master já usa) só pra quem
+    // é saas_admin — outros papéis nem veem o seletor (ver Header.tsx).
+    if (currentUser.role === 'saas_admin') {
+      apiFetch('/api/admin/tenants')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          const real = (data?.tenants || []) as Array<{ id: string; name: string; slug: string; created_at?: string; whatsappConnected?: boolean }>;
+          if (!real.length) return;
+          setTenants(
+            real.map((t) => ({
+              id: t.id,
+              name: t.name,
+              slug: t.slug,
+              plan: 'enterprise',
+              monthlyMRR: 0,
+              status: 'ativo',
+              createdAt: t.created_at ? new Date(t.created_at).toLocaleDateString('pt-BR') : '',
+              whatsappPhone: '',
+              whatsappStatus: t.whatsappConnected ? 'conectado' : 'desconectado',
+              whatsappEngine: 'meta_cloud_api',
+              maxLeadsPerMonth: 0,
+              currentLeadsMonth: 0,
+              webhookEndpoint: '',
+            }))
+          );
+        })
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
