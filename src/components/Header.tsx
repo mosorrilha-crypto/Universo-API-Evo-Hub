@@ -4,7 +4,6 @@ import { isStandalonePwa } from '../lib/pwa';
 import { hasRoleAtLeast } from '../lib/roles';
 import {
   MessageSquare,
-  Code,
   Sparkles,
   CheckCircle2,
   Brain,
@@ -414,7 +413,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <Layers className="w-4 h-4 text-purple-300" />
-                <span>Painel SaaS Master</span>
+                <span>Painel</span>
                 <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
                   Multi-Tenant
                 </span>
@@ -449,7 +448,7 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <Kanban className="w-4 h-4 text-emerald-400" />
-              <span>CRM do Operador</span>
+              <span>CRM</span>
             </button>
 
             {/* Sem aba própria de propósito (pedido do Lucas): já existe um
@@ -469,7 +468,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }`}
               >
                 <DollarSign className="w-4 h-4 text-emerald-400" />
-                <span>Financeiro & Vendas</span>
+                <span>Financeiro</span>
               </button>
             )}
 
@@ -485,7 +484,7 @@ export const Header: React.FC<HeaderProps> = ({
                   }`}
                 >
                   <Target className="w-4 h-4 text-emerald-400" />
-                  <span>Atribuição Meta CAPI</span>
+                  <span>Meta CAPI</span>
                 </button>
 
                 <button
@@ -501,31 +500,11 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>Base de Conhecimento</span>
                 </button>
 
-                <button
-                  id="tab-evohub"
-                  onClick={() => setActiveTab('evohub')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                    activeTab === 'evohub'
-                      ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
-                      : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
-                  }`}
-                >
-                  <Zap className="w-4 h-4 text-purple-400" />
-                  <span>Evo Hub (Meta API)</span>
-                </button>
-
-                <button
-                  id="tab-integration"
-                  onClick={() => setActiveTab('integration')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                    activeTab === 'integration'
-                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-                  }`}
-                >
-                  <Code className="w-4 h-4 text-emerald-400" />
-                  <span>Guia Conexão API</span>
-                </button>
+                {/* "Evo Hub (Meta API)" e "Guia Conexão API" removidas da
+                    navegação (pedido direto, "pode descartar"/"não é
+                    necessário no momento") — as telas (EvoHubIntegration.tsx
+                    e o guia) continuam existindo no código, só não têm mais
+                    aba própria; reativar é só devolver os dois botões aqui. */}
               </>
             )}
           </div>
