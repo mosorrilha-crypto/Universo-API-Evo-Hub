@@ -27,7 +27,6 @@ import {
   CalendarPlus,
   FileText,
   Mic,
-  Zap,
   Volume2,
   Paperclip,
   CheckCheck,
@@ -2169,19 +2168,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
             )}
 
-            {/* Auto-analyze Toggle Switch */}
-            <label className="inline-flex items-center cursor-pointer bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-semibold text-slate-300">
+            {/* Auto-analyze Toggle Switch — deixado discreto de propósito
+                (sem fundo/borda, texto pequeno e apagado): cada análise
+                automática é uma chamada real ao Gemini (custo de token), e a
+                maioria dos operadores deve preferir o botão "Analisar
+                Conversa Completa" (sob demanda) em vez de deixar isso ligado.
+                Começa desligado por padrão (ver useState acima). */}
+            <label
+              className="inline-flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
+              title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
+            >
               <input
                 type="checkbox"
                 checked={autoAnalyze}
                 onChange={(e) => setAutoAnalyze(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="relative w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 mr-2" />
-              <span className="flex items-center text-[11px]">
-                <Zap className="w-3.5 h-3.5 text-amber-400 mr-1" />
-                Auto IA
-              </span>
+              <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
+              <span className="text-[10px]">Auto IA</span>
             </label>
 
             {/* Push notification do PWA do atendente (issue #159) — pra não
@@ -2565,20 +2569,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       Removidos os 3 — mesmo padrão já aplicado a outras telas
                       decorativas deste painel (ver PRs #74, #86). */}
 
-                  {/* Reanalyze button */}
-                  <button
-                    onClick={() => handleAnalyzeConversation(selectedLead)}
-                    disabled={isAnalyzingConversation}
-                    className="px-2.5 py-1.5 rounded-lg bg-[#00a884] hover:bg-emerald-500 text-slate-950 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-                    title="Forçar Reanálise Completa com Gemini IA"
-                  >
-                    {isAnalyzingConversation ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5" />
-                    )}
-                    <span className="hidden sm:inline">Analisar IA</span>
-                  </button>
+                  {/* Botão "Analisar IA" removido daqui — duplicava exatamente
+                      a mesma ação do botão "Analisar Conversa Completa" no
+                      painel de Análise IA (mesmo handleAnalyzeConversation),
+                      só que mais visível/fácil de clicar sem querer. Um
+                      único controle de análise sob demanda evita gasto de
+                      token duplicado por engano. */}
 
                   {/* Cadastrar agendamento manual (issue #182, agendamento
                       fechado fora da IA — WhatsApp pessoal, telefone,
