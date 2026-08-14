@@ -67,7 +67,8 @@ import {
   Phone,
   Users,
   Settings,
-  Video
+  Video,
+  Menu
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -631,6 +632,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // menu; só o que o operador mexe com frequência (status do agente,
   // escalonamentos, novo lead) continua sempre visível.
   const [isToolbarSettingsOpen, setIsToolbarSettingsOpen] = useState(false);
+  /** Achado real: a barra de ícones lateral (estilo WhatsApp Web) só aparece a partir de 1024px (lg) porque o grid inteiro dessa seção só vira multi-coluna nesse breakpoint — mudar só o breakpoint da barra a deixaria "deitada" (faixa horizontal larga em vez de trilha lateral estreita), já que o grid continua de 1 coluna só entre 768-1023px. Em vez de mexer no grid inteiro (mudança maior, mais arriscada), esse menu flutuante cobre só essa faixa (md sem lg — "modo desktop" do Chrome mobile cai bem aqui, ~980px) com os mesmos ícones/ações da barra real. */
+  const [showFloatingSidebarMenu, setShowFloatingSidebarMenu] = useState(false);
+  /** Achado real (pedido direto): na mesma faixa 768-1023px sem barra lateral real, a caixa "Atendimento WhatsApp" (título + controles Ativo/Restrito/Pausado, Calendar etc.) ficava sempre fixa no topo, ocupando espaço vertical que sobra pouco nesse tamanho de tela — e sem sidebar nem menu flutuante pra "guardá-la", não tinha pra onde ir. Escondida por padrão só nessa faixa (md:hidden lg:flex — sempre visível em mobile puro e em desktop, onde já funcionava bem), revelada pelo botão "Configurações" do menu flutuante acima ou recolhida de novo pelo X que aparece dentro dela nessa mesma faixa. */
+  const [showTopToolbar, setShowTopToolbar] = useState(false);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1989,7 +1994,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
+      <div className={`relative p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl ${showTopToolbar ? 'flex' : 'flex md:hidden lg:flex'}`}>
+        {showTopToolbar && (
+          <button
+            type="button"
+            onClick={() => setShowTopToolbar(false)}
+            title="Recolher"
+            className="md:inline-flex lg:hidden hidden absolute top-2 right-2 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
         <div className="flex items-center space-x-3.5">
           <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
             <Bot className="w-5 h-5" />
@@ -2315,7 +2330,84 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-[56px_repeat(12,minmax(0,1fr))] h-[85dvh] lg:h-[720px]">
+      <div className="relative bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-[56px_repeat(12,minmax(0,1fr))] h-[85dvh] lg:h-[720px]">
+
+        {/* Menu flutuante — cobre a faixa 768-1023px (md sem lg), onde a
+            barra de ícones real (abaixo) ainda fica escondida porque o grid
+            desta seção só vira multi-coluna a partir de lg. "Modo desktop"
+            do Chrome mobile simula ~980px, exatamente nessa faixa — sem
+            isso, quem usa esse modo nunca tinha acesso nenhum à barra
+            lateral. Mesmas ações da barra real (Conversas/Status/Arquivadas/
+            Config), só que num menu que abre por cima em vez de fixo do
+            lado, pra não precisar mexer no breakpoint do grid inteiro
+            (mudança bem maior/mais arriscada — ver comentário do estado
+            showFloatingSidebarMenu). */}
+        <div className="hidden md:block lg:hidden absolute top-3 left-3 z-20">
+          <button
+            type="button"
+            onClick={() => setShowFloatingSidebarMenu((v) => !v)}
+            title="Menu"
+            className={`p-2.5 rounded-xl border shadow-lg transition-colors cursor-pointer ${
+              showFloatingSidebarMenu
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                : 'bg-[#202c33] border-slate-700 text-slate-300 hover:text-white'
+            }`}
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          {showFloatingSidebarMenu && (
+            <div className="mt-1.5 flex flex-col items-center py-2 gap-1 bg-[#202c33] border border-slate-700 rounded-xl shadow-2xl w-max">
+              <button type="button" title="Conversas" className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 cursor-default">
+                <MessageCircle className="w-5 h-5" />
+              </button>
+              {statusAvailable ? (
+                <button
+                  type="button"
+                  onClick={() => { setIsStatusModalOpen(true); setShowFloatingSidebarMenu(false); }}
+                  title="Postar Status"
+                  className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <CircleDashed className="w-5 h-5" />
+                </button>
+              ) : (
+                <button type="button" disabled title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+                  <CircleDashed className="w-5 h-5" />
+                </button>
+              )}
+              <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+                <Phone className="w-5 h-5" />
+              </button>
+              <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+                <Users className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowArchived(true); setShowFloatingSidebarMenu(false); }}
+                title="Arquivadas"
+                className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                <Archive className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTopToolbar(true);
+                  setIsToolbarSettingsOpen(true);
+                  setShowFloatingSidebarMenu(false);
+                  setTimeout(() => toolbarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+                }}
+                title="Configurações do agente"
+                className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+              <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
+                <User className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* ========================================== */}
         {/* Barra de ícones lateral esquerda, estilo WhatsApp Web/Desktop —
