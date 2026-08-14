@@ -135,6 +135,15 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(calls[1].config.systemInstruction).toBeTruthy();
   });
 
+  it('segmento high_ticket_installation (achado real, Clic Piscinas): abre a exceção de bloco único e a regra de escalonamento proativo', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-piscinas', ai, 'oi', undefined, undefined, undefined, undefined, undefined, 'high_ticket_installation');
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('ticket alto');
+    expect(systemInstruction).toContain('escalar pro time humano');
+    expect(systemInstruction).toContain('EXCETO quando as Regras de negócio do próprio tenant');
+  });
+
   it('issue #97: orientação de operador humano (retomada guiada) entra em contents, nunca em systemInstruction, e não muda a classificação do roteador', async () => {
     const { ai, calls } = makeFakeAi();
     const operatorGuidance = 'Diz pra ela que o horário de sábado 14h ainda está livre.';
