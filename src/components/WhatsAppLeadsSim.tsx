@@ -68,7 +68,8 @@ import {
   Users,
   Settings,
   Video,
-  Menu
+  Menu,
+  Copy
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -143,7 +144,7 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
     return <div className="w-full h-36 bg-slate-800 rounded-lg animate-pulse flex items-center justify-center text-slate-500 text-[10px]">Carregando imagem...</div>;
   }
   return (
-    <div onClick={() => onOpen(url)} className="relative group rounded-lg overflow-hidden border border-white/10 cursor-pointer">
+    <div onClick={() => onOpen(url)} className="relative group rounded-lg overflow-hidden cursor-pointer">
       <img src={url} alt="Imagem enviada pelo lead" className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-300" />
       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold">
         <ImageIcon className="w-4 h-4 mr-1" /> Ampliar
@@ -286,6 +287,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  /** Achado real (pedido direto, com print do WhatsApp de referência): a barra de ícones sempre visível no hover (Responder/Encaminhar/Reagir/Editar) mais o botão de apagar solto no rodapé do balão eram poluição visual — o WhatsApp de verdade usa um único gatilho "⋮" que abre um menu discreto, igual ao menu ⋮ do cabeçalho da conversa (ver isHeaderMenuOpen) já usado neste mesmo arquivo. Substituído por esse único estado. */
+  const [openMessageMenuFor, setOpenMessageMenuFor] = useState<string | null>(null);
 
   const scrollToMessage = (messageId: string) => {
     document.getElementById(`msg-anchor-${messageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2931,43 +2934,86 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         id={`msg-anchor-${msg.id}`}
                         className={`group relative flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
                       >
-                        {/* Hover Action Toolbar — Responder, Encaminhar, Reagir, Editar (só agente) */}
-                        <div
-                          className={`absolute -top-6 ${isLead ? 'left-0' : 'right-0'} hidden group-hover:flex items-center gap-0.5 bg-[#233138] border border-slate-700 rounded-lg px-1 py-0.5 shadow-lg z-10`}
-                        >
+                        {/* Menu de ações da mensagem — gatilho único "⋮" que abre um
+                            menu discreto (Responder/Copiar/Encaminhar/Reagir/Editar/
+                            Apagar), igual ao menu nativo do WhatsApp (print de
+                            referência) e ao mesmo padrão visual já usado no menu ⋮ do
+                            cabeçalho da conversa (isHeaderMenuOpen). Substitui a barra
+                            de ícones sempre visível no hover + o botão de apagar solto
+                            no rodapé do balão — dois caminhos concorrendo pelo mesmo
+                            espaço visual pra ações que cabem num só menu. */}
+                        <div className={`absolute -top-6 ${isLead ? 'left-0' : 'right-0'} z-10`}>
                           <button
                             type="button"
-                            onClick={() => handleReplyToMessage(msg)}
-                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                            title="Responder"
+                            onClick={() => setOpenMessageMenuFor(openMessageMenuFor === msg.id ? null : msg.id)}
+                            className={`p-1 rounded-full bg-[#233138] border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 shadow-lg transition-opacity cursor-pointer ${
+                              openMessageMenuFor === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                            title="Mais opções"
                           >
-                            <Reply className="w-3 h-3" />
+                            <MoreVertical className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setForwardingMessage(msg)}
-                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                            title="Encaminhar"
-                          >
-                            <Forward className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setReactionPickerFor(reactionPickerFor === msg.id ? null : msg.id)}
-                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                            title="Reagir"
-                          >
-                            <Smile className="w-3 h-3" />
-                          </button>
-                          {!isLead && (
-                            <button
-                              type="button"
-                              onClick={() => handleStartEditMessage(msg)}
-                              className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                              title="Editar"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
+
+                          {openMessageMenuFor === msg.id && (
+                            <>
+                              <div className="fixed inset-0 z-40" onClick={() => setOpenMessageMenuFor(null)} />
+                              <div className={`absolute top-7 ${isLead ? 'left-0' : 'right-0'} z-50 w-44 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top animate-pop-in`}>
+                                <button
+                                  type="button"
+                                  onClick={() => { handleReplyToMessage(msg); setOpenMessageMenuFor(null); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                >
+                                  <Reply className="w-3.5 h-3.5" />
+                                  <span>Responder</span>
+                                </button>
+                                {msg.text && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { navigator.clipboard?.writeText(msg.text || ''); setOpenMessageMenuFor(null); }}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copiar</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => { setForwardingMessage(msg); setOpenMessageMenuFor(null); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                >
+                                  <Forward className="w-3.5 h-3.5" />
+                                  <span>Encaminhar</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setReactionPickerFor(reactionPickerFor === msg.id ? null : msg.id); setOpenMessageMenuFor(null); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                >
+                                  <Smile className="w-3.5 h-3.5" />
+                                  <span>Reagir</span>
+                                </button>
+                                {!isLead && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { handleStartEditMessage(msg); setOpenMessageMenuFor(null); }}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                    <span>Editar</span>
+                                  </button>
+                                )}
+                                <div className="border-t border-slate-700" />
+                                <button
+                                  type="button"
+                                  onClick={() => { setOpenMessageMenuFor(null); handleDeleteSingleMessage(selectedLead.id, msg.id); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
+                                  title="Apagar esta mensagem"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Apagar</span>
+                                </button>
+                              </div>
+                            </>
                           )}
                         </div>
 
@@ -2990,9 +3036,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         )}
 
                         <div
-                          className={`max-w-[85%] rounded-xl p-2.5 shadow-md space-y-1 text-xs relative ${
+                          className={`max-w-[85%] rounded-xl p-2.5 shadow-md space-y-1 text-xs relative border border-white/5 ${
                             isLead
-                              ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none border border-slate-700/50'
+                              ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none'
                               : msg.sentBy === 'operator'
                                 ? 'bg-[#1f4287] text-white rounded-tr-none shadow-blue-950/40'
                                 : 'bg-[#005c4b] text-white rounded-tr-none shadow-emerald-950/40'
@@ -3074,7 +3120,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               {msg.mediaUrl && (
                                 <div
                                   onClick={() => setViewImageUrl(msg.mediaUrl || null)}
-                                  className="relative group rounded-lg overflow-hidden border border-white/10 cursor-pointer"
+                                  className="relative group rounded-lg overflow-hidden cursor-pointer"
                                 >
                                   <img
                                     src={msg.mediaUrl}
@@ -3127,14 +3173,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </div>
                           )}
 
-                          <div className={`flex justify-between items-center text-[9px] mt-1 gap-2 border-t border-white/5 pt-1 ${isLead ? 'text-slate-400' : 'text-emerald-200'}`}>
-                            <button
-                              onClick={() => handleDeleteSingleMessage(selectedLead.id, msg.id)}
-                              className="opacity-40 hover:opacity-100 hover:text-rose-400 transition-opacity p-0.5 cursor-pointer"
-                              title="Apagar esta mensagem"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                          <div className={`flex justify-end items-center text-[9px] mt-1 gap-2 border-t border-white/5 pt-1 ${isLead ? 'text-slate-400' : 'text-emerald-200'}`}>
                             <div className="flex items-center gap-1">
                               <span>
                                 {msg.timestamp}
