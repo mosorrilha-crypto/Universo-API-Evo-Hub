@@ -68,7 +68,6 @@ import {
   Users,
   Settings,
   Video,
-  Menu,
   Copy
 } from 'lucide-react';
 
@@ -635,8 +634,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // menu; só o que o operador mexe com frequência (status do agente,
   // escalonamentos, novo lead) continua sempre visível.
   const [isToolbarSettingsOpen, setIsToolbarSettingsOpen] = useState(false);
-  /** Achado real: a barra de ícones lateral (estilo WhatsApp Web) só aparece a partir de 1024px (lg) porque o grid inteiro dessa seção só vira multi-coluna nesse breakpoint — na faixa 768-1023px ("modo desktop" do Chrome mobile cai bem aqui, ~980px) ela fica inacessível. Primeira tentativa foi um menu flutuando por cima do grid inteiro (posição fixa no canto), mas isso colidia com o botão "Voltar" do cabeçalho da conversa quando uma thread estava aberta — ambos disputavam o mesmo canto superior esquerdo. Substituído por este botão DENTRO da própria barra de controles (toolbarRef, sempre em fluxo normal, nunca sobrepõe nada), com Status/Arquivadas — as únicas ações da barra lateral real sem outro caminho já existente aqui perto (Configurações já tem botão próprio nesta mesma barra). */
-  const [showSidebarShortcutsMenu, setShowSidebarShortcutsMenu] = useState(false);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1995,96 +1992,62 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className="relative p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
-        <div className="flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
-            <Bot className="w-5 h-5" />
+      <div className="relative p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl space-y-2.5">
+        {/* Linha 1 — título + status do agente, sempre numa linha só, nunca
+            quebra nem precisa rolar (só 2 elementos, cabem em qualquer
+            largura). Achado real: "Atendimento WhatsApp" repetia a mesma
+            informação da aba ativa logo acima — só "WhatsApp" já deixa
+            claro o contexto e sobra mais espaço horizontal. */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center space-x-3.5 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
+              <Bot className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-white truncate">
+                WhatsApp
+              </h2>
+              {activeTenant && (
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeTenant.name}</p>
+              )}
+            </div>
           </div>
-          <div>
-            {/* Achado real: "Atendimento WhatsApp" repetia a mesma informação
-                da aba ativa logo acima — só "WhatsApp" já deixa claro o
-                contexto e sobra mais espaço horizontal pros botões ao lado
-                (crítico na faixa 768-1023px, onde essa barra some rápido). */}
-            <h2 className="text-sm font-bold text-white">
-              WhatsApp
-            </h2>
-            {activeTenant && (
-              <p className="text-[11px] text-slate-400 mt-0.5">{activeTenant.name}</p>
-            )}
+
+          {/* Status do Agente Automático Real: active / paused / restricted —
+              fica fora da barra que rola, é a informação mais importante
+              pro operador ver de cara sem precisar deslizar nada. */}
+          <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
+            {(['active', 'restricted', 'paused'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => handleChangeAgentStatus(status)}
+                title={
+                  status === 'active' ? 'Agente responde sempre' :
+                  status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                  'Agente pausado — silêncio total'
+                }
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                  agentStatus === status
+                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Achado real em produção: no mobile o pai é flex-col com
-            items-start, então esta linha de botões (sem w-full) ficava com
-            largura "shrink-to-fit" — cresce pra caber todos os botões numa
-            linha só em vez de quebrar, empurrando a PÁGINA INTEIRA pra
-            rolar na horizontal (cortava até o cabeçalho/abas). flex-wrap
-            sozinho não resolve: só quebra linha quando o container tem uma
-            largura limitada pra quebrar contra — w-full dá esse limite.
-            Achado real #2 (13/08/2026): a mesma estouração voltava em
-            larguras tablet/phone-landscape (~768-950px), onde o pai vira
-            md:flex-row — aí "md:w-auto" + "flex-shrink-0" faziam esta linha
-            assumir a largura do CONTEÚDO (todos os botões numa linha só,
-            sem nunca ativar o flex-wrap) em vez de respeitar o espaço que
-            sobra ao lado do título. Removido flex-shrink-0 (deixa encolher
-            no espaço disponível) e adicionado md:min-w-0 (min-width:auto
-            padrão de flex item barraria esse encolhimento) — só assim o
-            flex-wrap tem uma largura limitada pra quebrar contra em
-            qualquer breakpoint, não só no mobile puro. */}
-        <div ref={toolbarRef} className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto md:min-w-0 w-full flex-wrap gap-y-2">
-          {/* Atalhos que só a barra de ícones lateral real (estilo WhatsApp
-              Web, lg:flex) tem — Status e Arquivadas — mas que ficam
-              inacessíveis na faixa 768-1023px (essa barra só existe a partir
-              de lg). "Configurações" já tem botão próprio aqui do lado, não
-              precisa duplicar. Fica junto do resto da barra (em fluxo normal,
-              nunca sobreposto), diferente da tentativa anterior de um menu
-              flutuando por cima do grid — que colidia com o botão "Voltar"
-              do cabeçalho da conversa quando uma thread estava aberta. */}
-          <div className="relative hidden md:block lg:hidden">
-            <button
-              type="button"
-              onClick={() => setShowSidebarShortcutsMenu((v) => !v)}
-              title="Menu"
-              className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                showSidebarShortcutsMenu
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                  : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
-              }`}
-            >
-              <Menu className="w-3.5 h-3.5" />
-            </button>
-            {showSidebarShortcutsMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowSidebarShortcutsMenu(false)} />
-                <div className="absolute left-0 top-10 z-50 w-44 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-left animate-pop-in">
-                  {statusAvailable ? (
-                    <button
-                      type="button"
-                      onClick={() => { setIsStatusModalOpen(true); setShowSidebarShortcutsMenu(false); }}
-                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                    >
-                      <CircleDashed className="w-3.5 h-3.5" />
-                      <span>Postar Status</span>
-                    </button>
-                  ) : (
-                    <button type="button" disabled title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial" className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-500 opacity-50 cursor-not-allowed">
-                      <CircleDashed className="w-3.5 h-3.5" />
-                      <span>Postar Status</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => { setShowArchived(true); setMobileThreadOpen(false); setShowSidebarShortcutsMenu(false); }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                  >
-                    <Archive className="w-3.5 h-3.5" />
-                    <span>Arquivadas</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
+        {/* Linha 2 — todos os outros botões numa fileira única, discreta, que
+            rola de lado (mesmo padrão já usado nas abas "Tudo/Não lidos/
+            Quentes" logo abaixo, na lista de conversas). Achado real:
+            "flex-wrap" fazia essa barra quebrar em 2-3 linhas ("caixa
+            gigante") e a tentativa anterior de esconder parte dos botões
+            atrás de um menu ⋮/☰ deixava ação real inacessível sem antes
+            descobrir que o menu existia. Rolagem horizontal resolve os dois
+            problemas de uma vez: nada escondido atrás de clique nenhum, e a
+            barra nunca cresce em altura, só em largura (que já rola). */}
+        <div ref={toolbarRef} className="flex items-center gap-2 overflow-x-auto scrollbar-thin -mx-1 px-1 pb-0.5">
           {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
               direto daqui, sem precisar navegar até a barra de abas do topo
               (Header.tsx já tem a aba "Escalonamentos" com o mesmo contador,
@@ -2092,7 +2055,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {onGoToEscalations && (
             <button
               onClick={onGoToEscalations}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+              className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/60 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
               title="Ir para a fila de Escalonamentos"
             >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
@@ -2114,7 +2077,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               confundindo quem tentava abrir a Ficha IA por aqui. */}
           <button
             onClick={() => setShowRightPanel(!showRightPanel)}
-            className={`hidden lg:flex px-3 py-1.5 rounded-xl border text-xs font-semibold items-center gap-1.5 transition-all cursor-pointer ${
+            className={`hidden lg:flex flex-shrink-0 px-3 py-1.5 rounded-xl border text-xs font-semibold items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
               showRightPanel
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
@@ -2124,27 +2087,38 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span>{showRightPanel ? 'Ocultar Ficha IA' : 'Ver Ficha IA'}</span>
           </button>
 
-          {/* Status do Agente Automático Real: active / paused / restricted */}
-          <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
-            {(['active', 'restricted', 'paused'] as const).map((status) => (
-              <button
-                key={status}
-                onClick={() => handleChangeAgentStatus(status)}
-                title={
-                  status === 'active' ? 'Agente responde sempre' :
-                  status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                  'Agente pausado — silêncio total'
-                }
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
-                  agentStatus === status
-                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
-              </button>
-            ))}
-          </div>
+          {/* Postar Status e Arquivadas — únicas ações que só existiam na
+              barra de ícones lateral real (estilo WhatsApp Web, lg:flex),
+              inacessíveis abaixo de lg. Antes ficavam atrás de um menu
+              flutuante/hambúrguer (achado real: colidia com o botão "Voltar"
+              E escondia ação real atrás de um ícone que não avisa o que tem
+              dentro) — agora são botões diretos nesta fileira, iguais aos
+              outros, sem nada escondido. */}
+          {statusAvailable ? (
+            <button
+              type="button"
+              onClick={() => setIsStatusModalOpen(true)}
+              className="flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white"
+              title="Postar Status"
+            >
+              <CircleDashed className="w-3.5 h-3.5" />
+              <span>Status</span>
+            </button>
+          ) : (
+            <button type="button" disabled title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial" className="flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 whitespace-nowrap bg-slate-950/80 border-slate-800 text-slate-500 opacity-50 cursor-not-allowed">
+              <CircleDashed className="w-3.5 h-3.5" />
+              <span>Status</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => { setShowArchived(true); setMobileThreadOpen(false); }}
+            className="flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white"
+            title="Ver conversas arquivadas"
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>Arquivadas</span>
+          </button>
 
           {/* Modo "somente anúncios" (pedido real, 14/08/2026): a Monique tem
               dois números ligados hoje — o pessoal dela (conectado
@@ -2161,7 +2135,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 ? 'Somente anúncios ATIVO — agente só responde contatos vindos de anúncio, silêncio pra contatos pessoais'
                 : 'Ativar modo somente anúncios — agente para de responder contatos pessoais automaticamente'
             }
-            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+            className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               adsOnly
                 ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
                 : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
@@ -2178,7 +2152,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           <button
             onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
             title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+            className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               googleCalendarConnected
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                 : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
@@ -2196,7 +2170,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             type="button"
             onClick={() => setIsToolbarSettingsOpen((v) => !v)}
             title="Configurações (Auto IA, notificações, limpar testes)"
-            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+            className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               isToolbarSettingsOpen
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                 : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
@@ -2208,7 +2182,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
           <button
             onClick={() => setShowAddLead(true)}
-            className="inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-950 transition-all cursor-pointer"
+            className="flex-shrink-0 inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-950 transition-all cursor-pointer whitespace-nowrap"
           >
             <PlusCircle className="w-4 h-4 mr-1" />
             <span>Novo Lead</span>

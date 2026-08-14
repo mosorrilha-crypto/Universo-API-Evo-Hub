@@ -431,7 +431,12 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <MessageSquare className="w-4 h-4" />
-              <span>Atendimento WhatsApp</span>
+              {/* Achado real: "Atendimento WhatsApp" ocupava espaço extra numa
+                  faixa de abas que já precisa de rolagem horizontal no
+                  mobile — o ícone de balão de mensagem já deixa o contexto
+                  claro, mesmo padrão do título encurtado dentro da própria
+                  tela (WhatsAppLeadsSim.tsx). */}
+              <span>WhatsApp</span>
             </button>
 
             <button
