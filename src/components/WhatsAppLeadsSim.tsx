@@ -1993,48 +1993,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
       <div className="relative p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl space-y-2.5">
-        {/* Linha 1 — título + status do agente, sempre numa linha só, nunca
-            quebra nem precisa rolar (só 2 elementos, cabem em qualquer
-            largura). Achado real: "Atendimento WhatsApp" repetia a mesma
-            informação da aba ativa logo acima — só "WhatsApp" já deixa
-            claro o contexto e sobra mais espaço horizontal. */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center space-x-3.5 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
-              <Bot className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-sm font-bold text-white truncate">
-                WhatsApp
-              </h2>
-              {activeTenant && (
-                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeTenant.name}</p>
-              )}
-            </div>
+        {/* Linha 1 — só o título. Achado real: "Atendimento WhatsApp" repetia
+            a mesma informação da aba ativa logo acima — só "WhatsApp" já
+            deixa claro o contexto. O status do agente (Ativo/Restrito/
+            Pausado) foi pra frente da barra de busca, na lista de conversas
+            logo abaixo (pedido direto) — não fica mais aqui. */}
+        <div className="flex items-center space-x-3.5 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
+            <Bot className="w-5 h-5" />
           </div>
-
-          {/* Status do Agente Automático Real: active / paused / restricted —
-              fica fora da barra que rola, é a informação mais importante
-              pro operador ver de cara sem precisar deslizar nada. */}
-          <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
-            {(['active', 'restricted', 'paused'] as const).map((status) => (
-              <button
-                key={status}
-                onClick={() => handleChangeAgentStatus(status)}
-                title={
-                  status === 'active' ? 'Agente responde sempre' :
-                  status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                  'Agente pausado — silêncio total'
-                }
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
-                  agentStatus === status
-                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
-              </button>
-            ))}
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-white truncate">
+              WhatsApp
+            </h2>
+            {activeTenant && (
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeTenant.name}</p>
+            )}
           </div>
         </div>
 
@@ -2456,25 +2430,51 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Removido o bloco inteiro — o contexto já está estabelecido
               pela aba ativa + barra de controles, sem perda de informação. */}
 
-          {/* WhatsApp Web Search Bar */}
+          {/* WhatsApp Web Search Bar — o status do agente (Ativo/Restrito/
+              Pausado) fica na frente dela, pedido direto pra ficar junto da
+              busca em vez de lá em cima na barra de título; a busca em si
+              fica mais curta (flex-1 dividindo a linha com o status, em vez
+              de w-full sozinha). */}
           <div className="p-2.5 bg-[#111b21] border-b border-slate-800/60">
-            <div className="relative flex items-center">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Pesquisar ou começar uma nova conversa"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2 text-slate-400 hover:text-white text-xs"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
+                {(['active', 'restricted', 'paused'] as const).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => handleChangeAgentStatus(status)}
+                    title={
+                      status === 'active' ? 'Agente responde sempre' :
+                      status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                      'Agente pausado — silêncio total'
+                    }
+                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                      agentStatus === status
+                        ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+                  </button>
+                ))}
+              </div>
+              <div className="relative flex items-center flex-1 min-w-0">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar ou começar uma nova conversa"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 text-slate-400 hover:text-white text-xs"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* WhatsApp Web Filter Tabs */}
