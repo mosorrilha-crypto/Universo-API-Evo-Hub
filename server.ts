@@ -18,6 +18,7 @@ import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
+import { createRoadmapRouter } from './server/routes/roadmap';
 import { createCrmRouter } from './server/routes/crm';
 import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
@@ -135,6 +136,7 @@ async function startServer() {
     jwtSecret: config.jwtSecret,
   }));
   app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
+  app.use(createRoadmapRouter({ authenticateToken }));
   app.use(createCrmRouter({ authenticateToken }));
   app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
