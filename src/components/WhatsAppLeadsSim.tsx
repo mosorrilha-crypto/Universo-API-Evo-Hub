@@ -68,7 +68,8 @@ import {
   Users,
   Settings,
   Video,
-  Menu
+  Menu,
+  Copy
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -143,7 +144,7 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
     return <div className="w-full h-36 bg-slate-800 rounded-lg animate-pulse flex items-center justify-center text-slate-500 text-[10px]">Carregando imagem...</div>;
   }
   return (
-    <div onClick={() => onOpen(url)} className="relative group rounded-lg overflow-hidden border border-white/10 cursor-pointer">
+    <div onClick={() => onOpen(url)} className="relative group rounded-lg overflow-hidden cursor-pointer">
       <img src={url} alt="Imagem enviada pelo lead" className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-300" />
       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold">
         <ImageIcon className="w-4 h-4 mr-1" /> Ampliar
@@ -286,6 +287,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  /** Achado real (pedido direto, com print do WhatsApp de referência): a barra de ícones sempre visível no hover (Responder/Encaminhar/Reagir/Editar) mais o botão de apagar solto no rodapé do balão eram poluição visual — o WhatsApp de verdade usa um único gatilho "⋮" que abre um menu discreto, igual ao menu ⋮ do cabeçalho da conversa (ver isHeaderMenuOpen) já usado neste mesmo arquivo. Substituído por esse único estado. */
+  const [openMessageMenuFor, setOpenMessageMenuFor] = useState<string | null>(null);
 
   const scrollToMessage = (messageId: string) => {
     document.getElementById(`msg-anchor-${messageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -632,10 +635,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // menu; só o que o operador mexe com frequência (status do agente,
   // escalonamentos, novo lead) continua sempre visível.
   const [isToolbarSettingsOpen, setIsToolbarSettingsOpen] = useState(false);
-  /** Achado real: a barra de ícones lateral (estilo WhatsApp Web) só aparece a partir de 1024px (lg) porque o grid inteiro dessa seção só vira multi-coluna nesse breakpoint — mudar só o breakpoint da barra a deixaria "deitada" (faixa horizontal larga em vez de trilha lateral estreita), já que o grid continua de 1 coluna só entre 768-1023px. Em vez de mexer no grid inteiro (mudança maior, mais arriscada), esse menu flutuante cobre só essa faixa (md sem lg — "modo desktop" do Chrome mobile cai bem aqui, ~980px) com os mesmos ícones/ações da barra real. */
-  const [showFloatingSidebarMenu, setShowFloatingSidebarMenu] = useState(false);
-  /** Achado real (pedido direto): na mesma faixa 768-1023px sem barra lateral real, a caixa "Atendimento WhatsApp" (título + controles Ativo/Restrito/Pausado, Calendar etc.) ficava sempre fixa no topo, ocupando espaço vertical que sobra pouco nesse tamanho de tela — e sem sidebar nem menu flutuante pra "guardá-la", não tinha pra onde ir. Escondida por padrão só nessa faixa (md:hidden lg:flex — sempre visível em mobile puro e em desktop, onde já funcionava bem), revelada pelo botão "Configurações" do menu flutuante acima ou recolhida de novo pelo X que aparece dentro dela nessa mesma faixa. */
-  const [showTopToolbar, setShowTopToolbar] = useState(false);
+  /** Achado real: a barra de ícones lateral (estilo WhatsApp Web) só aparece a partir de 1024px (lg) porque o grid inteiro dessa seção só vira multi-coluna nesse breakpoint — na faixa 768-1023px ("modo desktop" do Chrome mobile cai bem aqui, ~980px) ela fica inacessível. Primeira tentativa foi um menu flutuando por cima do grid inteiro (posição fixa no canto), mas isso colidia com o botão "Voltar" do cabeçalho da conversa quando uma thread estava aberta — ambos disputavam o mesmo canto superior esquerdo. Substituído por este botão DENTRO da própria barra de controles (toolbarRef, sempre em fluxo normal, nunca sobrepõe nada), com Status/Arquivadas — as únicas ações da barra lateral real sem outro caminho já existente aqui perto (Configurações já tem botão próprio nesta mesma barra). */
+  const [showSidebarShortcutsMenu, setShowSidebarShortcutsMenu] = useState(false);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1994,24 +1995,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className={`relative p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl ${showTopToolbar ? 'flex' : 'flex md:hidden lg:flex'}`}>
-        {showTopToolbar && (
-          <button
-            type="button"
-            onClick={() => setShowTopToolbar(false)}
-            title="Recolher"
-            className="md:inline-flex lg:hidden hidden absolute top-2 right-2 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
+      <div className="relative p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center space-x-3.5">
           <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
             <Bot className="w-5 h-5" />
           </div>
           <div>
+            {/* Achado real: "Atendimento WhatsApp" repetia a mesma informação
+                da aba ativa logo acima — só "WhatsApp" já deixa claro o
+                contexto e sobra mais espaço horizontal pros botões ao lado
+                (crítico na faixa 768-1023px, onde essa barra some rápido). */}
             <h2 className="text-sm font-bold text-white">
-              Atendimento WhatsApp
+              WhatsApp
             </h2>
             {activeTenant && (
               <p className="text-[11px] text-slate-400 mt-0.5">{activeTenant.name}</p>
@@ -2037,6 +2032,59 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             flex-wrap tem uma largura limitada pra quebrar contra em
             qualquer breakpoint, não só no mobile puro. */}
         <div ref={toolbarRef} className="flex items-center space-x-2.5 self-end md:self-auto md:w-auto md:min-w-0 w-full flex-wrap gap-y-2">
+          {/* Atalhos que só a barra de ícones lateral real (estilo WhatsApp
+              Web, lg:flex) tem — Status e Arquivadas — mas que ficam
+              inacessíveis na faixa 768-1023px (essa barra só existe a partir
+              de lg). "Configurações" já tem botão próprio aqui do lado, não
+              precisa duplicar. Fica junto do resto da barra (em fluxo normal,
+              nunca sobreposto), diferente da tentativa anterior de um menu
+              flutuando por cima do grid — que colidia com o botão "Voltar"
+              do cabeçalho da conversa quando uma thread estava aberta. */}
+          <div className="relative hidden md:block lg:hidden">
+            <button
+              type="button"
+              onClick={() => setShowSidebarShortcutsMenu((v) => !v)}
+              title="Menu"
+              className={`p-2 rounded-xl border transition-all cursor-pointer ${
+                showSidebarShortcutsMenu
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              <Menu className="w-3.5 h-3.5" />
+            </button>
+            {showSidebarShortcutsMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowSidebarShortcutsMenu(false)} />
+                <div className="absolute left-0 top-10 z-50 w-44 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-left animate-pop-in">
+                  {statusAvailable ? (
+                    <button
+                      type="button"
+                      onClick={() => { setIsStatusModalOpen(true); setShowSidebarShortcutsMenu(false); }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                    >
+                      <CircleDashed className="w-3.5 h-3.5" />
+                      <span>Postar Status</span>
+                    </button>
+                  ) : (
+                    <button type="button" disabled title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial" className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-500 opacity-50 cursor-not-allowed">
+                      <CircleDashed className="w-3.5 h-3.5" />
+                      <span>Postar Status</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setShowArchived(true); setMobileThreadOpen(false); setShowSidebarShortcutsMenu(false); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    <span>Arquivadas</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
               direto daqui, sem precisar navegar até a barra de abas do topo
               (Header.tsx já tem a aba "Escalonamentos" com o mesmo contador,
@@ -2331,83 +2379,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
       <div className="relative bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-[56px_repeat(12,minmax(0,1fr))] h-[85dvh] lg:h-[720px]">
-
-        {/* Menu flutuante — cobre a faixa 768-1023px (md sem lg), onde a
-            barra de ícones real (abaixo) ainda fica escondida porque o grid
-            desta seção só vira multi-coluna a partir de lg. "Modo desktop"
-            do Chrome mobile simula ~980px, exatamente nessa faixa — sem
-            isso, quem usa esse modo nunca tinha acesso nenhum à barra
-            lateral. Mesmas ações da barra real (Conversas/Status/Arquivadas/
-            Config), só que num menu que abre por cima em vez de fixo do
-            lado, pra não precisar mexer no breakpoint do grid inteiro
-            (mudança bem maior/mais arriscada — ver comentário do estado
-            showFloatingSidebarMenu). */}
-        <div className="hidden md:block lg:hidden absolute top-3 left-3 z-20">
-          <button
-            type="button"
-            onClick={() => setShowFloatingSidebarMenu((v) => !v)}
-            title="Menu"
-            className={`p-2.5 rounded-xl border shadow-lg transition-colors cursor-pointer ${
-              showFloatingSidebarMenu
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-[#202c33] border-slate-700 text-slate-300 hover:text-white'
-            }`}
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-
-          {showFloatingSidebarMenu && (
-            <div className="mt-1.5 flex flex-col items-center py-2 gap-1 bg-[#202c33] border border-slate-700 rounded-xl shadow-2xl w-max">
-              <button type="button" title="Conversas" className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 cursor-default">
-                <MessageCircle className="w-5 h-5" />
-              </button>
-              {statusAvailable ? (
-                <button
-                  type="button"
-                  onClick={() => { setIsStatusModalOpen(true); setShowFloatingSidebarMenu(false); }}
-                  title="Postar Status"
-                  className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                >
-                  <CircleDashed className="w-5 h-5" />
-                </button>
-              ) : (
-                <button type="button" disabled title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-                  <CircleDashed className="w-5 h-5" />
-                </button>
-              )}
-              <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-                <Phone className="w-5 h-5" />
-              </button>
-              <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-                <Users className="w-5 h-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => { setShowArchived(true); setShowFloatingSidebarMenu(false); }}
-                title="Arquivadas"
-                className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                <Archive className="w-5 h-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowTopToolbar(true);
-                  setIsToolbarSettingsOpen(true);
-                  setShowFloatingSidebarMenu(false);
-                  setTimeout(() => toolbarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
-                }}
-                title="Configurações do agente"
-                className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-              <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-                <User className="w-5 h-5" />
-              </button>
-            </div>
-          )}
-        </div>
 
         {/* ========================================== */}
         {/* Barra de ícones lateral esquerda, estilo WhatsApp Web/Desktop —
@@ -2931,43 +2902,86 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         id={`msg-anchor-${msg.id}`}
                         className={`group relative flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
                       >
-                        {/* Hover Action Toolbar — Responder, Encaminhar, Reagir, Editar (só agente) */}
-                        <div
-                          className={`absolute -top-6 ${isLead ? 'left-0' : 'right-0'} hidden group-hover:flex items-center gap-0.5 bg-[#233138] border border-slate-700 rounded-lg px-1 py-0.5 shadow-lg z-10`}
-                        >
+                        {/* Menu de ações da mensagem — gatilho único "⋮" que abre um
+                            menu discreto (Responder/Copiar/Encaminhar/Reagir/Editar/
+                            Apagar), igual ao menu nativo do WhatsApp (print de
+                            referência) e ao mesmo padrão visual já usado no menu ⋮ do
+                            cabeçalho da conversa (isHeaderMenuOpen). Substitui a barra
+                            de ícones sempre visível no hover + o botão de apagar solto
+                            no rodapé do balão — dois caminhos concorrendo pelo mesmo
+                            espaço visual pra ações que cabem num só menu. */}
+                        <div className={`absolute -top-6 ${isLead ? 'left-0' : 'right-0'} z-10`}>
                           <button
                             type="button"
-                            onClick={() => handleReplyToMessage(msg)}
-                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                            title="Responder"
+                            onClick={() => setOpenMessageMenuFor(openMessageMenuFor === msg.id ? null : msg.id)}
+                            className={`p-1 rounded-full bg-[#233138] border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 shadow-lg transition-opacity cursor-pointer ${
+                              openMessageMenuFor === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                            title="Mais opções"
                           >
-                            <Reply className="w-3 h-3" />
+                            <MoreVertical className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setForwardingMessage(msg)}
-                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                            title="Encaminhar"
-                          >
-                            <Forward className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setReactionPickerFor(reactionPickerFor === msg.id ? null : msg.id)}
-                            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                            title="Reagir"
-                          >
-                            <Smile className="w-3 h-3" />
-                          </button>
-                          {!isLead && (
-                            <button
-                              type="button"
-                              onClick={() => handleStartEditMessage(msg)}
-                              className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                              title="Editar"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
+
+                          {openMessageMenuFor === msg.id && (
+                            <>
+                              <div className="fixed inset-0 z-40" onClick={() => setOpenMessageMenuFor(null)} />
+                              <div className={`absolute top-7 ${isLead ? 'left-0' : 'right-0'} z-50 w-44 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top animate-pop-in`}>
+                                <button
+                                  type="button"
+                                  onClick={() => { handleReplyToMessage(msg); setOpenMessageMenuFor(null); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                >
+                                  <Reply className="w-3.5 h-3.5" />
+                                  <span>Responder</span>
+                                </button>
+                                {msg.text && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { navigator.clipboard?.writeText(msg.text || ''); setOpenMessageMenuFor(null); }}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copiar</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => { setForwardingMessage(msg); setOpenMessageMenuFor(null); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                >
+                                  <Forward className="w-3.5 h-3.5" />
+                                  <span>Encaminhar</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setReactionPickerFor(reactionPickerFor === msg.id ? null : msg.id); setOpenMessageMenuFor(null); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                >
+                                  <Smile className="w-3.5 h-3.5" />
+                                  <span>Reagir</span>
+                                </button>
+                                {!isLead && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { handleStartEditMessage(msg); setOpenMessageMenuFor(null); }}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                    <span>Editar</span>
+                                  </button>
+                                )}
+                                <div className="border-t border-slate-700" />
+                                <button
+                                  type="button"
+                                  onClick={() => { setOpenMessageMenuFor(null); handleDeleteSingleMessage(selectedLead.id, msg.id); }}
+                                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
+                                  title="Apagar esta mensagem"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Apagar</span>
+                                </button>
+                              </div>
+                            </>
                           )}
                         </div>
 
@@ -2990,9 +3004,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         )}
 
                         <div
-                          className={`max-w-[85%] rounded-xl p-2.5 shadow-md space-y-1 text-xs relative ${
+                          className={`max-w-[85%] rounded-xl p-2.5 shadow-md space-y-1 text-xs relative border border-white/5 ${
                             isLead
-                              ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none border border-slate-700/50'
+                              ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none'
                               : msg.sentBy === 'operator'
                                 ? 'bg-[#1f4287] text-white rounded-tr-none shadow-blue-950/40'
                                 : 'bg-[#005c4b] text-white rounded-tr-none shadow-emerald-950/40'
@@ -3074,7 +3088,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               {msg.mediaUrl && (
                                 <div
                                   onClick={() => setViewImageUrl(msg.mediaUrl || null)}
-                                  className="relative group rounded-lg overflow-hidden border border-white/10 cursor-pointer"
+                                  className="relative group rounded-lg overflow-hidden cursor-pointer"
                                 >
                                   <img
                                     src={msg.mediaUrl}
@@ -3127,14 +3141,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </div>
                           )}
 
-                          <div className={`flex justify-between items-center text-[9px] mt-1 gap-2 border-t border-white/5 pt-1 ${isLead ? 'text-slate-400' : 'text-emerald-200'}`}>
-                            <button
-                              onClick={() => handleDeleteSingleMessage(selectedLead.id, msg.id)}
-                              className="opacity-40 hover:opacity-100 hover:text-rose-400 transition-opacity p-0.5 cursor-pointer"
-                              title="Apagar esta mensagem"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                          <div className={`flex justify-end items-center text-[9px] mt-1 gap-2 border-t border-white/5 pt-1 ${isLead ? 'text-slate-400' : 'text-emerald-200'}`}>
                             <div className="flex items-center gap-1">
                               <span>
                                 {msg.timestamp}
