@@ -24,6 +24,8 @@ export interface ParsedIncomingMessage {
   metaImage?: { mediaId: string; mimeType?: string };
   /** Presente quando type === 'audio' via Evolution API. */
   evolutionAudio?: { url?: string; mediaKey?: string; mimeType?: string };
+  /** true quando type === 'image' via Evolution API — sem URL/mediaKey úteis aqui (mídia ponta-a-ponta criptografada), o download reconstrói a message key a partir de messageId/from, mesmo padrão já usado pra evolutionAudio (ver downloadEvolutionMedia). */
+  evolutionImage?: true;
   /** Presente quando a mensagem veio de um anúncio "Clique para WhatsApp" (Meta Cloud API) — usado pra atribuição real no Meta Conversions API (Epic 4.5.6). */
   referral?: { headline?: string; sourceId?: string; ctwaClid?: string };
 }
@@ -172,7 +174,7 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   }
 
   if (message.imageMessage) {
-    return [{ ...base, type: 'image' }];
+    return [{ ...base, type: 'image', evolutionImage: true }];
   }
 
   const rawType = message.stickerMessage

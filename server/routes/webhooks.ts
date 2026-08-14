@@ -14,7 +14,7 @@ import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
-import { downloadMetaMedia } from '../services/mediaDownload';
+import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
 import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnalysis';
@@ -244,6 +244,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           // download.
           const downloadPromise = msg.metaImage
             ? downloadMetaMedia(msg.metaImage.mediaId, resolvedTenant.metaAccessToken)
+            : msg.evolutionImage
+            ? downloadEvolutionMedia(
+                { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                resolvedTenant.evolutionInstanceName,
+                resolvedTenant.evolutionApiUrl,
+                resolvedTenant.evolutionApiKey
+              )
             : null;
           if (downloadPromise) {
             downloadPromise
