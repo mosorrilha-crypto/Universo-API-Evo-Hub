@@ -18,6 +18,7 @@ import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
+import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
@@ -291,22 +292,45 @@ async function generateSpecialistReply(
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = await buildGlobalAndSegmentLayer(agent, segment);
+  const specialistModel = 'gemini-3.6-flash';
+  // Camadas 1+2 são idênticas em quase toda chamada deste (agent, segment) —
+  // cache de contexto real do Gemini evita reenviar esse texto por inteiro
+  // toda mensagem (ver geminiSystemInstructionCache.ts). `null` = cache
+  // indisponível por qualquer motivo; usa systemInstruction inline, exatamente
+  // como sempre funcionou.
+  const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${segment}`, systemInstruction);
 
   const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
 ${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"`;
 
-  const response = await withGeminiRetryAndUsage(
-    tenantId,
-    'especialista',
-    () =>
-      ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ text: userContent }],
-        config: { systemInstruction, responseMimeType: 'application/json' },
-      }),
-    GEMINI_TIMEOUT_MS
-  );
+  const callSpecialist = (config: { cachedContent: string } | { systemInstruction: string }) =>
+    withGeminiRetryAndUsage(
+      tenantId,
+      'especialista',
+      () =>
+        ai.models.generateContent({
+          model: specialistModel,
+          contents: [{ text: userContent }],
+          config: { ...config, responseMimeType: 'application/json' },
+        }),
+      GEMINI_TIMEOUT_MS
+    );
+
+  let response;
+  try {
+    response = await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
+  } catch (err) {
+    // Rede de segurança extra: se a chamada com cachedContent falhar mesmo
+    // depois do retry padrão (ex: cache expirou entre criar e usar, corrida
+    // rara já que o TTL é de 55min), tenta UMA vez a mais sem cache antes de
+    // desistir — a resposta ao cliente nunca pode depender do cache de
+    // contexto dar certo.
+    if (!cachedContentName) throw err;
+    console.warn('⚠️  [Gemini Cache] chamada com cachedContent falhou mesmo após retry — tentando de novo sem cache:', (err as Error)?.message || err);
+    invalidateAllSystemInstructionCaches();
+    response = await callSpecialist({ systemInstruction });
+  }
 
   const parsed = JSON.parse(response.text || '{}') as { phase?: string; bubbles?: string[]; needsHumanConfirmation?: boolean; nomeCapturado?: string | null };
   const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean);

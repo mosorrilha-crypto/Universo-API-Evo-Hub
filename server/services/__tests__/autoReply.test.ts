@@ -6,8 +6,9 @@
  * `contents`. Este teste trava essa separação: se alguém voltar a
  * concatenar tudo numa string só, ele quebra.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GoogleGenAI } from '@google/genai';
+import { invalidateAllSystemInstructionCaches } from '../geminiSystemInstructionCache';
 
 const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
@@ -49,6 +50,17 @@ function makeFakeAi() {
   } as unknown as GoogleGenAI;
   return { ai, calls };
 }
+
+// Cache de contexto (geminiSystemInstructionCache.ts) mantém estado em
+// memória entre chamadas de propósito (é o que faz o cache funcionar) — sem
+// limpar entre testes, um teste que cria um cache de verdade (ex: agent=faq,
+// segment=beauty_studio, texto padrão) vazaria pra um teste seguinte que usa
+// o mesmo fake ai *sem* `.caches` só porque o texto do systemInstruction
+// bateu (mesmo hash), fazendo essa chamada usar cachedContent em vez de
+// systemInstruction por engano.
+beforeEach(() => {
+  invalidateAllSystemInstructionCaches();
+});
 
 describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
   it('manda camada global/segmento em systemInstruction, e tenant/dinâmico/histórico em contents', async () => {
@@ -211,6 +223,87 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('nunca invente desculpa, explicação interna, equipe/pessoa/"central" que cuida disso, nem prometa que alguém vai mandar depois');
     expect(systemInstruction).not.toContain('mencione o recurso visual só se um humano puder providenciar depois');
   });
+});
+
+describe('generateAutoReplyForText — cache de contexto da Camada 1+2 (geminiSystemInstructionCache.ts)', () => {
+  function makeFakeAiWithCache(cacheImpl: (params: any) => Promise<any>) {
+    const calls: any[] = [];
+    const cacheCalls: any[] = [];
+    const ai = {
+      caches: {
+        create: async (params: any) => {
+          cacheCalls.push(params);
+          return cacheImpl(params);
+        },
+      },
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          const isRouterCall = req.contents[0].text.includes('Classifique a intenção principal');
+          if (isRouterCall) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify(SPECIALIST_REPLY) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return { ai, calls, cacheCalls };
+  }
+
+  it('quando o cache de contexto é criado com sucesso, a chamada do especialista usa cachedContent em vez de repetir systemInstruction', async () => {
+    const { ai, calls, cacheCalls } = makeFakeAiWithCache(async () => ({ name: 'cachedContents/teste-123' }));
+
+    await generateAutoReplyForText('tenant-a', ai, 'quanto custa o retoque?', 'Cliente Teste', KB_MARKER, undefined, undefined, undefined, 'beauty_studio');
+
+    expect(cacheCalls).toHaveLength(1);
+    expect(cacheCalls[0].config.systemInstruction).toContain('REGRAS DE ESTILO');
+
+    const specialistCall = calls[1];
+    expect(specialistCall.config.cachedContent).toBe('cachedContents/teste-123');
+    expect(specialistCall.config.systemInstruction).toBeUndefined();
+    // Camadas 3+4 (tenant/dinâmico) continuam em `contents` normalmente — o
+    // cache só substitui a Camada 1+2, nunca o conteúdo variável por mensagem.
+    expect(specialistCall.contents[0].text).toContain(KB_MARKER);
+  });
+
+  it('quando criar o cache falha (rede, API indisponível, conteúdo abaixo do mínimo), cai pro comportamento de sempre — systemInstruction inline, resposta ao cliente não é afetada', async () => {
+    const { ai, calls } = makeFakeAiWithCache(async () => {
+      throw new Error('falha simulada da API de cache');
+    });
+
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+
+    expect(result).not.toBeNull();
+    const specialistCall = calls[1];
+    expect(specialistCall.config.cachedContent).toBeUndefined();
+    expect(specialistCall.config.systemInstruction).toContain('Nunca finja escassez');
+  });
+
+  it('cache criado com sucesso mas a chamada com cachedContent falha (ex: cache expirou entre criar e usar) — tenta de novo sem cache antes de desistir, resposta ao cliente não é afetada', async () => {
+    let cachedAttempts = 0;
+    const { ai, calls } = makeFakeAiWithCache(async () => ({ name: 'cachedContents/quase-expirado' }));
+    // Sobrescreve generateContent: falha toda vez que usar cachedContent (as
+    // 3 tentativas do retry padrão), só funciona com systemInstruction —
+    // simula o cache genuinamente não existir mais do lado da API.
+    (ai as any).models.generateContent = async (req: any) => {
+      calls.push(req);
+      const isRouterCall = req.contents[0].text.includes('Classifique a intenção principal');
+      if (isRouterCall) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+      if (req.config.cachedContent) {
+        cachedAttempts += 1;
+        throw new Error('cached content não encontrado (simulado)');
+      }
+      return { text: JSON.stringify(SPECIALIST_REPLY) } as any;
+    };
+
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+
+    expect(result).not.toBeNull();
+    expect(result?.bubbles).toEqual(SPECIALIST_REPLY.bubbles);
+    // 1 tentativa original + 2 retries do withGeminiRetry, todas com cachedContent.
+    expect(cachedAttempts).toBe(3);
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall.config.cachedContent).toBeUndefined();
+    expect(lastCall.config.systemInstruction).toContain('Nunca finja escassez');
+  }, 10000);
 });
 
 describe('generateAutoReplyForText — captura o nome que a cliente diz na conversa (pesquisa de mercado: "esquecer" o nome depois de algumas mensagens é um dos sinais mais claros de bot)', () => {

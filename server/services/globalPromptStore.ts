@@ -11,6 +11,7 @@
  * nenhuma camada Global no ar só porque a linha do banco está vazia.
  */
 import { getDb } from './db';
+import { invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 
 const ROW_ID = 'global';
 
@@ -74,4 +75,10 @@ export async function setGlobalPromptLayer(content: string | null, updatedBy: st
     .from('global_prompt_layer')
     .upsert({ id: ROW_ID, content: content?.trim() || null, updated_at: new Date().toISOString(), updated_by: updatedBy }, { onConflict: 'id' });
   if (error) throw error;
+  // Achado 14/08/2026, implementando cache de contexto real (Epic de
+  // economia de tokens): sem isso, uma edição/reset do prompt global só
+  // valeria de verdade depois do cache antigo expirar sozinho (até 55min)
+  // em vez de imediatamente — inaceitável pra correção urgente de um
+  // problema em produção (motivo original desta tela existir).
+  invalidateAllSystemInstructionCaches();
 }
