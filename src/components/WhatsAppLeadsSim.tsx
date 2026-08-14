@@ -242,6 +242,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Metadados só do painel (ver server/services/conversationStore.ts).
   const [showArchived, setShowArchived] = useState(false);
   const [openMenuForLeadId, setOpenMenuForLeadId] = useState<string | null>(null);
+  // Achado real em produção ("botão de excluir quebrado, conectado com o
+  // outro botão de excluir"): o menu ⋮ do cabeçalho da conversa aberta
+  // reusava openMenuForLeadId (mesmo estado do menu ⋮ de cada linha da
+  // lista). Quando a conversa aberta também aparece na lista (caso comum),
+  // os dois menus checavam a mesma condição pro mesmo id — abrir um abria o
+  // outro junto, entrelaçando os dois "Excluir". Estado próprio pro menu do
+  // cabeçalho resolve — só existe uma conversa aberta por vez, então um
+  // boolean simples basta, sem precisar de key por id.
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
   // Message Sending State
   const [inputMessage, setInputMessage] = useState('');
@@ -1221,6 +1230,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const handleSelectLead = (lead: LeadInfo) => {
     setActiveLeadId(lead.id);
     setMobileThreadOpen(true);
+    setIsHeaderMenuOpen(false);
     if ((lead as any).isReal) {
       if ((lead as any).manuallyUnread) {
         handleUpdateConversationState(lead.id, { unread: false });
@@ -2370,7 +2380,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => toolbarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            onClick={() => {
+              // Achado real em produção ("botão de engrenagem não faz
+              // nada"): só dava scroll até o toolbar (que já costuma estar
+              // visível, sem nada de novo pra ver) — nunca abria de fato o
+              // painel de Configurações, que fica atrás do botão "Configurações"
+              // separado (isToolbarSettingsOpen) e só aparece quando ele é
+              // true. Abre o painel de verdade antes de rolar até ele.
+              setIsToolbarSettingsOpen(true);
+              toolbarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }}
             title="Configurações do agente"
             className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
           >
@@ -2622,20 +2641,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       esse lead, fixar, marcar não lida, silenciar, arquivar)
                       só existiam no menu ⋮ de cada linha na LISTA — abrindo a
                       conversa não dava pra fazer nada disso sem voltar pra
-                      lista e achar a linha de novo. Reusa o mesmo
-                      openMenuForLeadId (já keyed por id) e as mesmas ações de
-                      handleUpdateConversationState do menu da lista — mesmo
-                      comportamento, só acessível também de dentro da
-                      conversa aberta. */}
+                      lista e achar a linha de novo. Mesmas ações de
+                      handleUpdateConversationState do menu da lista, mas com
+                      estado PRÓPRIO (isHeaderMenuOpen) — reusar
+                      openMenuForLeadId aqui causava um bug real: quando a
+                      conversa aberta também aparece na lista, os dois menus
+                      ⋮ (linha e cabeçalho) checavam a mesma condição pro
+                      mesmo id, então abrir um entrelaçava os dois "Excluir". */}
                   <div className="relative">
                     <button
-                      onClick={() => setOpenMenuForLeadId(openMenuForLeadId === selectedLead.id ? null : selectedLead.id)}
+                      onClick={() => setIsHeaderMenuOpen((open) => !open)}
                       className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Mais opções"
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
-                    {openMenuForLeadId === selectedLead.id && (() => {
+                    {isHeaderMenuOpen && (() => {
                       const isAiBlocked = !!(selectedLead as any).aiBlockedAt;
                       const isPinned = !!(selectedLead as any).pinnedAt;
                       const isManuallyUnread = !!(selectedLead as any).manuallyUnread;
@@ -2643,10 +2664,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       const isArchived = !!(selectedLead as any).archivedAt;
                       return (
                         <>
-                          <div className="fixed inset-0 z-40" onClick={() => setOpenMenuForLeadId(null)} />
+                          <div className="fixed inset-0 z-40" onClick={() => setIsHeaderMenuOpen(false)} />
                           <div className="absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
                             <button
-                              onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setOpenMenuForLeadId(null); }}
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
                               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
                               title="A IA para de responder automaticamente só pra esse número (manual ou automático, ex: falha de agenda) — o resto do atendimento continua normal"
                             >
@@ -2654,28 +2675,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <span>{isAiBlocked ? 'Reativar IA pra esse lead' : 'Bloquear IA pra esse lead'}</span>
                             </button>
                             <button
-                              onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setOpenMenuForLeadId(null); }}
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
                               <span>{isPinned ? 'Desafixar conversa' : 'Fixar conversa'}</span>
                             </button>
                             <button
-                              onClick={() => { handleUpdateConversationState(selectedLead.id, { unread: !isManuallyUnread }); setOpenMenuForLeadId(null); }}
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { unread: !isManuallyUnread }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               <Mail className="w-3.5 h-3.5" />
                               <span>{isManuallyUnread ? 'Marcar como lida' : 'Marcar como não lida'}</span>
                             </button>
                             <button
-                              onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setOpenMenuForLeadId(null); }}
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
                               <span>{isMuted ? 'Ativar notificações' : 'Silenciar notificações'}</span>
                             </button>
                             <button
-                              onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setOpenMenuForLeadId(null); setMobileThreadOpen(false); }}
+                              onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setIsHeaderMenuOpen(false); setMobileThreadOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
@@ -2683,7 +2704,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             <div className="border-t border-slate-700" />
                             <button
-                              onClick={() => { handleClearChatMessages(selectedLead.id); setOpenMenuForLeadId(null); }}
+                              onClick={() => { handleClearChatMessages(selectedLead.id); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Apaga as mensagens desta conversa, mantendo o contato"
                             >
@@ -2691,7 +2712,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <span>Limpar histórico de mensagens</span>
                             </button>
                             <button
-                              onClick={() => { setOpenMenuForLeadId(null); handleDeleteConversation(selectedLead.id, selectedLead.name); }}
+                              onClick={() => { setIsHeaderMenuOpen(false); handleDeleteConversation(selectedLead.id, selectedLead.name); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
                               title="Exclui a conversa e o contato permanentemente"
                             >

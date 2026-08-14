@@ -119,8 +119,15 @@ describe('POST /api/conversations/:phone/manual-appointment', () => {
   });
 
   it('409 quando o contato já tem um agendamento ativo', async () => {
+    // Datas calculadas a partir de "agora" (não hardcoded) — um horário
+    // fixo no passado vira "já passou" conforme os dias avançam, e o gate
+    // 409 (Date.parse(endIso) > Date.parse(now)) some de baixo do teste
+    // sem nenhuma mudança de código, só o calendário virando (achado real:
+    // "2026-08-14T09:00:00" foi escrito como data futura e virou passado).
+    const futureStartIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 19);
+    const futureEndIso = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString().slice(0, 19);
     supabase.__tables.appointments = [
-      { tenant_id: TENANT_ID, phone: PHONE, event_id: 'evt-existente', summary: 'Cejas', start_iso: '2026-08-14T09:00:00', end_iso: '2026-08-14T10:00:00', created_at: new Date().toISOString(), source: 'ai' },
+      { tenant_id: TENANT_ID, phone: PHONE, event_id: 'evt-existente', summary: 'Cejas', start_iso: futureStartIso, end_iso: futureEndIso, created_at: new Date().toISOString(), source: 'ai' },
     ];
     ({ server, baseUrl } = await startServer());
 
