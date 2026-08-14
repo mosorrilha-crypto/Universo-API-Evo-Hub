@@ -37,3 +37,29 @@ export async function isAgentPaused(tenantId: string): Promise<boolean> {
   }
   return false;
 }
+
+/**
+ * Modo "somente anúncios" (pedido real, 14/08/2026): quando o tenant tem
+ * mais de um número de WhatsApp ligado (ex: o pessoal do dono do negócio,
+ * conectado temporariamente pra não perder mensagem, e o número dedicado
+ * do agente), ativar isso faz o agente só responder automaticamente
+ * contatos identificados como vindos de anúncio (ctwa_clid gravado na
+ * conversa, ver conversationStore.ts) — nunca contatos pessoais. Flag
+ * ortogonal ao status active/paused/restricted, não um 4º valor dele; quem
+ * chama combina isAdsOnlyMode() com o ctwa_clid da conversa (ver
+ * webhooks.ts/transcriptionQueue.ts). A mensagem em si continua sendo
+ * gravada normalmente — só a resposta automática fica em silêncio.
+ */
+export async function isAdsOnlyMode(tenantId: string): Promise<boolean> {
+  const db = getDb();
+  const { data } = await db.from('agent_status').select('ads_only').eq('tenant_id', tenantId).maybeSingle();
+  return !!data?.ads_only;
+}
+
+export async function setAdsOnlyMode(tenantId: string, adsOnly: boolean): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('agent_status')
+    .upsert({ tenant_id: tenantId, ads_only: adsOnly, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  if (error) throw error;
+}

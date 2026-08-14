@@ -18,7 +18,7 @@ import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversa
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
-import { getAgentStatus, setAgentStatus, type AgentStatus } from '../services/agentStatus';
+import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
@@ -659,17 +659,22 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: true, appointment: updated });
   }));
 
-  // Status do agente automático (Epic 1.3 — pausar/restringir horário)
+  // Status do agente automático (Epic 1.3 — pausar/restringir horário) +
+  // modo "somente anúncios" (pedido real, 14/08/2026 — ver agentStatus.ts).
   router.get('/api/agent-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    res.json({ status: await getAgentStatus(tenantOf(req)) });
+    const tenantId = tenantOf(req);
+    const [status, adsOnly] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId)]);
+    res.json({ status, adsOnly });
   }));
 
   router.post('/api/agent-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { status } = req.body || {};
+    const { status, adsOnly } = req.body || {};
     const tenantId = tenantOf(req);
     try {
-      await setAgentStatus(tenantId, status as AgentStatus);
-      res.json({ status: await getAgentStatus(tenantId) });
+      if (status !== undefined) await setAgentStatus(tenantId, status as AgentStatus);
+      if (typeof adsOnly === 'boolean') await setAdsOnlyMode(tenantId, adsOnly);
+      const [newStatus, newAdsOnly] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId)]);
+      res.json({ status: newStatus, adsOnly: newAdsOnly });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
