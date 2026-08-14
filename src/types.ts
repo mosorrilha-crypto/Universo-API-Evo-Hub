@@ -209,6 +209,8 @@ export interface AgentKnowledgeBase {
   businessRules: string[];
   faqs: AgentFAQ[];
   documents: AgentFileDoc[];
+  /** Link de localização (Google Maps) que o agente manda quando o cliente pede o endereço — ver server/services/knowledgeBaseStore.ts. */
+  locationMapsUrl?: string;
   lastSaved?: string;
 }
 
