@@ -372,8 +372,6 @@ export interface QueueSystemStatus {
   completedJobs: number;
   failedJobs: number;
   rateLimitRPM: number;
-  mockModeEnabled: boolean;
-  contextCacheEnabled: boolean;
 }
 
 export interface BatchAnalysisJob {

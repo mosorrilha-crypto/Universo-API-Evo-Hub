@@ -25,12 +25,9 @@ import {
   X,
   PieChart as PieChartIcon,
   Cpu,
-  Database,
   RefreshCw,
   Server,
   Activity,
-  ToggleLeft,
-  ToggleRight,
   FlaskConical,
   Brain,
   Save,
@@ -792,7 +789,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   } | null>(null);
 
   const [queueStatus, setQueueStatus] = useState<QueueSystemStatus | null>(null);
-  const [isMockAiActive, setIsMockAiActive] = useState<boolean>(false);
 
   // Fetch live token telemetry and queue state
   const fetchTelemetry = async () => {
@@ -803,7 +799,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         if (isJson) {
           const data = await res.json();
           setTelemetryData(data);
-          setIsMockAiActive(!!data.useMockAiMode);
         }
       }
       // Achado real em produção (13/08/2026): usava `fetch` puro em vez de
@@ -829,24 +824,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     const interval = setInterval(fetchTelemetry, 10000);
     return () => clearInterval(interval);
   }, []);
-
-  const handleToggleMockMode = async () => {
-    try {
-      const res = await apiFetch('/api/telemetry/toggle-mock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !isMockAiActive }),
-      });
-      const isJson = res.headers.get('content-type')?.includes('application/json');
-      if (res.ok && isJson) {
-        const data = await res.json();
-        setIsMockAiActive(data.useMockAiMode);
-        fetchTelemetry();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   // Empresas reais (GET /api/admin/tenants) filtradas por busca + segmento —
   // `segment` é campo real da tabela `tenants` (docs/AGENTE-VERTICAL-
@@ -1084,48 +1061,26 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       {/* TAB CONTENT: ESTRATÉGIA DE TOKENS & ARQUITETURA SAAS */}
       {activeAdminTab === 'tokens_telemetry' && (
         <div className="space-y-6 animate-fade-in">
-          {/* Header Bar with Mocking Toggle */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center space-x-2">
-                <Cpu className="w-5 h-5 text-purple-400" />
-                <h2 className="text-base font-bold text-white">Arquitetura Avançada & Gestão de Tokens Gemini</h2>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-950 text-purple-300 border border-purple-800">
-                  Pay-as-You-Go + Context Cache
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Controle de custos por tenant, resiliência com filas, cache local de desenvolvimento e simulação da Gemini Batch API.
-              </p>
+          {/* Header — achado numa auditoria (14/08/2026): o botão "Ativar
+              Mocking" que ficava aqui não interceptava nenhuma chamada real
+              ao Gemini (nenhum lugar em server/gemini.ts ou autoReply.ts lia
+              esse valor) — só mudava o próprio texto do botão. Parecia uma
+              proteção de custo real, mas clicar nele não impedia gasto
+              nenhum. "simulação da Gemini Batch API" na descrição também
+              nunca existiu (`ai.batches` do SDK nunca é chamado em lugar
+              nenhum). Removidos os dois; "Context Cache" no badge acima
+              agora é real — ver geminiSystemInstructionCache.ts. */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div className="flex items-center space-x-2">
+              <Cpu className="w-5 h-5 text-purple-400" />
+              <h2 className="text-base font-bold text-white">Arquitetura Avançada & Gestão de Tokens Gemini</h2>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-950 text-purple-300 border border-purple-800">
+                Pay-as-You-Go + Context Cache
+              </span>
             </div>
-
-            {/* Development Mock Mode Switch */}
-            <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl flex items-center space-x-4">
-              <div>
-                <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                  <Database className="w-4 h-4 text-emerald-400" />
-                  Modo Mock Local (`USE_MOCK_AI`)
-                </div>
-                <div className="text-[10px] text-slate-400">
-                  {isMockAiActive
-                    ? 'ATIVADO: Respostas simuladas sem gastar cota/tokens durante edições de layout'
-                    : 'DESATIVADO: Chamadas reais conectadas ao Google Gemini API'}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleToggleMockMode}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1.5 transition-all ${
-                  isMockAiActive
-                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-950/40'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-                }`}
-              >
-                {isMockAiActive ? <ToggleRight className="w-5 h-5 text-slate-950" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}
-                <span>{isMockAiActive ? 'Mocking Ativado' : 'Ativar Mocking'}</span>
-              </button>
-            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Controle de custos por tenant e resiliência com filas — Camada 1+2 do prompt (fixa por segmento) agora usa cache de contexto real do Gemini.
+            </p>
           </div>
 
           {/* Strategy Overview KPIs — achado numa auditoria: enquanto telemetryData

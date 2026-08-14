@@ -10,9 +10,6 @@ interface TelemetryRouterDeps {
 export function createTelemetryRouter({ authenticateToken }: TelemetryRouterDeps): Router {
   const router = Router();
 
-  // Telemetria de Tokens & Cache AI Strategy
-  let mockAiEnabled = false;
-
   // Achado real em produção ("Telemetria de Tokens IA" jogava o painel numa
   // tela branca): esta rota respondia com números fabricados (tenant
   // fictício "Clínica Odonto Prime" incluído) usando nomes de campo
@@ -31,20 +28,19 @@ export function createTelemetryRouter({ authenticateToken }: TelemetryRouterDeps
   // (server/services/tokenUsageStore.ts, chamada a partir de
   // server/services/autoReply.ts a cada chamada Gemini). Agregado dos
   // últimos 30 dias, por tenant.
+  //
+  // Achado real em produção (14/08/2026): a rota também mandava
+  // `useMockAiMode`/tinha um POST /api/telemetry/toggle-mock pra ligar um
+  // "Modo Mock Local" no painel — mas nenhum lugar do código que realmente
+  // chama o Gemini (server/gemini.ts, autoReply.ts) lia esse valor. Era só
+  // uma variável indo e voltando entre o painel e esta rota, sem interceptar
+  // chamada real nenhuma — parecia proteção de custo, não protegia nada.
+  // Removido (usuário pediu explicitamente pra tirar tudo que é fake/mock
+  // desta tela).
   router.get('/api/telemetry/tokens', authenticateToken, asyncHandler(async (req, res) => {
     const { summary, tenantsTelemetry } = await getTokenTelemetry();
-    res.json({
-      useMockAiMode: mockAiEnabled,
-      summary,
-      tenantsTelemetry,
-    });
+    res.json({ summary, tenantsTelemetry });
   }));
-
-  router.post('/api/telemetry/toggle-mock', authenticateToken, (req, res) => {
-    const { enabled } = req.body || {};
-    mockAiEnabled = typeof enabled === 'boolean' ? enabled : !mockAiEnabled;
-    res.json({ useMockAiMode: mockAiEnabled, message: `Mock AI Mode ${mockAiEnabled ? 'Ativado' : 'Desativado'}` });
-  });
 
   // Status real da fila de transcrição (server/services/transcriptionQueue.ts) —
   // substitui os números fixos que existiam aqui antes (Epic 5.1.3 do roadmap).
@@ -66,8 +62,6 @@ export function createTelemetryRouter({ authenticateToken }: TelemetryRouterDeps
       completedJobs: stats.processedTotal,
       failedJobs: stats.failedTotal,
       rateLimitRPM: 60,
-      mockModeEnabled: mockAiEnabled,
-      contextCacheEnabled: false,
     });
   });
 
