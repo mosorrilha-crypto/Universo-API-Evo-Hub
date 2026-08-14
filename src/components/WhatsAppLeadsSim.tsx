@@ -18,7 +18,6 @@ import {
   Loader2,
   User,
   Clock,
-  PlusCircle,
   Send,
   AlertCircle,
   RefreshCw,
@@ -38,9 +37,7 @@ import {
   Filter,
   PanelRightOpen,
   PanelRightClose,
-  Globe,
   X,
-  Flame,
   CircleDashed,
   Info,
   Trash2,
@@ -222,7 +219,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'hot' | 'international'>('all');
+  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread'>('all');
   const [showRightPanel, setShowRightPanel] = useState(true);
 
   // Item 2 do checklist visual (issue #100): flash breve na linha da lista
@@ -1186,19 +1183,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       if (activeTabFilter === 'unread') {
         return getUnreadCount(lead) > 0;
       }
-      if (activeTabFilter === 'hot') {
-        return (
-          lead.fullAnalysis?.dealProbability !== undefined && lead.fullAnalysis.dealProbability >= 60
-        );
-      }
-      if (activeTabFilter === 'international') {
-        return (
-          lead.phone.startsWith('+1') ||
-          lead.phone.startsWith('+34') ||
-          lead.fullAnalysis?.detectedLanguage?.toLowerCase().includes('inglês') ||
-          lead.fullAnalysis?.detectedLanguage?.toLowerCase().includes('espanhol')
-        );
-      }
       return true;
     })
     // Achado a pedido do dono do tenant: a lista não se comportava como o
@@ -1993,34 +1977,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
       <div className="relative p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl space-y-2.5">
-        {/* Linha 1 — só o título. Achado real: "Atendimento WhatsApp" repetia
-            a mesma informação da aba ativa logo acima — só "WhatsApp" já
-            deixa claro o contexto. O status do agente (Ativo/Restrito/
-            Pausado) foi pra frente da barra de busca, na lista de conversas
-            logo abaixo (pedido direto) — não fica mais aqui. */}
-        <div className="flex items-center space-x-3.5 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
-            <Bot className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-sm font-bold text-white truncate">
-              WhatsApp
-            </h2>
-            {activeTenant && (
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeTenant.name}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Linha 2 — todos os outros botões numa fileira única, discreta, que
-            rola de lado (mesmo padrão já usado nas abas "Tudo/Não lidos/
-            Quentes" logo abaixo, na lista de conversas). Achado real:
-            "flex-wrap" fazia essa barra quebrar em 2-3 linhas ("caixa
-            gigante") e a tentativa anterior de esconder parte dos botões
-            atrás de um menu ⋮/☰ deixava ação real inacessível sem antes
-            descobrir que o menu existia. Rolagem horizontal resolve os dois
-            problemas de uma vez: nada escondido atrás de clique nenhum, e a
-            barra nunca cresce em altura, só em largura (que já rola). */}
+        {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
+            só repetia informação já visível na aba ativa logo acima
+            (Header.tsx) e no cabeçalho da página — removido por completo
+            pra a caixa ficar mais estreita, sobrando só a fileira de ações
+            de verdade abaixo. */}
         <div ref={toolbarRef} className="flex items-center gap-2 overflow-x-auto scrollbar-thin -mx-1 px-1 pb-0.5">
           {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
               direto daqui, sem precisar navegar até a barra de abas do topo
@@ -2122,7 +2083,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {/* Agenda (Google Calendar) — achado real de uso: fica atrás de
               "Configurações" era difícil de achar pra um item usado o tempo
               todo (ver comentário sem seu lugar antigo abaixo). Fica sempre
-              visível aqui, ao lado de "Configurações"/"Novo Lead". */}
+              visível aqui, ao lado de "Configurações". */}
           <button
             onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
             title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
@@ -2152,14 +2113,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           >
             <Settings className="w-3.5 h-3.5" />
             <span>Configurações</span>
-          </button>
-
-          <button
-            onClick={() => setShowAddLead(true)}
-            className="flex-shrink-0 inline-flex items-center px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-950 transition-all cursor-pointer whitespace-nowrap"
-          >
-            <PlusCircle className="w-4 h-4 mr-1" />
-            <span>Novo Lead</span>
           </button>
         </div>
 
@@ -2431,12 +2384,29 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               pela aba ativa + barra de controles, sem perda de informação. */}
 
           {/* WhatsApp Web Search Bar — o status do agente (Ativo/Restrito/
-              Pausado) fica na frente dela, pedido direto pra ficar junto da
-              busca em vez de lá em cima na barra de título; a busca em si
-              fica mais curta (flex-1 dividindo a linha com o status, em vez
-              de w-full sozinha). */}
+              Pausado) fica à direita dela (pedido direto), busca em si mais
+              curta (flex-1 dividindo a linha com o status, em vez de w-full
+              sozinha). */}
           <div className="p-2.5 bg-[#111b21] border-b border-slate-800/60">
             <div className="flex items-center gap-2">
+              <div className="relative flex items-center flex-1 min-w-0">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar ou começar uma nova conversa"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 text-slate-400 hover:text-white text-xs"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
               <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
                 {(['active', 'restricted', 'paused'] as const).map((status) => (
                   <button
@@ -2457,27 +2427,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </button>
                 ))}
               </div>
-              <div className="relative flex items-center flex-1 min-w-0">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Pesquisar ou começar uma nova conversa"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2 text-slate-400 hover:text-white text-xs"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
             </div>
 
-            {/* WhatsApp Web Filter Tabs */}
+            {/* WhatsApp Web Filter Tabs — "Quentes"/"Internacional" removidos
+                (pedido direto, "eu acho que não funciona"): dependiam de
+                lead.fullAnalysis, só preenchido depois de rodar a análise IA
+                manual naquele lead específico — como a análise automática
+                está desligada por padrão (ver isToolbarSettingsOpen), quase
+                nenhum lead tem esse campo populado no dia a dia, então os
+                dois filtros davam lista vazia quase sempre. "Tudo"/"Não
+                lidos" não dependem de análise nenhuma, continuam confiáveis. */}
             <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
               <button
                 onClick={() => setActiveTabFilter('all')}
@@ -2498,28 +2457,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 }`}
               >
                 Não lidos ({unreadLeadsCount})
-              </button>
-              <button
-                onClick={() => setActiveTabFilter('hot')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                  activeTabFilter === 'hot'
-                    ? 'bg-amber-500 text-slate-950 font-bold'
-                    : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                <Flame className="w-3 h-3 text-amber-400" />
-                Quentes
-              </button>
-              <button
-                onClick={() => setActiveTabFilter('international')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all flex items-center gap-1 whitespace-nowrap cursor-pointer ${
-                  activeTabFilter === 'international'
-                    ? 'bg-blue-500 text-slate-950 font-bold'
-                    : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                <Globe className="w-3 h-3 text-blue-400" />
-                Internacional
               </button>
 
               {tenantLabelSuggestions.length > 0 && (
