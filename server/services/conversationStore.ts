@@ -8,6 +8,7 @@
 import { getDb } from './db';
 import { listLabels, listLabelsByConversationId } from './conversationLabelStore';
 import { emitConversationUpdated } from './conversationEvents';
+import { registerPendingEcho } from './outboundEchoTracker';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -324,6 +325,12 @@ export async function recordOutgoingMessage(
   }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);
   emitConversationUpdated(tenantId, phone);
+  // Registra a marca de eco DEPOIS do envio real (webhooks.ts/conversations.ts
+  // sempre chamam recordOutgoingMessage só após a chamada de envio ter tido
+  // sucesso) — só pra tenant conectado via Evolution API o eco fromMe:true
+  // chega de volta; pra Meta/Evo Hub essa marca simplesmente nunca é
+  // consumida e expira sozinha (sem custo real). Ver outboundEchoTracker.ts.
+  registerPendingEcho(tenantId, phone, message.type, message.type === 'text' ? message.text : undefined).catch(() => {});
   return (await getConversation(tenantId, phone))!;
 }
 
