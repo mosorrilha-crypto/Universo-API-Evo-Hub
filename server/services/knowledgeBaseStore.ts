@@ -135,6 +135,15 @@ export interface AgentKnowledgeBase {
   businessRules?: string[];
   faqs?: AgentFAQ[];
   documents?: AgentFileDoc[];
+  /**
+   * Link de localização (Google Maps) pro agente mandar quando o cliente
+   * pedir o endereço/localização — texto livre em `businessModel` descreve
+   * o endereço, mas não é algo clicável/navegável no WhatsApp. Aceita tanto
+   * um link real (share link do Google Maps) quanto uma URL de busca
+   * gerada a partir do endereço (`https://www.google.com/maps/search/?api=1&query=...`),
+   * que funciona sem precisar de coordenadas exatas.
+   */
+  locationMapsUrl?: string;
 }
 
 export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
@@ -196,6 +205,7 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   // era uma resposta genérica de "vou confirmar", não uma alucinação — mas
   // ainda assim quebrava uma das perguntas mais comuns de FAQ).
   if (kb.businessModel) parts.push(`Sobre o negócio (endereço, horário, posicionamento): ${kb.businessModel}`);
+  if (kb.locationMapsUrl) parts.push(`Link de localização (Google Maps) — mande esse link exatamente como está, sem alterar, sempre que o cliente pedir o endereço/localização: ${kb.locationMapsUrl}`);
   if (kb.pricingAndPolicies) parts.push(`Políticas de preço/pagamento: ${kb.pricingAndPolicies}`);
   if (kb.businessRules?.length) parts.push(`Regras de negócio:\n- ${kb.businessRules.join('\n- ')}`);
   if (kb.products?.length) {

@@ -30,6 +30,21 @@ describe('formatKnowledgeBaseForPrompt', () => {
     const kb: AgentKnowledgeBase = { companyName: 'Estúdio Teste' };
     expect(() => formatKnowledgeBaseForPrompt(kb)).not.toThrow();
   });
+
+  it('inclui locationMapsUrl no texto do prompt, instruindo o agente a mandar o link', () => {
+    const kb: AgentKnowledgeBase = {
+      companyName: 'Estúdio Teste',
+      locationMapsUrl: 'https://www.google.com/maps/search/?api=1&query=Rua+X+123',
+    };
+    const text = formatKnowledgeBaseForPrompt(kb);
+    expect(text).toContain('https://www.google.com/maps/search/?api=1&query=Rua+X+123');
+  });
+
+  it('não quebra quando locationMapsUrl está ausente (não inventa link)', () => {
+    const kb: AgentKnowledgeBase = { companyName: 'Estúdio Teste' };
+    const text = formatKnowledgeBaseForPrompt(kb);
+    expect(text).not.toContain('maps');
+  });
 });
 
 /**

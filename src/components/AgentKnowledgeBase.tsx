@@ -90,6 +90,7 @@ export const moniqueStudioKnowledgeBase: AgentKnowledgeBase = {
   agentGoal: 'Atender clientes pelo WhatsApp e Instagram com a voz e o posicionamento da marca (sem afirmar ser literalmente a Monique): entender desejo/medo/necessidade, recomendar o serviço mais adequado, informar valor/duração com clareza, conduzir ao próximo passo (disponibilidade real → seña → confirmação de turno), fazer follow-up sem pressionar, estimular retorno/indicação/avaliação. Se perguntarem quem atende: "Soy la asistente del estudio y te ayudo con la información y la coordinación de tu turno con Monique."',
   toneOfVoice: 'Espanhol paraguaio com voseo natural (vos, querés, buscás, podés) quando a cliente escreve em espanhol, português quando ela escreve em português. Tom caloroso, próximo, humano, profissional, premium, nunca robótico. Expressões carinhosas com moderação (reina, amiga, linda, mi vida) — nunca em toda frase. NUNCA use diminutivo (nada de "-ito"/"-ita"). Escreva como uma pessoa real digitando no celular: frases curtas, sem parênteses nem dois-pontos explicativos dentro da mensagem. Evite usted, linguagem corporativa, excesso de emojis, pressão ou falsa urgência.',
   businessModel: 'Estúdio premium de micropigmentação e beleza (pestañas, cejas, labios) em Luque, Paraguai — atendimento de uma cliente por vez, privacidade, experiência sensorial com som binaural, técnica brasileira, resultado natural e personalizado. Monique é brasileira, mais de 13 anos de experiência. Instagram: @pestanaspormonique. Endereço: Calle Paso Bogarín 3665, Loma Merlo, Luque. Horário: segunda a sexta 07:30–20:00, sábados 08:00–13:00, domingos 09:00–17:00.',
+  locationMapsUrl: 'https://www.google.com/maps/search/?api=1&query=Calle%20Paso%20Bogar%C3%ADn%203665%2C%20Loma%20Merlo%2C%20Luque%2C%20Paraguay',
   pricingAndPolicies: 'Seña de Gs 50.000, sempre a primeira forma de confirmação oferecida, por transferência (Alias/Cédula: 5286155, Titular: Sara Jazmin Escobar Ruiz) — abatida do valor total do serviço. Efetivo só quando a cliente pedir/demonstrar dificuldade com transferência; nesse caso paga o valor total depois do atendimento. Cancelamento: seña devolvida com 24h+ de antecedência, não devolvida com menos de 24h. Retoque NÃO incluso no valor inicial (Gs 150.000 quando Monique recomendar após avaliar). Nunca desconto ou parcelamento não autorizado.',
   products: [
     // PESTAÑAS
@@ -864,6 +865,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 placeholder="Descreva o que sua empresa vende, para quem vende e quais são os principais diferenciais competitivos..."
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Link de Localização (Google Maps) — opcional:
+              </label>
+              <input
+                type="text"
+                value={formData.locationMapsUrl || ''}
+                onChange={(e) => setFormData({ ...formData, locationMapsUrl: e.target.value })}
+                placeholder="Ex: https://www.google.com/maps/search/?api=1&query=Seu+Endereço+Completo"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">Quando preenchido, o agente manda esse link sempre que o cliente pedir o endereço/localização.</p>
             </div>
 
             <div>
