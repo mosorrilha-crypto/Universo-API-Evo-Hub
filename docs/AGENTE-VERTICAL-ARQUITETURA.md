@@ -17,6 +17,17 @@
 > (seções 1–4, 6–8) foi implementado ainda** — é o projeto antes da obra. A única exceção é a
 > correção de segurança da seção 5 (fallback de canal desconhecido, PR #39), feita fora do
 > embargo por ser correção de um risco real em produção, não feature do agente vertical.
+>
+> **Atualização de 14/08/2026 — Camada 2 (Regras do Segmento) removida do código.** Decisão
+> explícita do dono do produto: nenhuma informação/regra de negócio editável deveria depender
+> de deploy pra mudar — só duas fontes editáveis pelo painel devem existir: a Camada 1 (Prompt
+> Global, editável por saas_admin via `global_prompt_layer`) e a Base de Conhecimento de cada
+> tenant (Camada 3, editável por qualquer admin do tenant). O texto que existia hardcoded no
+> segmento `beauty_studio` (server/services/autoReply.ts) foi migrado pra `businessRules` da
+> Base de Conhecimento da própria Monique, sem perda de conteúdo; o mesmo vale pro segmento
+> `high_ticket_installation` criado (e removido no mesmo dia) pra Clic Piscinas. As menções a
+> "Camada 2"/"Regras do Segmento" no resto deste documento são registro histórico da decisão
+> original de 07/08 — não descrevem mais o código atual.
 
 ---
 
