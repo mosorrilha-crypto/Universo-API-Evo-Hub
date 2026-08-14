@@ -1,34 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus } from '../types';
+import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus, RoadmapItem, RoadmapPriority } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import {
   Building2,
   DollarSign,
   Users,
-  TrendingUp,
   Plus,
   Search,
   CheckCircle2,
   AlertCircle,
-  Clock,
   Key,
-  MessageSquare,
   QrCode,
-  ShieldCheck,
   ExternalLink,
-  ChevronRight,
   Sparkles,
   Settings,
   Layers,
-  Copy,
   Zap,
   X,
-  PieChart as PieChartIcon,
   Cpu,
   RefreshCw,
   Server,
   Activity,
-  FlaskConical,
   Brain,
   Save,
   RotateCcw,
@@ -561,6 +553,143 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAdminTab]);
+
+  // Backlog técnico real (server/services/roadmapStore.ts) — achado real
+  // (pedido do usuário): a aba "Roadmap Técnico & Backlog" era uma lista de
+  // 4 cards fixos direto no JSX, com um badge "5 Módulos Planejados" já
+  // errado (só 4 cards), impossível de editar, e itens já desatualizados
+  // (ex: automação de instância WhatsApp já em boa parte implementada via
+  // "Conectar WhatsApp via QR Code"). Agora é uma lista real — o saas_admin
+  // adiciona pendências não-urgentes (texto + imagem opcional) conforme
+  // aparecem, marca como concluída quando executada depois em lote.
+  const [roadmapItems, setRoadmapItems] = useState<RoadmapItem[]>([]);
+  const [isLoadingRoadmap, setIsLoadingRoadmap] = useState(false);
+  const [roadmapLoaded, setRoadmapLoaded] = useState(false);
+  const [roadmapError, setRoadmapError] = useState<string | null>(null);
+  const [isAddRoadmapModalOpen, setIsAddRoadmapModalOpen] = useState(false);
+  const [newRoadmapTitle, setNewRoadmapTitle] = useState('');
+  const [newRoadmapDescription, setNewRoadmapDescription] = useState('');
+  const [newRoadmapPriority, setNewRoadmapPriority] = useState<RoadmapPriority>('media');
+  const [newRoadmapImageBase64, setNewRoadmapImageBase64] = useState<string | null>(null);
+  const [isSavingRoadmapItem, setIsSavingRoadmapItem] = useState(false);
+  const [roadmapFormError, setRoadmapFormError] = useState<string | null>(null);
+  const [busyRoadmapItemId, setBusyRoadmapItemId] = useState<string | null>(null);
+
+  const fetchRoadmapItems = async () => {
+    setIsLoadingRoadmap(true);
+    setRoadmapError(null);
+    try {
+      const res = await apiFetch('/api/admin/roadmap-items');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setRoadmapItems(data.items || []);
+      setRoadmapLoaded(true);
+    } catch (err: any) {
+      setRoadmapError(err.message || 'Falha ao carregar o backlog.');
+    } finally {
+      setIsLoadingRoadmap(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeAdminTab === 'roadmap' && !roadmapLoaded && !isLoadingRoadmap) {
+      fetchRoadmapItems();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAdminTab]);
+
+  const resetRoadmapForm = () => {
+    setNewRoadmapTitle('');
+    setNewRoadmapDescription('');
+    setNewRoadmapPriority('media');
+    setNewRoadmapImageBase64(null);
+    setRoadmapFormError(null);
+  };
+
+  const handleRoadmapImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setRoadmapFormError('Selecione um arquivo de imagem.');
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      setRoadmapFormError('Imagem muito grande — máximo de ~6MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setNewRoadmapImageBase64(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleCreateRoadmapItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRoadmapTitle.trim()) return;
+    setIsSavingRoadmapItem(true);
+    setRoadmapFormError(null);
+    try {
+      const res = await apiFetch('/api/admin/roadmap-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newRoadmapTitle.trim(),
+          description: newRoadmapDescription.trim(),
+          priority: newRoadmapPriority,
+          imageBase64: newRoadmapImageBase64,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setRoadmapItems((prev) => [data.item, ...prev]);
+      setIsAddRoadmapModalOpen(false);
+      resetRoadmapForm();
+    } catch (err: any) {
+      setRoadmapFormError(err.message || 'Falha ao salvar a pendência.');
+    } finally {
+      setIsSavingRoadmapItem(false);
+    }
+  };
+
+  const handleToggleRoadmapStatus = async (item: RoadmapItem) => {
+    setBusyRoadmapItemId(item.id);
+    try {
+      const nextStatus = item.status === 'pendente' ? 'concluido' : 'pendente';
+      const res = await apiFetch(`/api/admin/roadmap-items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setRoadmapItems((prev) => {
+        const updated = prev.map((it) => (it.id === item.id ? data.item : it));
+        // Reordena localmente (pendentes primeiro) igual o backend faz, sem
+        // precisar recarregar a lista inteira do zero.
+        return [...updated].sort((a, b) => {
+          if (a.status !== b.status) return a.status === 'pendente' ? -1 : 1;
+          return 0;
+        });
+      });
+    } catch (err: any) {
+      setRoadmapError(err.message || 'Falha ao atualizar a pendência.');
+    } finally {
+      setBusyRoadmapItemId(null);
+    }
+  };
+
+  const handleDeleteRoadmapItem = async (item: RoadmapItem) => {
+    if (!window.confirm(`Apagar a pendência "${item.title}"? Essa ação não pode ser desfeita.`)) return;
+    setBusyRoadmapItemId(item.id);
+    try {
+      const res = await apiFetch(`/api/admin/roadmap-items/${item.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRoadmapItems((prev) => prev.filter((it) => it.id !== item.id));
+    } catch (err: any) {
+      setRoadmapError(err.message || 'Falha ao apagar a pendência.');
+    } finally {
+      setBusyRoadmapItemId(null);
+    }
+  };
 
   const handleSaveGlobalPrompt = async () => {
     setIsSavingGlobalPrompt(true);
@@ -1277,10 +1406,15 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         </div>
       )}
 
-      {/* TAB CONTENT: ROADMAP TÉCNICO */}
+      {/* TAB CONTENT: ROADMAP TÉCNICO — achado real (pedido do usuário): era
+          uma lista de 4 cards fixos direto no JSX, com um badge "5 Módulos
+          Planejados" já errado (só 4 cards renderizados), impossível de
+          editar pelo painel, e itens já desatualizados (ex: "Automação
+          Zero-Touch de Instâncias WhatsApp" já em boa parte implementada via
+          "Conectar WhatsApp via QR Code", Epic 4.6). Backlog real agora —
+          ver server/services/roadmapStore.ts. */}
       {activeAdminTab === 'roadmap' && (
         <div className="space-y-6 animate-fade-in">
-          {/* BACKLOG TÉCNICO & ROADMAP DE IMPLEMENTAÇÕES NÃO URGENTES */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
               <div>
@@ -1289,87 +1423,92 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   Lista de Pendências & Roadmap Técnico (Implementações Não-Urgentes)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Melhorias planejadas para escalabilidade, automação de instâncias WhatsApp e relatórios avançados.
+                  Adicione pendências conforme aparecem, com prioridade e uma imagem de referência se ajudar — depois executamos tudo em lote.
                 </p>
               </div>
-              <span className="text-xs bg-purple-950 text-purple-300 border border-purple-800 px-3 py-1 rounded-xl font-semibold">
-                5 Módulos Planejados
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Card 1 */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                    <Zap className="w-4 h-4" /> 1. Automação Zero-Touch de Instâncias WhatsApp
-                  </span>
-                  <span className="text-[10px] bg-amber-950 text-amber-400 px-2 py-0.5 rounded-md font-semibold border border-amber-800">
-                    Média Prioridade
-                  </span>
-                </div>
-                <p className="text-xs text-slate-300">
-                  Criar e configurar instâncias na Z-API ou Evolution API via requisição HTTP direta no momento em que o cliente se cadastra, gerando o QR Code automaticamente no painel sem intervenção manual.
-                </p>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  APIs: POST /instance/create • POST /webhook/set
-                </div>
-              </div>
-
-              {/* Card 2 */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-purple-400 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4" /> 2. Circuit Breaker & Failover Automático
-                  </span>
-                  <span className="text-[10px] bg-amber-950 text-amber-400 px-2 py-0.5 rounded-md font-semibold border border-amber-800">
-                    Média Prioridade
-                  </span>
-                </div>
-                <p className="text-xs text-slate-300">
-                  Caso a VPS da Evolution API sofra downtime ou perca a conexão socket com os servidores do WhatsApp, o sistema redireciona automaticamente o fluxo de envios para a Z-API secundária sem perder mensagens dos leads.
-                </p>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  Monitoria: Heatbeat Ping a cada 30 segundos
-                </div>
-              </div>
-
-              {/* Card 3 */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
-                    <PieChartIcon className="w-4 h-4" /> 3. Exportador de Relatórios Financeiros & Churn
-                  </span>
-                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-md font-semibold border border-slate-700">
-                    Baixa Prioridade
-                  </span>
-                </div>
-                <p className="text-xs text-slate-300">
-                  Gerador de relatórios executivos em PDF/CSV contendo histórico de pagamentos, retenção por plano, custo de infraestrutura por empresa e margem operacional líquida do SaaS.
-                </p>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  Formatos: CSV, PDF, JSON Export
-                </div>
-              </div>
-
-              {/* Card 4 */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
-                    <Key className="w-4 h-4" /> 4. Gestão Granular de Permissões de Usuários (RBAC)
-                  </span>
-                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-md font-semibold border border-slate-700">
-                    Baixa Prioridade
-                  </span>
-                </div>
-                <p className="text-xs text-slate-300">
-                  Criação de papéis customizados dentro do CRM de cada tenant (ex: Vendedor Júnior só visualiza seus próprios leads; Gerente de Vendas acessa métricas da equipe; Finanças acessa relatórios).
-                </p>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  Níveis: Master Admin, Tenant Owner, Supervisor, Operador CRM
-                </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-xs bg-purple-950 text-purple-300 border border-purple-800 px-3 py-1 rounded-xl font-semibold">
+                  {roadmapItems.filter((i) => i.status === 'pendente').length} Pendente{roadmapItems.filter((i) => i.status === 'pendente').length === 1 ? '' : 's'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetRoadmapForm();
+                    setIsAddRoadmapModalOpen(true);
+                  }}
+                  className="py-2 px-3.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 flex items-center gap-2 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nova Pendência</span>
+                </button>
               </div>
             </div>
+
+            {roadmapError && (
+              <div className="p-3 rounded-xl bg-red-950/40 border border-red-800/60 text-red-300 text-xs">{roadmapError}</div>
+            )}
+
+            {isLoadingRoadmap ? (
+              <div className="text-center text-xs text-slate-500 py-10">Carregando backlog...</div>
+            ) : roadmapItems.length === 0 ? (
+              <div className="text-center text-xs text-slate-500 py-10">
+                Nenhuma pendência cadastrada ainda — clique em "Nova Pendência" pra adicionar a primeira.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {roadmapItems.map((item) => {
+                  const priorityStyle =
+                    item.priority === 'alta'
+                      ? 'bg-rose-950 text-rose-300 border-rose-800'
+                      : item.priority === 'media'
+                      ? 'bg-amber-950 text-amber-400 border-amber-800'
+                      : 'bg-slate-800 text-slate-400 border-slate-700';
+                  const priorityLabel = item.priority === 'alta' ? 'Alta Prioridade' : item.priority === 'media' ? 'Média Prioridade' : 'Baixa Prioridade';
+                  const isConcluded = item.status === 'concluido';
+                  const isBusy = busyRoadmapItemId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      className={`bg-slate-950 border rounded-xl p-4 space-y-2 ${isConcluded ? 'border-slate-800/60 opacity-60' : 'border-slate-800'}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className={`text-xs font-bold ${isConcluded ? 'text-slate-400 line-through' : 'text-white'}`}>{item.title}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border flex-shrink-0 ${priorityStyle}`}>{priorityLabel}</span>
+                      </div>
+                      {item.description && <p className="text-xs text-slate-300">{item.description}</p>}
+                      {item.imageBase64 && (
+                        <img src={item.imageBase64} alt={item.title} className="w-full max-h-48 object-cover rounded-lg border border-slate-800" />
+                      )}
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-[10px] text-slate-500">
+                          {isConcluded ? 'Concluída' : 'Pendente'} • {new Date(item.createdAt).toLocaleDateString('pt-BR')}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRoadmapStatus(item)}
+                            disabled={isBusy}
+                            title={isConcluded ? 'Reabrir pendência' : 'Marcar como concluída'}
+                            className="p-1.5 bg-slate-800 hover:bg-emerald-950/60 hover:text-emerald-300 text-slate-400 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            {isConcluded ? <RotateCcw className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRoadmapItem(item)}
+                            disabled={isBusy}
+                            title="Apagar pendência"
+                            className="p-1.5 bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-400 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1702,6 +1841,93 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         </div>
       )}
 
+      {/* NEW ROADMAP ITEM MODAL */}
+      {isAddRoadmapModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-5">
+            <button
+              onClick={() => setIsAddRoadmapModalOpen(false)}
+              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-3 pb-3 border-b border-slate-800">
+              <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Nova Pendência no Backlog</h2>
+                <p className="text-xs text-slate-400">Fica salva pra executarmos depois, sem urgência</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleCreateRoadmapItem} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Título</label>
+                <input
+                  type="text"
+                  value={newRoadmapTitle}
+                  onChange={(e) => setNewRoadmapTitle(e.target.value)}
+                  placeholder="Ex: Exportador de relatórios financeiros"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Descrição</label>
+                <textarea
+                  value={newRoadmapDescription}
+                  onChange={(e) => setNewRoadmapDescription(e.target.value)}
+                  rows={4}
+                  placeholder="Detalhe o que precisa ser feito..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500 resize-y"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Prioridade</label>
+                <select
+                  value={newRoadmapPriority}
+                  onChange={(e) => setNewRoadmapPriority(e.target.value as RoadmapPriority)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                >
+                  <option value="alta">Alta</option>
+                  <option value="media">Média</option>
+                  <option value="baixa">Baixa</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Imagem de referência (opcional)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleRoadmapImageChange}
+                  className="w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200 file:text-xs file:font-semibold hover:file:bg-slate-700 cursor-pointer"
+                />
+                {newRoadmapImageBase64 && (
+                  <img src={newRoadmapImageBase64} alt="Pré-visualização" className="mt-2 max-h-40 rounded-lg border border-slate-800" />
+                )}
+              </div>
+
+              {roadmapFormError && (
+                <p className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{roadmapFormError}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={isSavingRoadmapItem || !newRoadmapTitle.trim()}
+                className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer"
+              >
+                {isSavingRoadmapItem ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                <span>{isSavingRoadmapItem ? 'Salvando...' : 'Adicionar ao Backlog'}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

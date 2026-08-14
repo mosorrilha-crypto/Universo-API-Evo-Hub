@@ -374,6 +374,22 @@ export interface QueueSystemStatus {
   rateLimitRPM: number;
 }
 
+/** Backlog técnico real do produto (aba "Roadmap Técnico & Backlog", server/services/roadmapStore.ts) — não é por tenant. */
+export type RoadmapPriority = 'alta' | 'media' | 'baixa';
+export type RoadmapStatus = 'pendente' | 'concluido';
+
+export interface RoadmapItem {
+  id: string;
+  title: string;
+  description: string;
+  priority: RoadmapPriority;
+  status: RoadmapStatus;
+  imageBase64: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BatchAnalysisJob {
   id: string;
   tenantId: string;
