@@ -1,5 +1,6 @@
 import React from 'react';
 import { CircleDashed, Image as ImageIcon, Video, X } from 'lucide-react';
+import { AutoResizeTextarea } from '../AutoResizeTextarea';
 
 interface StatusModalProps {
   isOpen: boolean;
@@ -90,12 +91,12 @@ export const StatusModal: React.FC<StatusModalProps> = ({
             </div>
           ) : (
             <>
-              <textarea
+              <AutoResizeTextarea
                 placeholder="Escreva o texto do Status..."
                 value={text}
                 onChange={(e) => onTextChange(e.target.value)}
-                rows={3}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none resize-none"
+                minRows={3}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
               />
               <div className="flex items-center gap-2 flex-wrap">
                 <label className="text-xs font-medium text-slate-300">Cor de fundo</label>

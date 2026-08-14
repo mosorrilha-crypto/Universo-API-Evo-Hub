@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { EscalationInfo } from '../types';
+import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { AlertTriangle, CheckCircle2, XCircle, Trash2, Clock, Phone, MessageSquare, Globe2, MessageCircle, ExternalLink, MessageCircleReply, Send, TimerReset } from 'lucide-react';
 
 interface EscalationsPanelProps {
@@ -151,12 +152,12 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                 )}
                 {openReplyId === e.id && (
                   <div className="mt-2 flex flex-col gap-1.5" onClick={(evt) => evt.stopPropagation()}>
-                    <textarea
+                    <AutoResizeTextarea
                       value={replyDraftById[e.id] || ''}
                       onChange={(evt) => setReplyDraftById((prev) => ({ ...prev, [e.id]: evt.target.value }))}
                       placeholder={e.kind === 'payment_proof' ? 'Ex: faltam Gs 10.000, pede pra ela completar e reenviar o comprovante' : 'Ex: diz pra ela que o horário de sábado 14h ainda está livre'}
-                      rows={2}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500 resize-none"
+                      minRows={2}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
                     />
                     <div className="flex gap-2">
                       <button

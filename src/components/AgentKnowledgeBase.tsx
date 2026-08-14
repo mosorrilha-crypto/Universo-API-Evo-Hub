@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours } from '../types';
 import { apiFetch } from '../lib/apiClient';
+import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Brain,
   Sparkles,
@@ -30,40 +31,6 @@ import {
   Video,
   Play
 } from 'lucide-react';
-
-/**
- * Textarea que cresce junto com o conteúdo, em vez de ficar presa numa
- * altura fixa com scroll interno — achado real: os campos da Base de
- * Conhecimento (objetivo, modelo de negócio, políticas) guardam textos
- * longos, mas a caixa só mostrava 2-3 linhas, obrigando a rolar dentro dela
- * pra ler/editar o resto. Ajusta a altura via `scrollHeight` a cada mudança
- * de valor — sem precisar de biblioteca nova.
- */
-function AutoResizeTextarea({
-  value,
-  className,
-  minRows = 2,
-  ...rest
-}: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { minRows?: number }) {
-  const ref = React.useRef<HTMLTextAreaElement>(null);
-
-  React.useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
-
-  return (
-    <textarea
-      ref={ref}
-      value={value}
-      rows={minRows}
-      className={`${className || ''} resize-none overflow-hidden`}
-      {...rest}
-    />
-  );
-}
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;

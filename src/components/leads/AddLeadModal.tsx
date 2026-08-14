@@ -1,5 +1,6 @@
 import React from 'react';
 import { PlusCircle, Send } from 'lucide-react';
+import { AutoResizeTextarea } from '../AutoResizeTextarea';
 
 interface AddLeadModalProps {
   isOpen: boolean;
@@ -55,9 +56,9 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
 
           <div>
             <label className="text-xs font-medium text-slate-300 block mb-1">Primeira Mensagem do Cliente *</label>
-            <textarea
+            <AutoResizeTextarea
               required
-              rows={3}
+              minRows={3}
               placeholder="Ex: Olá, gostaria de solicitar um orçamento para o plano enterprise..."
               value={text}
               onChange={(e) => onTextChange(e.target.value)}

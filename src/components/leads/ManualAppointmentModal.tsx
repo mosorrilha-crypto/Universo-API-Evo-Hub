@@ -1,5 +1,6 @@
 import React from 'react';
 import { CalendarPlus } from 'lucide-react';
+import { AutoResizeTextarea } from '../AutoResizeTextarea';
 
 interface ManualAppointmentModalProps {
   isOpen: boolean;
@@ -97,12 +98,12 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
 
           <div>
             <label className="text-xs font-medium text-slate-300 block mb-1">Descrição (opcional)</label>
-            <textarea
-              rows={3}
+            <AutoResizeTextarea
+              minRows={3}
               placeholder="Ex: cliente pediu pra confirmar o endereço antes, quer levar acompanhante..."
               value={notes}
               onChange={(e) => onNotesChange(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none resize-none"
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
             />
           </div>
 

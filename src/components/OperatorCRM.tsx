@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LeadInfo, CRMStage, UserProfile, CRMOperatorNote, CRMTask, LeadSourceChannel } from '../types';
 import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
+import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Kanban,
   List,
@@ -810,8 +811,8 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                 </h3>
 
                 <form onSubmit={handleAddNote} className="space-y-2">
-                  <textarea
-                    rows={2}
+                  <AutoResizeTextarea
+                    minRows={2}
                     value={newNoteText}
                     onChange={(e) => setNewNoteText(e.target.value)}
                     placeholder="Registrar observação interna (ex: Cliente gostou da proposta do plano anual)..."
@@ -988,8 +989,8 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-bold mb-1">Nota / Observação Inicial</label>
-                <textarea
-                  rows={2}
+                <AutoResizeTextarea
+                  minRows={2}
                   placeholder="Descreva o primeiro contato ou pedido do cliente..."
                   value={leadNotes}
                   onChange={(e) => setLeadNotes(e.target.value)}
