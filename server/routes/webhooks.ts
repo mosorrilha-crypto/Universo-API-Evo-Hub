@@ -16,6 +16,7 @@ import { bufferIncomingText } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
+import { consumePendingEcho } from '../services/outboundEchoTracker';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
 import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnalysis';
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, type ResolvedTenant } from '../services/tenantResolver';
@@ -216,6 +217,38 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           continue;
         }
         const { tenantId } = resolvedTenant;
+
+        // Eco fromMe:true (só Evolution API — Baileys espelha TODA atividade
+        // do número conectado, inclusive nosso próprio envio via API). Nunca
+        // dispara resposta automática/escalonamento: ou é confirmação de
+        // algo que a gente mesma já mandou e já gravou (descarta), ou foi
+        // mandado direto do celular fora do painel — nesse caso vira
+        // mensagem nova (sentBy='operator'), senão ficaria invisível tanto
+        // pro operador quanto pro contexto futuro do agente (achado real).
+        // Ver server/services/outboundEchoTracker.ts.
+        if (msg.fromMe) {
+          if (msg.type === 'text' || msg.type === 'audio' || msg.type === 'image') {
+            const alreadyOurs = await consumePendingEcho(tenantId, msg.from, msg.type, msg.type === 'text' ? msg.text : undefined);
+            if (!alreadyOurs) {
+              if (msg.type === 'text' && msg.text) {
+                await recordOutgoingMessage(tenantId, msg.from, { type: 'text', text: msg.text, timestamp: nowLabel }, 'operator', undefined, undefined, msg.messageId);
+              } else if (msg.type === 'audio' || msg.type === 'image') {
+                const placeholderText = msg.type === 'audio' ? '🎤 Áudio enviado' : '📷 Imagem enviada';
+                await recordOutgoingMessage(tenantId, msg.from, { type: msg.type, text: placeholderText, timestamp: nowLabel }, 'operator', undefined, undefined, msg.messageId);
+                downloadEvolutionMedia(
+                  { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
+                  resolvedTenant.evolutionInstanceName,
+                  resolvedTenant.evolutionApiUrl,
+                  resolvedTenant.evolutionApiKey
+                )
+                  .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
+                  .catch((err) => console.warn(`❌ [Eco de envio] Falha ao baixar mídia mandada direto do celular (${msg.from}):`, err.message));
+              }
+              console.log(`📱 [Eco de envio] tenant=${tenantId} mensagem mandada direto do celular (fora do painel) pra ${msg.from} — gravada como operador.`);
+            }
+          }
+          continue;
+        }
 
         if (msg.referral?.ctwaClid) {
           attachAdReferralIfMissing(tenantId, msg.from, { ctwaClid: msg.referral.ctwaClid, adSourceId: msg.referral.sourceId, adHeadline: msg.referral.headline }).catch((err) =>

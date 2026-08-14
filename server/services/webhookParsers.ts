@@ -28,6 +28,8 @@ export interface ParsedIncomingMessage {
   evolutionImage?: true;
   /** Presente quando a mensagem veio de um anúncio "Clique para WhatsApp" (Meta Cloud API) — usado pra atribuição real no Meta Conversions API (Epic 4.5.6). */
   referral?: { headline?: string; sourceId?: string; ctwaClid?: string };
+  /** true quando o evento é fromMe (só Evolution API — Baileys espelha TODA atividade do número conectado, inclusive nosso próprio envio via API). Nunca deve disparar resposta automática/escalonamento — ver outboundEchoTracker.ts em webhooks.ts pra distinguir eco do nosso envio de mensagem mandada direto do celular. */
+  fromMe?: true;
 }
 
 /**
@@ -138,7 +140,7 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   }
 
   const data = body.data;
-  if (!data?.key?.id || data?.key?.fromMe) return [];
+  if (!data?.key?.id) return [];
 
   const remoteJid: string = String(data.key.remoteJid || '');
   // Mensagem de grupo do WhatsApp (JID termina em "@g.us") — nunca deve virar
@@ -155,7 +157,14 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   const contactName: string | undefined = data.pushName;
   const message = data.message || {};
 
-  const base: Omit<ParsedIncomingMessage, 'type'> = { provider: 'evolution', messageId, from, contactName, instanceName: body.instance };
+  const base: Omit<ParsedIncomingMessage, 'type'> = {
+    provider: 'evolution',
+    messageId,
+    from,
+    contactName,
+    instanceName: body.instance,
+    ...(data.key.fromMe ? { fromMe: true as const } : {}),
+  };
 
   if (message.audioMessage) {
     return [{
