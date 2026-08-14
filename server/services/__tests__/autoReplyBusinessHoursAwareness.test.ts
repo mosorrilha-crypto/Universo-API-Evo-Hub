@@ -69,6 +69,13 @@ function makeFakeAiCapturingSpecialistPrompt(capturedUserContents: string[], spe
           return { functionCalls: [] } as any;
         }
         capturedUserContents.push(req.contents[0].text);
+        // Desde 14/08/2026 a Camada 3 (Base de Conhecimento, onde o horário
+        // de funcionamento estático — não o "hoje está aberto/fechado"
+        // calculado na hora — agora entra) vai em `systemInstruction`
+        // cacheado, não mais em `contents` (ver buildCachedSystemInstruction
+        // em autoReply.ts). Captura os dois pra não quebrar os testes que
+        // checam qualquer um dos dois.
+        if (req.config?.systemInstruction) capturedUserContents.push(req.config.systemInstruction);
         return { text: JSON.stringify({ phase: 'informacao', bubbles: [specialistBubble], needsHumanConfirmation: false }) } as any;
       },
     },

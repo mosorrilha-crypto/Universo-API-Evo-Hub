@@ -203,7 +203,28 @@ DESISTÊNCIA/CANCELAMENTO: se o cliente sinalizar que quer desistir ou cancelar,
  * beauty_studio e pra Clic Piscinas foi migrado pra `businessRules` de cada
  * tenant respectivo, sem perda de conteúdo.
  */
-async function buildGlobalLayer(agent: AgentType): Promise<string> {
+/**
+ * Achado de eficiência (14/08/2026, mesmo dia da remoção da Camada 2): a
+ * Camada 1 (global) já era cacheada via Explicit Context Caching do Gemini
+ * (geminiSystemInstructionCache.ts) — texto idêntico pra todo tenant,
+ * escrito uma vez, reaproveitado por até 55min. A Camada 3 (Base de
+ * Conhecimento do tenant), porém, NUNCA foi cacheada — sempre reenviada
+ * por inteiro em `contents` a cada mensagem, mesmo sendo, na prática, tão
+ * estável quanto a Camada 1 (só muda quando alguém edita a KB pelo
+ * painel). Isso ficou mais caro depois da remoção da Camada 2: regras que
+ * antes viviam no cache compartilhado (`beauty_studio`) passaram a viver
+ * na KB de cada tenant, sem cache nenhum.
+ *
+ * Correção: a Camada 3 agora entra NO MESMO texto cacheado que a Camada 1,
+ * com chave por (agent, tenantId) — cache por tenant em vez de
+ * compartilhado entre todos, mas ainda assim cache de verdade. Não precisa
+ * de invalidação explícita quando a KB muda: a checagem de hash já
+ * existente em getCachedSystemInstruction detecta que o conteúdo mudou e
+ * recria o cache sozinha na próxima mensagem. `contents` (dinâmico —
+ * histórico, mensagem atual, resultado de ferramentas) nunca é cacheado,
+ * como sempre.
+ */
+async function buildCachedSystemInstruction(agent: AgentType, knowledgeBaseContext?: string): Promise<string> {
   const globalLayer = (await getGlobalPromptLayerOverride().catch(() => null)) || DEFAULT_GLOBAL_LAYER;
   return `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
 
@@ -224,7 +245,7 @@ REGRAS DE ESTILO (sempre aplicar):
 10. As bolhas de uma mesma resposta são fragmentos de UM ÚNICO pensamento contínuo, na ordem certa — nunca duas ideias que se contradizem ou dois começos de resposta diferentes colados um atrás do outro.
 11. No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.
 12. Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.
-
+${knowledgeBaseContext || ''}
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
 - "informacao": tirando dúvida técnica, pergunta sobre preço/procedimento/disponibilidade.
@@ -261,11 +282,15 @@ function findServiceNamedInHeadline(adHeadline: string, products?: AgentProduct[
  * Base de Conhecimento, empatia antes de credenciais, sem "speech" de
  * vendedor).
  *
- * Camada 1 (global, fixa) vai em `systemInstruction`. Camadas 3+4
- * (tenant/dinâmico, editáveis pelo painel — Base de Conhecimento) +
- * contexto transacional (histórico/mensagem atual) vão em `contents`, como
- * mensagens distintas — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seções 1 e
- * 7 (Etapa 3). Não existe mais Camada 2 (segmento) hardcoded em código.
+ * Camada 1 (global, fixa) + Camada 3 (Base de Conhecimento do tenant,
+ * editável pelo painel, mas estável entre mensagens) vão juntas em
+ * `systemInstruction` — cacheadas por tenant (ver buildCachedSystemInstruction
+ * e geminiSystemInstructionCache.ts), desde 14/08/2026. Só o que muda de
+ * verdade a cada mensagem (Camada 4 dinâmica via `extraContext`, histórico,
+ * mensagem atual) vai em `contents`, nunca cacheado — ver
+ * docs/AGENTE-VERTICAL-ARQUITETURA.md seções 1 e 7 (Etapa 3, com a
+ * atualização de 14/08 no topo do documento). Não existe mais Camada 2
+ * (segmento) hardcoded em código.
  */
 async function generateSpecialistReply(
   tenantId: string,
@@ -280,18 +305,19 @@ async function generateSpecialistReply(
   adContext?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
-  const systemInstruction = await buildGlobalLayer(agent);
+  const systemInstruction = await buildCachedSystemInstruction(agent, knowledgeBaseContext);
   const specialistModel = 'gemini-3.6-flash';
-  // Camada 1 é idêntica em toda chamada deste `agent` (não depende mais de
-  // `segment` — Camada 2 hardcoded foi removida, ver buildGlobalLayer) —
-  // cache de contexto real do Gemini evita reenviar esse texto por inteiro
-  // toda mensagem (ver geminiSystemInstructionCache.ts). `null` = cache
-  // indisponível por qualquer motivo; usa systemInstruction inline, exatamente
-  // como sempre funcionou.
-  const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}`, systemInstruction);
+  // Camada 1 (global) + Camada 3 (Base de Conhecimento do tenant) juntas
+  // são idênticas em toda chamada deste (agent, tenantId) enquanto ninguém
+  // editar o prompt global nem a KB — cache de contexto real do Gemini
+  // evita reenviar esse texto por inteiro toda mensagem (ver
+  // geminiSystemInstructionCache.ts; chave por tenant, não compartilhada,
+  // já que a KB agora faz parte do texto cacheado). `null` = cache
+  // indisponível por qualquer motivo; usa systemInstruction inline,
+  // exatamente como sempre funcionou.
+  const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${tenantId}`, systemInstruction);
 
-  const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${knowledgeBaseContext || ''}
-${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
+  const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
 Nova mensagem do cliente: "${text}"`;
 
   const callSpecialist = (config: { cachedContent: string } | { systemInstruction: string }) =>

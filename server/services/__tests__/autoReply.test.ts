@@ -92,11 +92,15 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     // pedido explícito: nenhuma regra de negócio editável deveria depender
     // de deploy pra mudar).
     expect(systemInstruction).toContain('REGRAS DE ESTILO');
-    expect(systemInstruction).not.toContain(KB_MARKER);
     expect(systemInstruction).toContain('Nunca finja escassez');
 
-    // Camadas 3+4 (tenant/dinâmico) + histórico: nunca a instrução fixa.
-    expect(userContent).toContain(KB_MARKER);
+    // Achado de eficiência (mesmo dia): a Camada 3 (KB do tenant) passou a
+    // entrar no texto CACHEADO junto com a Camada 1, em vez de ir solta em
+    // `contents` a cada mensagem sem cache nenhum — ver
+    // buildCachedSystemInstruction. Só o que muda de verdade por mensagem
+    // (histórico, mensagem atual) continua em `contents`.
+    expect(systemInstruction).toContain(KB_MARKER);
+    expect(userContent).not.toContain(KB_MARKER);
     expect(userContent).toContain('quanto custa o retoque?');
     expect(userContent).not.toContain('REGRAS DE ESTILO');
   });
@@ -254,13 +258,18 @@ describe('generateAutoReplyForText — cache de contexto da Camada 1+2 (geminiSy
 
     expect(cacheCalls).toHaveLength(1);
     expect(cacheCalls[0].config.systemInstruction).toContain('REGRAS DE ESTILO');
+    // Desde 14/08/2026 a Camada 3 (Base de Conhecimento do tenant) entra no
+    // MESMO texto cacheado que a Camada 1 (ver buildCachedSystemInstruction)
+    // — cache por tenant, não mais compartilhado, mas cache de verdade.
+    expect(cacheCalls[0].config.systemInstruction).toContain(KB_MARKER);
 
     const specialistCall = calls[1];
     expect(specialistCall.config.cachedContent).toBe('cachedContents/teste-123');
     expect(specialistCall.config.systemInstruction).toBeUndefined();
-    // Camadas 3+4 (tenant/dinâmico) continuam em `contents` normalmente — o
-    // cache só substitui a Camada 1+2, nunca o conteúdo variável por mensagem.
-    expect(specialistCall.contents[0].text).toContain(KB_MARKER);
+    // Só o que muda de verdade a cada mensagem (histórico, mensagem atual)
+    // continua em `contents`, nunca cacheado.
+    expect(specialistCall.contents[0].text).not.toContain(KB_MARKER);
+    expect(specialistCall.contents[0].text).toContain('quanto custa o retoque?');
   });
 
   it('quando criar o cache falha (rede, API indisponível, conteúdo abaixo do mínimo), cai pro comportamento de sempre — systemInstruction inline, resposta ao cliente não é afetada', async () => {
