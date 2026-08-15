@@ -876,6 +876,57 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.send(video.buffer);
   }));
 
+  // Upload de arquivo (ex: catálogo em PDF) pra um bloco tipo "file" da
+  // Mensagem Inicial de Primeiro Contato (firstContactBlocks) — mesmo
+  // padrão desacoplado do vídeo acima (upload só grava o binário e devolve
+  // um fileId; quem associa a um bloco é o formData local no cliente,
+  // AgentKnowledgeBase.tsx). Reaproveita o mesmo storage/binário de
+  // knowledgeBaseDocumentStore.ts (bucket "app-data", prefixo kb-docs/),
+  // mas de propósito NÃO usa a rota POST /api/knowledge-base/documents
+  // acima: aquela persiste direto em kb.documents (lista "Documentos
+  // Anexados" lida pela IA como contexto — ver formatKnowledgeBaseForPrompt)
+  // e roda extração de texto; um catálogo de primeiro contato é só pra
+  // MANDAR pro cliente, nunca deve virar contexto de prompt nem contar no
+  // teto de MAX_DOCUMENTS_PER_TENANT daquela lista.
+  router.post('/api/knowledge-base/first-contact-file', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { fileName, mimeType, base64, oldFileId } = req.body || {};
+    if (!fileName?.trim() || !base64) {
+      return res.status(400).json({ error: 'Campos "fileName" e "base64" são obrigatórios.' });
+    }
+    const resolvedMimeType = mimeType || 'application/octet-stream';
+    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buffer.length > MAX_DOCUMENT_BYTES) {
+      return res.status(400).json({ error: `Arquivo maior que ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB.` });
+    }
+
+    const fileId = `fc-file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await uploadKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, fileId, buffer, resolvedMimeType);
+
+    // Substituindo o arquivo anterior do mesmo bloco — apaga o antigo do
+    // Storage pra não acumular lixo a cada troca (melhor esforço, mesmo
+    // padrão do vídeo acima).
+    if (typeof oldFileId === 'string' && oldFileId.trim()) {
+      await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, oldFileId.trim());
+    }
+
+    res.json({
+      fileId,
+      mimeType: resolvedMimeType,
+      fileName: String(fileName).trim(),
+      sizeBytes: buffer.length,
+    });
+  }));
+
+  // Baixa/visualiza o arquivo de primeiro contato — mesmo padrão autenticado
+  // de GET /api/knowledge-base/documents/:docId e /videos/:videoId acima.
+  router.get('/api/knowledge-base/first-contact-file/:fileId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const file = await getKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantOf(req), req.params.fileId);
+    if (!file) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+    res.setHeader('Content-Type', file.contentType);
+    res.send(file.buffer);
+  }));
+
   // Escalonamentos pra atendimento humano — "isso precisa de você"
   // (respostas que a IA não conseguiu gerar, bloqueios de envio, e qualquer
   // menção a pagamento/transferência, que nunca deve ser confirmada sozinha

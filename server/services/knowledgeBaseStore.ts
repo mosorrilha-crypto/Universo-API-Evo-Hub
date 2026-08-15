@@ -101,28 +101,37 @@ export function findProductDurationMinutes(kb: AgentKnowledgeBase | null, produc
   return kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized)?.durationMinutes;
 }
 
+export type FirstContactBlockType = 'text' | 'image' | 'video' | 'file';
+
 /**
- * Bloco fixo (texto/imagem/vídeo) enviado automaticamente na 1ª mensagem de
- * uma conversa nova — pedido real (14/08/2026, Clic Piscinas): em vez da
- * pergunta de triagem padrão da IA logo de cara, o tenant quer mandar um
- * "pacote de boas-vindas" fixo primeiro; a negociação com a IA só começa a
- * partir da PRÓXIMA mensagem do cliente (ver sendFirstContactMessage em
- * server/services/firstContactMessage.ts e o gate em webhooks.ts). Nenhum
- * campo preenchido = comportamento de sempre (a IA responde a 1ª mensagem
- * normalmente) — cada tenant "liga" isso só preenchendo o campo, sem
- * precisar de um toggle separado.
+ * Um passo da sequência de "1º contato" — pedido real (15/08/2026, Clic
+ * Piscinas): a mensagem fixa precisa poder intercalar texto/vídeo/texto (ou
+ * qualquer outra ordem, ex: um catálogo em PDF), não só um texto + uma
+ * imagem + um vídeo soltos numa ordem fixa. `order` (índice no array
+ * `firstContactBlocks`, ver AgentKnowledgeBase abaixo) é quem decide a
+ * sequência de envio real — cada bloco carrega só os campos do seu próprio
+ * `type`.
  */
-export interface AgentFirstContactMessage {
+export interface FirstContactBlock {
+  id: string;
+  type: FirstContactBlockType;
+  /** Só pra type === 'text'. */
   text?: string;
-  /** Imagem inline (data URI base64), mesmo padrão de AgentProduct.exampleImageBase64. */
+  /** Só pra type === 'image' — inline (data URI base64), mesmo padrão de AgentProduct.exampleImageBase64. */
   imageBase64?: string;
   imageMimeType?: string;
-  /** Vídeo no Storage (knowledgeBaseVideoStore.ts) — aqui só a referência, mesmo padrão de AgentProduct.exampleVideoId. */
+  /** Só pra type === 'video' — Storage (knowledgeBaseVideoStore.ts), aqui só a referência, mesmo padrão de AgentProduct.exampleVideoId. */
   videoId?: string;
   videoMimeType?: string;
   videoFileName?: string;
   videoSizeBytes?: number;
+  /** Só pra type === 'file' (ex: catálogo em PDF) — Storage (knowledgeBaseDocumentStore.ts), aqui só a referência. Desacoplado da lista de "Documentos Anexados" (AgentFileDoc): não entra como contexto de leitura da IA, só é enviado como arquivo real pro cliente. */
+  fileId?: string;
+  fileMimeType?: string;
+  fileName?: string;
+  fileSizeBytes?: number;
 }
+
 
 export interface AgentFAQ {
   question: string;
@@ -167,7 +176,8 @@ export interface AgentKnowledgeBase {
    * que funciona sem precisar de coordenadas exatas.
    */
   locationMapsUrl?: string;
-  firstContactMessage?: AgentFirstContactMessage;
+  /** Sequência fixa de "1º contato" (texto/imagem/vídeo/arquivo, na ordem do array) — ver FirstContactBlock acima. Ausente/vazio = comportamento de sempre. */
+  firstContactBlocks?: FirstContactBlock[];
 }
 
 export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
