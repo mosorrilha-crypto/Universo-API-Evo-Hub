@@ -153,7 +153,21 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   if (remoteJid.endsWith('@g.us')) return [];
 
   const messageId: string = data.key.id;
-  const from: string = remoteJid.split('@')[0];
+  // Migração de privacidade em rollout progressivo do WhatsApp: em vez do JID
+  // de telefone tradicional (`@s.whatsapp.net`), a conversa pode vir
+  // endereçada por um identificador opaco (`@lid`) — confirmado em produção
+  // (15/08/2026, tenant Clic Piscinas) e documentado como bug ativo/conhecido
+  // na comunidade Baileys/Evolution API (base da nossa Evolution API):
+  // https://github.com/WhiskeySockets/Baileys/issues/1718. Sem tratar isso,
+  // `from` vira o número opaco do @lid (não o telefone real), criando uma
+  // conversa NOVA duplicada pro mesmo lead a cada vez que o WhatsApp decide
+  // endereçar por esse identificador em vez do de telefone. Quando isso
+  // acontece, o Baileys expõe o telefone real em `key.remoteJidAlt` — usa
+  // esse fallback quando presente; sem ele, cai pro valor opaco (mesmo
+  // comportamento de antes, sem regressão).
+  const from: string = remoteJid.endsWith('@lid') && data.key.remoteJidAlt
+    ? String(data.key.remoteJidAlt).split('@')[0]
+    : remoteJid.split('@')[0];
   const contactName: string | undefined = data.pushName;
   const message = data.message || {};
 
