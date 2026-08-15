@@ -70,7 +70,8 @@ Analise o histórico da conversa a seguir e a base de conhecimento do agente e r
   "keyTopicsDiscussed": ["tópicos relevantes"],
   "multiModalInsights": ["insights multimídia/áudios"],
   "recommendedNextAction": "próxima ação recomendada para o operador humanizado",
-  "suggestedSmartReply": "resposta inteligente pronta e persuasiva para o operador enviar"
+  "suggestedSmartReply": "resposta inteligente pronta e persuasiva para o operador enviar, escrita no MESMO idioma do lead (detectedLanguage)",
+  "suggestedSmartReplyTranslation": "tradução literal de suggestedSmartReply para o Português, SOMENTE se detectedLanguage não for português — se já for português, use string vazia"
 }
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
@@ -130,6 +131,7 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
         multiModalInsights: [],
         recommendedNextAction: 'Análise indisponível no momento — revise a conversa manualmente antes de responder.',
         suggestedSmartReply: '',
+        suggestedSmartReplyTranslation: '',
       };
 
       return res.json({ success: true, source: 'fallback', analysis: fallbackAnalysis });

@@ -2150,15 +2150,40 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     handleAnalyzeConversation(newLeadItem);
   };
 
-  // Handle direct Meta CAPI trigger from conversation panel
+  // Handle direct Meta CAPI trigger from conversation panel (botões da Ficha
+  // IA). Achado real (15/08/2026): este handler nunca mandava pixelId/
+  // accessToken no corpo da requisição — POST /api/meta-capi/send-event
+  // sempre rejeitava com 400 ("configure pixelId e accessToken"), então o
+  // botão nunca funcionou de verdade desde que foi criado. A aba "Central &
+  // Disparo Meta CAPI" (AdAttributionCAPI.tsx) já salva essas credenciais em
+  // localStorage sob a chave 'meta_capi_config' — reusa a mesma aqui, em vez
+  // de duplicar o formulário de configuração nesta ficha.
   const handleDirectCAPI = async (eventName: string) => {
     if (!selectedLead) return;
+    let pixelId = '';
+    let accessToken = '';
+    let testEventCode: string | undefined;
+    try {
+      const saved = localStorage.getItem('meta_capi_config');
+      if (saved) {
+        const cfg = JSON.parse(saved);
+        pixelId = cfg.pixelId || '';
+        accessToken = cfg.accessToken || '';
+        testEventCode = cfg.testEventCode || undefined;
+      }
+    } catch {
+      // config corrompida no localStorage — segue com campos vazios, o
+      // backend recusa com a mensagem já orientando a configurar de novo.
+    }
     try {
       const response = await apiFetch('/api/meta-capi/send-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           eventName,
+          pixelId,
+          accessToken,
+          testEventCode,
           leadInfo: selectedLead,
           eventValue: 490,
         }),
