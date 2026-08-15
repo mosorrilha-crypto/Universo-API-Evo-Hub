@@ -457,5 +457,59 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     res.json({ success: true });
   }));
 
+  // ── Instagram DM (Fase 1) — credenciais por tenant ──────────────────────
+  // Pedido real (15/08/2026): "como responder lead do Instagram" — Fase 1 é
+  // entrada manual do ID da conta Instagram + access token (obtidos direto
+  // no App da Meta, já conectado à Página/conta certa segundo o dono do
+  // produto), sem fluxo de OAuth próprio ainda. Mesmo padrão de segredo do
+  // GET/PUT de capi-credentials acima: token nunca volta em texto puro, só
+  // um indicador de "já configurado"; campo em branco no PUT nunca apaga um
+  // token já salvo.
+  router.get('/api/admin/tenants/:id/instagram-credentials', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { data, error } = await db()
+      .from('tenant_instagram_credentials')
+      .select('instagram_account_id, access_token')
+      .eq('tenant_id', req.params.id)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({
+      instagramAccountId: data?.instagram_account_id || null,
+      accessTokenSet: !!data?.access_token,
+    });
+  }));
+
+  router.put('/api/admin/tenants/:id/instagram-credentials', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { instagramAccountId, accessToken } = req.body || {};
+    if (instagramAccountId !== undefined && instagramAccountId !== null && typeof instagramAccountId !== 'string') {
+      return res.status(400).json({ error: 'Campo "instagramAccountId" precisa ser string ou null.' });
+    }
+    if (accessToken !== undefined && accessToken !== null && typeof accessToken !== 'string') {
+      return res.status(400).json({ error: 'Campo "accessToken" precisa ser string ou null.' });
+    }
+
+    const { data: tenant, error: tenantError } = await db().from('tenants').select('id').eq('id', req.params.id).maybeSingle();
+    if (tenantError) return res.status(500).json({ error: tenantError.message });
+    if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
+
+    const { data: existing } = await db()
+      .from('tenant_instagram_credentials')
+      .select('instagram_account_id, access_token')
+      .eq('tenant_id', tenant.id)
+      .maybeSingle();
+
+    const finalInstagramAccountId: string | undefined = instagramAccountId?.trim() || existing?.instagram_account_id;
+    const finalAccessToken: string | undefined = accessToken?.trim() || existing?.access_token;
+    if (!finalInstagramAccountId || !finalAccessToken) {
+      return res.status(400).json({ error: 'ID da conta Instagram e access token são obrigatórios.' });
+    }
+
+    const { error: upsertError } = await db()
+      .from('tenant_instagram_credentials')
+      .upsert({ tenant_id: tenant.id, instagram_account_id: finalInstagramAccountId, access_token: finalAccessToken }, { onConflict: 'tenant_id' });
+    if (upsertError) return res.status(500).json({ error: upsertError.message });
+
+    res.json({ success: true });
+  }));
+
   return router;
 }

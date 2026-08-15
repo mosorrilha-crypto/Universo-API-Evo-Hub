@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Router } from 'express';
-import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
+import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode } from '../services/conversationStore';
@@ -8,6 +8,7 @@ import { generateAutoReplyForText } from '../services/autoReply';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
 import { showEvolutionTyping } from '../services/evolutionSend';
+import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
@@ -20,7 +21,7 @@ import { saveMediaImage } from '../services/mediaImageStore';
 import { consumePendingEcho } from '../services/outboundEchoTracker';
 import { getAppointmentForPhone, markPaymentPendingVerification } from '../services/appointmentStore';
 import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnalysis';
-import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, type ResolvedTenant } from '../services/tenantResolver';
+import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
@@ -58,8 +59,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant) => {
     const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
     const isEvolution = resolvedTenant.provider === 'evolution';
+    const isInstagram = resolvedTenant.provider === 'instagram';
     const channel = isEvolution
       ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey }
+      : isInstagram
+      ? { provider: 'instagram' as const, instagramAccountId: resolvedTenant.instagramAccountId, accessToken: resolvedTenant.instagramAccessToken }
       : { provider: 'meta' as const, phoneNumberId, accessToken: token };
     if (!getAi) return;
     // runExclusive garante que, se a mensagem anterior desse número ainda
@@ -96,15 +100,23 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // longa), não só na hora de enviar as bolhas.
         if (isEvolution) {
           await showEvolutionTyping(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey);
+        } else if (isInstagram) {
+          await showInstagramTyping(resolvedTenant.instagramAccountId, resolvedTenant.instagramAccessToken, phone);
         } else {
           await markAsReadAndShowTyping(phoneNumberId, token, messageId);
         }
-        // Ferramenta de envio de foto/vídeo (Epic 4.5.2) — agora suporta tanto
-        // Meta quanto Evolution. supabaseUrl/supabaseKey só são usados pra
-        // buscar o binário do vídeo de exemplo no Storage na hora de enviar
-        // (a foto já vem inline na Base de Conhecimento, não precisa disso).
+        // Ferramenta de envio de foto/vídeo (Epic 4.5.2) — suporta Meta e
+        // Evolution. Instagram (Fase 1) ainda não — mediaConfig sem
+        // phoneNumberId/accessToken pro provider 'meta' faz hasMediaSendConfig
+        // (autoReply.ts) devolver false, desligando a ferramenta de mídia pra
+        // esse canal até a Fase 2, sem precisar de um branch dedicado aqui.
+        // supabaseUrl/supabaseKey só são usados pra buscar o binário do vídeo
+        // de exemplo no Storage na hora de enviar (a foto já vem inline na
+        // Base de Conhecimento, não precisa disso).
         const mediaConfig = isEvolution
           ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey, supabaseUrl, supabaseKey }
+          : isInstagram
+          ? { provider: 'instagram' as const, supabaseUrl, supabaseKey }
           : { provider: 'meta' as const, phoneNumberId, accessToken: token, supabaseUrl, supabaseKey };
 
         // Pedido real (Clic Piscinas, 14/08/2026): em vez da pergunta de
@@ -221,9 +233,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       try {
         // Epic 4.6 — mensagem da Evolution API (Porta A) resolve o tenant
         // pela instância, não pelo phone_number_id (conceito que só existe
-        // na Meta Cloud API/Porta B).
+        // na Meta Cloud API/Porta B). Instagram DM (Fase 1, 15/08/2026) —
+        // terceiro canal, resolve pela conta Instagram que recebeu a
+        // mensagem, sem fallback nenhum (ver resolveTenantByInstagramAccountId).
         const resolvedTenant = msg.provider === 'evolution'
           ? await resolveTenantByEvolutionInstance(msg.instanceName, { evolutionApiUrl, evolutionApiKey, evolutionInstanceName })
+          : msg.provider === 'instagram'
+          ? await resolveTenantByInstagramAccountId(msg.instagramAccountId)
           : await resolveTenantByPhoneNumberId(msg.phoneNumberId, { metaAccessToken, metaPhoneNumberId });
         if (resolvedTenant.unknownChannel) {
           // Canal não identificado (Bloco 2.B, revisão de segurança 06/08/2026):
@@ -433,7 +449,27 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       });
     }
 
-    // 2. Meta WhatsApp Cloud API Format
+    // 2. Instagram DM (Fase 1, 15/08/2026) — mesma Meta App/assinatura HMAC
+    // acima (a Meta assina todos os produtos de webhook igual — WhatsApp,
+    // Instagram, Messenger), payload em formato "Messenger Platform"
+    // (entry[].messaging[]), diferente do formato da Meta Cloud API abaixo.
+    if (body?.object === 'instagram') {
+      const parsedMessages = parseInstagramWebhookPayload(body);
+      const enqueued = await enqueueAudioMessages(parsedMessages);
+
+      const firstMessaging = body.entry?.[0]?.messaging?.[0];
+      if (firstMessaging) {
+        console.log(`📸 [Webhook Instagram] Nova mensagem de ${firstMessaging.sender?.id}:`, firstMessaging.message?.text ? redactMessageForLog(firstMessaging.message.text) : '[Anexo]', enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Evento do Instagram processado com sucesso',
+        processedMessages: parsedMessages.length,
+      });
+    }
+
+    // 3. Meta WhatsApp Cloud API Format
     if (body?.object === 'whatsapp_business_account') {
       const entry = body.entry?.[0];
       const changes = entry?.changes?.[0];
@@ -577,6 +613,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
 
   router.get('/api/webhooks/whatsapp', handleWebhookVerification);
   router.post('/api/webhooks/whatsapp', handleWebhookPayload);
+
+  // Alias só pra clareza ao cadastrar o webhook do produto Instagram no App
+  // da Meta — mesmo handler genérico acima, que já despacha por body.object.
+  router.get('/api/webhooks/instagram', handleWebhookVerification);
+  router.post('/api/webhooks/instagram', handleWebhookPayload);
 
   // Endpoint dedicado do Evo Hub real — é esse que deve ser cadastrado como
   // webhook_url ao criar o canal via POST /api/v1/channels no Evo Hub.
