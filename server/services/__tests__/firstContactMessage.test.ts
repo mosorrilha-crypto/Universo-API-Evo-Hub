@@ -10,12 +10,14 @@ const sendEvolutionMediaMessage = vi.fn(async () => undefined);
 const recordOutgoingMessage = vi.fn(async (..._args: any[]) => ({}) as any);
 const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
 const getKnowledgeBaseDocument = vi.fn(async () => ({ buffer: Buffer.from('fake-pdf-bytes'), contentType: 'application/pdf' }));
+const saveMediaImage = vi.fn(async (..._args: any[]) => undefined);
 
 vi.mock('../metaSend', () => ({ sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage, sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
 vi.mock('../knowledgeBaseDocumentStore', () => ({ getKnowledgeBaseDocument }));
+vi.mock('../mediaImageStore', () => ({ saveMediaImage }));
 
 const { hasFirstContactMessage, sendFirstContactMessage } = await import('../firstContactMessage');
 
@@ -152,6 +154,22 @@ describe('sendFirstContactMessage', () => {
     expect(recordOutgoingMessage).toHaveBeenCalledTimes(2); // só os 2 que realmente enviaram, nunca o vídeo que falhou
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('falhou ao enviar o bloco 2/3 (video)'));
     consoleErrorSpy.mockRestore();
+  });
+
+  it('achado real (15/08/2026, Clic Piscinas): salva o binário do vídeo sob o MESMO id da mensagem gravada, pro painel conseguir tocar de volta (antes só abria no WhatsApp real do lead, nunca no painel)', async () => {
+    const kb: AgentKnowledgeBase = { firstContactBlocks: [videoBlock()] };
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+
+    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+    const [supabaseUrlArg, supabaseKeyArg, savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
+    expect(supabaseUrlArg).toBe('https://fake.supabase.co');
+    expect(supabaseKeyArg).toBe('fake-key');
+    expect(savedBase64).toBe(Buffer.from('fake-video-bytes').toString('base64'));
+    expect(savedMimeType).toBe('video/mp4');
+
+    expect(recordOutgoingMessage).toHaveBeenCalledTimes(1);
+    // customId é o 7º argumento de recordOutgoingMessage (tenantId, phone, message, sentBy, replyTo, forwardedFrom, customId).
+    expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
   });
 
   it('não quebra e não grava nada quando o vídeo configurado não é encontrado no Storage — mas continua pros próximos blocos', async () => {
