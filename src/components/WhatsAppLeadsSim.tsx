@@ -3138,6 +3138,36 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     const quotedMessage = msg.replyToMessageId
                       ? selectedLead.messages?.find((m) => m.id === msg.replyToMessageId)
                       : undefined;
+                    // Design dos balões alinhado ao WhatsApp real (pedido direto,
+                    // print de referência, 15/08/2026): antes disso o horário+check
+                    // sempre ocupava uma linha própria com risco divisório em cima
+                    // (mesmo numa mensagem de uma palavra só) e a imagem tinha uma
+                    // margem visível dentro do balão em vez de tocar as bordas — o
+                    // WhatsApp real flutua o horário ao final do último texto e deixa
+                    // a foto rente às bordas do balão. hasHeaderContent decide se o
+                    // bloco de mídia/texto precisa de um respiro no topo (quando não
+                    // tem tag/encaminhada/citação acima) ou se a imagem pode tocar o
+                    // canto arredondado do balão direto.
+                    const hasHeaderContent = (!isLead && !!msg.sentBy) || !!msg.forwardedFromMessageId || !!quotedMessage;
+                    // Horário + check de entrega — flutua à direita do último texto
+                    // do balão (mesmo truque de CSS que o WhatsApp usa: float-right
+                    // com margem, o texto quebra em volta dele) em vez de uma linha
+                    // inteira só pra isso.
+                    const timeFooter = (
+                      <span
+                        className={`float-right ml-2 mt-0.5 inline-flex items-center gap-1 text-[9px] whitespace-nowrap select-none ${
+                          isLead ? 'text-slate-400' : 'text-emerald-200'
+                        }`}
+                      >
+                        {msg.timestamp}
+                        {msg.editedAt && <span className="italic opacity-70"> (editado)</span>}
+                        {!isLead && (msg.sendFailed ? (
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                        ) : (
+                          <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />
+                        ))}
+                      </span>
+                    );
                     return (
                       <div
                         key={msg.id}
@@ -3246,7 +3276,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         )}
 
                         <div
-                          className={`max-w-[85%] rounded-xl p-2.5 shadow-md space-y-1 text-xs relative border border-white/5 ${
+                          className={`max-w-[85%] rounded-xl shadow-md text-xs relative border border-white/5 overflow-hidden ${
                             isLead
                               ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none'
                               : msg.sentBy === 'operator'
@@ -3254,49 +3284,53 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 : 'bg-[#005c4b] text-white rounded-tr-none shadow-emerald-950/40'
                           }`}
                         >
-                          {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. */}
-                          {!isLead && msg.sentBy && (
-                            <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide opacity-70">
-                              {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5" /> : <UserCheck className="w-2.5 h-2.5" />}
-                              {msg.sentBy === 'ai' ? 'IA' : 'Operador'}
-                            </div>
-                          )}
-
-                          {msg.forwardedFromMessageId && (
-                            <div className="flex items-center gap-1 text-[9px] italic opacity-60">
-                              <Forward className="w-2.5 h-2.5" /> Encaminhada
-                            </div>
-                          )}
-
-                          {quotedMessage && (
-                            <button
-                              type="button"
-                              onClick={() => scrollToMessage(quotedMessage.id)}
-                              className={`block w-full text-left rounded-lg px-2 py-1 border-l-4 cursor-pointer ${
-                                isLead ? 'bg-slate-800/60 border-emerald-500' : 'bg-black/20 border-emerald-300'
-                              }`}
-                            >
-                              <div className="text-[9px] font-bold text-emerald-400">
-                                {quotedMessage.sender === 'lead' ? selectedLead.name : 'Você'}
-                              </div>
-                              <div className="text-[10px] opacity-80 truncate">
-                                {quotedMessage.text ||
-                                  (quotedMessage.type === 'image' ? '📷 Imagem' : quotedMessage.type === 'audio' ? '🎤 Áudio' : quotedMessage.type === 'file' ? '📎 Arquivo' : '')}
-                              </div>
-                            </button>
-                          )}
-
                           {msg.reactions && msg.reactions.length > 0 && (
                             <div
-                              className={`absolute -bottom-2.5 ${isLead ? 'left-2' : 'right-2'} bg-[#233138] border border-slate-700 rounded-full px-1.5 py-0.5 text-[10px] shadow-md`}
+                              className={`absolute -bottom-2.5 ${isLead ? 'left-2' : 'right-2'} bg-[#233138] border border-slate-700 rounded-full px-1.5 py-0.5 text-[10px] shadow-md z-10`}
                             >
                               {msg.reactions.map((r) => r.emoji).join(' ')}
                             </div>
                           )}
 
+                          {hasHeaderContent && (
+                            <div className="px-2.5 pt-2.5 pb-2 space-y-1">
+                              {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. */}
+                              {!isLead && msg.sentBy && (
+                                <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide opacity-70">
+                                  {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5" /> : <UserCheck className="w-2.5 h-2.5" />}
+                                  {msg.sentBy === 'ai' ? 'IA' : 'Operador'}
+                                </div>
+                              )}
+
+                              {msg.forwardedFromMessageId && (
+                                <div className="flex items-center gap-1 text-[9px] italic opacity-60">
+                                  <Forward className="w-2.5 h-2.5" /> Encaminhada
+                                </div>
+                              )}
+
+                              {quotedMessage && (
+                                <button
+                                  type="button"
+                                  onClick={() => scrollToMessage(quotedMessage.id)}
+                                  className={`block w-full text-left rounded-lg px-2 py-1 border-l-4 cursor-pointer ${
+                                    isLead ? 'bg-slate-800/60 border-emerald-500' : 'bg-black/20 border-emerald-300'
+                                  }`}
+                                >
+                                  <div className="text-[9px] font-bold text-emerald-400">
+                                    {quotedMessage.sender === 'lead' ? selectedLead.name : 'Você'}
+                                  </div>
+                                  <div className="text-[10px] opacity-80 truncate">
+                                    {quotedMessage.text ||
+                                      (quotedMessage.type === 'image' ? '📷 Imagem' : quotedMessage.type === 'audio' ? '🎤 Áudio' : quotedMessage.type === 'file' ? '📎 Arquivo' : '')}
+                                  </div>
+                                </button>
+                              )}
+                            </div>
+                          )}
+
                           {/* Audio Message Type */}
                           {msg.type === 'audio' && (
-                            <div className="space-y-2 min-w-[220px]">
+                            <div className={`px-2.5 pb-2.5 space-y-2 min-w-[220px] ${hasHeaderContent ? '' : 'pt-2.5'}`}>
                               <div className="flex items-center space-x-2 bg-slate-950/40 p-2 rounded-lg border border-white/10">
                                 <button
                                   onClick={() => ((selectedLead as any)?.isReal ? handlePlayRealAudioMessage(msg.id) : handlePlayAudioMessage(msg.id, msg.text || ''))}
@@ -3320,22 +3354,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               </div>
                               <p className="text-[11px] italic opacity-90">
                                 "{msg.text}"
+                                {timeFooter}
                               </p>
                             </div>
                           )}
 
-                          {/* Image Message Type */}
+                          {/* Image Message Type — imagem rente às bordas do balão
+                              (igual ao WhatsApp real), sem margem interna; a legenda
+                              (quando tem) fica numa faixa com padding própria abaixo,
+                              com o horário flutuando no final dela. overflow-hidden no
+                              balão (acima) já corta os cantos da imagem no formato
+                              certo — não precisa de rounded-* na própria img. */}
                           {msg.type === 'image' && (
-                            <div className="space-y-1.5 min-w-[200px]">
+                            <div className="min-w-[200px]">
                               {msg.mediaUrl && (
                                 <div
                                   onClick={() => setViewImageUrl(msg.mediaUrl || null)}
-                                  className="relative group rounded-lg overflow-hidden cursor-pointer"
+                                  className="relative group cursor-pointer"
                                 >
                                   <img
                                     src={msg.mediaUrl}
                                     alt="Imagem do lead"
-                                    className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-300"
+                                    className="w-full h-44 object-cover group-hover:scale-105 transition-transform duration-300"
                                   />
                                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold">
                                     <ImageIcon className="w-4 h-4 mr-1" /> Ampliar
@@ -3353,7 +3393,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               {!msg.mediaUrl && (selectedLead as any)?.isReal && (
                                 <RealClientImage messageId={msg.id} onOpen={setViewImageUrl} />
                               )}
-                              <p className="text-xs">{msg.text}</p>
+                              <p className="text-xs px-2.5 pt-1.5 pb-2.5">
+                                {msg.text}
+                                {timeFooter}
+                              </p>
                             </div>
                           )}
 
@@ -3371,7 +3414,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           {msg.type === 'file' && (() => {
                             const isVideo = msg.text?.trimStart().startsWith('🎥');
                             return (
-                              <div className="space-y-1 min-w-[200px]">
+                              <div className={`px-2.5 pb-2.5 space-y-1 min-w-[200px] ${hasHeaderContent ? '' : 'pt-2.5'}`}>
                                 <div className="flex items-center space-x-2 bg-slate-950/40 p-2.5 rounded-lg border border-white/10">
                                   {isVideo ? (
                                     <Video className="w-5 h-5 text-emerald-400 flex-shrink-0" />
@@ -3385,34 +3428,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                     <span className="text-[9px] opacity-75">{isVideo ? 'Vídeo' : 'Documento PDF'}</span>
                                   </div>
                                 </div>
-                                <p className="text-xs">{msg.text}</p>
+                                <p className="text-xs">
+                                  {msg.text}
+                                  {timeFooter}
+                                </p>
                               </div>
                             );
                           })()}
 
                           {/* Regular Text Message */}
-                          {msg.type === 'text' && <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>}
+                          {msg.type === 'text' && (
+                            <p className={`px-2.5 pb-2.5 leading-relaxed whitespace-pre-wrap ${hasHeaderContent ? '' : 'pt-2.5'}`}>
+                              {msg.text}
+                              {timeFooter}
+                            </p>
+                          )}
 
                           {msg.sendFailed && (
-                            <div className="flex items-center gap-1 text-[10px] font-bold text-rose-300 bg-rose-950/60 border border-rose-700/60 rounded-lg px-2 py-1 mt-1">
+                            <div className="flex items-center gap-1 text-[10px] font-bold text-rose-300 bg-rose-950/60 border border-rose-700/60 rounded-lg px-2 py-1 mx-2.5 mb-2.5">
                               <AlertCircle className="w-3 h-3 flex-shrink-0" />
                               <span>Falha no envio — o cliente NÃO recebeu isto.</span>
                             </div>
                           )}
-
-                          <div className={`flex justify-end items-center text-[9px] mt-1 gap-2 border-t border-white/5 pt-1 ${isLead ? 'text-slate-400' : 'text-emerald-200'}`}>
-                            <div className="flex items-center gap-1">
-                              <span>
-                                {msg.timestamp}
-                                {msg.editedAt && <span className="italic opacity-70"> (editado)</span>}
-                              </span>
-                              {!isLead && (msg.sendFailed ? (
-                                <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
-                              ) : (
-                                <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />
-                              ))}
-                            </div>
-                          </div>
                         </div>
                       </div>
                     );
