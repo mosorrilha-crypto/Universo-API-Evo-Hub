@@ -171,13 +171,21 @@ export interface AgentProduct {
   bookable?: boolean;
 }
 
+export type FirstContactBlockType = 'text' | 'image' | 'video' | 'file';
+
 /**
- * Bloco fixo (texto/imagem/vídeo) enviado automaticamente na 1ª mensagem de
- * uma conversa nova, em vez da pergunta de triagem padrão da IA — ver
- * server/services/firstContactMessage.ts. Nenhum campo preenchido =
- * comportamento de sempre (a IA responde a 1ª mensagem normalmente).
+ * Um passo da sequência de "1º contato" — enviado automaticamente na 1ª
+ * mensagem de uma conversa nova, em vez da pergunta de triagem padrão da IA
+ * (ver server/services/firstContactMessage.ts). `firstContactBlocks`
+ * (abaixo) é um array ORDENADO: a sequência de envio real segue a ordem do
+ * array, permitindo intercalar texto/vídeo/texto/arquivo do jeito que o
+ * tenant quiser. Cada bloco só usa os campos do seu próprio `type`. Array
+ * vazio/ausente = comportamento de sempre (a IA responde a 1ª mensagem
+ * normalmente).
  */
-export interface AgentFirstContactMessage {
+export interface FirstContactBlock {
+  id: string;
+  type: FirstContactBlockType;
   text?: string;
   imageBase64?: string;
   imageMimeType?: string;
@@ -185,6 +193,11 @@ export interface AgentFirstContactMessage {
   videoMimeType?: string;
   videoFileName?: string;
   videoSizeBytes?: number;
+  /** Arquivo genérico (ex: catálogo em PDF) — Storage (knowledgeBaseDocumentStore.ts), aqui só a referência. Desacoplado de AgentFileDoc/"Documentos Anexados": nunca vira contexto de leitura da IA, só é enviado como arquivo real pro cliente. */
+  fileId?: string;
+  fileMimeType?: string;
+  fileName?: string;
+  fileSizeBytes?: number;
 }
 
 export interface AgentFAQ {
@@ -227,7 +240,7 @@ export interface AgentKnowledgeBase {
   documents: AgentFileDoc[];
   /** Link de localização (Google Maps) que o agente manda quando o cliente pede o endereço — ver server/services/knowledgeBaseStore.ts. */
   locationMapsUrl?: string;
-  firstContactMessage?: AgentFirstContactMessage;
+  firstContactBlocks?: FirstContactBlock[];
   lastSaved?: string;
 }
 

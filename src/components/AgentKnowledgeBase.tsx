@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours } from '../types';
+import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
@@ -31,7 +31,13 @@ import {
   Video,
   Play,
   Send,
-  X
+  X,
+  Image as ImageIcon,
+  MessageSquare,
+  Paperclip,
+  ChevronUp,
+  ChevronDown,
+  GripVertical
 } from 'lucide-react';
 
 interface AgentKnowledgeBaseProps {
@@ -54,6 +60,14 @@ const WEEKDAY_LABELS: { key: string; label: string }[] = [
 ];
 
 const DEFAULT_DAY_HOURS: DayHours = { open: '09:00', close: '18:00' };
+
+/** Ícone/rótulo/cor de cada tipo de bloco da Mensagem Inicial de Primeiro Contato — usado pra montar a sequência ordenada (ver SECTION 6 abaixo). */
+const FIRST_CONTACT_BLOCK_META: Record<FirstContactBlockType, { label: string; icon: React.ReactNode; color: string }> = {
+  text: { label: 'Texto', icon: <MessageSquare className="w-3.5 h-3.5" />, color: 'text-slate-300' },
+  image: { label: 'Imagem', icon: <ImageIcon className="w-3.5 h-3.5" />, color: 'text-blue-400' },
+  video: { label: 'Vídeo', icon: <Video className="w-3.5 h-3.5" />, color: 'text-emerald-400' },
+  file: { label: 'Arquivo', icon: <Paperclip className="w-3.5 h-3.5" />, color: 'text-purple-400' },
+};
 
 /**
  * Achado real em produção: os catálogos semeados via scripts/seed-monique-
@@ -299,6 +313,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     products: ensureUniqueIds(knowledgeBase.products, 'prod'),
     faqs: ensureUniqueIds(knowledgeBase.faqs, 'faq'),
     documents: ensureUniqueIds(knowledgeBase.documents, 'doc'),
+    firstContactBlocks: ensureUniqueIds(knowledgeBase.firstContactBlocks, 'fcblock'),
   }));
   const [isSavedToast, setIsSavedToast] = useState(false);
 
@@ -518,46 +533,64 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }
   };
 
-  // Mensagem Inicial de Primeiro Contato (pedido real, 14/08/2026, Clic
-  // Piscinas): bloco fixo de texto/imagem/vídeo mandado automaticamente na
-  // 1ª mensagem de uma conversa NOVA, em vez da pergunta de triagem padrão
-  // da IA — ver server/services/firstContactMessage.ts. Mesmos padrões de
-  // upload já usados nos produtos (imagem inline em base64, vídeo sobe pro
-  // Storage na hora e só a referência fica no formData), só que num único
-  // objeto do tenant em vez de um por produto.
-  const [uploadingFirstContactVideo, setUploadingFirstContactVideo] = useState(false);
-  const [previewingFirstContactVideo, setPreviewingFirstContactVideo] = useState(false);
+  // Mensagem Inicial de Primeiro Contato (pedido real, 14-15/08/2026, Clic
+  // Piscinas): sequência ORDENADA de blocos (texto/imagem/vídeo/arquivo)
+  // mandada automaticamente na 1ª mensagem de uma conversa NOVA, em vez da
+  // pergunta de triagem padrão da IA — ver server/services/firstContactMessage.ts.
+  // Pedido explícito de poder intercalar tipos (ex: texto > vídeo > texto),
+  // não só um texto + uma imagem + um vídeo soltos numa ordem fixa — por
+  // isso é um array (firstContactBlocks), reordenável, em vez de um objeto
+  // único. Mesmos padrões de upload já usados nos produtos (imagem inline
+  // em base64, vídeo/arquivo sobem pro Storage na hora e só a referência
+  // fica no formData).
+  const MAX_FIRST_CONTACT_FILE_SIZE_MB = 15; // mesmo teto de MAX_DOCUMENT_BYTES no servidor
+  const [uploadingBlockId, setUploadingBlockId] = useState<string | null>(null);
+  const [previewingBlockMediaId, setPreviewingBlockMediaId] = useState<string | null>(null);
 
-  const handleFirstContactTextChange = (value: string) => {
+  const handleAddFirstContactBlock = (type: FirstContactBlockType) => {
+    const block: FirstContactBlock = { id: `fcblock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, type };
+    setFormData((prev) => ({ ...prev, firstContactBlocks: [...(prev.firstContactBlocks || []), block] }));
+  };
+
+  const handleRemoveFirstContactBlock = (id: string) => {
+    setFormData((prev) => ({ ...prev, firstContactBlocks: (prev.firstContactBlocks || []).filter((b) => b.id !== id) }));
+  };
+
+  // Sem biblioteca de drag-and-drop no projeto — reordena com botões
+  // ↑/↓, trocando de posição com o vizinho, suficiente pra uma sequência
+  // curta de blocos (o caso real de uso).
+  const handleMoveFirstContactBlock = (id: string, direction: 'up' | 'down') => {
+    setFormData((prev) => {
+      const blocks = [...(prev.firstContactBlocks || [])];
+      const idx = blocks.findIndex((b) => b.id === id);
+      const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+      if (idx === -1 || swapWith < 0 || swapWith >= blocks.length) return prev;
+      [blocks[idx], blocks[swapWith]] = [blocks[swapWith], blocks[idx]];
+      return { ...prev, firstContactBlocks: blocks };
+    });
+  };
+
+  const updateFirstContactBlock = (id: string, patch: Partial<FirstContactBlock>) => {
     setFormData((prev) => ({
       ...prev,
-      firstContactMessage: { ...prev.firstContactMessage, text: value },
+      firstContactBlocks: (prev.firstContactBlocks || []).map((b) => (b.id === id ? { ...b, ...patch } : b)),
     }));
   };
 
-  const handleFirstContactImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFirstContactBlockTextChange = (id: string, value: string) => updateFirstContactBlock(id, { text: value });
+
+  const handleFirstContactBlockImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result);
-      setFormData((prev) => ({
-        ...prev,
-        firstContactMessage: { ...prev.firstContactMessage, imageBase64: base64, imageMimeType: file.type },
-      }));
-    };
+    reader.onload = () => updateFirstContactBlock(id, { imageBase64: String(reader.result), imageMimeType: file.type });
     reader.readAsDataURL(file);
   };
 
-  const handleFirstContactImageRemove = () => {
-    setFormData((prev) => ({
-      ...prev,
-      firstContactMessage: { ...prev.firstContactMessage, imageBase64: undefined, imageMimeType: undefined },
-    }));
-  };
+  const handleFirstContactBlockImageRemove = (id: string) => updateFirstContactBlock(id, { imageBase64: undefined, imageMimeType: undefined });
 
-  const handleFirstContactVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFirstContactBlockVideoUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -570,8 +603,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       return;
     }
 
-    const oldVideoId = formData.firstContactMessage?.videoId;
-    setUploadingFirstContactVideo(true);
+    const oldVideoId = formData.firstContactBlocks?.find((b) => b.id === id)?.videoId;
+    setUploadingBlockId(id);
     try {
       const base64 = await fileToBase64Local(file);
       const res = await apiFetch('/api/knowledge-base/videos', {
@@ -584,29 +617,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         throw new Error(errBody.error || `HTTP ${res.status}`);
       }
       const { videoId, mimeType, fileName, sizeBytes } = await res.json();
-      setFormData((prev) => ({
-        ...prev,
-        firstContactMessage: { ...prev.firstContactMessage, videoId, videoMimeType: mimeType, videoFileName: fileName, videoSizeBytes: sizeBytes },
-      }));
+      updateFirstContactBlock(id, { videoId, videoMimeType: mimeType, videoFileName: fileName, videoSizeBytes: sizeBytes });
     } catch (err: any) {
       console.error('Falha ao enviar vídeo:', err);
       alert(`Não foi possível enviar o vídeo: ${err.message || 'tente novamente'}.`);
     } finally {
-      setUploadingFirstContactVideo(false);
+      setUploadingBlockId(null);
     }
   };
 
-  const handleFirstContactVideoRemove = () => {
-    setFormData((prev) => ({
-      ...prev,
-      firstContactMessage: { ...prev.firstContactMessage, videoId: undefined, videoMimeType: undefined, videoFileName: undefined, videoSizeBytes: undefined },
-    }));
-  };
+  const handleFirstContactBlockVideoRemove = (id: string) =>
+    updateFirstContactBlock(id, { videoId: undefined, videoMimeType: undefined, videoFileName: undefined, videoSizeBytes: undefined });
 
-  const handlePreviewFirstContactVideo = async () => {
-    const videoId = formData.firstContactMessage?.videoId;
-    if (!videoId) return;
-    setPreviewingFirstContactVideo(true);
+  const handlePreviewFirstContactBlockVideo = async (videoId: string) => {
+    setPreviewingBlockMediaId(videoId);
     try {
       const res = await apiFetch(`/api/knowledge-base/videos/${videoId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -618,7 +642,59 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       console.error('Falha ao abrir vídeo:', err);
       alert('Não foi possível abrir o vídeo.');
     } finally {
-      setPreviewingFirstContactVideo(false);
+      setPreviewingBlockMediaId(null);
+    }
+  };
+
+  const handleFirstContactBlockFileUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > MAX_FIRST_CONTACT_FILE_SIZE_MB * 1024 * 1024) {
+      alert(`Arquivo maior que ${MAX_FIRST_CONTACT_FILE_SIZE_MB}MB.`);
+      return;
+    }
+
+    const oldFileId = formData.firstContactBlocks?.find((b) => b.id === id)?.fileId;
+    setUploadingBlockId(id);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/first-contact-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64, oldFileId }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { fileId, mimeType, fileName, sizeBytes } = await res.json();
+      updateFirstContactBlock(id, { fileId, fileMimeType: mimeType, fileName, fileSizeBytes: sizeBytes });
+    } catch (err: any) {
+      console.error('Falha ao enviar arquivo:', err);
+      alert(`Não foi possível enviar o arquivo: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingBlockId(null);
+    }
+  };
+
+  const handleFirstContactBlockFileRemove = (id: string) =>
+    updateFirstContactBlock(id, { fileId: undefined, fileMimeType: undefined, fileName: undefined, fileSizeBytes: undefined });
+
+  const handlePreviewFirstContactBlockFile = async (fileId: string) => {
+    setPreviewingBlockMediaId(fileId);
+    try {
+      const res = await apiFetch(`/api/knowledge-base/first-contact-file/${fileId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      console.error('Falha ao abrir arquivo:', err);
+      alert('Não foi possível abrir o arquivo.');
+    } finally {
+      setPreviewingBlockMediaId(null);
     }
   };
 
@@ -1492,13 +1568,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         )}
 
         {/* SECTION 6: Mensagem Inicial de Primeiro Contato — pedido real
-            (14/08/2026, Clic Piscinas): em vez da pergunta de triagem padrão
-            da IA logo na 1ª mensagem, mandar primeiro um bloco fixo (texto/
-            imagem/vídeo, não gerado pela IA) — a negociação com a IA só
-            começa a partir da PRÓXIMA mensagem do cliente. Ver
-            server/services/firstContactMessage.ts. Nenhum campo preenchido
-            aqui = comportamento de sempre (a IA responde a 1ª mensagem
-            normalmente), sem precisar de um toggle separado. */}
+            (14-15/08/2026, Clic Piscinas): em vez da pergunta de triagem
+            padrão da IA logo na 1ª mensagem, mandar primeiro uma SEQUÊNCIA
+            ORDENADA de blocos (texto/imagem/vídeo/arquivo, não gerados pela
+            IA) — a negociação com a IA só começa a partir da PRÓXIMA
+            mensagem do cliente. Ver server/services/firstContactMessage.ts.
+            Nenhum bloco = comportamento de sempre (a IA responde a 1ª
+            mensagem normalmente), sem precisar de um toggle separado. */}
         {activeSubSection === 'firstContact' && (
           <div className="space-y-5">
             <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
@@ -1508,104 +1584,258 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Mensagem Inicial Programada de Primeiro Contato
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Preenchendo algo aqui, a PRIMEIRA mensagem de uma conversa nova recebe este bloco fixo (texto + imagem + vídeo, o que estiver preenchido) em vez da pergunta de triagem padrão da IA — a negociação com a IA só começa a partir da próxima mensagem do cliente. Deixe tudo em branco pra manter o comportamento normal (a IA responde a 1ª mensagem sozinha).
+                  Monte a sequência que a PRIMEIRA mensagem de uma conversa nova recebe, na ordem exata dos blocos abaixo (ex: texto → vídeo → texto), em vez da pergunta de triagem padrão da IA — a negociação com a IA só começa a partir da próxima mensagem do cliente. Sem nenhum bloco, mantém o comportamento normal (a IA responde a 1ª mensagem sozinha).
                 </p>
               </div>
             </div>
 
+            {(!formData.firstContactBlocks || formData.firstContactBlocks.length === 0) && (
+              <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center text-xs text-slate-500">
+                Nenhum bloco adicionado ainda. Use os botões abaixo pra começar a sequência.
+              </div>
+            )}
+
+            {/* Sequência ordenada, "em fila" — cada bloco ligado ao próximo
+                por uma setinha, pra ficar visualmente óbvio que é uma ordem
+                de envio, não campos soltos. */}
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">Texto (bloco de informações)</label>
-              <AutoResizeTextarea
-                minRows={4}
-                value={formData.firstContactMessage?.text || ''}
-                onChange={(e) => handleFirstContactTextChange(e.target.value)}
-                placeholder="Ex: Oi! Que bom que você chegou até nós 🙌 Somos a Clic Piscinas — confira no vídeo abaixo como funciona nosso processo, do orçamento à instalação..."
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-pink-500 focus:outline-none leading-relaxed"
-              />
+              {(formData.firstContactBlocks || []).map((block, idx) => {
+                const meta = FIRST_CONTACT_BLOCK_META[block.type];
+                const isFirst = idx === 0;
+                const isLast = idx === (formData.firstContactBlocks?.length || 0) - 1;
+                return (
+                  <div key={block.id}>
+                    {idx > 0 && (
+                      <div className="flex justify-center py-0.5">
+                        <ChevronDown className="w-4 h-4 text-slate-700" />
+                      </div>
+                    )}
+                    <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-bold flex items-center gap-1.5 ${meta.color}`}>
+                          <GripVertical className="w-3.5 h-3.5 text-slate-700" />
+                          {meta.icon}
+                          {meta.label}
+                          <span className="text-slate-500 font-normal">· passo {idx + 1}</span>
+                        </span>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveFirstContactBlock(block.id, 'up')}
+                            disabled={isFirst}
+                            title="Mover pra cima"
+                            className="p-1 text-slate-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                          >
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveFirstContactBlock(block.id, 'down')}
+                            disabled={isLast}
+                            title="Mover pra baixo"
+                            className="p-1 text-slate-500 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                          >
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFirstContactBlock(block.id)}
+                            title="Remover bloco"
+                            className="p-1 text-slate-500 hover:text-red-400 cursor-pointer transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {block.type === 'text' && (
+                        <AutoResizeTextarea
+                          minRows={3}
+                          value={block.text || ''}
+                          onChange={(e) => handleFirstContactBlockTextChange(block.id, e.target.value)}
+                          placeholder="Ex: Oi! Que bom que você chegou até nós 🙌 Somos a Clic Piscinas — confira no vídeo abaixo..."
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-pink-500 focus:outline-none leading-relaxed"
+                        />
+                      )}
+
+                      {block.type === 'image' && (
+                        <div className="flex items-center gap-3">
+                          {block.imageBase64 ? (
+                            <img src={block.imageBase64} alt="Bloco de imagem" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
+                          ) : (
+                            <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem imagem</div>
+                          )}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
+                              {block.imageBase64 ? 'Trocar imagem' : 'Adicionar imagem'}
+                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFirstContactBlockImageChange(block.id, e)} />
+                            </label>
+                            {block.imageBase64 && (
+                              <button
+                                type="button"
+                                onClick={() => handleFirstContactBlockImageRemove(block.id)}
+                                className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
+                              >
+                                <X className="w-3 h-3" />
+                                Remover
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {block.type === 'video' && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-3">
+                            {block.videoId ? (
+                              <button
+                                type="button"
+                                onClick={() => handlePreviewFirstContactBlockVideo(block.videoId!)}
+                                disabled={previewingBlockMediaId === block.videoId}
+                                title={block.videoFileName || 'Ver vídeo'}
+                                className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
+                              >
+                                {previewingBlockMediaId === block.videoId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                              </button>
+                            ) : (
+                              <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem vídeo</div>
+                            )}
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold flex items-center gap-1 w-fit">
+                                {uploadingBlockId === block.id ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Enviando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Video className="w-3 h-3" />
+                                    {block.videoId ? 'Trocar vídeo' : 'Adicionar vídeo'}
+                                  </>
+                                )}
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  className="hidden"
+                                  disabled={uploadingBlockId === block.id}
+                                  onChange={(e) => handleFirstContactBlockVideoUpload(block.id, e)}
+                                />
+                              </label>
+                              {block.videoId && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleFirstContactBlockVideoRemove(block.id)}
+                                  className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
+                                >
+                                  <X className="w-3 h-3" />
+                                  Remover
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <span className="text-[9px] text-slate-500 block">
+                            Até {MAX_VIDEO_INPUT_SIZE_MB}MB, qualquer formato — convertido automaticamente.
+                            {block.videoSizeBytes ? ` (${(block.videoSizeBytes / (1024 * 1024)).toFixed(1)} MB)` : ''}
+                          </span>
+                        </div>
+                      )}
+
+                      {block.type === 'file' && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-3">
+                            {block.fileId ? (
+                              <button
+                                type="button"
+                                onClick={() => handlePreviewFirstContactBlockFile(block.fileId!)}
+                                disabled={previewingBlockMediaId === block.fileId}
+                                title={block.fileName || 'Ver arquivo'}
+                                className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-purple-400 hover:text-purple-300 disabled:opacity-50 cursor-pointer"
+                              >
+                                {previewingBlockMediaId === block.fileId ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+                              </button>
+                            ) : (
+                              <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem arquivo</div>
+                            )}
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold flex items-center gap-1 w-fit">
+                                {uploadingBlockId === block.id ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Enviando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Paperclip className="w-3 h-3" />
+                                    {block.fileId ? 'Trocar arquivo' : 'Adicionar arquivo'}
+                                  </>
+                                )}
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  disabled={uploadingBlockId === block.id}
+                                  onChange={(e) => handleFirstContactBlockFileUpload(block.id, e)}
+                                />
+                              </label>
+                              {block.fileId && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleFirstContactBlockFileRemove(block.id)}
+                                  className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
+                                >
+                                  <X className="w-3 h-3" />
+                                  Remover
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <span className="text-[9px] text-slate-500 block">
+                            Até {MAX_FIRST_CONTACT_FILE_SIZE_MB}MB (ex: catálogo em PDF).
+                            {block.fileName ? ` ${block.fileName}` : ''}
+                            {block.fileSizeBytes ? ` (${(block.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB)` : ''}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                <span className="text-xs font-bold text-slate-300 block">Imagem</span>
-                <div className="flex items-center gap-3">
-                  {formData.firstContactMessage?.imageBase64 ? (
-                    <img src={formData.firstContactMessage.imageBase64} alt="Primeiro contato" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
-                  ) : (
-                    <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem imagem</div>
-                  )}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
-                      {formData.firstContactMessage?.imageBase64 ? 'Trocar imagem' : 'Adicionar imagem'}
-                      <input type="file" accept="image/*" className="hidden" onChange={handleFirstContactImageChange} />
-                    </label>
-                    {formData.firstContactMessage?.imageBase64 && (
-                      <button
-                        type="button"
-                        onClick={handleFirstContactImageRemove}
-                        className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
-                      >
-                        <X className="w-3 h-3" />
-                        Remover
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                <span className="text-xs font-bold text-slate-300 block">Vídeo (até {MAX_VIDEO_INPUT_SIZE_MB}MB, qualquer formato — convertido automaticamente)</span>
-                <div className="flex items-center gap-3">
-                  {formData.firstContactMessage?.videoId ? (
-                    <button
-                      type="button"
-                      onClick={handlePreviewFirstContactVideo}
-                      disabled={previewingFirstContactVideo}
-                      title={formData.firstContactMessage.videoFileName || 'Ver vídeo'}
-                      className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
-                    >
-                      {previewingFirstContactVideo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                    </button>
-                  ) : (
-                    <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem vídeo</div>
-                  )}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold flex items-center gap-1 w-fit">
-                      {uploadingFirstContactVideo ? (
-                        <>
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          Enviando...
-                        </>
-                      ) : (
-                        <>
-                          <Video className="w-3 h-3" />
-                          {formData.firstContactMessage?.videoId ? 'Trocar vídeo' : 'Adicionar vídeo'}
-                        </>
-                      )}
-                      <input
-                        type="file"
-                        accept="video/*"
-                        className="hidden"
-                        disabled={uploadingFirstContactVideo}
-                        onChange={handleFirstContactVideoUpload}
-                      />
-                    </label>
-                    {formData.firstContactMessage?.videoId && (
-                      <button
-                        type="button"
-                        onClick={handleFirstContactVideoRemove}
-                        className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
-                      >
-                        <X className="w-3 h-3" />
-                        Remover
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {formData.firstContactMessage?.videoSizeBytes && (
-                  <span className="text-[9px] text-slate-500 block">
-                    {(formData.firstContactMessage.videoSizeBytes / (1024 * 1024)).toFixed(1)} MB
-                  </span>
-                )}
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
+              <span className="text-xs font-bold text-slate-400 pt-3">Adicionar bloco:</span>
+              <div className="flex flex-wrap gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => handleAddFirstContactBlock('text')}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Texto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddFirstContactBlock('image')}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  Imagem
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddFirstContactBlock('video')}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <Video className="w-3.5 h-3.5" />
+                  Vídeo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddFirstContactBlock('file')}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-purple-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <Paperclip className="w-3.5 h-3.5" />
+                  Arquivo
+                </button>
               </div>
             </div>
           </div>
