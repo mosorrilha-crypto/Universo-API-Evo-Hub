@@ -789,6 +789,7 @@ export const App: React.FC = () => {
           <WhatsAppLeadsSim
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
+            canManageWhatsAppConnection={canSeeAdminTools}
             onSaveTranscript={(item) => {
               setSavedTranscripts((prev) => [item, ...prev]);
               showToast('Atendimento salvo no histórico');

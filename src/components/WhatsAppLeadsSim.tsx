@@ -65,7 +65,8 @@ import {
   Users,
   Settings,
   Video,
-  Copy
+  Copy,
+  QrCode
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -109,6 +110,8 @@ interface WhatsAppLeadsSimProps {
   openLeadPhone?: string;
   /** Muda a cada clique em "Voltar pra conversa", mesmo pro mesmo telefone — garante que clicar de novo no mesmo lead depois de já ter navegado manualmente reabra a conversa mesmo assim. */
   openLeadRequestId?: number;
+  /** hasRoleAtLeast(currentUser?.role, 'admin') calculado em App.tsx — libera o botão "Reconectar WhatsApp (QR Code)" (ver ReconectarWhatsAppQrCode abaixo) pra admin comum do tenant, não só saas_admin. */
+  canManageWhatsAppConnection?: boolean;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -149,10 +152,158 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
   );
 };
 
+// Reconectar WhatsApp (Evolution API) direto do tenant, sem precisar de
+// saas_admin — pedido real (15/08/2026, incidente Clic Piscinas): o WhatsApp
+// deslogou sozinho do lado do WhatsApp (ver LOGOUT nos logs do Evolution
+// API) e só quem tinha saas_admin conseguia gerar QR Code novo pra
+// reconectar, deixando o tenant sem responder até alguém com esse acesso
+// aparecer. Mesmo fluxo do `ConectarEvolutionQrCode` do Painel SaaS Master
+// (SaaSAdminDashboard.tsx), mas sem seletor de tenant nem opção de criar
+// tenant novo — sempre o tenant logado. O backend (server/routes/admin.ts,
+// resolveEvolutionTenantId) ignora qualquer id que não venha de saas_admin e
+// resolve pelo tenantId do JWT, então isso nunca abre a conexão de outro
+// tenant mesmo que o `tenantId` passado aqui esteja errado/desatualizado.
+const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
+  const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
+  const [connectionState, setConnectionState] = useState<'idle' | 'waiting' | 'connected'>('idle');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (connectionState !== 'waiting') return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.connected) setConnectionState('connected');
+      } catch {
+        // Falha transitória de rede durante o polling — tenta de novo no próximo tick.
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [connectionState, tenantId]);
+
+  const handleRefreshQr = async () => {
+    setIsGeneratingQr(true);
+    setErrorMsg(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/qrcode`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.warning) setErrorMsg(data.warning);
+      setQrCodeBase64(data.qrCodeBase64 || null);
+      setConnectionState('waiting');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao buscar o QR Code.');
+    } finally {
+      setIsGeneratingQr(false);
+    }
+  };
+
+  const handleGenerateQr = async () => {
+    setIsGeneratingQr(true);
+    setErrorMsg(null);
+    setQrCodeBase64(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.warning) setErrorMsg(data.warning);
+      if (data.qrCodeBase64) {
+        setQrCodeBase64(data.qrCodeBase64);
+        setConnectionState('waiting');
+      } else {
+        await handleRefreshQr();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao gerar o QR Code.');
+    } finally {
+      setIsGeneratingQr(false);
+    }
+  };
+
+  const openModal = () => {
+    setIsModalOpen(true);
+    setErrorMsg(null);
+    setQrCodeBase64(null);
+    setConnectionState('idle');
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openModal}
+        title="Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)"
+        className="px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+      >
+        <QrCode className="w-3.5 h-3.5" />
+        <span>Reconectar WhatsApp (QR Code)</span>
+      </button>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsModalOpen(false)}>
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-bold text-sm flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-purple-400" /> Reconectar WhatsApp (Evolution API)
+              </h3>
+              <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {errorMsg && (
+              <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{errorMsg}</div>
+            )}
+
+            {connectionState === 'connected' ? (
+              <div className="text-center py-6 space-y-2">
+                <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+                <p className="text-sm text-white font-semibold">WhatsApp conectado!</p>
+                <p className="text-xs text-slate-400">O número já pode receber e enviar mensagens de novo.</p>
+              </div>
+            ) : qrCodeBase64 ? (
+              <div className="text-center space-y-3">
+                <img src={qrCodeBase64} alt="QR Code de conexão" className="mx-auto rounded-lg border border-slate-700 w-56 h-56 object-contain bg-white" />
+                <p className="text-xs text-slate-400">Abra o WhatsApp no celular deste número → Aparelhos conectados → Conectar um aparelho → escaneie este código.</p>
+                <button
+                  type="button"
+                  onClick={handleRefreshQr}
+                  disabled={isGeneratingQr}
+                  className="text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isGeneratingQr ? 'animate-spin' : ''}`} /> QR expirou? Gerar novo
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleGenerateQr}
+                disabled={isGeneratingQr}
+                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {isGeneratingQr ? <span className="animate-spin">⏳</span> : <QrCode className="w-3.5 h-3.5" />}
+                {isGeneratingQr ? 'Gerando...' : 'Gerar QR Code'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
 export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onSaveTranscript,
   knowledgeBase,
   activeTenant,
+  canManageWhatsAppConnection,
   onAddNewLead,
   onDeleteLead,
   escalationsPendingCount = 0,
@@ -2090,6 +2241,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
         {isToolbarSettingsOpen && (
           <div className="w-full flex flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
+            {/* Reconectar WhatsApp via QR Code — só faz sentido pra tenant
+                conectado via Evolution API (statusAvailable) e só aparece
+                pra quem tem permissão de admin+ (canManageWhatsAppConnection,
+                calculado em App.tsx a partir do papel do usuário logado). */}
+            {canManageWhatsAppConnection && statusAvailable && activeTenant?.id && (
+              <ReconectarWhatsAppQrCode tenantId={activeTenant.id} />
+            )}
+
             {/* Clear Mock Data Button */}
             <button
               onClick={handleClearMockData}

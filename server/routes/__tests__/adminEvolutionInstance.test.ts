@@ -27,12 +27,15 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
   next();
 }
 
-function startServer(deps: { evolutionApiUrl?: string; evolutionApiKey?: string } = { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY }) {
+function startServer(
+  deps: { evolutionApiUrl?: string; evolutionApiKey?: string } = { evolutionApiUrl: EVOLUTION_API_URL, evolutionApiKey: EVOLUTION_API_KEY },
+  authenticateToken: any = fakeAuthenticateToken
+) {
   const app = express();
   app.use(express.json());
   app.use(
     createAdminRouter({
-      authenticateToken: fakeAuthenticateToken as any,
+      authenticateToken,
       supabase: supabase as any,
       publicBaseUrl: PUBLIC_BASE_URL,
       ...deps,
@@ -290,5 +293,74 @@ describe('GET /api/admin/tenants/:id/evolution-instance/status', () => {
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/status`);
     expect(res.status).toBe(404);
+  });
+});
+
+// Pedido real (15/08/2026, incidente Clic Piscinas): admin comum (não
+// saas_admin) do próprio tenant também precisa conseguir reconectar via QR
+// Code, sem depender de alguém com saas_admin. As três rotas acima passaram
+// de requireRole('saas_admin') pra requireRole('admin') + resolveEvolutionTenantId,
+// que ignora o :id da URL pra quem não é saas_admin e sempre usa o tenantId
+// do JWT — os testes abaixo provam que um admin não consegue usar essa rota
+// pra mexer na conexão de OUTRO tenant só trocando o :id na URL.
+describe('escopo por tenant pra admin comum (não saas_admin)', () => {
+  const OTHER_TENANT_ID = 'tenant-de-outra-empresa';
+
+  function fakeAuthenticateTokenAsAdmin(req: any, _res: any, next: any) {
+    req.user = { id: 'op-admin-comum', tenantId: TENANT_ID, role: 'admin' };
+    next();
+  }
+
+  it('POST .../evolution-instance com :id de OUTRO tenant na URL ainda assim cria a instância no tenant do próprio JWT', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        return { ok: true, json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { base64: 'data:image/png;base64,ABC123' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${OTHER_TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(201);
+
+    const rows = supabase.__tables.tenant_evolution_credentials;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tenant_id).toBe(TENANT_ID);
+    expect(rows[0].tenant_id).not.toBe(OTHER_TENANT_ID);
+  });
+
+  it('GET .../evolution-instance/status com :id de OUTRO tenant na URL consulta o tenant do próprio JWT, não o da URL', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'minha-instancia', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+      { tenant_id: OTHER_TENANT_ID, instance_name: 'instancia-de-outra-empresa', api_url: EVOLUTION_API_URL, api_key: 'outra-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      expect(String(url)).toBe(`${EVOLUTION_API_URL}/instance/connectionState/minha-instancia`);
+      return { ok: true, json: async () => ({ instance: { state: 'open' } }) } as any;
+    }) as any;
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${OTHER_TENANT_ID}/evolution-instance/status`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.instanceName).toBe('minha-instancia');
+  });
+
+  it('403 pra operator/manager — só admin+ consegue reconectar', async () => {
+    function fakeAuthenticateTokenAsOperator(req: any, _res: any, next: any) {
+      req.user = { id: 'op-comum', tenantId: TENANT_ID, role: 'operator' };
+      next();
+    }
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsOperator));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(403);
   });
 });
