@@ -13,6 +13,7 @@ import { ManualAppointmentModal } from './leads/ManualAppointmentModal';
 import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
+import { ContractModal } from './contracts/ContractModal';
 import {
   Play,
   Sparkles,
@@ -94,6 +95,14 @@ const COMPOSER_EMOJIS = [
   '💇', '💅', '💄', '✂️', '💇‍♀️', '👄', '👁️', '💆', '🌸', '🌟',
   '✅', '❌', '⏰', '📅', '📍', '💰', '💳', '📷', '📄', '❓',
 ];
+
+// Botão "Gerar Contrato" (pedido real, 15/08/2026): o modelo de contrato em
+// ContractModal.tsx é o texto fixo específico da Clic Piscinas (compra-venda
+// de piscina) — não faz sentido nenhum aparecer pra outros tenants (ex: a
+// Monique, que vende serviço de estética, não piscina). Decisão explícita
+// do dono do produto: só a Clic Piscinas por agora; generalizar pra modelo
+// por tenant fica pra quando outro tenant precisar de contrato de verdade.
+const CLIC_PISCINAS_TENANT_ID = '45dbb383-522e-400b-9804-0ea65f589d40';
 
 interface WhatsAppLeadsSimProps {
   onSaveTranscript: (item: SavedTranscriptItem) => void;
@@ -1293,6 +1302,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Botão só aparece quando NÃO há agendamento já rastreado pra esse
   // contato (evita tentar cadastrar dois pro mesmo número).
   const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false);
+  const [isContractModalOpen, setIsContractModalOpen] = useState(false);
   const [manualServiceName, setManualServiceName] = useState('');
   const [manualDate, setManualDate] = useState('');
   const [manualTime, setManualTime] = useState('');
@@ -2736,6 +2746,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   )}
 
+                  {/* Gerar Contrato (pedido real, 15/08/2026) — modelo fixo
+                      da Clic Piscinas, ver CLIC_PISCINAS_TENANT_ID acima. */}
+                  {(selectedLead as any)?.isReal && activeTenant?.id === CLIC_PISCINAS_TENANT_ID && (
+                    <button
+                      onClick={() => setIsContractModalOpen(true)}
+                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      title="Gerar contrato"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                  )}
+
                   {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver PR #70) */}
                   <button
                     onClick={() => setMobileAnalysisOpen(true)}
@@ -3579,6 +3601,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
         onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); }}
+      />
+
+      <ContractModal
+        isOpen={isContractModalOpen}
+        onClose={() => setIsContractModalOpen(false)}
+        buyerName={selectedLead?.name || ''}
       />
 
       <StatusModal
