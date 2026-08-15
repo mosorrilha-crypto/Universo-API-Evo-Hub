@@ -45,14 +45,45 @@ describe('outboundEchoTracker', () => {
     expect(await consumePendingEcho(TENANT_A, '595981111111', 'text', 'Oi')).toBe(false);
   });
 
-  it('marca expirada (fora da janela de tolerância) não é consumida', async () => {
+  it('marca expirada (fora da janela de tolerância, 2min) não é consumida', async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2026-08-14T12:00:00Z'));
       await registerPendingEcho(TENANT_A, '595981111111', 'text', 'Oi');
-      vi.setSystemTime(new Date('2026-08-14T12:01:00Z')); // 60s depois, janela é 30s
+      vi.setSystemTime(new Date('2026-08-14T12:03:00Z')); // 3min depois, janela é 2min
       const consumed = await consumePendingEcho(TENANT_A, '595981111111', 'text', 'Oi');
       expect(consumed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('achado real (15/08/2026): eco com latência de 90s (dentro da nova janela de 2min, fora da antiga de 30s) ainda é consumido', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-14T12:00:00Z'));
+      await registerPendingEcho(TENANT_A, '595981111111', 'text', 'Oi');
+      vi.setSystemTime(new Date('2026-08-14T12:01:30Z')); // 90s depois
+      const consumed = await consumePendingEcho(TENANT_A, '595981111111', 'text', 'Oi');
+      expect(consumed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('limpa marcas nunca reclamadas há mais de 10min (envio que falhou/eco que nunca chegou), pra não colidir com mensagem futura de texto igual', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-14T12:00:00Z'));
+      await registerPendingEcho(TENANT_A, '595981111111', 'text', 'Oi'); // nunca reclamada — simula envio que falhou
+
+      vi.setSystemTime(new Date('2026-08-14T12:11:00Z')); // 11min depois, teto de limpeza é 10min
+      // Consumir qualquer coisa (mesmo tenant) já dispara a limpeza best-effort.
+      await consumePendingEcho(TENANT_A, '595981111119', 'text', 'outro texto qualquer');
+
+      // Uma mensagem NOVA de texto igual, chegando bem depois, não deve mais achar a marca órfã.
+      const consumedLater = await consumePendingEcho(TENANT_A, '595981111111', 'text', 'Oi');
+      expect(consumedLater).toBe(false);
     } finally {
       vi.useRealTimers();
     }

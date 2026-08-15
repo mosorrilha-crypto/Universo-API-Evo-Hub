@@ -11,8 +11,24 @@
  */
 import { getDb } from './db';
 
-/** Janela de tolerância entre "mandamos algo" e "o eco chegou de volta" — generosa o bastante pra cobrir latência normal do webhook, curta o bastante pra não confundir uma coincidência de texto muito depois. */
-const ECHO_WINDOW_MS = 30_000;
+/**
+ * Janela de tolerância entre "mandamos algo" e "o eco chegou de volta" —
+ * generosa o bastante pra cobrir latência normal do webhook, curta o
+ * bastante pra não confundir uma coincidência de texto muito depois.
+ * Achado real (15/08/2026): 30s achava curto demais pra latência real
+ * observada em produção (webhook da Evolution API pode demorar bem mais que
+ * isso sob carga) — uma marca pendente "expirava" da janela de match antes
+ * do eco de verdade chegar, e o eco tardio virava (incorretamente) uma
+ * mensagem nova "mandada direto do celular", duplicando o que já tínhamos
+ * gravado. Aumentado pra 2min; a garbage collection abaixo evita que marcas
+ * nunca reclamadas (ex: envio que falhou silenciosamente, sem eco nenhum
+ * chegar) fiquem acumulando pra sempre e um dia colidam por coincidência com
+ * uma mensagem futura de texto igual.
+ */
+const ECHO_WINDOW_MS = 120_000;
+
+/** Teto pra marca pendente nunca reclamada (envio falhou/eco nunca chegou) — limpa no mesmo select-then-delete de consumePendingEcho, sem precisar de job separado. */
+const STALE_ECHO_MS = 10 * 60_000;
 
 export type OutboundEchoType = 'text' | 'audio' | 'image' | 'file';
 
@@ -40,6 +56,7 @@ export async function registerPendingEcho(tenantId: string, phone: string, type:
  */
 export async function consumePendingEcho(tenantId: string, phone: string, type: OutboundEchoType, text?: string): Promise<boolean> {
   const db = getDb();
+  await cleanupStaleEchoes(tenantId);
   const sinceIso = new Date(Date.now() - ECHO_WINDOW_MS).toISOString();
   let query = db
     .from('pending_outbound_echoes')
@@ -65,4 +82,19 @@ export async function consumePendingEcho(tenantId: string, phone: string, type: 
     console.warn(`⚠️  [Eco de envio] Falha ao remover marca pendente ${match.id}:`, deleteError.message);
   }
   return true;
+}
+
+/**
+ * Melhor esforço, roda a cada chamada de consumePendingEcho — apaga marcas
+ * nunca reclamadas há mais de STALE_ECHO_MS (o eco de verdade nunca chegou,
+ * geralmente porque o envio original falhou silenciosamente). Nunca lança:
+ * falha aqui não pode travar o processamento real do evento fromMe.
+ */
+async function cleanupStaleEchoes(tenantId: string): Promise<void> {
+  const db = getDb();
+  const staleBeforeIso = new Date(Date.now() - STALE_ECHO_MS).toISOString();
+  const { error } = await db.from('pending_outbound_echoes').delete().eq('tenant_id', tenantId).lt('created_at', staleBeforeIso);
+  if (error) {
+    console.warn(`⚠️  [Eco de envio] Falha ao limpar marcas pendentes antigas (tenant=${tenantId}):`, error.message);
+  }
 }

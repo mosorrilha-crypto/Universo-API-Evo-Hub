@@ -11,7 +11,7 @@ type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
 
 class FakeQueryBuilder {
-  private filters: Array<['eq' | 'ilike' | 'gte' | 'in', string, any]> = [];
+  private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'in', string, any]> = [];
   private wantSelect = false;
 
   constructor(
@@ -38,6 +38,12 @@ class FakeQueryBuilder {
     return this;
   }
 
+  /** Comparação simples (string/número) — suficiente pra filtro "mais antigo que X" por created_at ISO. */
+  lt(column: string, value: any) {
+    this.filters.push(['lt', column, value]);
+    return this;
+  }
+
   in(column: string, values: any[]) {
     this.filters.push(['in', column, values]);
     return this;
@@ -56,6 +62,7 @@ class FakeQueryBuilder {
     return this.filters.every(([kind, column, value]) => {
       if (kind === 'ilike') return String(row[column] ?? '').toLowerCase() === String(value ?? '').toLowerCase();
       if (kind === 'gte') return row[column] >= value;
+      if (kind === 'lt') return row[column] < value;
       if (kind === 'in') return (value as any[]).includes(row[column]);
       return row[column] === value;
     });
