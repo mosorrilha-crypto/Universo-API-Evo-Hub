@@ -81,6 +81,26 @@ describe('sendFirstContactMessage', () => {
     expect(sendWhatsAppTextMessage).toHaveBeenNthCalledWith(2, 'pnid-1', 'token-1', PHONE, 'Qualquer dúvida, é só chamar.');
   });
 
+  it('manda a legenda do vídeo (videoCaption) junto na mesma mensagem de mídia, via Meta e Evolution', async () => {
+    const kbMeta: AgentKnowledgeBase = { firstContactBlocks: [{ ...videoBlock(), videoCaption: 'Así entregamos nuestras piscinas' }] };
+    await sendFirstContactMessage(TENANT_ID, PHONE, kbMeta, META_CONFIG);
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pnid-1', 'token-1', PHONE, 'media-id-123', 'video/mp4', 'Así entregamos nuestras piscinas');
+    expect(recordOutgoingMessage.mock.calls[0][2]).toMatchObject({ text: '🎥 Así entregamos nuestras piscinas' });
+
+    vi.clearAllMocks();
+    getKnowledgeBaseVideo.mockResolvedValue({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' });
+    const kbEvolution: AgentKnowledgeBase = { firstContactBlocks: [{ ...videoBlock(), videoCaption: 'Así entregamos nuestras piscinas' }] };
+    await sendFirstContactMessage(TENANT_ID, PHONE, kbEvolution, EVOLUTION_CONFIG);
+    expect(sendEvolutionMediaMessage).toHaveBeenCalledWith('inst-1', 'https://evo.example.com', 'evo-key', PHONE, Buffer.from('fake-video-bytes').toString('base64'), 'video/mp4', 'piscinas.mp4', 'Así entregamos nuestras piscinas');
+  });
+
+  it('vídeo sem legenda manda caption undefined e usa o texto de registro padrão', async () => {
+    const kb: AgentKnowledgeBase = { firstContactBlocks: [videoBlock()] };
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pnid-1', 'token-1', PHONE, 'media-id-123', 'video/mp4', undefined);
+    expect(recordOutgoingMessage.mock.calls[0][2]).toMatchObject({ text: '🎥 Vídeo de primeiro contato' });
+  });
+
   it('manda um bloco de arquivo (ex: catálogo em PDF) via Meta', async () => {
     const kb: AgentKnowledgeBase = { firstContactBlocks: [fileBlock()] };
 
@@ -112,6 +132,26 @@ describe('sendFirstContactMessage', () => {
 
     expect(sendEvolutionTextMessage).toHaveBeenCalledWith('inst-1', 'https://evo.example.com', 'evo-key', PHONE, 'Oi!');
     expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('bloco que falha ao enviar de verdade (ex: erro de rede/timeout) não derruba os blocos seguintes da sequência', async () => {
+    uploadWhatsAppMedia.mockRejectedValueOnce(new Error('timeout na Evolution API'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const kb: AgentKnowledgeBase = {
+      firstContactBlocks: [
+        textBlock('Bem-vindo!', 'b1'),
+        videoBlock('b2'), // falha aqui — uploadWhatsAppMedia rejeita
+        textBlock('Lo que queda a cargo del cliente sería...', 'b3'),
+      ],
+    };
+
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(2); // blocos 1 e 3, mesmo com o 2 falhando
+    expect(sendWhatsAppTextMessage).toHaveBeenNthCalledWith(2, 'pnid-1', 'token-1', PHONE, 'Lo que queda a cargo del cliente sería...');
+    expect(recordOutgoingMessage).toHaveBeenCalledTimes(2); // só os 2 que realmente enviaram, nunca o vídeo que falhou
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('falhou ao enviar o bloco 2/3 (video)'));
+    consoleErrorSpy.mockRestore();
   });
 
   it('não quebra e não grava nada quando o vídeo configurado não é encontrado no Storage — mas continua pros próximos blocos', async () => {

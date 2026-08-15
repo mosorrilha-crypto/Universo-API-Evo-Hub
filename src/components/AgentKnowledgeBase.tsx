@@ -629,6 +629,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const handleFirstContactBlockVideoRemove = (id: string) =>
     updateFirstContactBlock(id, { videoId: undefined, videoMimeType: undefined, videoFileName: undefined, videoSizeBytes: undefined });
 
+  const handleFirstContactBlockVideoCaptionChange = (id: string, value: string) => updateFirstContactBlock(id, { videoCaption: value });
+
   const handlePreviewFirstContactBlockVideo = async (videoId: string) => {
     setPreviewingBlockMediaId(videoId);
     try {
@@ -1737,6 +1739,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                             Até {MAX_VIDEO_INPUT_SIZE_MB}MB, qualquer formato — convertido automaticamente.
                             {block.videoSizeBytes ? ` (${(block.videoSizeBytes / (1024 * 1024)).toFixed(1)} MB)` : ''}
                           </span>
+                          <input
+                            type="text"
+                            value={block.videoCaption || ''}
+                            onChange={(e) => handleFirstContactBlockVideoCaptionChange(block.id, e.target.value)}
+                            placeholder="Legenda do vídeo (opcional) — vai junto na mesma mensagem"
+                            className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-white focus:border-emerald-500 focus:outline-none"
+                          />
                         </div>
                       )}
 

@@ -54,6 +54,7 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
       await sendWhatsAppTextMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, text);
     }
     await recordOutgoingMessage(tenantId, phone, { type: 'text', text, timestamp: nowTimestamp() }, 'ai');
+    console.log(`🤖 [Primeiro Contato] tenant=${tenantId} bloco texto enviado pra ${phone}: "${text.slice(0, 60)}"`);
     return;
   }
 
@@ -69,6 +70,7 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
       await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType);
     }
     await recordOutgoingMessage(tenantId, phone, { type: 'image', text: '📷 Mensagem de primeiro contato', timestamp: nowTimestamp() }, 'ai');
+    console.log(`🤖 [Primeiro Contato] tenant=${tenantId} bloco imagem enviado pra ${phone}.`);
     return;
   }
 
@@ -81,13 +83,15 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
     }
     const mimeType = block.videoMimeType || video.contentType;
     const filename = block.videoFileName || 'primeiro-contato.mp4';
+    const caption = block.videoCaption?.trim() || undefined;
     if (isEvolution) {
-      await sendEvolutionMediaMessage(mediaConfig.evolutionInstanceName, mediaConfig.evolutionApiUrl, mediaConfig.evolutionApiKey, phone, video.buffer.toString('base64'), mimeType, filename);
+      await sendEvolutionMediaMessage(mediaConfig.evolutionInstanceName, mediaConfig.evolutionApiUrl, mediaConfig.evolutionApiKey, phone, video.buffer.toString('base64'), mimeType, filename, caption);
     } else {
       const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
-      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType);
+      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, caption);
     }
-    await recordOutgoingMessage(tenantId, phone, { type: 'file', text: '🎥 Vídeo de primeiro contato', timestamp: nowTimestamp() }, 'ai');
+    await recordOutgoingMessage(tenantId, phone, { type: 'file', text: caption ? `🎥 ${caption}` : '🎥 Vídeo de primeiro contato', timestamp: nowTimestamp() }, 'ai');
+    console.log(`🤖 [Primeiro Contato] tenant=${tenantId} bloco vídeo (${filename}, ${(video.buffer.length / (1024 * 1024)).toFixed(1)}MB) enviado pra ${phone} via ${isEvolution ? 'Evolution' : 'Meta'}.`);
     return;
   }
 
@@ -107,10 +111,22 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
       await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType);
     }
     await recordOutgoingMessage(tenantId, phone, { type: 'file', text: `📎 Arquivo de primeiro contato: ${filename}`, timestamp: nowTimestamp() }, 'ai');
+    console.log(`🤖 [Primeiro Contato] tenant=${tenantId} bloco arquivo (${filename}) enviado pra ${phone} via ${isEvolution ? 'Evolution' : 'Meta'}.`);
   }
 }
 
-/** Manda os blocos em ordem, um de cada vez (aguarda cada envio antes do próximo) — preserva a sequência texto/vídeo/texto/... exatamente como configurada. */
+/**
+ * Manda os blocos em ordem, um de cada vez (aguarda cada envio antes do
+ * próximo) — preserva a sequência texto/vídeo/texto/... exatamente como
+ * configurada. Achado real em produção (15/08/2026, Clic Piscinas — mensagem
+ * de primeiro contato não chegava no WhatsApp real): um bloco que falhasse
+ * no meio (ex: vídeo grande demorando/rejeitado pela Evolution API) derrubava
+ * a sequência INTEIRA — os blocos seguintes (ex: texto explicando o que fica
+ * a cargo do cliente) nunca chegavam a ser enviados, mesmo sem relação
+ * nenhuma com o bloco que falhou. Cada bloco agora falha isoladamente: um
+ * erro é logado e a sequência continua pro próximo bloco, em vez de abortar
+ * tudo.
+ */
 export async function sendFirstContactMessage(
   tenantId: string,
   phone: string,
@@ -118,8 +134,13 @@ export async function sendFirstContactMessage(
   mediaConfig: MediaSendConfig
 ): Promise<void> {
   const blocks = kb.firstContactBlocks || [];
-  for (const block of blocks) {
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
     if (!blockHasContent(block)) continue;
-    await sendBlock(tenantId, phone, block, mediaConfig);
+    try {
+      await sendBlock(tenantId, phone, block, mediaConfig);
+    } catch (err: any) {
+      console.error(`❌ [Primeiro Contato] tenant=${tenantId} falhou ao enviar o bloco ${i + 1}/${blocks.length} (${block.type}) pra ${phone}: ${err.message} — seguindo pros próximos blocos.`);
+    }
   }
 }
