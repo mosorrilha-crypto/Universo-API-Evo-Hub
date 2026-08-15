@@ -555,6 +555,52 @@ describe('generateAutoReplyForText — etapa de reclamação (Epic 4.5.8)', () =
     expect(result?.agent).toBe('reclamacao');
     expect(result?.needsHumanConfirmation).toBe(true);
   });
+
+  function makeFakeAiReclamacaoWithConcessionPromise(promiseText: string) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'reclamacao' }) } as any;
+          return { text: JSON.stringify({ phase: 'objecao', bubbles: [promiseText], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('gate de reembolso/desconto (15/08/2026): corrige quando o modelo promete reembolso numa reclamação, sem ferramenta nenhuma pra sustentar isso', async () => {
+    const ai = makeFakeAiReclamacaoWithConcessionPromise('Sin problema, ya te hago el reembolso completo del servicio.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'quero meu dinheiro de volta', 'Cliente');
+    expect(result?.agent).toBe('reclamacao');
+    expect(result?.bubbles).not.toContain('Sin problema, ya te hago el reembolso completo del servicio.');
+    expect(result?.bubbles.join(' ')).not.toMatch(/reembols/i);
+  });
+
+  it('gate de reembolso/desconto: corrige quando o modelo promete desconto numa reclamação', async () => {
+    const ai = makeFakeAiReclamacaoWithConcessionPromise('Te puedo hacer un descuento del 50% en tu próxima visita por las molestias.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'não gostei do resultado', 'Cliente');
+    expect(result?.bubbles.join(' ')).not.toMatch(/descont/i);
+  });
+
+  it('gate de reembolso/desconto: não mexe numa reclamação normal, sem promessa de reembolso/desconto/cortesia', async () => {
+    const ai = makeFakeAiReclamacaoWithConcessionPromise('Lamento mucho el inconveniente, ya avisé al equipo para revisar tu caso.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'não gostei do atendimento', 'Cliente');
+    expect(result?.bubbles).toEqual(['Lamento mucho el inconveniente, ya avisé al equipo para revisar tu caso.']);
+  });
+
+  it('gate de reembolso/desconto: escopo restrito a reclamacao — um agente FAQ recitando a política de reembolso já cadastrada não é tocado', async () => {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Nuestra política permite reembolso si cancelás con 24h+ de anticipación.'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    const result = await generateAutoReplyForText('tenant-a', ai, 'qual a política de cancelamento?', 'Cliente');
+    expect(result?.agent).toBe('faq');
+    expect(result?.bubbles).toEqual(['Nuestra política permite reembolso si cancelás con 24h+ de anticipación.']);
+  });
 });
 
 describe('generateAutoReplyForText — pedir o nome na triagem (achado real: falta de personalização quando o WhatsApp não tem nome de perfil)', () => {
