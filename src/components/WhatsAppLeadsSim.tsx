@@ -4,7 +4,7 @@ import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
-import { ConversationAnalysisPanel } from './ConversationAnalysisPanel';
+import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
 import { ForwardMessageModal } from './chat/ForwardMessageModal';
 import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
@@ -2188,15 +2188,40 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     handleAnalyzeConversation(newLeadItem);
   };
 
-  // Handle direct Meta CAPI trigger from conversation panel
+  // Handle direct Meta CAPI trigger from conversation panel (botões da Ficha
+  // IA). Achado real (15/08/2026): este handler nunca mandava pixelId/
+  // accessToken no corpo da requisição — POST /api/meta-capi/send-event
+  // sempre rejeitava com 400 ("configure pixelId e accessToken"), então o
+  // botão nunca funcionou de verdade desde que foi criado. A aba "Central &
+  // Disparo Meta CAPI" (AdAttributionCAPI.tsx) já salva essas credenciais em
+  // localStorage sob a chave 'meta_capi_config' — reusa a mesma aqui, em vez
+  // de duplicar o formulário de configuração nesta ficha.
   const handleDirectCAPI = async (eventName: string) => {
     if (!selectedLead) return;
+    let pixelId = '';
+    let accessToken = '';
+    let testEventCode: string | undefined;
+    try {
+      const saved = localStorage.getItem('meta_capi_config');
+      if (saved) {
+        const cfg = JSON.parse(saved);
+        pixelId = cfg.pixelId || '';
+        accessToken = cfg.accessToken || '';
+        testEventCode = cfg.testEventCode || undefined;
+      }
+    } catch {
+      // config corrompida no localStorage — segue com campos vazios, o
+      // backend recusa com a mensagem já orientando a configurar de novo.
+    }
     try {
       const response = await apiFetch('/api/meta-capi/send-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           eventName,
+          pixelId,
+          accessToken,
+          testEventCode,
           leadInfo: selectedLead,
           eventValue: 490,
         }),
@@ -2209,6 +2234,60 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       }
     } catch (err: any) {
       alert(`Erro CAPI: ${err.message}`);
+    }
+  };
+
+  // Gerar Resposta a partir de uma Sugestão (pedido real, 15/08/2026, Ficha
+  // IA) — POST /api/ai/reply-from-hint. Mesmo shape de leadInfo/messages/
+  // agentKnowledgeBase já usado em handleAnalyzeConversation, pra manter a
+  // resposta gerada consistente com o que o Gemini já sabe sobre este lead.
+  const handleGenerateReplyFromHint = async (hint: string): Promise<HintReplyResult> => {
+    if (!selectedLead) return { reply: '', error: 'Nenhum lead selecionado.' };
+    try {
+      const response = await apiFetch('/api/ai/reply-from-hint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadInfo: {
+            name: selectedLead.name,
+            phone: selectedLead.phone,
+            sampleType: (selectedLead as any).sampleType,
+          },
+          messages: selectedLead.messages || [],
+          agentKnowledgeBase: knowledgeBase,
+          hint,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return { reply: '', error: data?.error || 'Erro ao gerar resposta.' };
+      }
+      return { reply: data.reply || '', translation: data.translation || undefined, detectedLanguage: data.detectedLanguage || undefined, error: data.error };
+    } catch (err: any) {
+      return { reply: '', error: err.message || 'Falha ao gerar resposta.' };
+    }
+  };
+
+  // Perguntar à IA (pedido real, 15/08/2026, Ficha IA) — POST /api/ai/ask.
+  const handleAskAi = async (question: string): Promise<AskAiResult> => {
+    if (!selectedLead) return { answer: '', error: 'Nenhum lead selecionado.' };
+    try {
+      const response = await apiFetch('/api/ai/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadInfo: { name: selectedLead.name, phone: selectedLead.phone },
+          messages: selectedLead.messages || [],
+          question,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return { answer: '', error: data?.error || 'Erro ao consultar a IA.' };
+      }
+      return { answer: data.answer || '', error: data.error };
+    } catch (err: any) {
+      return { answer: '', error: err.message || 'Falha ao consultar a IA.' };
     }
   };
 
@@ -3593,6 +3672,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onApplySuggestedReply={handleApplySuggestedReply}
               leadName={selectedLead?.name || 'Lead'}
               onSendCAPIEvent={handleDirectCAPI}
+              onGenerateReplyFromHint={handleGenerateReplyFromHint}
+              onAskAi={handleAskAi}
             />
           </div>
         )}
@@ -3627,6 +3708,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onApplySuggestedReply={handleApplySuggestedReply}
                 leadName={selectedLead.name || 'Lead'}
                 onSendCAPIEvent={handleDirectCAPI}
+                onGenerateReplyFromHint={handleGenerateReplyFromHint}
+                onAskAi={handleAskAi}
               />
             </div>
           </div>
