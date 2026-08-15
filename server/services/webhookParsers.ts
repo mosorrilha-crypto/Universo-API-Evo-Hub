@@ -6,7 +6,7 @@
  */
 
 export interface ParsedIncomingMessage {
-  provider: 'meta' | 'evolution' | 'evohub';
+  provider: 'meta' | 'evolution' | 'evohub' | 'instagram';
   messageId: string;
   from: string;
   contactName?: string;
@@ -14,6 +14,8 @@ export interface ParsedIncomingMessage {
   phoneNumberId?: string;
   /** Nome da instância Evolution API (`body.instance`) — equivalente ao phoneNumberId acima, mas pra Porta A (Epic 4.6, self-hosted/QR Code). Ausente em mensagens via Meta/Evo Hub. */
   instanceName?: string;
+  /** ID da conta Instagram que recebeu a mensagem (`entry[].id`) — equivalente ao phoneNumberId/instanceName acima, mas pra Instagram DM (Fase 1, 15/08/2026). Ausente em mensagens via WhatsApp. */
+  instagramAccountId?: string;
   type: 'audio' | 'text' | 'image' | 'other';
   /** Tipo bruto do WhatsApp quando type==='other' (ex: "sticker", "video", "location", "contacts") — usado pra mostrar um rótulo específico no painel em vez de "[other]" genérico. Ver friendlyLabelForOtherType. */
   rawType?: string;
@@ -120,9 +122,59 @@ export function friendlyLabelForOtherType(rawType: string | undefined): string {
       return '👆 Resposta de botão recebida';
     case 'document':
       return '📎 Documento recebido';
+    case 'instagram_attachment':
+      return '📎 Anexo do Instagram recebido';
     default:
       return `[${rawType || 'other'}]`;
   }
+}
+
+/**
+ * Instagram DM (Fase 1, 15/08/2026) — mesma "família" de webhook da Meta
+ * (Messenger Platform), payload em `entry[].messaging[]`, estrutura
+ * DIFERENTE de `entry[].changes[].value.messages[]` usada pela Meta Cloud
+ * API/WhatsApp. Referência: https://developers.facebook.com/docs/messenger-platform/instagram/features/webhook
+ *
+ * `message.is_echo: true` marca um evento espelhando uma mensagem que a
+ * PRÓPRIA conta mandou (via API ou direto pelo app do Instagram) — mesmo
+ * papel do `fromMe` da Evolution API (Baileys): nunca deve disparar resposta
+ * automática, só vira mensagem de operador quando não é eco do nosso próprio
+ * envio (ver outboundEchoTracker.ts em webhooks.ts).
+ *
+ * Fase 1 só lida com texto — anexo (imagem/áudio/story reply etc.) vira tipo
+ * "other" com rótulo amigável (friendlyLabelForOtherType), sem download nem
+ * resposta automática, igual outros tipos não suportados dos outros
+ * provedores.
+ */
+export function parseInstagramWebhookPayload(body: any): ParsedIncomingMessage[] {
+  const parsed: ParsedIncomingMessage[] = [];
+  if (body?.object !== 'instagram') return parsed;
+
+  for (const entry of body.entry || []) {
+    const instagramAccountId: string | undefined = entry.id;
+
+    for (const event of entry.messaging || []) {
+      const messageId: string | undefined = event.message?.mid;
+      const from: string | undefined = event.sender?.id;
+      if (!messageId || !from) continue;
+
+      const base: Omit<ParsedIncomingMessage, 'type'> = {
+        provider: 'instagram',
+        messageId,
+        from,
+        instagramAccountId,
+        ...(event.message?.is_echo ? { fromMe: true as const } : {}),
+      };
+
+      if (typeof event.message?.text === 'string' && event.message.text) {
+        parsed.push({ ...base, type: 'text', text: event.message.text });
+      } else {
+        parsed.push({ ...base, type: 'other', rawType: 'instagram_attachment' });
+      }
+    }
+  }
+
+  return parsed;
 }
 
 /**

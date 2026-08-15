@@ -93,7 +93,12 @@ async function checkAndSendRemindersForTenant(
   tenantId: string,
   cfg: CalendarConfig,
   channel: {
-    provider?: 'meta' | 'evolution';
+    // resolveCredentialsForTenant (tenantResolver.ts) nunca devolve
+    // 'instagram' hoje — Fase 1 (15/08/2026) não inclui lembrete de
+    // agendamento pelo Instagram. Union só precisa incluir o valor pra bater
+    // estruturalmente com ResolvedTenant.provider (mesmo tipo devolvido por
+    // resolveCredentialsForTenant); o branch abaixo nunca vê 'instagram' na prática.
+    provider?: 'meta' | 'evolution' | 'instagram';
     metaAccessToken?: string;
     metaPhoneNumberId?: string;
     evolutionInstanceName?: string;

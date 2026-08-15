@@ -25,7 +25,8 @@ import {
   Brain,
   Save,
   RotateCcw,
-  Loader2
+  Loader2,
+  Camera
 } from 'lucide-react';
 
 interface RealTenant {
@@ -485,6 +486,202 @@ function GerenciarCredenciaisCapi() {
                 type="submit"
                 disabled={!selectedTenantId || isSaving || isLoadingCreds}
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {isSaving ? 'Salvando...' : 'Salvar credenciais'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Instagram DM (Fase 1, pedido real 15/08/2026 — "como responder lead do
+ * Instagram") — mesmo padrão de `GerenciarCredenciaisCapi` acima: entrada
+ * manual do ID da conta Instagram + access token (obtidos direto no App da
+ * Meta, já conectado à Página/conta certa), sem fluxo de OAuth próprio ainda
+ * (fica pra uma fase seguinte se o volume justificar). Busca a lista REAL de
+ * tenants (GET /api/admin/tenants), não a tabela local/mock desta tela.
+ */
+function GerenciarCredenciaisInstagram() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [realTenants, setRealTenants] = useState<RealTenant[]>([]);
+  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('');
+  const [isLoadingCreds, setIsLoadingCreds] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [instagramAccountId, setInstagramAccountId] = useState('');
+  const [accessToken, setAccessToken] = useState('');
+  const [accessTokenSet, setAccessTokenSet] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const fetchRealTenants = async () => {
+    setIsLoadingTenants(true);
+    try {
+      const res = await apiFetch('/api/admin/tenants');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const tenants: RealTenant[] = (data.tenants || []).map((t: any) => ({ id: t.id, name: t.name, slug: t.slug }));
+      setRealTenants(tenants);
+      if (tenants.length && !selectedTenantId) setSelectedTenantId(tenants[0].id);
+    } catch (err) {
+      console.error('Falha ao carregar tenants reais:', err);
+    } finally {
+      setIsLoadingTenants(false);
+    }
+  };
+
+  // Nunca limpa successMsg aqui — mesmo motivo de GerenciarCredenciaisCapi
+  // acima (handleSave chama isso logo depois de setar a mensagem de sucesso).
+  const fetchCredentials = async (tenantId: string) => {
+    if (!tenantId) return;
+    setIsLoadingCreds(true);
+    setErrorMsg(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/instagram-credentials`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setInstagramAccountId(data.instagramAccountId || '');
+      setAccessTokenSet(!!data.accessTokenSet);
+      setAccessToken('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao carregar credenciais.');
+    } finally {
+      setIsLoadingCreds(false);
+    }
+  };
+
+  const openModal = () => {
+    setIsModalOpen(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    fetchRealTenants();
+  };
+
+  useEffect(() => {
+    if (isModalOpen && selectedTenantId) fetchCredentials(selectedTenantId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen, selectedTenantId]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTenantId) return;
+    setIsSaving(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/instagram-credentials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instagramAccountId: instagramAccountId.trim() || undefined,
+          // Em branco = manter o token já salvo (mesmo motivo de
+          // GerenciarCredenciaisCapi acima).
+          ...(accessToken.trim() ? { accessToken: accessToken.trim() } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setSuccessMsg('Credenciais salvas! O Instagram desse tenant já pode receber e responder DM automaticamente.');
+      await fetchCredentials(selectedTenantId);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao salvar credenciais.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openModal}
+        className="bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
+      >
+        <Camera className="w-3.5 h-3.5" />
+        Conectar Instagram
+      </button>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsModalOpen(false)}>
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-bold text-sm flex items-center gap-2">
+                <Camera className="w-4 h-4 text-pink-400" /> Instagram DM (Fase 1)
+              </h3>
+              <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-500">
+              Cole o ID da conta profissional do Instagram e o access token com permissão <code>instagram_manage_messages</code>,
+              gerados no mesmo App da Meta já usado pro WhatsApp. Com isso salvo, o agente passa a responder DM do Instagram
+              dessa conta automaticamente (texto, por enquanto — sem envio de foto/vídeo ainda).
+            </p>
+
+            {errorMsg && (
+              <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{errorMsg}</div>
+            )}
+            {successMsg && (
+              <div className="bg-emerald-950/60 border border-emerald-800 rounded-lg p-2.5 text-xs text-emerald-300">{successMsg}</div>
+            )}
+
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Tenant</label>
+              <select
+                value={selectedTenantId}
+                onChange={(e) => {
+                  setSuccessMsg(null);
+                  setSelectedTenantId(e.target.value);
+                }}
+                disabled={isLoadingTenants || !realTenants.length}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-pink-500"
+              >
+                {!realTenants.length && <option value="">{isLoadingTenants ? 'Carregando...' : 'Nenhum tenant cadastrado ainda'}</option>}
+                {realTenants.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">ID da Conta Instagram</label>
+                <input
+                  type="text"
+                  value={instagramAccountId}
+                  onChange={(e) => setInstagramAccountId(e.target.value)}
+                  disabled={isLoadingCreds}
+                  placeholder="Ex: 17841400000000000"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-pink-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block flex items-center gap-1.5">
+                  <Key className="w-3 h-3" /> Access Token
+                </label>
+                <input
+                  type="password"
+                  value={accessToken}
+                  onChange={(e) => setAccessToken(e.target.value)}
+                  disabled={isLoadingCreds}
+                  placeholder={accessTokenSet ? 'Já configurado — deixe em branco pra manter' : 'Cole o token aqui'}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-pink-500 disabled:opacity-50"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={!selectedTenantId || isSaving || isLoadingCreds}
+                className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 {isSaving ? 'Salvando...' : 'Salvar credenciais'}
@@ -1130,6 +1327,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
             <div className="flex justify-end gap-2">
               <GerenciarCredenciaisCapi />
+              <GerenciarCredenciaisInstagram />
               <ConectarEvolutionQrCode />
             </div>
 

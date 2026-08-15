@@ -23,11 +23,13 @@ export interface ResolvedTenant {
   tenantId: string;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
-  /** Porta A (Epic 4.6) — presente quando a mensagem/canal veio de uma instância Evolution API em vez do Meta Cloud API oficial. */
-  provider?: 'meta' | 'evolution';
+  /** Porta A (Epic 4.6) — presente quando a mensagem/canal veio de uma instância Evolution API em vez do Meta Cloud API oficial. Instagram DM (Fase 1, 15/08/2026) — terceiro canal, mesma Meta App/webhook da Meta Cloud API, payload e credencial próprios (ver resolveTenantByInstagramAccountId). */
+  provider?: 'meta' | 'evolution' | 'instagram';
   evolutionInstanceName?: string;
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
+  instagramAccountId?: string;
+  instagramAccessToken?: string;
   /** true quando o phone_number_id não bate com nenhum tenant cadastrado nem com o número compartilhado — não escrever em nenhum tenant. */
   unknownChannel?: boolean;
 }
@@ -119,6 +121,40 @@ export async function resolveTenantByEvolutionInstance(
     evolutionApiUrl: shared.evolutionApiUrl,
     evolutionApiKey: shared.evolutionApiKey,
   };
+}
+
+/**
+ * Instagram DM (Fase 1, 15/08/2026) — mesma lógica de
+ * `resolveTenantByEvolutionInstance` acima, trocando `instance_name` pelo ID
+ * da conta Instagram (`tenant_instagram_credentials`, migration 0033).
+ * Diferente da Meta Cloud API e da Evolution, não existe tenant legado nem
+ * credencial compartilhada aqui — é um canal novo, sem histórico anterior a
+ * proteger — então uma conta desconhecida sempre descarta como canal
+ * desconhecido, sem fallback nenhum.
+ */
+export async function resolveTenantByInstagramAccountId(instagramAccountId: string | undefined): Promise<ResolvedTenant> {
+  if (!instagramAccountId) return { tenantId: '', unknownChannel: true };
+  try {
+    const db = getDb();
+    const { data } = await db
+      .from('tenant_instagram_credentials')
+      .select('tenant_id, instagram_account_id, access_token')
+      .eq('instagram_account_id', instagramAccountId)
+      .maybeSingle();
+    if (data) {
+      return {
+        tenantId: data.tenant_id,
+        provider: 'instagram',
+        instagramAccountId: data.instagram_account_id,
+        instagramAccessToken: data.access_token,
+      };
+    }
+  } catch (err) {
+    console.warn('⚠️  [Tenant] Falha ao resolver tenant por conta Instagram:', (err as Error).message);
+    return { tenantId: '', unknownChannel: true };
+  }
+  console.warn(`🚫 [Tenant] Conta Instagram "${instagramAccountId}" não pertence a nenhum tenant cadastrado — mensagem descartada como canal desconhecido, não gravada em tenant nenhum.`);
+  return { tenantId: '', unknownChannel: true };
 }
 
 /**

@@ -25,9 +25,16 @@ import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
-/** Credenciais Meta pra fazer o agente enviar mídia de verdade (Epic 4.5.2) — mesmo par phone_number_id/access_token já resolvido por tenant em quem chama generateAutoReplyForText. */
+/**
+ * Credenciais Meta pra fazer o agente enviar mídia de verdade (Epic 4.5.2) —
+ * mesmo par phone_number_id/access_token já resolvido por tenant em quem
+ * chama generateAutoReplyForText. Instagram (Fase 1, 15/08/2026) ainda não
+ * suporta envio de mídia pela ferramenta do agente — union type já prevê o
+ * provider pra tipar corretamente o objeto montado em webhooks.ts, mas
+ * hasMediaSendConfig abaixo sempre devolve false pra ele até a Fase 2.
+ */
 export interface MediaSendConfig {
-  provider?: 'meta' | 'evolution';
+  provider?: 'meta' | 'evolution' | 'instagram';
   phoneNumberId?: string;
   accessToken?: string;
   evolutionInstanceName?: string;
