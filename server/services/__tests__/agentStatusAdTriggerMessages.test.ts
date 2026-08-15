@@ -68,4 +68,13 @@ describe('matchesAdTriggerMessage', () => {
   it('lista de gatilhos vazia nunca bate com nada', () => {
     expect(matchesAdTriggerMessage('qualquer coisa', [])).toBe(false);
   });
+
+  it('achado real (15/08/2026): bate quando o lead emenda algo depois do gatilho sem espaço (ex: "hola" colado no fim)', () => {
+    expect(matchesAdTriggerMessage('Me gustaría reservar un horario para el combo de cejas y labios 💕hola', triggers)).toBe(true);
+    expect(matchesAdTriggerMessage('Me gustaría reservar un horario para el combo de cejas y labios 💕 hola, buenas!', triggers)).toBe(true);
+  });
+
+  it('continua NÃO batendo quando o texto do gatilho aparece no MEIO/FIM, não como prefixo (não virou substring solto)', () => {
+    expect(matchesAdTriggerMessage('hola, Me gustaría reservar un horario para el combo de cejas y labios 💕', triggers)).toBe(false);
+  });
 });

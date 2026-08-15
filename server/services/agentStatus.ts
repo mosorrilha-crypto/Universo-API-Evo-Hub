@@ -96,14 +96,28 @@ function normalizeForAdTriggerMatch(text: string): string {
 
 /**
  * true se `text` bate (depois de normalizado) com algum dos gatilhos
- * configurados. Comparação exata (não substring) de propósito: os "ice
- * breakers" da Meta são um texto pronto que o lead toca/envia sem editar —
- * um match parcial abriria brecha pra mensagem orgânica de cliente real
- * (ex: "quería reservar un horario") disparar resposta indevidamente fora
- * do modo somente-anúncios.
+ * configurados. Compara por PREFIXO (não substring solto) de propósito: os
+ * "ice breakers" da Meta são um texto pronto que entra pré-preenchido na
+ * caixa de digitação do lead — um match solto (substring em qualquer
+ * posição) abriria brecha pra mensagem orgânica de cliente real (ex:
+ * "quería reservar un horario") disparar resposta indevidamente fora do
+ * modo somente-anúncios. Prefixo é o meio-termo certo: continua exigindo o
+ * texto INTEIRO do gatilho, só não trava mais quando o lead emenda algo
+ * depois sem espaço.
+ *
+ * Achado real em produção (15/08/2026): comparação exata (antes deste
+ * fix) travava com "hola" emendado direto depois do gatilho sem espaço
+ * (ex: "...cejas y labios 💕hola") — comportamento comum de verdade (o
+ * lead toca o botão de ice breaker da Meta, que pré-preenche o texto, e
+ * digita algo a mais antes de mandar). Sem bater o gatilho, a mensagem
+ * ficava travada em silêncio pelo modo somente-anúncios — sem log, sem
+ * escalonamento, sem nada visível pro operador.
  */
 export function matchesAdTriggerMessage(text: string, triggers: string[]): boolean {
   const normalizedText = normalizeForAdTriggerMatch(text);
   if (!normalizedText) return false;
-  return triggers.some((trigger) => normalizeForAdTriggerMatch(trigger) === normalizedText);
+  return triggers.some((trigger) => {
+    const normalizedTrigger = normalizeForAdTriggerMatch(trigger);
+    return !!normalizedTrigger && normalizedText.startsWith(normalizedTrigger);
+  });
 }
