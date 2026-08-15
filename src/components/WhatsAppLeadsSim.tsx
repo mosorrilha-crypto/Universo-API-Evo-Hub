@@ -160,6 +160,43 @@ const RealClientImage: React.FC<{ messageId: string; onOpen: (url: string) => vo
   );
 };
 
+// Achado real em produção (15/08/2026, Clic Piscinas): o vídeo (primeiro
+// contato, ou exemplo de produto) abria normalmente no WhatsApp real do
+// lead, mas o painel nunca tocava nada — só um card estático "Vídeo
+// enviado" (ver bloco `msg.type === 'file'` abaixo). Toca o vídeo de
+// verdade agora, buscando o binário salvo sob o mesmo id da mensagem
+// (GET /api/media/:messageId, mesmo mecanismo de RealClientImage acima).
+// Mensagens antigas (enviadas antes desta correção) nunca tiveram o
+// binário salvo — cai no aviso "Vídeo indisponível" em vez de travar
+// carregando pra sempre.
+const RealClientVideo: React.FC<{ messageId: string }> = ({ messageId }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    apiFetch(`/api/media/${encodeURIComponent(messageId)}`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled) return;
+        if (!blob) { setFailed(true); return; }
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [messageId]);
+
+  if (failed) {
+    return <div className="w-full h-36 bg-slate-800 rounded-lg flex items-center justify-center text-slate-500 text-[10px]">Vídeo indisponível (mensagem antiga, salva antes do preview existir)</div>;
+  }
+  if (!url) {
+    return <div className="w-full h-36 bg-slate-800 rounded-lg animate-pulse flex items-center justify-center text-slate-500 text-[10px]">Carregando vídeo...</div>;
+  }
+  return <video src={url} controls preload="metadata" className="w-full max-h-64 rounded-lg bg-black" />;
+};
+
 // Reconectar WhatsApp (Evolution API) direto do tenant, sem precisar de
 // saas_admin — pedido real (15/08/2026, incidente Clic Piscinas): o WhatsApp
 // deslogou sozinho do lado do WhatsApp (ver LOGOUT nos logs do Evolution
@@ -3357,19 +3394,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </div>
                           )}
 
-                          {/* File Document Type — o painel nunca teve preview real de
-                              vídeo (sem player embutido), só este bloco genérico. Vídeos
-                              mandados pelo agente (exemplo de produto, mensagem de
-                              primeiro contato) também usam type:'file' por não existir um
-                              MessageType próprio pra vídeo (ver runMidiaTool/
-                              firstContactMessage.ts) — mostrar "Documento PDF" pra um
-                              vídeo é enganoso (achado real: gerou dúvida se o vídeo tinha
-                              ido mesmo ou virado um arquivo/documento de verdade). O
-                              rótulo aqui é só sobre COMO O PAINEL mostra o registro, não
-                              reflete o que chegou de fato no WhatsApp real — ambos os
-                              tipos usam exatamente o mesmo envio de mídia por baixo. */}
+                          {/* File Document Type — vídeos mandados pelo agente (exemplo de
+                              produto, mensagem de primeiro contato) usam type:'file' por
+                              não existir um MessageType próprio pra vídeo (ver
+                              runMidiaTool/firstContactMessage.ts) — mostrar "Documento PDF"
+                              pra um vídeo é enganoso (achado real: gerou dúvida se o vídeo
+                              tinha ido mesmo ou virado um arquivo/documento de verdade), daí
+                              o isVideo abaixo (detecta pelo prefixo 🎥 do texto). Documento
+                              de verdade (PDF/catálogo) continua só com o card estático — sem
+                              preview real, igual sempre foi. */}
                           {msg.type === 'file' && (() => {
                             const isVideo = msg.text?.trimStart().startsWith('🎥');
+                            // Preview de vídeo de verdade só existe pra lead real (mensagens
+                            // do mock não têm messageId de banco pra buscar em /api/media).
+                            if (isVideo && (selectedLead as any)?.isReal) {
+                              return (
+                                <div className="space-y-1.5 min-w-[220px]">
+                                  <RealClientVideo messageId={msg.id} />
+                                  <p className="text-xs">{msg.text}</p>
+                                </div>
+                              );
+                            }
                             return (
                               <div className="space-y-1 min-w-[200px]">
                                 <div className="flex items-center space-x-2 bg-slate-950/40 p-2.5 rounded-lg border border-white/10">

@@ -17,6 +17,7 @@ import { sendEvolutionMediaMessage } from './evolutionSend';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
+import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
@@ -1008,11 +1009,19 @@ Só chame enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explici
         await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
       }
 
+      // Achado real em produção (15/08/2026, Clic Piscinas): o vídeo abria
+      // normalmente no WhatsApp real do lead, mas o painel nunca teve
+      // preview de vídeo nenhum — só um card estático "Vídeo enviado".
+      // Salva o binário sob o MESMO id da mensagem (mesmo mecanismo já
+      // usado pra imagem enviada pelo painel, ver mediaImageStore.ts) pra
+      // GET /api/media/:messageId conseguir servir de volta.
+      const videoMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, videoMessageId, video.buffer.toString('base64'), mimeType);
       await recordOutgoingMessage(tenantId, phone, {
         type: 'file',
         text: `🎥 Vídeo de exemplo: ${product.name}`,
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      }, 'ai');
+      }, 'ai', undefined, undefined, videoMessageId);
       return { actionsSummary: [`Enviou o vídeo de exemplo real de "${product.name}" pro cliente agora.`] };
     } catch (err: any) {
       return { actionsSummary: [`Tentou enviar o vídeo de "${product.name}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };

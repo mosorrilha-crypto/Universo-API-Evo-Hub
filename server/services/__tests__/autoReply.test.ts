@@ -13,11 +13,12 @@ import { invalidateAllSystemInstructionCaches } from '../geminiSystemInstruction
 const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
 const sendEvolutionMediaMessage = vi.fn(async () => undefined);
-const recordOutgoingMessage = vi.fn(async () => ({}) as any);
+const recordOutgoingMessage = vi.fn(async (..._args: any[]) => ({}) as any);
 const PRODUCT_WITH_PHOTO = { name: 'Microlips', price: 'Gs 500.000', exampleImageBase64: 'data:image/jpeg;base64,QQ==', exampleImageMimeType: 'image/jpeg' };
 const PRODUCT_WITH_VIDEO = { name: 'Efecto Volumen Brasileño', price: 'Gs 200.000', exampleVideoId: 'video-1', exampleVideoMimeType: 'video/mp4', exampleVideoFileName: 'volumen.mp4' };
 const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO, PRODUCT_WITH_VIDEO] }));
 const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
+const saveMediaImage = vi.fn(async (..._args: any[]) => undefined);
 // null = sem override salvo pelo saas_admin — cai no DEFAULT_GLOBAL_LAYER hardcoded, que é o que os testes abaixo verificam.
 const getGlobalPromptLayerOverride = vi.fn(async () => null as string | null);
 
@@ -26,6 +27,7 @@ vi.mock('../evolutionSend', () => ({ sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
+vi.mock('../mediaImageStore', () => ({ saveMediaImage }));
 vi.mock('../globalPromptStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../globalPromptStore')>();
   return { ...actual, getGlobalPromptLayerOverride };
@@ -462,6 +464,7 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
     sendWhatsAppMediaMessage.mockClear();
     recordOutgoingMessage.mockClear();
     getKnowledgeBaseVideo.mockClear();
+    saveMediaImage.mockClear();
     const { ai } = makeFakeAiWithVideoTool(true);
 
     const result = await generateAutoReplyForText(
@@ -474,6 +477,15 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
     expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'video/mp4', 'volumen.mp4');
     expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', 'Efecto Volumen Brasileño');
     expect(recordOutgoingMessage).toHaveBeenCalled();
+
+    // Achado real (15/08/2026, Clic Piscinas): o vídeo abria no WhatsApp real
+    // do lead mas nunca no painel — salva o binário sob o MESMO id da
+    // mensagem gravada, pro painel conseguir tocar de volta (GET /api/media/:messageId).
+    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+    const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
+    expect(savedBase64).toBe(Buffer.from('fake-video-bytes').toString('base64'));
+    expect(savedMimeType).toBe('video/mp4');
+    expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
   });
 
   it('acha o produto mesmo quando o Gemini devolve o nome com caixa/espaçamento diferente do catálogo (achado real em produção: match exato falhava silenciosamente)', async () => {

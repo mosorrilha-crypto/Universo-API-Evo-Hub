@@ -17,6 +17,12 @@ import { getKnowledgeBaseDocument } from './knowledgeBaseDocumentStore';
 import { sendWhatsAppTextMessage, sendWhatsAppMediaMessage, uploadWhatsAppMedia } from './metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage } from './evolutionSend';
 import { recordOutgoingMessage } from './conversationStore';
+import { saveMediaImage } from './mediaImageStore';
+
+/** Mesmo esquema de id usado em conversationStore.ts — gerado aqui ANTES do envio pra poder salvar o binário sob o mesmo id (ver saveMediaImage abaixo). */
+function newMessageId(): string {
+  return `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 /** true quando há pelo menos um bloco com conteúdo de fato — bloco presente mas vazio (ex: type 'text' sem texto) não deve disparar nada. */
 export function hasFirstContactMessage(kb: AgentKnowledgeBase | null | undefined): boolean {
@@ -90,7 +96,16 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
       const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
       await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, caption);
     }
-    await recordOutgoingMessage(tenantId, phone, { type: 'file', text: caption ? `🎥 ${caption}` : '🎥 Vídeo de primeiro contato', timestamp: nowTimestamp() }, 'ai');
+    // Achado real em produção (15/08/2026, Clic Piscinas): o vídeo abria
+    // normalmente no WhatsApp real do lead, mas o painel nunca teve preview
+    // de vídeo nenhum — só um card estático "Vídeo enviado". Salva o
+    // binário sob o MESMO id da mensagem (mesmo mecanismo já usado pra
+    // imagem enviada pelo painel, ver mediaImageStore.ts) pra
+    // GET /api/media/:messageId conseguir servir de volta e o painel tocar
+    // o vídeo de verdade.
+    const messageId = newMessageId();
+    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, messageId, video.buffer.toString('base64'), mimeType);
+    await recordOutgoingMessage(tenantId, phone, { type: 'file', text: caption ? `🎥 ${caption}` : '🎥 Vídeo de primeiro contato', timestamp: nowTimestamp() }, 'ai', undefined, undefined, messageId);
     console.log(`🤖 [Primeiro Contato] tenant=${tenantId} bloco vídeo (${filename}, ${(video.buffer.length / (1024 * 1024)).toFixed(1)}MB) enviado pra ${phone} via ${isEvolution ? 'Evolution' : 'Meta'}.`);
     return;
   }
