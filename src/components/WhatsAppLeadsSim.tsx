@@ -440,7 +440,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Status do agente automático real (active/paused/restricted) — controla
   // se o backend responde sozinho às mensagens recebidas (ver Epic 1.3).
-  const [agentStatus, setAgentStatusState] = useState<'active' | 'paused' | 'restricted'>('active');
+  //
+  // Achado real em produção (15/08/2026): começava em 'active' e, se o GET
+  // inicial falhasse (rede, token expirado etc.), o catch engolia o erro em
+  // silêncio e o pill "Ativo" continuava destacado pra sempre — o operador
+  // via "Ativo" enquanto o backend de verdade podia estar "Restrito"/
+  // "Pausado", sem nenhum sinal de que a tela não confirmou o valor real.
+  // Começa null (estado "ainda não sei") em vez de assumir 'active' — só
+  // acende um dos três pills depois que o GET realmente confirma o valor.
+  const [agentStatus, setAgentStatusState] = useState<'active' | 'paused' | 'restricted' | null>(null);
+  const [agentStatusLoadFailed, setAgentStatusLoadFailed] = useState(false);
   // Modo "somente anúncios" (pedido real, 14/08/2026): quando ativo, o
   // agente só responde automaticamente contatos com atribuição de anúncio
   // real (ctwa_clid) — nunca contatos pessoais. Útil quando o dono do
@@ -455,15 +464,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // matchesAdTriggerMessage no backend).
   const [adTriggerMessages, setAdTriggerMessagesState] = useState<string[]>([]);
 
-  useEffect(() => {
+  const loadAgentStatus = () => {
     apiFetch('/api/agent-status')
-      .then((r) => r.ok ? r.json() : null)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
-        if (data?.status) setAgentStatusState(data.status);
+        setAgentStatusState(data?.status || 'active');
         if (typeof data?.adsOnly === 'boolean') setAdsOnlyState(data.adsOnly);
         if (Array.isArray(data?.adTriggerMessages)) setAdTriggerMessagesState(data.adTriggerMessages);
+        setAgentStatusLoadFailed(false);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error('Falha ao carregar o status real do agente:', err);
+        setAgentStatusLoadFailed(true);
+      });
+  };
+
+  useEffect(() => {
+    loadAgentStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Respostas rápidas configuráveis — lista compartilhada pela equipe.
@@ -2532,15 +2550,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </button>
                 )}
               </div>
+              {/* Achado real em produção (15/08/2026): enquanto agentStatus
+                  ainda é null (GET inicial não confirmou nada) ou falhou de
+                  vez, nenhum pill acende — antes disso "Ativo" ficava
+                  destacado por padrão mesmo com o backend em outro estado,
+                  passando confiança falsa pro operador de que a IA estava
+                  respondendo. */}
+              {agentStatusLoadFailed && (
+                <button
+                  type="button"
+                  onClick={loadAgentStatus}
+                  title="Não foi possível confirmar o status real do agente no servidor — os pills abaixo podem não refletir a verdade. Clique pra tentar de novo."
+                  className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-all cursor-pointer"
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  <span>Status incerto — recarregar</span>
+                </button>
+              )}
               <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
                 {(['active', 'restricted', 'paused'] as const).map((status) => (
                   <button
                     key={status}
                     onClick={() => handleChangeAgentStatus(status)}
                     title={
-                      status === 'active' ? 'Agente responde sempre' :
-                      status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                      'Agente pausado — silêncio total'
+                      agentStatus === null
+                        ? 'Confirmando o status real do agente...'
+                        : status === 'active' ? 'Agente responde sempre' :
+                          status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                          'Agente pausado — silêncio total'
                     }
                     className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
                       agentStatus === status
