@@ -1,5 +1,25 @@
 @import "tailwindcss";
 
+/* Impressão do Contrato (ContractModal.tsx, pedido real 15/08/2026): sem
+   isso, o Ctrl+P/window.print() imprimia a tela inteira do painel por
+   baixo do modal (cabeçalho, abas, conversa) junto com o contrato — as
+   classes `print:` do Tailwind só controlam a exibição do PRÓPRIO elemento,
+   não escondem o resto da árvore. Esconde tudo exceto o que estiver dentro
+   de `.contract-print-root` só durante a impressão. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .contract-print-root,
+  .contract-print-root * {
+    visibility: visible;
+  }
+  .contract-print-root {
+    position: fixed;
+    inset: 0;
+  }
+}
+
 /* Achado real em produção: um layout flex-col + items-start sem w-full num
    componente (ver WhatsAppLeadsSim.tsx) deixou uma linha de botões crescer
    além da viewport, arrastando a PÁGINA INTEIRA pra rolar na horizontal
