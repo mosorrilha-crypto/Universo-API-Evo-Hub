@@ -125,6 +125,8 @@ export interface FirstContactBlock {
   videoMimeType?: string;
   videoFileName?: string;
   videoSizeBytes?: number;
+  /** Legenda opcional do vídeo — vai junto na MESMA mensagem de mídia (caption real da Meta/Evolution), não como um bloco de texto separado. */
+  videoCaption?: string;
   /** Só pra type === 'file' (ex: catálogo em PDF) — Storage (knowledgeBaseDocumentStore.ts), aqui só a referência. Desacoplado da lista de "Documentos Anexados" (AgentFileDoc): não entra como contexto de leitura da IA, só é enviado como arquivo real pro cliente. */
   fileId?: string;
   fileMimeType?: string;

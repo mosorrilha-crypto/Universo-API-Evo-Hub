@@ -81,13 +81,14 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
     }
     const mimeType = block.videoMimeType || video.contentType;
     const filename = block.videoFileName || 'primeiro-contato.mp4';
+    const caption = block.videoCaption?.trim() || undefined;
     if (isEvolution) {
-      await sendEvolutionMediaMessage(mediaConfig.evolutionInstanceName, mediaConfig.evolutionApiUrl, mediaConfig.evolutionApiKey, phone, video.buffer.toString('base64'), mimeType, filename);
+      await sendEvolutionMediaMessage(mediaConfig.evolutionInstanceName, mediaConfig.evolutionApiUrl, mediaConfig.evolutionApiKey, phone, video.buffer.toString('base64'), mimeType, filename, caption);
     } else {
       const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
-      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType);
+      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, caption);
     }
-    await recordOutgoingMessage(tenantId, phone, { type: 'file', text: '🎥 Vídeo de primeiro contato', timestamp: nowTimestamp() }, 'ai');
+    await recordOutgoingMessage(tenantId, phone, { type: 'file', text: caption ? `🎥 ${caption}` : '🎥 Vídeo de primeiro contato', timestamp: nowTimestamp() }, 'ai');
     return;
   }
 

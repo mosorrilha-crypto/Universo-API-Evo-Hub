@@ -81,6 +81,26 @@ describe('sendFirstContactMessage', () => {
     expect(sendWhatsAppTextMessage).toHaveBeenNthCalledWith(2, 'pnid-1', 'token-1', PHONE, 'Qualquer dúvida, é só chamar.');
   });
 
+  it('manda a legenda do vídeo (videoCaption) junto na mesma mensagem de mídia, via Meta e Evolution', async () => {
+    const kbMeta: AgentKnowledgeBase = { firstContactBlocks: [{ ...videoBlock(), videoCaption: 'Así entregamos nuestras piscinas' }] };
+    await sendFirstContactMessage(TENANT_ID, PHONE, kbMeta, META_CONFIG);
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pnid-1', 'token-1', PHONE, 'media-id-123', 'video/mp4', 'Así entregamos nuestras piscinas');
+    expect(recordOutgoingMessage.mock.calls[0][2]).toMatchObject({ text: '🎥 Así entregamos nuestras piscinas' });
+
+    vi.clearAllMocks();
+    getKnowledgeBaseVideo.mockResolvedValue({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' });
+    const kbEvolution: AgentKnowledgeBase = { firstContactBlocks: [{ ...videoBlock(), videoCaption: 'Así entregamos nuestras piscinas' }] };
+    await sendFirstContactMessage(TENANT_ID, PHONE, kbEvolution, EVOLUTION_CONFIG);
+    expect(sendEvolutionMediaMessage).toHaveBeenCalledWith('inst-1', 'https://evo.example.com', 'evo-key', PHONE, Buffer.from('fake-video-bytes').toString('base64'), 'video/mp4', 'piscinas.mp4', 'Así entregamos nuestras piscinas');
+  });
+
+  it('vídeo sem legenda manda caption undefined e usa o texto de registro padrão', async () => {
+    const kb: AgentKnowledgeBase = { firstContactBlocks: [videoBlock()] };
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pnid-1', 'token-1', PHONE, 'media-id-123', 'video/mp4', undefined);
+    expect(recordOutgoingMessage.mock.calls[0][2]).toMatchObject({ text: '🎥 Vídeo de primeiro contato' });
+  });
+
   it('manda um bloco de arquivo (ex: catálogo em PDF) via Meta', async () => {
     const kb: AgentKnowledgeBase = { firstContactBlocks: [fileBlock()] };
 
