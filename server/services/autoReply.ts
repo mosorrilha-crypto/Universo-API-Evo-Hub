@@ -544,6 +544,38 @@ function extractCitedTimes(text: string): string[] {
   });
 }
 
+/**
+ * Gate determinístico pra reembolso/desconto (15/08/2026) — mesmo espírito
+ * do gate anti-alucinação de horário (Epic 4.5.7) e da regra "toda
+ * reclamação escala pra humano" (Epic 4.5.8), mas cobrindo uma lacuna real:
+ * `needsHumanConfirmation` forçado em `reclamacao` só GERA um alerta pro
+ * operador em paralelo — não impede o texto que o modelo escreveu de sair
+ * pro cliente na hora. Sem ferramenta nenhuma de reembolso/desconto neste
+ * sistema (diferente de agenda, que tem `criar_agendamento` real pra
+ * confirmar um horário), QUALQUER promessa de reembolso/desconto/cortesia
+ * citada pelo modelo numa reclamação é, por definição, não confirmada —
+ * nunca há uma "ferramenta que rodou" capaz de sustentar essa promessa.
+ * Escopo deliberadamente restrito ao agente `reclamacao`: uma resposta de
+ * FAQ recitando a política de reembolso já cadastrada na Base de
+ * Conhecimento (ex: "cancelamento com 24h+ de antecedência tem reembolso")
+ * não é uma promessa nova, é informação real — nunca deve ser bloqueada.
+ */
+const CONCESSION_PROMISE_PATTERNS = [
+  /reembols/i, // reembolso, reembolsar, reembolsado, reembolsamos
+  /devolv\w*\s+(o\s+)?(dinheiro|dinero|valor|importe)/i, // devolver o dinheiro / devolver tu dinero
+  /descont\w*/i, // desconto, descuento, descontar, descontamos
+  /\bgr[aá]tis\b/i,
+  /\bgratuit[oa]\b/i,
+  /cortes[ií]a/i,
+  /\bsem custo\b/i,
+  /\bsin costo\b/i,
+];
+
+/** true quando o texto cita uma promessa de reembolso/desconto/cortesia — ver comentário acima. */
+function containsUnauthorizedConcessionPromise(text: string): boolean {
+  return CONCESSION_PROMISE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 async function executeCalendarTool(
   tenantId: string,
   name: string,
@@ -1188,6 +1220,18 @@ export async function generateAutoReplyForText(
           stopAutoReply = true;
         }
       }
+    }
+
+    // Gate determinístico de reembolso/desconto (15/08/2026, ver
+    // containsUnauthorizedConcessionPromise acima) — needsHumanConfirmation
+    // forçado abaixo só ALERTA o operador em paralelo, nunca impede o texto
+    // do modelo de sair pro cliente. Corrige ANTES de sair, mesmo padrão do
+    // gate de horário: substitui a promessa não confirmada por uma resposta
+    // segura, sem prometer nada que a IA não tem autoridade nem ferramenta
+    // pra sustentar.
+    if (agent === 'reclamacao' && containsUnauthorizedConcessionPromise(bubbles.join(' '))) {
+      console.warn(`⚠️  [Gate de reembolso/desconto] tenant=${tenantId} modelo citou reembolso/desconto/cortesia numa reclamação sem autorização — corrigindo resposta.`);
+      bubbles = ['Entiendo tu situación — ya avisé a alguien del equipo para que revise tu caso con atención y te confirme los próximos pasos.'];
     }
 
     // Epic 4.5.8 — toda reclamação escala pra humano, sem exceção. A IA
