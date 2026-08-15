@@ -26,6 +26,7 @@ import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
+import { startPendingFollowUpJob } from './server/services/pendingFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { initWebPush } from './server/services/webPush';
@@ -190,6 +191,14 @@ async function startServer() {
   // (data combinada chegou e ainda está pending) — nunca confirma/libera
   // nada sozinho. Ver server/services/preReservationFollowUpJob.ts.
   startPreReservationFollowUpJob();
+
+  // Job em background que escala pro operador quando um lead esfria no meio
+  // do funil — esperando avaliação da dona do negócio (foto de trabalho
+  // anterior) ou sumiu depois que a IA ofereceu horário/opção. Achado real
+  // (15/08/2026): auditoria de conversas do dia mostrou zero agendamentos
+  // fechados apesar de dezenas de conversas ativas. Nunca reabre contato
+  // sozinho, só avisa. Ver server/services/pendingFollowUpJob.ts.
+  startPendingFollowUpJob();
 
   // Job em background que alerta o operador quando o agente automático fica
   // pausado tempo demais com lead sem resposta acumulando (issue #115) —

@@ -95,6 +95,20 @@ export interface AutoReplyResult {
    * que é um bot (achado em pesquisa de mercado sobre humanização).
    */
   capturedClientName?: string;
+  /**
+   * Acompanhamento de funil (pedido real, 15/08/2026 — server/services/pendingFollowUpJob.ts):
+   * resumo curto quando a resposta pediu algo pra avaliação humana (foto de
+   * trabalho anterior etc.) e ainda não tem decisão — undefined no resto.
+   * Quem chama (webhooks.ts) usa isso pra marcar um acompanhamento pendente
+   * que escala pro operador se ninguém resolver até o fim do dia.
+   */
+  pendingOwnerReview?: string;
+  /**
+   * Resumo curto quando a resposta ofereceu horário/opção e está esperando
+   * o cliente escolher — undefined no resto. Escala pro operador se o
+   * cliente não responder em ~2h30 (ver pendingFollowUpJob.ts).
+   */
+  awaitingCustomerChoice?: string;
 }
 
 /**
@@ -262,8 +276,12 @@ Classifique também a fase atual desta conversa em UMA destas opções:
 
 Se em algum momento desta mensagem OU do histórico a cliente disser o próprio nome, e a seção "Nome do cliente" acima NÃO tiver aparecido com esse nome (ou não tiver aparecido de jeito nenhum), preencha "nomeCapturado" com esse nome exato — nunca invente, nunca repita um nome que já apareceu em "Nome do cliente". Isso existe pra não "esquecer" o nome depois que a mensagem em que ela disse sair do histórico recente (achado real: conversa de WhatsApp não tem limite de tamanho, mas o contexto que você recebe só traz as últimas mensagens).
 
+Acompanhamento de funil — pedido real (15/08/2026): uma auditoria de conversas reais mostrou leads esfriando sem ninguém perceber. Preencha estes dois campos SEMPRE que se aplicarem:
+- "pendenteAvaliacao": preencha com um resumo bem curto (ex: "trabalho anterior de cejas, aguardando avaliação") SOMENTE quando sua resposta pediu uma foto/informação especificamente pra avaliação humana (ex: trabalho anterior, pigmento antigo) antes de decidir o procedimento — null no resto.
+- "aguardandoCliente": preencha com um resumo bem curto (ex: "ofereceu sábado 15 ou segunda 17, esperando escolha") SOMENTE quando sua resposta pediu pro cliente escolher/confirmar algo necessário pra avançar rumo ao agendamento (dia, horário, qual serviço) — null no resto, e nunca preencha os dois campos ao mesmo tempo.
+
 Responda ESTRITAMENTE em JSON no formato:
-{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null}
+{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null}
 Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima.`;
 }
 
@@ -311,7 +329,7 @@ async function generateSpecialistReply(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   extraContext?: string,
   adContext?: string
-): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
+): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = await buildCachedSystemInstruction(agent, knowledgeBaseContext);
   const specialistModel = 'gemini-3.6-flash';
@@ -356,7 +374,14 @@ Nova mensagem do cliente: "${text}"`;
     response = await callSpecialist({ systemInstruction });
   }
 
-  const parsed = JSON.parse(response.text || '{}') as { phase?: string; bubbles?: string[]; needsHumanConfirmation?: boolean; nomeCapturado?: string | null };
+  const parsed = JSON.parse(response.text || '{}') as {
+    phase?: string;
+    bubbles?: string[];
+    needsHumanConfirmation?: boolean;
+    nomeCapturado?: string | null;
+    pendenteAvaliacao?: string | null;
+    aguardandoCliente?: string | null;
+  };
   const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean);
   const validPhases: ConversationPhase[] = ['abertura', 'informacao', 'objecao', 'fechamento'];
   const phase = validPhases.includes(parsed.phase as ConversationPhase) ? (parsed.phase as ConversationPhase) : 'informacao';
@@ -368,7 +393,12 @@ Nova mensagem do cliente: "${text}"`;
     : undefined;
 
   if (!bubbles.length) return null;
-  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName };
+  // Acompanhamento de funil (pedido real, 15/08/2026 — server/services/pendingFollowUpJob.ts):
+  // strings curtas e opcionais, não booleans — já vêm com o motivo pronto
+  // pra virar o texto do escalonamento, sem precisar adivinhar depois.
+  const pendingOwnerReview = typeof parsed.pendenteAvaliacao === 'string' && parsed.pendenteAvaliacao.trim() ? parsed.pendenteAvaliacao.trim() : undefined;
+  const awaitingCustomerChoice = typeof parsed.aguardandoCliente === 'string' && parsed.aguardandoCliente.trim() ? parsed.aguardandoCliente.trim() : undefined;
+  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName, pendingOwnerReview, awaitingCustomerChoice };
 }
 
 /**

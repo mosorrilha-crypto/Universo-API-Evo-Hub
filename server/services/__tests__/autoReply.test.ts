@@ -348,6 +348,47 @@ describe('generateAutoReplyForText — captura o nome que a cliente diz na conve
   });
 });
 
+describe('generateAutoReplyForText — acompanhamento de funil (pedido real, 15/08/2026: auditoria de conversas reais mostrou lead esfriando sem ninguém perceber)', () => {
+  function makeFakeAiWithFollowUp(pendenteAvaliacao: string | null, aguardandoCliente: string | null) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['¡Dale!'], needsHumanConfirmation: false, pendenteAvaliacao, aguardandoCliente }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('devolve pendingOwnerReview quando o modelo sinaliza que pediu avaliação da dona do negócio', async () => {
+    const ai = makeFakeAiWithFollowUp('trabalho anterior de cejas, aguardando avaliação', null);
+    const result = await generateAutoReplyForText('tenant-a', ai, 'tengo cejas tatuadas de otro lugar', undefined, undefined, []);
+    expect(result?.pendingOwnerReview).toBe('trabalho anterior de cejas, aguardando avaliação');
+    expect(result?.awaitingCustomerChoice).toBeUndefined();
+  });
+
+  it('devolve awaitingCustomerChoice quando o modelo sinaliza que ofereceu horário/opção e está esperando o cliente', async () => {
+    const ai = makeFakeAiWithFollowUp(null, 'ofereceu sábado 15 ou segunda 17, esperando escolha');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'quiero reservar', undefined, undefined, []);
+    expect(result?.awaitingCustomerChoice).toBe('ofereceu sábado 15 ou segunda 17, esperando escolha');
+    expect(result?.pendingOwnerReview).toBeUndefined();
+  });
+
+  it('nenhum dos dois campos definido quando o modelo não sinaliza nada (caso normal)', async () => {
+    const ai = makeFakeAiWithFollowUp(null, null);
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.pendingOwnerReview).toBeUndefined();
+    expect(result?.awaitingCustomerChoice).toBeUndefined();
+  });
+
+  it('string vazia/só espaço conta como "não sinalizado" (nunca cria pendência vazia)', async () => {
+    const ai = makeFakeAiWithFollowUp('   ', null);
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.pendingOwnerReview).toBeUndefined();
+  });
+});
+
 describe('generateAutoReplyForText — menção ao anúncio na abertura', () => {
   // Achado real em produção: todo lead vinha de anúncio ("Técnica brasileña
   // en Luque") mas a IA nunca sabia disso — toda saudação inicial saía
