@@ -13,7 +13,7 @@ import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/know
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
-import { bufferIncomingText } from '../services/messageBuffer';
+import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
@@ -194,6 +194,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant);
     });
   };
+
+  // Recupera buffers de rajada presos por um restart de deploy no meio da
+  // janela de 6s de silêncio — sem isso, a mensagem ficava perdida pra
+  // sempre (achado real, 15/08/2026). Uma vez só no boot do router, o
+  // próprio sweeper se reagenda periodicamente por dentro.
+  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) => {
+    triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant);
+  });
 
   // Extrai as mensagens em um formato comum, resolve de qual tenant é cada
   // uma (Bloco 2.B — por phone_number_id, com fallback pro tenant legado +
