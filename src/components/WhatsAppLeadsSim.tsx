@@ -60,9 +60,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  MessageCircle,
   Phone,
-  Users,
   Settings,
   Video,
   Copy,
@@ -2410,90 +2408,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="relative bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-[56px_repeat(12,minmax(0,1fr))] h-[85dvh] lg:h-[720px]">
-
-        {/* ========================================== */}
-        {/* Barra de ícones lateral esquerda, estilo WhatsApp Web/Desktop —
-            só nesta seção (Atendimento WhatsApp), o resto do produto mantém
-            a navegação própria do Universo. Ocupa uma faixa fixa extra
-            (56px) ANTES das 12 colunas normais — grid auto-placement cuida
-            do resto sozinho, sem precisar recalcular nenhum lg:col-span
-            existente. Escondida no mobile (lg:flex): não há espaço real pra
-            ela nesse breakpoint e o produto já usa mobileThreadOpen pra
-            navegação lá.
-            Cada ícone só é clicável quando já existe uma ação real por trás
-            (Conversas = esta própria tela; Arquivadas = seção já existente
-            na lista; Config = rola até os controles reais do agente,
-            Ativo/Restrito/Pausado + Calendar + Auto IA, que já existem
-            acima). Chamadas/Comunidades/Perfil não têm nenhuma
-            funcionalidade real no produto hoje — ficam desabilitados com
-            tooltip "Em breve" em vez de fingir que fazem algo.
-            Status (pedido real do dono do produto, 12/08/2026: fotos de
-            antes/depois de procedimento já aquecem lead comprovadamente) só
-            existe pra tenants conectados via Evolution API — a Meta Cloud
-            API oficial (canal da Monique hoje) não tem Status nenhum, então
-            o ícone fica desabilitado com um tooltip que explica isso, não
-            "Em breve" (não é uma questão de tempo, é de canal). */}
-        <nav className="hidden lg:flex flex-col items-center py-3 gap-1 bg-[#202c33] border-r border-slate-800/80">
-          <button
-            type="button"
-            title="Conversas"
-            className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 cursor-default"
-          >
-            <MessageCircle className="w-5 h-5" />
-          </button>
-          {statusAvailable ? (
-            <button
-              type="button"
-              onClick={() => setIsStatusModalOpen(true)}
-              title="Postar Status"
-              className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-            >
-              <CircleDashed className="w-5 h-5" />
-            </button>
-          ) : (
-            <button type="button" disabled title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-              <CircleDashed className="w-5 h-5" />
-            </button>
-          )}
-          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-            <Phone className="w-5 h-5" />
-          </button>
-          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-            <Users className="w-5 h-5" />
-          </button>
-
-          <div className="flex-1" />
-
-          <button
-            type="button"
-            onClick={() => setShowArchived(true)}
-            title="Arquivadas"
-            className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-          >
-            <Archive className="w-5 h-5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              // Achado real em produção ("botão de engrenagem não faz
-              // nada"): só dava scroll até o toolbar (que já costuma estar
-              // visível, sem nada de novo pra ver) — nunca abria de fato o
-              // painel de Configurações, que fica atrás do botão "Configurações"
-              // separado (isToolbarSettingsOpen) e só aparece quando ele é
-              // true. Abre o painel de verdade antes de rolar até ele.
-              setIsToolbarSettingsOpen(true);
-              toolbarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }}
-            title="Configurações do agente"
-            className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
-          <button type="button" disabled title="Em breve" className="p-2.5 rounded-xl text-slate-500 opacity-40 cursor-not-allowed">
-            <User className="w-5 h-5" />
-          </button>
-        </nav>
+      <div className="relative bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[85dvh] lg:h-[720px]">
 
         {/* ========================================== */}
         {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}
