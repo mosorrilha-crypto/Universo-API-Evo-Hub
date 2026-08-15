@@ -3084,21 +3084,38 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </div>
                           )}
 
-                          {/* File Document Type */}
-                          {msg.type === 'file' && (
-                            <div className="space-y-1 min-w-[200px]">
-                              <div className="flex items-center space-x-2 bg-slate-950/40 p-2.5 rounded-lg border border-white/10">
-                                <FileText className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-[11px] font-bold truncate block">
-                                    {msg.fileName || 'documento.pdf'}
-                                  </span>
-                                  <span className="text-[9px] opacity-75">Documento PDF</span>
+                          {/* File Document Type — o painel nunca teve preview real de
+                              vídeo (sem player embutido), só este bloco genérico. Vídeos
+                              mandados pelo agente (exemplo de produto, mensagem de
+                              primeiro contato) também usam type:'file' por não existir um
+                              MessageType próprio pra vídeo (ver runMidiaTool/
+                              firstContactMessage.ts) — mostrar "Documento PDF" pra um
+                              vídeo é enganoso (achado real: gerou dúvida se o vídeo tinha
+                              ido mesmo ou virado um arquivo/documento de verdade). O
+                              rótulo aqui é só sobre COMO O PAINEL mostra o registro, não
+                              reflete o que chegou de fato no WhatsApp real — ambos os
+                              tipos usam exatamente o mesmo envio de mídia por baixo. */}
+                          {msg.type === 'file' && (() => {
+                            const isVideo = msg.text?.trimStart().startsWith('🎥');
+                            return (
+                              <div className="space-y-1 min-w-[200px]">
+                                <div className="flex items-center space-x-2 bg-slate-950/40 p-2.5 rounded-lg border border-white/10">
+                                  {isVideo ? (
+                                    <Video className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                                  ) : (
+                                    <FileText className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <span className="text-[11px] font-bold truncate block">
+                                      {isVideo ? 'Vídeo enviado' : msg.fileName || 'documento.pdf'}
+                                    </span>
+                                    <span className="text-[9px] opacity-75">{isVideo ? 'Vídeo' : 'Documento PDF'}</span>
+                                  </div>
                                 </div>
+                                <p className="text-xs">{msg.text}</p>
                               </div>
-                              <p className="text-xs">{msg.text}</p>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           {/* Regular Text Message */}
                           {msg.type === 'text' && <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>}
