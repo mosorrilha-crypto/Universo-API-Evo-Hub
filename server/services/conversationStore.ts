@@ -9,6 +9,7 @@ import { getDb } from './db';
 import { listLabels, listLabelsByConversationId } from './conversationLabelStore';
 import { emitConversationUpdated } from './conversationEvents';
 import { registerPendingEcho } from './outboundEchoTracker';
+import { isAdsOnlyMode, getAdTriggerMessages, matchesAdTriggerMessage } from './agentStatus';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -250,6 +251,50 @@ export async function setConversationNameIfMissing(tenantId: string, phone: stri
   if (existing?.name) return;
   await db.from('conversations').update({ name }).eq('id', conv.id);
   emitConversationUpdated(tenantId, phone);
+}
+
+/**
+ * Marca essa conversa como vinda de anúncio pelo texto da mensagem bater
+ * com um dos gatilhos configurados (ver matchesAdTriggerMessage em
+ * agentStatus.ts) — complementa o ctwa_clid pra quando a Meta não manda
+ * esse dado no referral. Idempotente: só grava a primeira vez, nunca
+ * sobrescreve (mesmo padrão de attachAdReferralIfMissing acima).
+ */
+export async function markAdGreetingMatched(tenantId: string, phone: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  const { data: existing } = await db.from('conversations').select('ad_greeting_matched_at').eq('id', conv.id).maybeSingle();
+  if (existing?.ad_greeting_matched_at) return;
+  await db.from('conversations').update({ ad_greeting_matched_at: new Date().toISOString() }).eq('id', conv.id);
+}
+
+/** true se essa conversa já foi identificada como vinda de anúncio pelo texto da mensagem (ver markAdGreetingMatched). */
+export async function getConversationAdGreetingMatched(tenantId: string, phone: string): Promise<boolean> {
+  const db = getDb();
+  const { data } = await db.from('conversations').select('ad_greeting_matched_at').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  return !!data?.ad_greeting_matched_at;
+}
+
+/**
+ * true = a resposta automática deve ficar em silêncio agora por causa do
+ * modo "somente anúncios" (agentStatus.isAdsOnlyMode). Um lead já
+ * identificado como vindo de anúncio (ctwa_clid real OU texto batendo com
+ * um gatilho configurado, marcando a conversa via markAdGreetingMatched)
+ * sempre passa — o gatilho de texto só precisa bater na primeira mensagem,
+ * as seguintes da mesma conversa continuam liberadas. Compartilhado entre
+ * o caminho de texto (webhooks.ts) e o de áudio transcrito
+ * (transcriptionQueue.ts, passa a transcrição como `text`).
+ */
+export async function shouldBlockForAdsOnlyMode(tenantId: string, phone: string, text: string): Promise<boolean> {
+  if (!(await isAdsOnlyMode(tenantId))) return false;
+  if (await getConversationCtwaClid(tenantId, phone)) return false;
+  if (await getConversationAdGreetingMatched(tenantId, phone)) return false;
+  const triggers = await getAdTriggerMessages(tenantId);
+  if (matchesAdTriggerMessage(text, triggers)) {
+    await markAdGreetingMatched(tenantId, phone);
+    return false;
+  }
+  return true;
 }
 
 /** ctwa_clid gravado pra essa conversa, se algum dia veio de um anúncio — null caso contrário (nunca inventar). */

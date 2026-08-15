@@ -12,6 +12,7 @@ import { AddLeadModal } from './leads/AddLeadModal';
 import { ManualAppointmentModal } from './leads/ManualAppointmentModal';
 import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
+import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Play,
   Sparkles,
@@ -437,6 +438,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // negócio conecta o número pessoal dele além do número dedicado do
   // agente, pra não perder mensagem enquanto valida confiança no agente.
   const [adsOnly, setAdsOnlyState] = useState(false);
+  // Gatilhos de texto pro modo "somente anúncios" (achado real, 15/08/2026):
+  // o ctwa_clid quase nunca vem preenchido no tráfego real — o tenant
+  // cadastra o texto exato do "ice breaker" que a Meta oferece no botão do
+  // anúncio (ex: "Me gustaría reservar un horario para el combo de cejas y
+  // labios 💕") pra identificar esses leads mesmo sem ctwa_clid (ver
+  // matchesAdTriggerMessage no backend).
+  const [adTriggerMessages, setAdTriggerMessagesState] = useState<string[]>([]);
 
   useEffect(() => {
     apiFetch('/api/agent-status')
@@ -444,6 +452,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       .then((data) => {
         if (data?.status) setAgentStatusState(data.status);
         if (typeof data?.adsOnly === 'boolean') setAdsOnlyState(data.adsOnly);
+        if (Array.isArray(data?.adTriggerMessages)) setAdTriggerMessagesState(data.adTriggerMessages);
       })
       .catch(() => {});
   }, []);
@@ -739,6 +748,36 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       console.error('Falha ao atualizar modo somente anúncios:', err);
       setAdsOnlyState(previous);
       setErrorMsg('Não foi possível atualizar o modo "somente anúncios" no servidor — tente de novo.');
+    }
+  };
+
+  const [isAdTriggersModalOpen, setIsAdTriggersModalOpen] = useState(false);
+  const [adTriggersDraft, setAdTriggersDraft] = useState('');
+  const [isSavingAdTriggers, setIsSavingAdTriggers] = useState(false);
+
+  const openAdTriggersModal = () => {
+    setAdTriggersDraft(adTriggerMessages.join('\n'));
+    setIsAdTriggersModalOpen(true);
+  };
+
+  const handleSaveAdTriggerMessages = async () => {
+    const messages = adTriggersDraft.split('\n').map((m) => m.trim()).filter(Boolean);
+    setIsSavingAdTriggers(true);
+    try {
+      const res = await apiFetch('/api/agent-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adTriggerMessages: messages }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setAdTriggerMessagesState(Array.isArray(data.adTriggerMessages) ? data.adTriggerMessages : messages);
+      setIsAdTriggersModalOpen(false);
+    } catch (err) {
+      console.error('Falha ao salvar gatilhos de anúncio:', err);
+      setErrorMsg('Não foi possível salvar os gatilhos de anúncio no servidor — tente de novo.');
+    } finally {
+      setIsSavingAdTriggers(false);
     }
   };
 
@@ -2190,6 +2229,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span>{adsOnly ? 'Só Anúncios' : 'Todos os Contatos'}</span>
           </button>
 
+          {/* Gatilhos de texto pro modo "somente anúncios" (achado real,
+              15/08/2026): só faz sentido configurar isso com o modo ligado —
+              ctwa_clid quase nunca vem preenchido de verdade, então esse é o
+              jeito prático de identificar lead de anúncio (ver
+              matchesAdTriggerMessage no backend). */}
+          {adsOnly && (
+            <button
+              type="button"
+              onClick={openAdTriggersModal}
+              title="Configurar os textos do 'ice breaker' do anúncio que identificam um lead como vindo de anúncio, mesmo sem ctwa_clid"
+              className="flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Gatilhos de Anúncio{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}</span>
+            </button>
+          )}
+
           {/* Agenda (Google Calendar) — achado real de uso: fica atrás de
               "Configurações" era difícil de achar pra um item usado o tempo
               todo (ver comentário sem seu lugar antigo abaixo). Fica sempre
@@ -3512,6 +3568,46 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onSubmit={handlePostStatus}
         onClose={() => { setIsStatusModalOpen(false); setStatusError(null); setStatusImageBase64(null); setStatusImageFileName(''); setStatusVideoBase64(null); setStatusVideoFileName(''); setStatusText(''); setStatusCaption(''); }}
       />
+
+      {/* Gatilhos de texto do modo "somente anúncios" — um por linha, texto
+          exato do "ice breaker" que a Meta oferece no botão do anúncio. */}
+      {isAdTriggersModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsAdTriggersModalOpen(false)}>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Filter className="w-5 h-5 text-sky-400" />
+              Gatilhos de Anúncio
+            </h3>
+            <p className="text-xs text-slate-400">
+              Um texto por linha — a mensagem-modelo ("ice breaker") que a Meta oferece no botão do anúncio. Quando a primeira mensagem de um lead bate com um desses textos, o agente responde mesmo sem o dado de clique no anúncio (ctwa_clid), que a Meta quase nunca preenche.
+            </p>
+            <AutoResizeTextarea
+              placeholder={'Me gustaría reservar un horario para el combo de cejas y labios 💕\n¡Hola! Vi el anuncio y me gustaría agendar un horario. 😊'}
+              value={adTriggersDraft}
+              onChange={(e) => setAdTriggersDraft(e.target.value)}
+              minRows={4}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-sky-500 focus:outline-none"
+            />
+            <div className="flex justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAdTriggersModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAdTriggerMessages}
+                disabled={isSavingAdTriggers}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 shadow-md shadow-sky-950 cursor-pointer"
+              >
+                {isSavingAdTriggers ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <UpcomingEventsPanel
         isOpen={isUpcomingEventsPanelOpen}

@@ -18,7 +18,7 @@ import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversa
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
-import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, type AgentStatus } from '../services/agentStatus';
+import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
@@ -663,18 +663,24 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // modo "somente anúncios" (pedido real, 14/08/2026 — ver agentStatus.ts).
   router.get('/api/agent-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
-    const [status, adsOnly] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId)]);
-    res.json({ status, adsOnly });
+    const [status, adsOnly, adTriggerMessages] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId), getAdTriggerMessages(tenantId)]);
+    res.json({ status, adsOnly, adTriggerMessages });
   }));
 
   router.post('/api/agent-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { status, adsOnly } = req.body || {};
+    const { status, adsOnly, adTriggerMessages } = req.body || {};
     const tenantId = tenantOf(req);
     try {
       if (status !== undefined) await setAgentStatus(tenantId, status as AgentStatus);
       if (typeof adsOnly === 'boolean') await setAdsOnlyMode(tenantId, adsOnly);
-      const [newStatus, newAdsOnly] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId)]);
-      res.json({ status: newStatus, adsOnly: newAdsOnly });
+      if (Array.isArray(adTriggerMessages)) {
+        if (!adTriggerMessages.every((m) => typeof m === 'string')) {
+          return res.status(400).json({ error: 'adTriggerMessages precisa ser uma lista de textos.' });
+        }
+        await setAdTriggerMessages(tenantId, adTriggerMessages.map((m) => m.trim()).filter(Boolean));
+      }
+      const [newStatus, newAdsOnly, newAdTriggerMessages] = await Promise.all([getAgentStatus(tenantId), isAdsOnlyMode(tenantId), getAdTriggerMessages(tenantId)]);
+      res.json({ status: newStatus, adsOnly: newAdsOnly, adTriggerMessages: newAdTriggerMessages });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }

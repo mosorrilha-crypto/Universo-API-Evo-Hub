@@ -1,12 +1,12 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
-import { updateMessageText, recordOutgoingMessage, getConversation, getConversationCtwaClid, markGeoRestricted } from './conversationStore';
+import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles, type OutboundChannel } from './sendBubbles';
 import { isGeoRestrictedError } from './metaSend';
 import { generateAutoReplyForText } from './autoReply';
-import { isAgentPaused, isAdsOnlyMode } from './agentStatus';
+import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { getTenantSegment } from './tenantProfileStore';
@@ -171,8 +171,9 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         // receber resposta automática nem quando manda áudio.
         if (conversation?.aiBlockedAt) return;
         // Mesmo gate do caminho de texto (ver webhooks.ts triggerAutoReply) —
-        // modo "somente anúncios" também vale pra áudio.
-        if ((await isAdsOnlyMode(tenantId)) && !(await getConversationCtwaClid(tenantId, message.from))) return;
+        // modo "somente anúncios" também vale pra áudio, usando a
+        // transcrição como o texto a comparar com os gatilhos configurados.
+        if (await shouldBlockForAdsOnlyMode(tenantId, message.from, outcome.result.transcription)) return;
         const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
         const segment = await getTenantSegment(tenantId);
         const history = conversation?.messages.slice(0, -1);

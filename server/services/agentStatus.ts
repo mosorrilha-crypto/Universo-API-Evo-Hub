@@ -43,12 +43,12 @@ export async function isAgentPaused(tenantId: string): Promise<boolean> {
  * mais de um número de WhatsApp ligado (ex: o pessoal do dono do negócio,
  * conectado temporariamente pra não perder mensagem, e o número dedicado
  * do agente), ativar isso faz o agente só responder automaticamente
- * contatos identificados como vindos de anúncio (ctwa_clid gravado na
- * conversa, ver conversationStore.ts) — nunca contatos pessoais. Flag
- * ortogonal ao status active/paused/restricted, não um 4º valor dele; quem
- * chama combina isAdsOnlyMode() com o ctwa_clid da conversa (ver
- * webhooks.ts/transcriptionQueue.ts). A mensagem em si continua sendo
- * gravada normalmente — só a resposta automática fica em silêncio.
+ * contatos identificados como vindos de anúncio — nunca contatos pessoais.
+ * Flag ortogonal ao status active/paused/restricted, não um 4º valor dele;
+ * quem chama combina isso com o ctwa_clid e os gatilhos de texto da
+ * conversa (ver shouldBlockForAdsOnlyMode em conversationStore.ts, usado
+ * por webhooks.ts e transcriptionQueue.ts). A mensagem em si continua
+ * sendo gravada normalmente — só a resposta automática fica em silêncio.
  */
 export async function isAdsOnlyMode(tenantId: string): Promise<boolean> {
   const db = getDb();
@@ -62,4 +62,48 @@ export async function setAdsOnlyMode(tenantId: string, adsOnly: boolean): Promis
     .from('agent_status')
     .upsert({ tenant_id: tenantId, ads_only: adsOnly, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
   if (error) throw error;
+}
+
+/**
+ * Achado real em produção (15/08/2026): o ctwa_clid quase nunca vem
+ * preenchido no tráfego real de anúncio (a Meta nem sempre manda o
+ * referral), o que deixava o modo "somente anúncios" bloqueando lead
+ * nenhum de anúncio de verdade. Complemento: o tenant cadastra o(s) texto(s)
+ * exato(s) do "ice breaker" que a Meta oferece no botão do anúncio (ex: "Me
+ * gustaría reservar un horario para el combo de cejas y labios 💕") — a
+ * primeira mensagem de um lead que bate com um desses gatilhos é tratada
+ * como vinda de anúncio mesmo sem ctwa_clid (ver
+ * shouldBlockForAdsOnlyMode/markAdGreetingMatched em conversationStore.ts).
+ */
+export async function getAdTriggerMessages(tenantId: string): Promise<string[]> {
+  const db = getDb();
+  const { data } = await db.from('agent_status').select('ad_trigger_messages').eq('tenant_id', tenantId).maybeSingle();
+  return Array.isArray(data?.ad_trigger_messages) ? data.ad_trigger_messages : [];
+}
+
+export async function setAdTriggerMessages(tenantId: string, messages: string[]): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('agent_status')
+    .upsert({ tenant_id: tenantId, ad_trigger_messages: messages, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  if (error) throw error;
+}
+
+/** Normaliza (apara espaços, colapsa espaço interno, minúsculas) pra comparar sem exigir bater byte a byte — emoji e acentos não são afetados. */
+function normalizeForAdTriggerMatch(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * true se `text` bate (depois de normalizado) com algum dos gatilhos
+ * configurados. Comparação exata (não substring) de propósito: os "ice
+ * breakers" da Meta são um texto pronto que o lead toca/envia sem editar —
+ * um match parcial abriria brecha pra mensagem orgânica de cliente real
+ * (ex: "quería reservar un horario") disparar resposta indevidamente fora
+ * do modo somente-anúncios.
+ */
+export function matchesAdTriggerMessage(text: string, triggers: string[]): boolean {
+  const normalizedText = normalizeForAdTriggerMatch(text);
+  if (!normalizedText) return false;
+  return triggers.some((trigger) => normalizeForAdTriggerMatch(trigger) === normalizedText);
 }
