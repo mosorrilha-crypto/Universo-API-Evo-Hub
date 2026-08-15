@@ -254,11 +254,12 @@ describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
 });
 
 describe('POST /api/admin/tenants/:id/evolution-instance/recreate', () => {
-  it('achado real (15/08/2026, Clic Piscinas): apaga e recria a instância do zero, mantendo o mesmo nome, e atualiza a credencial salva', async () => {
+  it('achado real (15/08/2026, Clic Piscinas): apaga a instância antiga e recria com um NOME NOVO — a Evolution API recusa reusar o nome antigo (HTTP 403 "already in use") mesmo já apagado', async () => {
     supabase.__tables.tenant_evolution_credentials = [
       { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-antiga' },
     ];
     const calls: string[] = [];
+    let createdInstanceName: string | undefined;
     let webhookCall: { url: string; body: any } | undefined;
     global.fetch = vi.fn(async (url: any, options?: any) => {
       const urlStr = String(url);
@@ -271,7 +272,12 @@ describe('POST /api/admin/tenants/:id/evolution-instance/recreate', () => {
         return { ok: true, json: async () => ({}) } as any;
       }
       if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
-        expect(JSON.parse(options.body)).toMatchObject({ instanceName: '45dbb383-dgshl7' });
+        const body = JSON.parse(options.body);
+        // Nome novo, derivado do antigo, mas NUNCA igual ao antigo — reusar
+        // o mesmo nome é exatamente o bug real que isso corrige.
+        expect(body.instanceName).toMatch(/^45dbb383-dgshl7-[a-z0-9]+$/);
+        expect(body.instanceName).not.toBe('45dbb383-dgshl7');
+        createdInstanceName = body.instanceName;
         return { ok: true, json: async () => ({ hash: { apikey: 'key-nova' }, qrcode: { base64: 'data:image/png;base64,QRNOVO' } }) } as any;
       }
       if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
@@ -285,7 +291,7 @@ describe('POST /api/admin/tenants/:id/evolution-instance/recreate', () => {
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/recreate`, { method: 'POST' });
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.instanceName).toBe('45dbb383-dgshl7');
+    expect(data.instanceName).toBe(createdInstanceName);
     expect(data.qrCodeBase64).toBe('data:image/png;base64,QRNOVO');
     expect(data.warning).toBeUndefined();
 
@@ -293,14 +299,14 @@ describe('POST /api/admin/tenants/:id/evolution-instance/recreate', () => {
       `DELETE ${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`,
       `DELETE ${EVOLUTION_API_URL}/instance/delete/45dbb383-dgshl7`,
       `POST ${EVOLUTION_API_URL}/instance/create`,
-      `POST ${EVOLUTION_API_URL}/webhook/set/45dbb383-dgshl7`,
+      `POST ${EVOLUTION_API_URL}/webhook/set/${createdInstanceName}`,
     ]);
-    expect(webhookCall?.url).toBe(`${EVOLUTION_API_URL}/webhook/set/45dbb383-dgshl7`);
+    expect(webhookCall?.url).toBe(`${EVOLUTION_API_URL}/webhook/set/${createdInstanceName}`);
 
-    // Mesma linha (mesmo instance_name), só a api_key atualizada pra da instância nova.
+    // instance_name E api_key atualizados pros da instância nova.
     const rows = supabase.__tables.tenant_evolution_credentials;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_key: 'key-nova' });
+    expect(rows[0]).toMatchObject({ tenant_id: TENANT_ID, instance_name: createdInstanceName, api_key: 'key-nova' });
   });
 
   it('segue pro recreate mesmo se a instância já não existir mais do lado da Evolution API (delete 404)', async () => {

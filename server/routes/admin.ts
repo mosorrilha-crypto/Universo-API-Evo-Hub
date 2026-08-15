@@ -376,16 +376,23 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     }
   }));
 
-  // Recria a instância do zero (delete + create), mantendo o MESMO nome —
-  // achado real em produção (15/08/2026, Clic Piscinas): reconectar via QR
-  // Code (rota acima) NÃO limpa o cache/estado interno do Baileys por
-  // contato (ex: mapeamento @lid degradado — ver issue #262); mensagens
-  // continuavam sendo aceitas pela Evolution API mas nunca chegavam no
-  // destinatário. Apagar a instância inteira e recriá-la força uma sessão
-  // Baileys nova do zero, sem esse estado acumulado. Sempre exige escanear
-  // o QR Code de novo depois — é deliberadamente destrutivo, por isso fica
-  // atrás de uma confirmação explícita no painel (não é a mesma coisa que
-  // "Gerar QR Code", que só renova o QR de uma instância já saudável).
+  // Recria a instância do zero (delete + create) — achado real em produção
+  // (15/08/2026, Clic Piscinas): reconectar via QR Code (rota acima) NÃO
+  // limpa o cache/estado interno do Baileys por contato (ex: mapeamento
+  // @lid degradado — ver issue #262); mensagens continuavam sendo aceitas
+  // pela Evolution API mas nunca chegavam no destinatário. Apagar a
+  // instância inteira e recriá-la força uma sessão Baileys nova do zero,
+  // sem esse estado acumulado. Sempre exige escanear o QR Code de novo
+  // depois — é deliberadamente destrutivo, por isso fica atrás de uma
+  // confirmação explícita no painel (não é a mesma coisa que "Gerar QR
+  // Code", que só renova o QR de uma instância já saudável).
+  //
+  // Achado real em produção (mesmo dia, na hora H): recriar com o MESMO
+  // nome falha com 403 "This name ... is already in use" — a Evolution API
+  // não libera um nome de instância pra reuso mesmo depois de apagada.
+  // Precisa de um nome NOVO (mesmo esquema de sufixo aleatório da criação
+  // original) — por isso o instance_name salvo também muda aqui, não só a
+  // api_key.
   router.post('/api/admin/tenants/:id/evolution-instance/recreate', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (!evolutionApiUrl || !evolutionApiKey) {
       return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível recriar a instância.' });
@@ -423,12 +430,17 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       return res.status(502).json({ error: `Falha ao apagar a instância na Evolution API: HTTP ${deleteRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
     }
 
+    // Nome NOVO — a Evolution API recusa reusar o nome antigo mesmo já
+    // apagado (achado real, ver comentário acima). Sufixo curto aleatório,
+    // mesmo esquema da criação original (rota POST .../evolution-instance).
+    const newInstanceName = `${cred.instance_name}-${Math.random().toString(36).slice(2, 8)}`;
+
     let created: any;
     try {
       const createRes = await fetch(`${evolutionApiUrl.replace(/\/$/, '')}/instance/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey },
-        body: JSON.stringify({ instanceName: cred.instance_name, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+        body: JSON.stringify({ instanceName: newInstanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
         signal: AbortSignal.timeout(20000),
       });
       created = await createRes.json().catch(() => ({}));
@@ -444,7 +456,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
 
     const { error: updateError } = await db()
       .from('tenant_evolution_credentials')
-      .update({ api_key: instanceApiKey })
+      .update({ instance_name: newInstanceName, api_key: instanceApiKey })
       .eq('tenant_id', tenantId);
     if (updateError) {
       return res.status(500).json({ error: `Instância recriada na Evolution API, mas falha ao atualizar a credencial salva: ${updateError.message}` });
@@ -452,13 +464,13 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
 
     let webhookWarning: string | undefined;
     try {
-      await setEvolutionWebhook(cred.instance_name, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+      await setEvolutionWebhook(newInstanceName, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
     } catch (err: any) {
       webhookWarning = `Instância recriada, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
     }
 
     res.json({
-      instanceName: cred.instance_name,
+      instanceName: newInstanceName,
       qrCodeBase64,
       warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância recriada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
     });
