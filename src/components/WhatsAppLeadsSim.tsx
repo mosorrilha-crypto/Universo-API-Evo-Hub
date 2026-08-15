@@ -665,11 +665,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [isLoadingUpcomingEvents, setIsLoadingUpcomingEvents] = useState(false);
   const [upcomingEventsError, setUpcomingEventsError] = useState<string | null>(null);
+  // Mês em exibição na Agenda (pedido real, 15/08/2026: só mostrar "os
+  // próximos dias a partir de agora" fazia a agenda parecer desatualizada —
+  // sem jeito de olhar um mês específico, nem o corrente inteiro). `month` é
+  // 1-12, igual o parâmetro que a rota espera.
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  });
+  const calendarMonthLabel = new Date(calendarMonth.year, calendarMonth.month - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
-  const fetchUpcomingEvents = () => {
+  const fetchUpcomingEvents = (month: { year: number; month: number } = calendarMonth) => {
     setIsLoadingUpcomingEvents(true);
     setUpcomingEventsError(null);
-    apiFetch('/api/google-calendar/upcoming-events')
+    apiFetch(`/api/google-calendar/upcoming-events?year=${month.year}&month=${month.month}`)
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
         return r.json();
@@ -682,6 +691,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const handleOpenUpcomingEvents = () => {
     setIsUpcomingEventsPanelOpen(true);
     fetchUpcomingEvents();
+  };
+
+  const changeCalendarMonth = (delta: number) => {
+    setCalendarMonth((prev) => {
+      const base = new Date(prev.year, prev.month - 1 + delta, 1);
+      const next = { year: base.getFullYear(), month: base.getMonth() + 1 };
+      fetchUpcomingEvents(next);
+      return next;
+    });
+  };
+
+  const handleToggleEventCompleted = async (eventId: string, completed: boolean) => {
+    setUpcomingEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, completed } : e)));
+    try {
+      const res = await apiFetch(`/api/google-calendar/events/${encodeURIComponent(eventId)}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao atualizar conclusão do atendimento:', err);
+      setUpcomingEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, completed: !completed } : e)));
+      setUpcomingEventsError('Não foi possível salvar isso no servidor agora — tente de novo.');
+    }
   };
 
   // Escolher um lead a partir do widget de agenda (sem conversa aberta
@@ -3615,10 +3649,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         events={upcomingEvents}
         isLoading={isLoadingUpcomingEvents}
         error={upcomingEventsError}
-        onRefresh={fetchUpcomingEvents}
+        onRefresh={() => fetchUpcomingEvents()}
         leads={leads}
         onCreateAdHocContactForAppointment={handleCreateAdHocContactForAppointment}
         onPickLeadForNewAppointment={handlePickLeadForNewAppointment}
+        monthLabel={calendarMonthLabel}
+        onPrevMonth={() => changeCalendarMonth(-1)}
+        onNextMonth={() => changeCalendarMonth(1)}
+        onToggleCompleted={handleToggleEventCompleted}
       />
     </div>
   );

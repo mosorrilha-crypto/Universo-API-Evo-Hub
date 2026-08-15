@@ -6,7 +6,9 @@
  */
 import express from 'express';
 import type { Server } from 'http';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { initDb } from '../../services/db';
+import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 
 const isGoogleCalendarConnected = vi.fn(async (_tenantId: string) => true);
 const listUpcomingEvents = vi.fn(async (_tenantId: string, _cfg: unknown, _timeMinIso: string, _timeMaxIso: string) => [
@@ -58,6 +60,10 @@ function startServer(tenantId: string, deps: typeof ROUTER_DEPS = ROUTER_DEPS) {
   });
 }
 
+beforeEach(() => {
+  initDb(createFakeSupabase());
+});
+
 afterEach(async () => {
   vi.clearAllMocks();
   isGoogleCalendarConnected.mockResolvedValue(true);
@@ -72,7 +78,7 @@ describe('GET /api/google-calendar/upcoming-events', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.events).toHaveLength(1);
-    expect(data.events[0]).toMatchObject({ id: 'evt-1', summary: 'Design de Sobrancelhas — Clarice' });
+    expect(data.events[0]).toMatchObject({ id: 'evt-1', summary: 'Design de Sobrancelhas — Clarice', completed: false });
     expect(isGoogleCalendarConnected).toHaveBeenCalledWith(TENANT_A);
     expect(listUpcomingEvents).toHaveBeenCalledWith(TENANT_A, expect.anything(), expect.any(String), expect.any(String));
   });
@@ -101,5 +107,78 @@ describe('GET /api/google-calendar/upcoming-events', () => {
     await fetch(`${baseUrl}/api/google-calendar/upcoming-events`);
     expect(isGoogleCalendarConnected).toHaveBeenCalledWith(TENANT_B);
     expect(listUpcomingEvents).toHaveBeenCalledWith(TENANT_B, expect.anything(), expect.any(String), expect.any(String));
+  });
+
+  it('?year&month troca a janela pro mês inteiro (não os "próximos dias" a partir de agora)', async () => {
+    ({ server, baseUrl } = await startServer(TENANT_A));
+
+    await fetch(`${baseUrl}/api/google-calendar/upcoming-events?year=2026&month=2`);
+    const [, , timeMinIso, timeMaxIso] = listUpcomingEvents.mock.calls[0];
+    expect(new Date(timeMinIso).getMonth()).toBe(1); // fevereiro = índice 1
+    expect(new Date(timeMinIso).getDate()).toBe(1);
+    expect(new Date(timeMaxIso).getMonth()).toBe(2); // início de março (exclusivo)
+  });
+
+  it('devolve completed:true pros eventos já marcados como concluídos', async () => {
+    ({ server, baseUrl } = await startServer(TENANT_A));
+    await fetch(`${baseUrl}/api/google-calendar/events/evt-1/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: true }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/google-calendar/upcoming-events`);
+    const data = await res.json();
+    expect(data.events[0]).toMatchObject({ id: 'evt-1', completed: true });
+  });
+});
+
+describe('POST /api/google-calendar/events/:eventId/complete', () => {
+  it('marca e desmarca um evento como concluído', async () => {
+    ({ server, baseUrl } = await startServer(TENANT_A));
+
+    const markRes = await fetch(`${baseUrl}/api/google-calendar/events/evt-1/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: true }),
+    });
+    expect(markRes.status).toBe(200);
+
+    let res = await fetch(`${baseUrl}/api/google-calendar/upcoming-events`);
+    expect((await res.json()).events[0].completed).toBe(true);
+
+    const unmarkRes = await fetch(`${baseUrl}/api/google-calendar/events/evt-1/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: false }),
+    });
+    expect(unmarkRes.status).toBe(200);
+
+    res = await fetch(`${baseUrl}/api/google-calendar/upcoming-events`);
+    expect((await res.json()).events[0].completed).toBe(false);
+  });
+
+  it('400 quando "completed" não é boolean', async () => {
+    ({ server, baseUrl } = await startServer(TENANT_A));
+    const res = await fetch(`${baseUrl}/api/google-calendar/events/evt-1/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: 'sim' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('isolado por tenant — marcar concluído no tenant A não vaza pro tenant B', async () => {
+    ({ server, baseUrl } = await startServer(TENANT_A));
+    await fetch(`${baseUrl}/api/google-calendar/events/evt-1/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: true }),
+    });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    ({ server, baseUrl } = await startServer(TENANT_B));
+    const res = await fetch(`${baseUrl}/api/google-calendar/upcoming-events`);
+    expect((await res.json()).events[0].completed).toBe(false);
   });
 });
