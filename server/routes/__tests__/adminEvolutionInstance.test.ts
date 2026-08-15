@@ -187,6 +187,63 @@ describe('POST /api/admin/tenants/:id/evolution-instance', () => {
     // Continua uma credencial só — nenhuma segunda instância/linha criada.
     expect(supabase.__tables.tenant_evolution_credentials).toHaveLength(1);
   });
+
+  it('incidente real (15/08/2026, Clic Piscinas): credencial aponta pra instância que já não existe (404 no connect) — se autocura criando uma nova em vez de devolver 502 pra sempre', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-morta' },
+    ];
+    let createdInstanceName: string | undefined;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/45dbb383-dgshl7`) {
+        return { ok: false, status: 404, json: async () => ({ status: 404, error: 'Not Found', response: { message: ['The "45dbb383-dgshl7" instance does not exist'] } }) } as any;
+      }
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        const body = JSON.parse(options.body);
+        expect(body.instanceName).toMatch(/^45dbb383-dgshl7-[a-z0-9]+$/);
+        createdInstanceName = body.instanceName;
+        return { ok: true, json: async () => ({ hash: { apikey: 'key-nova' }, qrcode: { base64: 'data:image/png;base64,AUTOCURA' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.instanceName).toBe(createdInstanceName);
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,AUTOCURA');
+
+    const rows = supabase.__tables.tenant_evolution_credentials;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ tenant_id: TENANT_ID, instance_name: createdInstanceName, api_key: 'key-nova' });
+  });
+
+  it('falha que NÃO é 404 no connect continua devolvendo 502 normalmente (não tenta se autocurar à toa)', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    let createCalled = false;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`) {
+        return { ok: false, status: 500, json: async () => ({ error: 'boom' }) } as any;
+      }
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        createCalled = true;
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(502);
+    expect(createCalled).toBe(false);
+  });
 });
 
 describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
@@ -242,6 +299,52 @@ describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
     const data = await res.json();
     expect(data.qrCodeBase64).toBe('data:image/png;base64,NOVOQR');
     expect(data.warning).toMatch(/webhook/i);
+  });
+
+  it('incidente real (15/08/2026, Clic Piscinas): 404 no connect também se autocura aqui, não só na rota POST', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-morta' },
+    ];
+    let createdInstanceName: string | undefined;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/45dbb383-dgshl7`) {
+        return { ok: false, status: 404, json: async () => ({ response: { message: ['The "45dbb383-dgshl7" instance does not exist'] } }) } as any;
+      }
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        createdInstanceName = JSON.parse(options.body).instanceName;
+        return { ok: true, json: async () => ({ hash: { apikey: 'key-nova' }, qrcode: { base64: 'data:image/png;base64,AUTOCURA2' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.instanceName).toBe(createdInstanceName);
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,AUTOCURA2');
+    expect(supabase.__tables.tenant_evolution_credentials[0].instance_name).toBe(createdInstanceName);
+  });
+
+  it('sem EVOLUTION_API_URL/KEY globais configurados, 404 no connect não tenta se autocurar — só devolve o erro original', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-morta' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/connect/45dbb383-dgshl7`) {
+        return { ok: false, status: 404, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer({}));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode`);
+    expect(res.status).toBe(502);
   });
 
   it('404 quando o tenant ainda não tem instância criada', async () => {

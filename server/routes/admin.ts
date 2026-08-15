@@ -205,6 +205,9 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
    * de tenant_evolution_credentials — deixando pra trás uma instância órfã
    * na Evolution API).
    */
+  /** Erro de "connect" numa instância que a Evolution API já não conhece (deletada por fora, ex: recriação que falhou no meio) — distinto de outras falhas pra quem chama poder se autocurar recriando em vez de só devolver erro. */
+  class InstanceNotFoundError extends Error {}
+
   async function reconnectExistingInstance(cred: { instance_name: string; api_url: string; api_key: string }) {
     const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
       headers: { apikey: cred.api_key },
@@ -212,7 +215,9 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     });
     const data = await connectRes.json().catch(() => ({}));
     if (!connectRes.ok) {
-      throw new Error(`Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}`);
+      const message = `Falha ao buscar QR Code: HTTP ${connectRes.status} — ${JSON.stringify(data).slice(0, 300)}`;
+      if (connectRes.status === 404) throw new InstanceNotFoundError(message);
+      throw new Error(message);
     }
     const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
 
@@ -224,6 +229,65 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     }
 
     return { instanceName: cred.instance_name, qrCodeBase64, warning: webhookWarning };
+  }
+
+  /**
+   * Cria uma instância nova na Evolution API e persiste — usada tanto pro
+   * tenant que nunca teve instância quanto pra "autocura" quando a
+   * instância salva já não existe mais do lado da Evolution API (achado
+   * real em produção, 15/08/2026: "Recriar instância do zero" apagou a
+   * instância antiga mas falhou ao recriar com o mesmo nome — HTTP 403
+   * "already in use" — deixando a credencial salva apontando pra uma
+   * instância morta; clicar em "Gerar QR Code" depois disso batia num
+   * `/instance/connect` que devolve 404 pra sempre, sem saída no painel).
+   * `persist: 'insert'` quando não existe nenhuma linha ainda pra esse
+   * tenant, `'update'` quando já existe (troca instance_name + api_key).
+   */
+  async function createFreshInstance(tenantId: string, instanceName: string, persist: 'insert' | 'update'): Promise<{ instanceName: string; qrCodeBase64?: string; warning?: string }> {
+    let created: any;
+    try {
+      const createRes = await fetch(`${evolutionApiUrl!.replace(/\/$/, '')}/instance/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey! },
+        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+        signal: AbortSignal.timeout(20000),
+      });
+      created = await createRes.json().catch(() => ({}));
+      if (!createRes.ok) {
+        throw new Error(`Falha ao criar instância na Evolution API: HTTP ${createRes.status} — ${JSON.stringify(created).slice(0, 300)}`);
+      }
+    } catch (err: any) {
+      throw new Error(err.message || `Falha ao falar com a Evolution API: ${err}`);
+    }
+
+    const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey!;
+    const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
+
+    const { error: credError } =
+      persist === 'insert'
+        ? await db().from('tenant_evolution_credentials').insert({ tenant_id: tenantId, instance_name: instanceName, api_url: evolutionApiUrl, api_key: instanceApiKey })
+        : await db().from('tenant_evolution_credentials').update({ instance_name: instanceName, api_key: instanceApiKey }).eq('tenant_id', tenantId);
+    if (credError) {
+      throw new Error(`Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}`);
+    }
+
+    let webhookWarning: string | undefined;
+    try {
+      await setEvolutionWebhook(instanceName, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+    } catch (err: any) {
+      webhookWarning = `Instância pronta, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+    }
+
+    return {
+      instanceName,
+      qrCodeBase64,
+      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
+    };
+  }
+
+  /** Sufixo curto aleatório pra nunca colidir com um nome já usado (a Evolution API não libera nomes de instância pra reuso mesmo depois de apagados). */
+  function withFreshSuffix(baseName: string): string {
+    return `${baseName}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   // ── Evolution API multi-instância (Epic 4.6 — Porta A, QR Code) ────────
@@ -266,6 +330,18 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
         const result = await reconnectExistingInstance(existingCred as any);
         return res.json(result);
       } catch (err: any) {
+        if (err instanceof InstanceNotFoundError) {
+          // Autocura: a credencial salva aponta pra uma instância que já não
+          // existe do lado da Evolution API (ex: recriação anterior que
+          // apagou a antiga mas falhou ao recriar) — recria do zero com nome
+          // novo em vez de devolver 502 pra sempre com nenhuma saída no painel.
+          try {
+            const result = await createFreshInstance(tenantId, withFreshSuffix(existingCred.instance_name), 'update');
+            return res.json(result);
+          } catch (recreateErr: any) {
+            return res.status(502).json({ error: recreateErr.message });
+          }
+        }
         return res.status(502).json({ error: err.message });
       }
     }
@@ -275,7 +351,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     // aleatório, pra nunca colidir com uma instância já existente na mesma
     // Evolution API mesmo se o slug se repetir.
     const baseName = (requestedName || tenant.slug || tenant.id.slice(0, 8)).toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    const instanceName = `${baseName}-${Math.random().toString(36).slice(2, 8)}`;
+    const instanceName = withFreshSuffix(baseName);
 
     let created: any;
     try {
@@ -330,10 +406,11 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // /instance/create expira rápido, e o operador pode reabrir a tela de
   // onboarding depois desse tempo.
   router.get('/api/admin/tenants/:id/evolution-instance/qrcode', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = resolveEvolutionTenantId(req);
     const { data: cred, error: credError } = await db()
       .from('tenant_evolution_credentials')
       .select('instance_name, api_url, api_key')
-      .eq('tenant_id', resolveEvolutionTenantId(req))
+      .eq('tenant_id', tenantId)
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
@@ -342,6 +419,16 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       const result = await reconnectExistingInstance(cred as any);
       res.json(result);
     } catch (err: any) {
+      // Mesma autocura do POST .../evolution-instance acima — ver comentário
+      // na definição de createFreshInstance.
+      if (err instanceof InstanceNotFoundError && evolutionApiUrl && evolutionApiKey) {
+        try {
+          const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update');
+          return res.json(result);
+        } catch (recreateErr: any) {
+          return res.status(502).json({ error: recreateErr.message });
+        }
+      }
       res.status(502).json({ error: err.message });
     }
   }));
@@ -430,50 +517,12 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       return res.status(502).json({ error: `Falha ao apagar a instância na Evolution API: HTTP ${deleteRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
     }
 
-    // Nome NOVO — a Evolution API recusa reusar o nome antigo mesmo já
-    // apagado (achado real, ver comentário acima). Sufixo curto aleatório,
-    // mesmo esquema da criação original (rota POST .../evolution-instance).
-    const newInstanceName = `${cred.instance_name}-${Math.random().toString(36).slice(2, 8)}`;
-
-    let created: any;
     try {
-      const createRes = await fetch(`${evolutionApiUrl.replace(/\/$/, '')}/instance/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey },
-        body: JSON.stringify({ instanceName: newInstanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
-        signal: AbortSignal.timeout(20000),
-      });
-      created = await createRes.json().catch(() => ({}));
-      if (!createRes.ok) {
-        return res.status(502).json({ error: `Instância apagada, mas falha ao recriar na Evolution API: HTTP ${createRes.status} — ${JSON.stringify(created).slice(0, 300)}` });
-      }
+      const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update');
+      res.json(result);
     } catch (err: any) {
-      return res.status(502).json({ error: `Instância apagada, mas falha ao falar com a Evolution API pra recriar: ${err.message}` });
+      res.status(502).json({ error: `Instância apagada — ${err.message}` });
     }
-
-    const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey;
-    const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
-
-    const { error: updateError } = await db()
-      .from('tenant_evolution_credentials')
-      .update({ instance_name: newInstanceName, api_key: instanceApiKey })
-      .eq('tenant_id', tenantId);
-    if (updateError) {
-      return res.status(500).json({ error: `Instância recriada na Evolution API, mas falha ao atualizar a credencial salva: ${updateError.message}` });
-    }
-
-    let webhookWarning: string | undefined;
-    try {
-      await setEvolutionWebhook(newInstanceName, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
-    } catch (err: any) {
-      webhookWarning = `Instância recriada, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
-    }
-
-    res.json({
-      instanceName: newInstanceName,
-      qrCodeBase64,
-      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância recriada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
-    });
   }));
 
   // ── Camada 1 (Global) do prompt do agente ───────────────────────────────
