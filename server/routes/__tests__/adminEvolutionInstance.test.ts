@@ -253,6 +253,111 @@ describe('GET /api/admin/tenants/:id/evolution-instance/qrcode', () => {
   });
 });
 
+describe('POST /api/admin/tenants/:id/evolution-instance/recreate', () => {
+  it('achado real (15/08/2026, Clic Piscinas): apaga e recria a instância do zero, mantendo o mesmo nome, e atualiza a credencial salva', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-antiga' },
+    ];
+    const calls: string[] = [];
+    let webhookCall: { url: string; body: any } | undefined;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      calls.push(`${options?.method || 'GET'} ${urlStr}`);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`) {
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      if (urlStr === `${EVOLUTION_API_URL}/instance/delete/45dbb383-dgshl7`) {
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        expect(JSON.parse(options.body)).toMatchObject({ instanceName: '45dbb383-dgshl7' });
+        return { ok: true, json: async () => ({ hash: { apikey: 'key-nova' }, qrcode: { base64: 'data:image/png;base64,QRNOVO' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) {
+        webhookCall = { url: urlStr, body: JSON.parse(options.body) };
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/recreate`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.instanceName).toBe('45dbb383-dgshl7');
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,QRNOVO');
+    expect(data.warning).toBeUndefined();
+
+    expect(calls).toEqual([
+      `DELETE ${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`,
+      `DELETE ${EVOLUTION_API_URL}/instance/delete/45dbb383-dgshl7`,
+      `POST ${EVOLUTION_API_URL}/instance/create`,
+      `POST ${EVOLUTION_API_URL}/webhook/set/45dbb383-dgshl7`,
+    ]);
+    expect(webhookCall?.url).toBe(`${EVOLUTION_API_URL}/webhook/set/45dbb383-dgshl7`);
+
+    // Mesma linha (mesmo instance_name), só a api_key atualizada pra da instância nova.
+    const rows = supabase.__tables.tenant_evolution_credentials;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_key: 'key-nova' });
+  });
+
+  it('segue pro recreate mesmo se a instância já não existir mais do lado da Evolution API (delete 404)', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-antiga' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`) return { ok: false, status: 404, json: async () => ({}) } as any;
+      if (urlStr === `${EVOLUTION_API_URL}/instance/delete/45dbb383-dgshl7`) return { ok: false, status: 404, json: async () => ({}) } as any;
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        return { ok: true, json: async () => ({ hash: { apikey: 'key-nova' }, qrcode: { base64: 'data:image/png;base64,QRNOVO' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/recreate`, { method: 'POST' });
+    expect(res.status).toBe(200);
+  });
+
+  it('devolve 502 e NÃO recria quando apagar a instância falha de verdade (não é só 404)', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: '45dbb383-dgshl7', api_url: EVOLUTION_API_URL, api_key: 'key-antiga' },
+    ];
+    let createCalled = false;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/logout/45dbb383-dgshl7`) return { ok: true, json: async () => ({}) } as any;
+      if (urlStr === `${EVOLUTION_API_URL}/instance/delete/45dbb383-dgshl7`) return { ok: false, status: 500, json: async () => ({ error: 'boom' }) } as any;
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        createCalled = true;
+        return { ok: true, json: async () => ({}) } as any;
+      }
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/recreate`, { method: 'POST' });
+    expect(res.status).toBe(502);
+    expect(createCalled).toBe(false);
+    // Credencial antiga intacta — nada foi trocado já que a recriação não avançou.
+    expect(supabase.__tables.tenant_evolution_credentials[0].api_key).toBe('key-antiga');
+  });
+
+  it('404 quando o tenant ainda não tem instância criada', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => (String(url).startsWith(baseUrl) ? realFetch(url, options) : { ok: true, json: async () => ({}) })) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/recreate`, { method: 'POST' });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('GET /api/admin/tenants/:id/evolution-instance/status', () => {
   it('devolve connected=true quando o estado da instância é "open"', async () => {
     supabase.__tables.tenant_evolution_credentials = [
