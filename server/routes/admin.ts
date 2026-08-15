@@ -376,6 +376,94 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     }
   }));
 
+  // Recria a instância do zero (delete + create), mantendo o MESMO nome —
+  // achado real em produção (15/08/2026, Clic Piscinas): reconectar via QR
+  // Code (rota acima) NÃO limpa o cache/estado interno do Baileys por
+  // contato (ex: mapeamento @lid degradado — ver issue #262); mensagens
+  // continuavam sendo aceitas pela Evolution API mas nunca chegavam no
+  // destinatário. Apagar a instância inteira e recriá-la força uma sessão
+  // Baileys nova do zero, sem esse estado acumulado. Sempre exige escanear
+  // o QR Code de novo depois — é deliberadamente destrutivo, por isso fica
+  // atrás de uma confirmação explícita no painel (não é a mesma coisa que
+  // "Gerar QR Code", que só renova o QR de uma instância já saudável).
+  router.post('/api/admin/tenants/:id/evolution-instance/recreate', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    if (!evolutionApiUrl || !evolutionApiKey) {
+      return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível recriar a instância.' });
+    }
+    const tenantId = resolveEvolutionTenantId(req);
+    const { data: cred, error: credError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('instance_name, api_url, api_key')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (credError) return res.status(500).json({ error: credError.message });
+    if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+
+    const apiBase = cred.api_url.replace(/\/$/, '');
+
+    // Best-effort — a instância pode já estar deslogada/num estado
+    // inconsistente; o que importa de verdade é o delete logo abaixo.
+    await fetch(`${apiBase}/instance/logout/${cred.instance_name}`, {
+      method: 'DELETE',
+      headers: { apikey: cred.api_key },
+      signal: AbortSignal.timeout(20000),
+    }).catch(() => {});
+
+    const deleteRes = await fetch(`${apiBase}/instance/delete/${cred.instance_name}`, {
+      method: 'DELETE',
+      headers: { apikey: cred.api_key },
+      signal: AbortSignal.timeout(20000),
+    }).catch((err: any) => {
+      throw new Error(`Falha ao falar com a Evolution API pra apagar a instância: ${err.message}`);
+    });
+    // 404 aqui significa "já não existia" — segue normalmente pro recreate
+    // em vez de travar numa instância que, pro nosso propósito, já se foi.
+    if (!deleteRes.ok && deleteRes.status !== 404) {
+      const data = await deleteRes.json().catch(() => ({}));
+      return res.status(502).json({ error: `Falha ao apagar a instância na Evolution API: HTTP ${deleteRes.status} — ${JSON.stringify(data).slice(0, 300)}` });
+    }
+
+    let created: any;
+    try {
+      const createRes = await fetch(`${evolutionApiUrl.replace(/\/$/, '')}/instance/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey },
+        body: JSON.stringify({ instanceName: cred.instance_name, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+        signal: AbortSignal.timeout(20000),
+      });
+      created = await createRes.json().catch(() => ({}));
+      if (!createRes.ok) {
+        return res.status(502).json({ error: `Instância apagada, mas falha ao recriar na Evolution API: HTTP ${createRes.status} — ${JSON.stringify(created).slice(0, 300)}` });
+      }
+    } catch (err: any) {
+      return res.status(502).json({ error: `Instância apagada, mas falha ao falar com a Evolution API pra recriar: ${err.message}` });
+    }
+
+    const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey;
+    const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
+
+    const { error: updateError } = await db()
+      .from('tenant_evolution_credentials')
+      .update({ api_key: instanceApiKey })
+      .eq('tenant_id', tenantId);
+    if (updateError) {
+      return res.status(500).json({ error: `Instância recriada na Evolution API, mas falha ao atualizar a credencial salva: ${updateError.message}` });
+    }
+
+    let webhookWarning: string | undefined;
+    try {
+      await setEvolutionWebhook(cred.instance_name, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
+    } catch (err: any) {
+      webhookWarning = `Instância recriada, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+    }
+
+    res.json({
+      instanceName: cred.instance_name,
+      qrCodeBase64,
+      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância recriada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
+    });
+  }));
+
   // ── Camada 1 (Global) do prompt do agente ───────────────────────────────
   // Pedido real do dono do produto: poder ajustar a regra fixa do agente
   // (docs/AGENTE-VERTICAL-ARQUITETURA.md seção 1) direto pelo painel quando

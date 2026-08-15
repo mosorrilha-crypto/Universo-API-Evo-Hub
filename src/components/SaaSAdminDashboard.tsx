@@ -62,6 +62,7 @@ export function ConectarEvolutionQrCode() {
   const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<'idle' | 'waiting' | 'connected'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isRecreating, setIsRecreating] = useState(false);
 
   const fetchRealTenants = async () => {
     setIsLoadingTenants(true);
@@ -176,6 +177,37 @@ export function ConectarEvolutionQrCode() {
     }
   };
 
+  // Recria a instância do zero na Evolution API (delete + create) — achado
+  // real (15/08/2026, Clic Piscinas): diferente de "Gerar novo QR Code"
+  // (que só renova o pareamento de uma instância já saudável), isso limpa
+  // estado interno do Baileys que reconectar sozinho não resolve (ex:
+  // mapeamento @lid degradado pra um contato específico — issue #262).
+  // Sempre exige escanear o QR de novo depois — por isso pede confirmação
+  // explícita antes de disparar.
+  const handleRecreateInstance = async () => {
+    if (!selectedTenantId) return;
+    if (!window.confirm('Isso vai apagar e recriar a instância do WhatsApp desse tenant do zero. A conexão atual cai e vai ser preciso escanear o QR Code de novo. Continuar?')) return;
+    setIsRecreating(true);
+    setErrorMsg(null);
+    setQrCodeBase64(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${selectedTenantId}/evolution-instance/recreate`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.warning) setErrorMsg(data.warning);
+      if (data.qrCodeBase64) {
+        setQrCodeBase64(data.qrCodeBase64);
+        setConnectionState('waiting');
+      } else {
+        await handleRefreshQr();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha ao recriar a instância.');
+    } finally {
+      setIsRecreating(false);
+    }
+  };
+
   return (
     <>
       <button
@@ -207,10 +239,18 @@ export function ConectarEvolutionQrCode() {
             )}
 
             {connectionState === 'connected' ? (
-              <div className="text-center py-6 space-y-2">
+              <div className="text-center py-6 space-y-3">
                 <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
                 <p className="text-sm text-white font-semibold">WhatsApp conectado!</p>
                 <p className="text-xs text-slate-400">O número já pode receber e enviar mensagens por esse tenant.</p>
+                <button
+                  type="button"
+                  onClick={handleRecreateInstance}
+                  disabled={isRecreating}
+                  className="text-xs text-red-300 hover:text-red-200 flex items-center gap-1.5 mx-auto disabled:opacity-50 pt-2"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isRecreating ? 'animate-spin' : ''}`} /> {isRecreating ? 'Recriando...' : 'Mensagens não chegam mesmo conectado? Recriar instância do zero'}
+                </button>
               </div>
             ) : qrCodeBase64 ? (
               <div className="text-center space-y-3">
