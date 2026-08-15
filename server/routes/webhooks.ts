@@ -10,6 +10,7 @@ import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaS
 import { showEvolutionTyping } from '../services/evolutionSend';
 import { isAgentPaused, isAdsOnlyMode } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText } from '../services/messageBuffer';
@@ -85,7 +86,8 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
       // (recordIncomingMessage, antes de chegar aqui) — só a resposta
       // automática fica em silêncio, nunca perde o dado.
       if ((await isAdsOnlyMode(tenantId)) && !(await getConversationCtwaClid(tenantId, phone))) return;
-      const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
+      const kb = await getKnowledgeBase(tenantId);
+      const kbContext = formatKnowledgeBaseForPrompt(kb);
       const segment = await getTenantSegment(tenantId);
       const history = conversation?.messages.slice(0, -historyExclude);
       try {
@@ -103,6 +105,20 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         const mediaConfig = isEvolution
           ? { provider: 'evolution' as const, evolutionInstanceName: resolvedTenant.evolutionInstanceName, evolutionApiUrl: resolvedTenant.evolutionApiUrl, evolutionApiKey: resolvedTenant.evolutionApiKey, supabaseUrl, supabaseKey }
           : { provider: 'meta' as const, phoneNumberId, accessToken: token, supabaseUrl, supabaseKey };
+
+        // Pedido real (Clic Piscinas, 14/08/2026): em vez da pergunta de
+        // triagem padrão da IA logo de cara, mandar primeiro um bloco fixo
+        // (texto/imagem/vídeo, definido na Base de Conhecimento) na 1ª
+        // mensagem de uma conversa NOVA — a negociação com a IA só começa a
+        // partir da PRÓXIMA mensagem do cliente. `history` vazio é o único
+        // sinal estrutural de "1ª mensagem de verdade" (a mensagem que
+        // acabou de chegar já foi excluída dela, ver historyExclude no
+        // início da função). Tenant sem nada configurado em
+        // firstContactMessage mantém o comportamento de sempre.
+        if (history?.length === 0 && hasFirstContactMessage(kb)) {
+          await sendFirstContactMessage(tenantId, phone, kb!, mediaConfig);
+          return;
+        }
 
         // Issue #97 — orientação que um operador deixou num escalonamento,
         // ainda não usada numa resposta real (ex: foi deixada fora da

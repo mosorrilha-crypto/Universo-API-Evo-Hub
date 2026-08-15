@@ -101,6 +101,29 @@ export function findProductDurationMinutes(kb: AgentKnowledgeBase | null, produc
   return kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized)?.durationMinutes;
 }
 
+/**
+ * Bloco fixo (texto/imagem/vídeo) enviado automaticamente na 1ª mensagem de
+ * uma conversa nova — pedido real (14/08/2026, Clic Piscinas): em vez da
+ * pergunta de triagem padrão da IA logo de cara, o tenant quer mandar um
+ * "pacote de boas-vindas" fixo primeiro; a negociação com a IA só começa a
+ * partir da PRÓXIMA mensagem do cliente (ver sendFirstContactMessage em
+ * server/services/firstContactMessage.ts e o gate em webhooks.ts). Nenhum
+ * campo preenchido = comportamento de sempre (a IA responde a 1ª mensagem
+ * normalmente) — cada tenant "liga" isso só preenchendo o campo, sem
+ * precisar de um toggle separado.
+ */
+export interface AgentFirstContactMessage {
+  text?: string;
+  /** Imagem inline (data URI base64), mesmo padrão de AgentProduct.exampleImageBase64. */
+  imageBase64?: string;
+  imageMimeType?: string;
+  /** Vídeo no Storage (knowledgeBaseVideoStore.ts) — aqui só a referência, mesmo padrão de AgentProduct.exampleVideoId. */
+  videoId?: string;
+  videoMimeType?: string;
+  videoFileName?: string;
+  videoSizeBytes?: number;
+}
+
 export interface AgentFAQ {
   question: string;
   answer: string;
@@ -144,6 +167,7 @@ export interface AgentKnowledgeBase {
    * que funciona sem precisar de coordenadas exatas.
    */
   locationMapsUrl?: string;
+  firstContactMessage?: AgentFirstContactMessage;
 }
 
 export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {

@@ -171,6 +171,22 @@ export interface AgentProduct {
   bookable?: boolean;
 }
 
+/**
+ * Bloco fixo (texto/imagem/vídeo) enviado automaticamente na 1ª mensagem de
+ * uma conversa nova, em vez da pergunta de triagem padrão da IA — ver
+ * server/services/firstContactMessage.ts. Nenhum campo preenchido =
+ * comportamento de sempre (a IA responde a 1ª mensagem normalmente).
+ */
+export interface AgentFirstContactMessage {
+  text?: string;
+  imageBase64?: string;
+  imageMimeType?: string;
+  videoId?: string;
+  videoMimeType?: string;
+  videoFileName?: string;
+  videoSizeBytes?: number;
+}
+
 export interface AgentFAQ {
   id: string;
   question: string;
@@ -211,6 +227,7 @@ export interface AgentKnowledgeBase {
   documents: AgentFileDoc[];
   /** Link de localização (Google Maps) que o agente manda quando o cliente pede o endereço — ver server/services/knowledgeBaseStore.ts. */
   locationMapsUrl?: string;
+  firstContactMessage?: AgentFirstContactMessage;
   lastSaved?: string;
 }
 
