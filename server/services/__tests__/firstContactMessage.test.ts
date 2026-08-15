@@ -134,6 +134,26 @@ describe('sendFirstContactMessage', () => {
     expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
   });
 
+  it('bloco que falha ao enviar de verdade (ex: erro de rede/timeout) não derruba os blocos seguintes da sequência', async () => {
+    uploadWhatsAppMedia.mockRejectedValueOnce(new Error('timeout na Evolution API'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const kb: AgentKnowledgeBase = {
+      firstContactBlocks: [
+        textBlock('Bem-vindo!', 'b1'),
+        videoBlock('b2'), // falha aqui — uploadWhatsAppMedia rejeita
+        textBlock('Lo que queda a cargo del cliente sería...', 'b3'),
+      ],
+    };
+
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(2); // blocos 1 e 3, mesmo com o 2 falhando
+    expect(sendWhatsAppTextMessage).toHaveBeenNthCalledWith(2, 'pnid-1', 'token-1', PHONE, 'Lo que queda a cargo del cliente sería...');
+    expect(recordOutgoingMessage).toHaveBeenCalledTimes(2); // só os 2 que realmente enviaram, nunca o vídeo que falhou
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('falhou ao enviar o bloco 2/3 (video)'));
+    consoleErrorSpy.mockRestore();
+  });
+
   it('não quebra e não grava nada quando o vídeo configurado não é encontrado no Storage — mas continua pros próximos blocos', async () => {
     getKnowledgeBaseVideo.mockResolvedValueOnce(null);
     const kb: AgentKnowledgeBase = { firstContactBlocks: [videoBlock('1'), textBlock('Depois do vídeo que sumiu', '2')] };
