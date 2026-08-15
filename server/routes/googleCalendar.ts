@@ -10,6 +10,7 @@ import {
   type CalendarConfig,
 } from '../services/googleCalendar';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
+import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from '../services/calendarEventCompletionStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -100,6 +101,13 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // roda em produção pro job de lembretes; só faltava uma rota expondo isso
   // pro frontend. `?days=N` (default 14) igual ao raciocínio de
   // findWeeklyAvailability, sem virar um parâmetro livre demais.
+  //
+  // Pedido real (15/08/2026): só mostrar "os próximos dias a partir de
+  // agora" fazia a agenda parecer "desatualizada" — não tinha como olhar um
+  // mês específico (nem o mês corrente inteiro, nem meses passados/futuros
+  // fora da janela de N dias). `?year=YYYY&month=1-12` (opcional, os dois
+  // juntos) troca a janela pra esse mês inteiro; sem eles, mantém o
+  // comportamento antigo (compatibilidade com quem já chamava sem parâmetro).
   router.get('/api/google-calendar/upcoming-events', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!(await isGoogleCalendarConnected(tenantId))) {
@@ -108,12 +116,39 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     if (!googleRedirectUri) {
       return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
     }
-    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 60);
     const cfg: CalendarConfig = { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri };
-    const now = new Date();
-    const timeMaxIso = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
-    const events = await listUpcomingEvents(tenantId, cfg, now.toISOString(), timeMaxIso);
-    res.json({ events });
+
+    const year = Number(req.query.year);
+    const month = Number(req.query.month); // 1-12
+    let timeMinIso: string;
+    let timeMaxIso: string;
+    if (Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12) {
+      timeMinIso = new Date(year, month - 1, 1).toISOString();
+      timeMaxIso = new Date(year, month, 1).toISOString();
+    } else {
+      const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 60);
+      const now = new Date();
+      timeMinIso = now.toISOString();
+      timeMaxIso = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    const events = await listUpcomingEvents(tenantId, cfg, timeMinIso, timeMaxIso);
+    const completedIds = await getCompletedEventIds(tenantId, events.map((e) => e.id));
+    res.json({ events: events.map((e) => ({ ...e, completed: completedIds.has(e.id) })) });
+  }));
+
+  // Marca/desmarca um evento como concluído (checkbox da Agenda) — só a
+  // marca em si, nunca mexe no evento real do Google Calendar (ver
+  // calendarEventCompletionStore.ts).
+  router.post('/api/google-calendar/events/:eventId/complete', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { completed } = req.body || {};
+    if (typeof completed !== 'boolean') {
+      return res.status(400).json({ error: '"completed" precisa ser true ou false.' });
+    }
+    if (completed) await markEventCompleted(tenantId, req.params.eventId);
+    else await markEventNotCompleted(tenantId, req.params.eventId);
+    res.json({ success: true });
   }));
 
   return router;

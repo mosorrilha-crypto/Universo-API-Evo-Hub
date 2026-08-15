@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { LeadInfo } from '../../types';
-import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown } from 'lucide-react';
 
 export interface UpcomingEvent {
   id: string;
   summary: string;
   startIso: string;
   description?: string;
+  /** Marcado como concluído no painel (calendarEventCompletionStore.ts) — o evento do Google Calendar em si nunca muda. */
+  completed?: boolean;
 }
 
 interface UpcomingEventsPanelProps {
@@ -20,6 +22,12 @@ interface UpcomingEventsPanelProps {
   onPickLeadForNewAppointment: (lead: LeadInfo) => void;
   /** Contato que veio de outra fonte (indicação, telefone, presencial) e ainda não tem conversa/lead nenhum registrado aqui. */
   onCreateAdHocContactForAppointment: (name: string, phone: string) => void;
+  /** Rótulo do mês em exibição (ex: "Agosto 2026") — pedido real (15/08/2026): a agenda só mostrava "os próximos dias a partir de agora", sem jeito de olhar um mês específico (nem o corrente inteiro). */
+  monthLabel: string;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
+  /** Marca/desmarca um atendimento como concluído — some da lista ativa e vai pra seção "Concluídos" (colapsada por padrão, mesmo padrão de "Arquivadas" no Atendimento WhatsApp). */
+  onToggleCompleted: (eventId: string, completed: boolean) => void;
 }
 
 /** "Hoje" / "Amanhã" / dia da semana curto + data — só pra exibição, não precisa da mesma precisão de fuso do backend (que já resolve tudo antes de mandar o horário). */
@@ -42,12 +50,14 @@ function timeLabel(startIso: string): string {
 
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
+  monthLabel, onPrevMonth, onNextMonth, onToggleCompleted,
 }) => {
   const [isPickingLead, setIsPickingLead] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
   const [isTypingNewContact, setIsTypingNewContact] = useState(false);
   const [newContactName, setNewContactName] = useState('');
   const [newContactPhone, setNewContactPhone] = useState('');
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const resetPicker = () => {
     setIsPickingLead(false);
@@ -59,8 +69,11 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
 
   if (!isOpen) return null;
 
+  const activeEvents = events.filter((e) => !e.completed);
+  const completedEvents = events.filter((e) => e.completed);
+
   const grouped: { label: string; items: UpcomingEvent[] }[] = [];
-  for (const event of events) {
+  for (const event of activeEvents) {
     const label = dayLabel(event.startIso);
     const group = grouped.find((g) => g.label === label);
     if (group) group.items.push(event);
@@ -98,6 +111,28 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
         <p className="text-xs text-slate-400 mb-3">
           O que já está marcado no Google Calendar real — feito pela IA ou pelo painel.
         </p>
+
+        {!isPickingLead && (
+          <div className="flex items-center justify-between mb-3 bg-slate-950 border border-slate-800 rounded-xl px-1.5 py-1">
+            <button
+              type="button"
+              onClick={onPrevMonth}
+              title="Mês anterior"
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-xs font-bold text-white capitalize">{monthLabel}</span>
+            <button
+              type="button"
+              onClick={onNextMonth}
+              title="Próximo mês"
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300 mb-3">{error}</div>
@@ -213,8 +248,8 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                 <div className="flex items-center justify-center py-8 text-slate-500">
                   <Loader2 className="w-5 h-5 animate-spin" />
                 </div>
-              ) : events.length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-8">Nada agendado nos próximos dias.</p>
+              ) : activeEvents.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-8">Nada agendado neste mês.</p>
               ) : (
                 grouped.map((group) => (
                   <div key={group.label}>
@@ -222,6 +257,12 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                     <div className="space-y-1.5">
                       {group.items.map((event) => (
                         <div key={event.id} className="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
+                          <button
+                            type="button"
+                            onClick={() => onToggleCompleted(event.id, true)}
+                            title="Marcar como concluído"
+                            className="flex-shrink-0 w-4 h-4 mt-0.5 rounded border border-slate-600 hover:border-emerald-500 hover:bg-emerald-500/10 cursor-pointer transition-colors"
+                          />
                           <span className="text-xs font-bold text-white flex-shrink-0 w-11">{timeLabel(event.startIso)}</span>
                           <span className="text-xs text-slate-300 truncate">{event.summary}</span>
                         </div>
@@ -229,6 +270,44 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                     </div>
                   </div>
                 ))
+              )}
+
+              {/* Concluídos — colapsado por padrão, mesmo padrão de "Arquivadas"
+                  no Atendimento WhatsApp. Fica marcado com um check verde e
+                  texto riscado; some da lista ativa (e da conta de pendentes)
+                  assim que marcado. */}
+              {completedEvents.length > 0 && (
+                <div className="border-t border-slate-800 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCompleted((v) => !v)}
+                    className="w-full flex items-center justify-between px-1 py-1 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5 text-[11px] font-medium">
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                      Concluídos · {completedEvents.length}
+                    </span>
+                    {showCompleted ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+                  {showCompleted && (
+                    <div className="space-y-1.5 mt-1.5">
+                      {completedEvents.map((event) => (
+                        <div key={event.id} className="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/50">
+                          <button
+                            type="button"
+                            onClick={() => onToggleCompleted(event.id, false)}
+                            title="Desmarcar conclusão"
+                            className="flex-shrink-0 w-4 h-4 mt-0.5 rounded bg-emerald-600 border border-emerald-600 flex items-center justify-center cursor-pointer"
+                          >
+                            <Check className="w-3 h-3 text-white" />
+                          </button>
+                          <span className="text-xs font-bold text-slate-500 flex-shrink-0 w-11 line-through">{timeLabel(event.startIso)}</span>
+                          <span className="text-xs text-slate-500 truncate line-through">{event.summary}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </>
