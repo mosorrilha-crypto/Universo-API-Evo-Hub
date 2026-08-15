@@ -21,7 +21,7 @@ import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components
 import { EvoHubIntegration } from './components/EvoHubIntegration';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { LoginModal } from './components/LoginModal';
-import { setAuthToken, setUnauthorizedHandler, apiFetch } from './lib/apiClient';
+import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { isStandalonePwa } from './lib/pwa';
 import { hasRoleAtLeast } from './lib/roles';
 
@@ -214,6 +214,22 @@ export const App: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  // Achado real em produção (15/08/2026): o seletor de tenant (Header.tsx,
+  // só visível pra saas_admin) até aqui só mudava essa tela — toda chamada
+  // ao backend continuava resolvendo o tenant pelo token de login, fixo
+  // desde que o operador entrou (ver resolveTenantId em
+  // server/middleware/rbac.ts). Um saas_admin trocou pra outro tenant no
+  // seletor, salvou a Mensagem de Primeiro Contato lá, e a gravação foi
+  // silenciosamente pro tenant do PRÓPRIO login — um cliente real de outro
+  // tenant chegou a receber o conteúdo errado. Mantém `apiFetch` mandando o
+  // tenant realmente selecionado (header X-Tenant-Id) só quando quem está
+  // logado é saas_admin — pra qualquer outro papel o backend ignora esse
+  // header de qualquer forma, mas nem faz sentido mandar (o seletor nem
+  // aparece pra eles).
+  useEffect(() => {
+    setTenantOverride(currentUser?.role === 'saas_admin' ? activeTenant.id : null);
+  }, [currentUser?.role, activeTenant.id]);
 
   // CRM Leads — bug real em produção (12/08/2026): sempre que o cache local
   // estava vazio (navegador novo, aba anônima, ou depois de limpar dados do

@@ -27,3 +27,39 @@ export function requireRole(minRole: Role) {
 export function isSaasAdmin(req: AuthenticatedRequest): boolean {
   return req.user?.role === 'saas_admin';
 }
+
+/** Header que o seletor de tenant do painel (Header.tsx) manda pra apontar qual tenant um saas_admin está gerenciando no momento — ver resolveTenantId abaixo. */
+export const TENANT_OVERRIDE_HEADER = 'x-tenant-id';
+
+/**
+ * Resolve o tenant_id de verdade de uma requisição autenticada. Por padrão
+ * vem sempre do JWT (`req.user.tenantId`) — nunca de body/query, pra nenhum
+ * papel. A ÚNICA exceção: saas_admin pode apontar pra outro tenant mandando
+ * o header `X-Tenant-Id` (é isso que o seletor de tenant do painel passa a
+ * fazer de verdade a partir de agora).
+ *
+ * Achado real em produção (15/08/2026): até aqui esse seletor era
+ * puramente cosmético — cada rota resolvia o tenant sempre pelo JWT, fixo
+ * desde o login, então trocar o tenant na tela nunca mudava pra onde uma
+ * gravação ia de verdade. Um saas_admin trocou pra "Clic Piscinas" no
+ * seletor, configurou a Mensagem de Primeiro Contato lá, e ela foi salva
+ * silenciosamente no tenant do PRÓPRIO login (Monique-Teste) — sem erro
+ * nenhum. Um cliente real da Monique chegou a receber, como primeira
+ * mensagem automática, o texto de entrega de piscina + lista de material
+ * da Clic Piscinas.
+ *
+ * Pra qualquer papel que não seja saas_admin, o header é sempre ignorado —
+ * um admin comum de tenant nunca consegue apontar pra outro tenant só
+ * mandando esse header, mesmo que tente.
+ */
+export function resolveTenantId(req: AuthenticatedRequest): string {
+  if (!req.user?.tenantId) {
+    throw new Error('Sessão autenticada sem tenantId — recusado (nunca cair no tenant legado por segurança).');
+  }
+  if (isSaasAdmin(req)) {
+    const override = req.headers[TENANT_OVERRIDE_HEADER];
+    const value = Array.isArray(override) ? override[0] : override;
+    if (value?.trim()) return value.trim();
+  }
+  return req.user.tenantId;
+}

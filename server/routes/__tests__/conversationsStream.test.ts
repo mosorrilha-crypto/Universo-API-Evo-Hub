@@ -83,4 +83,58 @@ describe('GET /api/conversations/stream', () => {
 
     controller.abort();
   });
+
+  // Achado real em produção (15/08/2026): o seletor de tenant do painel
+  // (saas_admin) precisa que ESTE stream também acompanhe o tenant
+  // selecionado, não só as chamadas REST via apiFetch (que já mandam
+  // X-Tenant-Id) — EventSource nativo não manda header customizado, então
+  // esse tenant só pode vir por querystring aqui (ver resolveTenantId em
+  // middleware/rbac.ts pra mesma exceção nas outras rotas).
+  it('saas_admin com ?tenantId= — assina o tenant apontado, não o do próprio login', async () => {
+    const TENANT_B = 'tenant-b';
+    const token = jwt.sign({ id: 'op-1', tenantId: TENANT_A, role: 'saas_admin' }, JWT_SECRET);
+    const controller = new AbortController();
+    const res = await fetch(`${baseUrl}/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${TENANT_B}`, {
+      signal: controller.signal,
+    });
+    expect(res.status).toBe(200);
+
+    const reader = res.body!.getReader();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Evento do tenant do PRÓPRIO login (TENANT_A) não deveria chegar aqui.
+    emitConversationUpdated(TENANT_A, '595900000001');
+    // Evento do tenant apontado pelo querystring (TENANT_B) deveria chegar.
+    emitConversationUpdated(TENANT_B, '595900000002');
+
+    const { value } = await reader.read();
+    const chunk = new TextDecoder().decode(value);
+    expect(chunk).toContain('data: {"phone":"595900000002"}');
+    expect(chunk).not.toContain('595900000001');
+
+    controller.abort();
+  });
+
+  it('admin comum (não saas_admin) com ?tenantId= — ignorado, assina sempre o próprio tenant do JWT', async () => {
+    const TENANT_B = 'tenant-b';
+    const token = jwt.sign({ id: 'op-1', tenantId: TENANT_A, role: 'admin' }, JWT_SECRET);
+    const controller = new AbortController();
+    const res = await fetch(`${baseUrl}/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${TENANT_B}`, {
+      signal: controller.signal,
+    });
+    expect(res.status).toBe(200);
+
+    const reader = res.body!.getReader();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    emitConversationUpdated(TENANT_B, '595900000003');
+    emitConversationUpdated(TENANT_A, '595900000004');
+
+    const { value } = await reader.read();
+    const chunk = new TextDecoder().decode(value);
+    expect(chunk).toContain('data: {"phone":"595900000004"}');
+    expect(chunk).not.toContain('595900000003');
+
+    controller.abort();
+  });
 });

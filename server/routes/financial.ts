@@ -9,16 +9,15 @@ import {
 } from '../services/financialStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { resolveTenantId } from '../middleware/rbac';
 
 interface FinancialRouterDeps {
   authenticateToken: RequestHandler;
 }
 
+/** tenantId de verdade da requisição — vem do JWT, exceto pra saas_admin usando o seletor de tenant do painel (ver resolveTenantId em middleware/rbac.ts). */
 function tenantOf(req: AuthenticatedRequest): string {
-  if (!req.user?.tenantId) {
-    throw new Error('Sessão autenticada sem tenantId — recusado (nunca cair no tenant legado por segurança).');
-  }
-  return req.user.tenantId;
+  return resolveTenantId(req);
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];

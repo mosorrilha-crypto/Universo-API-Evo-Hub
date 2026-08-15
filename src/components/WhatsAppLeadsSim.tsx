@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
-import { apiFetch, getAuthToken } from '../lib/apiClient';
+import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
@@ -1210,7 +1210,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     let source: EventSource | null = null;
     const token = getAuthToken();
     if (token) {
-      source = new EventSource(`/api/conversations/stream?token=${encodeURIComponent(token)}`);
+      // EventSource nativo não manda header customizado (nem X-Tenant-Id que
+      // apiFetch já anexa sozinho) — o tenant do seletor (saas_admin) vai por
+      // querystring aqui, mesma exceção de resolveTenantId no backend.
+      const tenantOverride = getTenantOverride();
+      const streamUrl = tenantOverride
+        ? `/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${encodeURIComponent(tenantOverride)}`
+        : `/api/conversations/stream?token=${encodeURIComponent(token)}`;
+      source = new EventSource(streamUrl);
       // O evento só carrega o telefone que mudou — reaproveita o mesmo
       // fetch da lista em vez de montar um merge separado por telefone,
       // então cobre também o caso de conversa apagada.

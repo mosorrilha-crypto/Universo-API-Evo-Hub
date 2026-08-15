@@ -36,6 +36,7 @@ import { getNowLocalNaive } from '../services/autoReply';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { resolveTenantId } from '../middleware/rbac';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
@@ -58,22 +59,18 @@ interface ConversationsRouterDeps {
 }
 
 /**
- * tenantId do operador autenticado. Achado numa auditoria externa: caía
- * silenciosamente no tenant legado (dados reais da Monique) quando o JWT não
- * trazia tenantId, em vez de rejeitar — mesmo padrão de risco que o
- * roteamento de webhook por phone_number_id já corrigiu (Bloco 2.B, revisão
- * de segurança 06/08/2026: "nunca gravar/ler em tenant nenhum quando não dá
- * pra provar de quem é"). Hoje todo fluxo de emissão de token (login real e
- * demo, server/routes/auth.ts) sempre inclui tenantId, então isso nunca
- * deveria disparar em uso normal — mas se disparar, precisa rejeitar (todas
- * as rotas deste arquivo passam por asyncHandler, então o throw vira 500 via
- * o middleware de erro global, nunca um vazamento silencioso pro tenant legado).
+ * tenantId de verdade da requisição — por padrão vem do JWT do operador
+ * autenticado (achado numa auditoria externa: caía silenciosamente no
+ * tenant legado quando o JWT não trazia tenantId, em vez de rejeitar; hoje
+ * todo fluxo de emissão de token sempre inclui tenantId, então isso nunca
+ * deveria disparar em uso normal, mas se disparar precisa rejeitar). Único
+ * jeito de mudar isso é ser saas_admin usando o seletor de tenant do painel
+ * — ver resolveTenantId em middleware/rbac.ts pro porquê disso existir
+ * (achado real em produção, 15/08/2026: esse seletor era só cosmético e
+ * causou uma gravação cross-tenant real).
  */
 function tenantOf(req: AuthenticatedRequest): string {
-  if (!req.user?.tenantId) {
-    throw new Error('Sessão autenticada sem tenantId — recusado (nunca cair no tenant legado por segurança).');
-  }
-  return req.user.tenantId;
+  return resolveTenantId(req);
 }
 
 /**
@@ -103,8 +100,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     } catch {
       return res.status(403).end();
     }
-    const tenantId = user?.tenantId;
-    if (!tenantId) return res.status(403).end();
+    if (!user?.tenantId) return res.status(403).end();
+    // Mesma exceção de resolveTenantId (middleware/rbac.ts): só saas_admin
+    // pode apontar pra outro tenant, aqui via querystring (EventSource
+    // nativo não manda header customizado) — o painel manda isso a partir
+    // do tenant selecionado no seletor.
+    const requestedTenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId.trim() : undefined;
+    const tenantId = user.role === 'saas_admin' && requestedTenantId ? requestedTenantId : user.tenantId;
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

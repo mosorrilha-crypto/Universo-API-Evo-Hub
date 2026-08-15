@@ -14,6 +14,7 @@ import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from 
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { resolveTenantId } from '../middleware/rbac';
 
 interface GoogleCalendarRouterDeps {
   authenticateToken: RequestHandler;
@@ -35,17 +36,12 @@ interface GoogleCalendarRouterDeps {
  * tenant legado único.
  */
 /**
- * tenantId do operador autenticado. Achado numa auditoria externa: caía
- * silenciosamente no tenant legado quando o JWT não trazia tenantId, em vez
- * de rejeitar — mesmo padrão já corrigido no roteamento de webhook por
- * phone_number_id (Bloco 2.B). Todo fluxo de emissão de token hoje sempre
- * inclui tenantId, então isso não deveria disparar em uso normal.
+ * tenantId de verdade da requisição — vem do JWT, exceto pra saas_admin
+ * usando o seletor de tenant do painel (ver resolveTenantId em
+ * middleware/rbac.ts pro porquê disso existir).
  */
 function tenantOf(req: AuthenticatedRequest): string {
-  if (!req.user?.tenantId) {
-    throw new Error('Sessão autenticada sem tenantId — recusado (nunca cair no tenant legado por segurança).');
-  }
-  return req.user.tenantId;
+  return resolveTenantId(req);
 }
 
 export function createGoogleCalendarRouter({ authenticateToken, googleClientId, googleClientSecret, googleRedirectUri, jwtSecret }: GoogleCalendarRouterDeps): Router {

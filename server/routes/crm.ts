@@ -3,16 +3,15 @@ import { listConversations } from '../services/conversationStore';
 import { listCrmLeadStates, upsertCrmLeadState, deleteCrmLeadState, type CrmLeadState } from '../services/crmStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { resolveTenantId } from '../middleware/rbac';
 
 interface CrmRouterDeps {
   authenticateToken: RequestHandler;
 }
 
+/** tenantId de verdade da requisição — vem do JWT, exceto pra saas_admin usando o seletor de tenant do painel (ver resolveTenantId em middleware/rbac.ts). */
 function tenantOf(req: AuthenticatedRequest): string {
-  if (!req.user?.tenantId) {
-    throw new Error('Sessão autenticada sem tenantId — recusado (nunca cair no tenant legado por segurança).');
-  }
-  return req.user.tenantId;
+  return resolveTenantId(req);
 }
 
 /**
