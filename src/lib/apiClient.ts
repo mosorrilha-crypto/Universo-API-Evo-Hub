@@ -25,6 +25,26 @@ export const setAuthToken = (token: string | null) => {
 
 export const getAuthToken = () => currentToken;
 
+// Tenant que o seletor do painel (Header.tsx) tem selecionado no momento —
+// só tem efeito de verdade no backend pra saas_admin (ver resolveTenantId
+// em server/middleware/rbac.ts); pra qualquer outro papel o backend ignora
+// esse header e usa sempre o tenantId do próprio token, então não faz mal
+// nenhum mandar mesmo sem checar o papel aqui no cliente.
+//
+// Achado real em produção (15/08/2026): até aqui esse seletor só mudava a
+// TELA — toda chamada ao backend continuava resolvendo o tenant pelo token
+// de login, fixo desde que o operador entrou. Um saas_admin trocou pra
+// outro tenant no seletor, configurou algo lá (achando que estava editando
+// aquele tenant) e a gravação foi silenciosamente pro tenant do PRÓPRIO
+// login — um cliente real chegou a receber conteúdo de outro tenant.
+let tenantOverride: string | null = null;
+
+export const setTenantOverride = (tenantId: string | null) => {
+  tenantOverride = tenantId;
+};
+
+export const getTenantOverride = () => tenantOverride;
+
 // Callback disparado quando o servidor rejeita explicitamente o token da
 // sessão (403 — token presente mas inválido/expirado, ver server/middleware/auth.ts:
 // jwt.verify falhou). App.tsx registra isso pra forçar um novo login com
@@ -53,6 +73,9 @@ export const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {})
   const headers = new Headers(init.headers || {});
   if (currentToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${currentToken}`);
+  }
+  if (tenantOverride && !headers.has('X-Tenant-Id')) {
+    headers.set('X-Tenant-Id', tenantOverride);
   }
   const response = await fetch(input, { ...init, headers });
   if (response.status === 403 && currentToken) {
