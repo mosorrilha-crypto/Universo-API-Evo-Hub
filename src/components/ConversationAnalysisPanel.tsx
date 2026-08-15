@@ -1,5 +1,6 @@
 import React from 'react';
 import { FullConversationAnalysis } from '../types';
+import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Sparkles,
   TrendingUp,
@@ -488,12 +489,12 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
           <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400 flex items-center">
             <Wand2 className="w-3.5 h-3.5 mr-1" /> Gerar Resposta a partir de uma Sugestão
           </span>
-          <textarea
+          <AutoResizeTextarea
             value={hintDraft}
             onChange={(e) => setHintDraft(e.target.value)}
             placeholder='Ex: "diz pra ela que sábado às 14h ainda tá livre" ou "explica que o valor já inclui instalação"'
-            rows={2}
-            className="w-full bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 resize-none"
+            minRows={2}
+            className="w-full bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500"
           />
           <button
             onClick={handleGenerateHintReply}
@@ -563,12 +564,12 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center">
             <Bot className="w-3.5 h-3.5 mr-1 text-emerald-400" /> Perguntar à IA
           </span>
-          <textarea
+          <AutoResizeTextarea
             value={questionDraft}
             onChange={(e) => setQuestionDraft(e.target.value)}
             placeholder='Sobre esta conversa ("esse cliente já falou de orçamento?") ou qualquer pergunta geral ("traduza esta frase", "quais feriados tem este mês")'
-            rows={2}
-            className="w-full bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+            minRows={2}
+            className="w-full bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
           <button
             onClick={handleAsk}
