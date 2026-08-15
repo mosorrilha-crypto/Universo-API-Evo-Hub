@@ -229,13 +229,26 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // ── Evolution API multi-instância (Epic 4.6 — Porta A, QR Code) ────────
   // Onboarding "sem barreira de entrada": cria uma instância nova na
   // Evolution API self-hosted em nome do tenant e devolve o QR Code pro
-  // painel exibir. Só saas_admin cria (provisionamento ainda é manual — o
-  // self-service completo, 4.6.5, fica pra depois).
-  router.post('/api/admin/tenants/:id/evolution-instance', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  // painel exibir.
+  // Pedido real (15/08/2026, incidente Clic Piscinas — WhatsApp deslogou
+  // sozinho do lado do WhatsApp e ninguém com saas_admin estava disponível
+  // na hora): liberado pra `admin` comum reconectar/gerar QR Code do PRÓPRIO
+  // tenant, mesmo padrão de escopo já usado nas rotas de operators acima —
+  // nunca confia no `:id` da URL pra quem não é saas_admin, sempre resolve
+  // pelo tenantId do JWT (nunca client-supplied), pra um admin de um tenant
+  // nunca conseguir mexer na conexão de outro só trocando o id na URL.
+  function resolveEvolutionTenantId(req: AuthenticatedRequest): string {
+    if (isSaasAdmin(req)) return req.params.id;
+    if (!req.user?.tenantId) throw new Error('tenantId ausente na sessão autenticada.');
+    return req.user.tenantId;
+  }
+
+  router.post('/api/admin/tenants/:id/evolution-instance', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (!evolutionApiUrl || !evolutionApiKey) {
       return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível provisionar instância nova.' });
     }
-    const { data: tenant, error: tenantError } = await db().from('tenants').select('id, slug, name').eq('id', req.params.id).maybeSingle();
+    const tenantId = resolveEvolutionTenantId(req);
+    const { data: tenant, error: tenantError } = await db().from('tenants').select('id, slug, name').eq('id', tenantId).maybeSingle();
     if (tenantError) return res.status(500).json({ error: tenantError.message });
     if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
 
@@ -316,11 +329,11 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // Reconecta/renova o QR Code de uma instância já criada — o QR do
   // /instance/create expira rápido, e o operador pode reabrir a tela de
   // onboarding depois desse tempo.
-  router.get('/api/admin/tenants/:id/evolution-instance/qrcode', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/tenants/:id/evolution-instance/qrcode', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { data: cred, error: credError } = await db()
       .from('tenant_evolution_credentials')
       .select('instance_name, api_url, api_key')
-      .eq('tenant_id', req.params.id)
+      .eq('tenant_id', resolveEvolutionTenantId(req))
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
@@ -336,11 +349,11 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // Estado da conexão (aberta/fechada/conectando) — pro painel saber quando
   // parar de mostrar o QR Code e exibir "conectado" sem precisar o operador
   // ficar recarregando a tela manualmente pra descobrir.
-  router.get('/api/admin/tenants/:id/evolution-instance/status', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/tenants/:id/evolution-instance/status', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { data: cred, error: credError } = await db()
       .from('tenant_evolution_credentials')
       .select('instance_name, api_url, api_key')
-      .eq('tenant_id', req.params.id)
+      .eq('tenant_id', resolveEvolutionTenantId(req))
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
