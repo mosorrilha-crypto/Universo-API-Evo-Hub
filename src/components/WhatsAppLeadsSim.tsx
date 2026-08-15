@@ -4,7 +4,7 @@ import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
-import { ConversationAnalysisPanel } from './ConversationAnalysisPanel';
+import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
 import { ForwardMessageModal } from './chat/ForwardMessageModal';
 import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
@@ -2199,6 +2199,60 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Gerar Resposta a partir de uma Sugestão (pedido real, 15/08/2026, Ficha
+  // IA) — POST /api/ai/reply-from-hint. Mesmo shape de leadInfo/messages/
+  // agentKnowledgeBase já usado em handleAnalyzeConversation, pra manter a
+  // resposta gerada consistente com o que o Gemini já sabe sobre este lead.
+  const handleGenerateReplyFromHint = async (hint: string): Promise<HintReplyResult> => {
+    if (!selectedLead) return { reply: '', error: 'Nenhum lead selecionado.' };
+    try {
+      const response = await apiFetch('/api/ai/reply-from-hint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadInfo: {
+            name: selectedLead.name,
+            phone: selectedLead.phone,
+            sampleType: (selectedLead as any).sampleType,
+          },
+          messages: selectedLead.messages || [],
+          agentKnowledgeBase: knowledgeBase,
+          hint,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return { reply: '', error: data?.error || 'Erro ao gerar resposta.' };
+      }
+      return { reply: data.reply || '', translation: data.translation || undefined, detectedLanguage: data.detectedLanguage || undefined, error: data.error };
+    } catch (err: any) {
+      return { reply: '', error: err.message || 'Falha ao gerar resposta.' };
+    }
+  };
+
+  // Perguntar à IA (pedido real, 15/08/2026, Ficha IA) — POST /api/ai/ask.
+  const handleAskAi = async (question: string): Promise<AskAiResult> => {
+    if (!selectedLead) return { answer: '', error: 'Nenhum lead selecionado.' };
+    try {
+      const response = await apiFetch('/api/ai/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leadInfo: { name: selectedLead.name, phone: selectedLead.phone },
+          messages: selectedLead.messages || [],
+          question,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        return { answer: '', error: data?.error || 'Erro ao consultar a IA.' };
+      }
+      return { answer: data.answer || '', error: data.error };
+    } catch (err: any) {
+      return { answer: '', error: err.message || 'Falha ao consultar a IA.' };
+    }
+  };
+
   // Uma linha da lista de conversas — usada tanto na lista principal quanto
   // na seção "Arquivadas" colapsável, pra não duplicar o JSX.
   const renderLeadRow = (lead: PanelLead) => {
@@ -3580,6 +3634,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onApplySuggestedReply={handleApplySuggestedReply}
               leadName={selectedLead?.name || 'Lead'}
               onSendCAPIEvent={handleDirectCAPI}
+              onGenerateReplyFromHint={handleGenerateReplyFromHint}
+              onAskAi={handleAskAi}
             />
           </div>
         )}
@@ -3614,6 +3670,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onApplySuggestedReply={handleApplySuggestedReply}
                 leadName={selectedLead.name || 'Lead'}
                 onSendCAPIEvent={handleDirectCAPI}
+                onGenerateReplyFromHint={handleGenerateReplyFromHint}
+                onAskAi={handleAskAi}
               />
             </div>
           </div>

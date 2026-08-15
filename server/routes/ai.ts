@@ -140,6 +140,125 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
     }
   });
 
+  /**
+   * Gera a próxima mensagem pra enviar a partir de uma SUGESTÃO/instrução do
+   * operador (pedido real, 15/08/2026: "igual a que temos no escalonamento,
+   * mas nesta ficha de IA, pra criar a próxima msg baseada em uma sugestão e
+   * não no contexto da conversa" — mesmo espírito do "Orientar a IA" do
+   * escalonamento, issue #97, só que aqui a resposta é gerada NA HORA em vez
+   * de guardada pra usar só quando o cliente escrever de novo).
+   *
+   * Diferente do "Resposta Sugerida" de /api/analyze-conversation (que só
+   * reage ao histórico), aqui a instrução do operador é o que MANDA — o
+   * histórico entra só pra manter tom/idioma/contexto consistentes, nunca
+   * pra sobrepor o que o operador pediu.
+   */
+  router.post('/api/ai/reply-from-hint', authenticateToken, rateLimiter, async (req, res) => {
+    try {
+      const { leadInfo, messages, agentKnowledgeBase, hint } = req.body || {};
+      if (typeof hint !== 'string' || !hint.trim()) {
+        return res.status(400).json({ success: false, error: 'Campo "hint" (sua sugestão) é obrigatório.' });
+      }
+
+      if (ai) {
+        try {
+          const prompt = `Você é um atendente de vendas humano respondendo no WhatsApp em nome de um negócio real.
+Um operador humano te deu a seguinte instrução sobre o que responder ao lead a seguir — ela é a fonte principal do que escrever, não uma sugestão opcional:
+INSTRUÇÃO DO OPERADOR: "${hint.trim()}"
+
+Use o histórico da conversa e a base de conhecimento SÓ pra manter o tom, o idioma e o contexto consistentes com o que já foi dito — nunca pra contrariar ou ignorar a instrução do operador.
+
+Responda estritamente em formato JSON:
+{
+  "reply": "mensagem pronta pra enviar ao lead, seguindo a instrução do operador, no MESMO idioma que o lead usa na conversa",
+  "detectedLanguage": "idioma do lead na conversa, ex: Espanhol (Paraguai)",
+  "translation": "tradução literal de reply para o Português, SOMENTE se detectedLanguage não for português — se já for português, use string vazia"
+}
+
+Dados do Lead: ${JSON.stringify(leadInfo)}
+Histórico de Mensagens: ${JSON.stringify(messages)}
+Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
+`;
+
+          const response = await withGeminiRetry(() => ai.models.generateContent({
+            model: 'gemini-3.6-flash',
+            contents: prompt,
+            config: { responseMimeType: 'application/json' },
+          }));
+
+          const parsed = JSON.parse(response.text || '');
+          return res.json({ success: true, source: 'gemini', ...parsed });
+        } catch (geminiError) {
+          console.warn('Gemini API call error (reply-from-hint), fallbacking:', geminiError);
+        }
+      }
+
+      // Mesma política anti-fabricação do /api/analyze-conversation acima —
+      // nunca inventar uma resposta pronta pra enviar quando o Gemini falha.
+      return res.json({
+        success: true,
+        source: 'fallback',
+        reply: '',
+        detectedLanguage: undefined,
+        translation: '',
+        error: 'Não foi possível gerar a resposta agora (Gemini indisponível). Tente novamente em instantes.',
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message || 'Erro ao gerar resposta a partir da sugestão.' });
+    }
+  });
+
+  /**
+   * Assistente de IA de perguntas livres dentro da Ficha IA (pedido real,
+   * 15/08/2026): pode responder tanto sobre ESTA conversa específica ("esse
+   * cliente já falou de orçamento antes?") quanto perguntas gerais sem
+   * relação nenhuma com o lead ("traduza esta frase", "quais feriados tem
+   * este mês") — um assistente pessoal dentro do painel, não travado ao
+   * contexto da conversa.
+   */
+  router.post('/api/ai/ask', authenticateToken, rateLimiter, async (req, res) => {
+    try {
+      const { leadInfo, messages, question } = req.body || {};
+      if (typeof question !== 'string' || !question.trim()) {
+        return res.status(400).json({ success: false, error: 'Campo "question" é obrigatório.' });
+      }
+
+      if (ai) {
+        try {
+          const prompt = `Você é um assistente de IA dentro do painel de atendimento de um operador de WhatsApp Business.
+O operador pode perguntar sobre a conversa com o lead abaixo (ex: "esse cliente já falou de orçamento?", "resume o que falta pra fechar") OU fazer uma pergunta geral sem relação nenhuma com essa conversa (ex: traduções, datas, cálculos, feriados) — responda da forma mais direta e útil possível, em Português, a menos que a pergunta peça outro idioma.
+
+Dados do Lead (contexto, use se for relevante pra pergunta): ${JSON.stringify(leadInfo || {})}
+Histórico da Conversa (contexto, use se for relevante pra pergunta): ${JSON.stringify(messages || [])}
+
+Pergunta do operador: "${question.trim()}"
+
+Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
+
+          const response = await withGeminiRetry(() => ai.models.generateContent({
+            model: 'gemini-3.6-flash',
+            contents: prompt,
+            config: { responseMimeType: 'application/json' },
+          }));
+
+          const parsed = JSON.parse(response.text || '');
+          return res.json({ success: true, source: 'gemini', answer: parsed.answer || '' });
+        } catch (geminiError) {
+          console.warn('Gemini API call error (ask), fallbacking:', geminiError);
+        }
+      }
+
+      return res.json({
+        success: true,
+        source: 'fallback',
+        answer: '',
+        error: 'Não foi possível consultar a IA agora (Gemini indisponível). Tente novamente em instantes.',
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message || 'Erro ao consultar a IA.' });
+    }
+  });
+
   // AI Audio Transcription Endpoint
   router.post('/api/transcribe', authenticateToken, rateLimiter, async (req, res) => {
     try {
