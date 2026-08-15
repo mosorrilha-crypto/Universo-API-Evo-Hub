@@ -26,8 +26,6 @@ import { isStandalonePwa } from './lib/pwa';
 import { hasRoleAtLeast } from './lib/roles';
 
 import { INITIAL_TENANTS } from './data/mockTenants';
-import { INITIAL_MOCK_LEADS } from './data/mockLeads';
-import { INITIAL_TRANSACTIONS } from './data/mockTransactions';
 
 // Placeholder usado só como prop enquanto a tela de login (bloqueante,
 // isForcedLogin={!currentUser} logo abaixo) está aberta por cima do painel —
@@ -223,19 +221,17 @@ export const App: React.FC = () => {
   // leads fictícios de demonstração em vez de começar vazia — e como o merge
   // com os leads reais (GET /api/crm/leads, abaixo) só ADICIONA por id, nunca
   // remove, os fictícios ficavam "grudados" na lista pra sempre, misturados
-  // com clientes reais. Começa vazia agora; quem quiser os dados de exemplo
-  // de volta usa o botão "Carregar dados de demonstração" (handleLoadDemoData).
+  // com clientes reais. Começa vazia agora.
   const [leads, setLeads] = useState<LeadInfo[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
     return saved ? JSON.parse(saved) : [];
   });
 
   // Financial Transactions — mesmo raciocínio do fix de leads fake
-  // (12/08/2026): cache vazio nunca deveria cair pro dataset fictício
-  // INITIAL_TRANSACTIONS, senão dado de demonstração "gruda" pra sempre (o
-  // merge com transações reais, GET /api/financial/transactions abaixo, só
-  // ADICIONA por id, nunca remove). Começa vazia; "Carregar dados de
-  // demonstração" continua existindo pra quem quiser o mock de volta.
+  // (12/08/2026): cache vazio nunca deveria cair pro dataset fictício, senão
+  // dado de demonstração "gruda" pra sempre (o merge com transações reais,
+  // GET /api/financial/transactions abaixo, só ADICIONA por id, nunca
+  // remove). Começa vazia.
   const [transactions, setTransactions] = useState<FinancialTransaction[]>(() => {
     const saved = localStorage.getItem('saas_transactions');
     return saved ? JSON.parse(saved) : [];
@@ -599,9 +595,8 @@ export const App: React.FC = () => {
   };
 
   // Toda cobrança criada pelo botão "Gerar Nova Cobrança" do painel é uma
-  // ação real de operador (o dataset de demonstração é injetado direto via
-  // handleLoadDemoData, nunca passa por aqui) — persiste no servidor sempre,
-  // mesmo padrão de handleUpdateLead: nunca aplica local antes de confirmar.
+  // ação real de operador — persiste no servidor sempre, mesmo padrão de
+  // handleUpdateLead: nunca aplica local antes de confirmar.
   const handleAddTransaction = async (newTx: FinancialTransaction) => {
     try {
       const res = await apiFetch('/api/financial/transactions', {
@@ -674,48 +669,6 @@ export const App: React.FC = () => {
     showToast(`Empresa alterada para: ${tenant.name}`);
   };
 
-  const handleClearAllMockData = () => {
-    if (window.confirm('Tem certeza que deseja zerar todos os dados fictícios para entrar em modo de produção limpo?')) {
-      setLeads([]);
-      setTransactions([]);
-      setSavedTranscripts([]);
-      // Achado real em produção: o "Gerenciador de Usuários" (Painel SaaS
-      // Master) guarda sua própria lista fictícia numa chave separada de
-      // localStorage, gerenciada só dentro de SaaSAdminDashboard.tsx (nunca
-      // fala com a tabela real `operators` do Supabase) — esse botão nunca
-      // limpava ela, deixando nomes/e-mails fictícios (Carlos Silva, Ricardo
-      // Santos etc) presos no navegador mesmo depois de "limpar tudo". O
-      // componente só lê essa chave no mount, então remover aqui já resolve
-      // na próxima vez que a aba "Painel SaaS Master" for aberta.
-      localStorage.removeItem('saas_users_list');
-      showToast('Dados limpos! Canvas pronto para produção.');
-    }
-  };
-
-  const handleLoadDemoData = () => {
-    setLeads(INITIAL_MOCK_LEADS);
-    setTransactions(INITIAL_TRANSACTIONS);
-    setKnowledgeBase(moniqueStudioKnowledgeBase);
-    showToast('Dados de demonstração restaurados!');
-  };
-
-  const handleExportBackup = () => {
-    const backupData = {
-      tenants,
-      leads,
-      transactions,
-      knowledgeBase,
-      exportedAt: new Date().toISOString()
-    };
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `backup_saas_${activeTenant.id}_${Date.now()}.json`;
-    a.click();
-    showToast('Backup JSON gerado com sucesso!');
-  };
-
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
     setFinancialPreselectedLead(lead);
@@ -742,12 +695,6 @@ export const App: React.FC = () => {
         tenants={tenants}
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
-        onClearAllMockData={handleClearAllMockData}
-        onLoadDemoData={handleLoadDemoData}
-        onExportBackup={handleExportBackup}
-        leadsCount={leads.length}
-        transactionsCount={transactions.length}
-        demoLeadsCount={leads.filter((l) => !l.isReal).length}
       />
 
       {/* Main Content Area */}

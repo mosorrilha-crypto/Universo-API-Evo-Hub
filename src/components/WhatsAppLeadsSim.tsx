@@ -314,9 +314,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
   // reais (buscados em App.tsx e sincronizados de volta nesta mesma chave)
   // só são ADICIONADOS, nunca removidos, os fictícios ficavam misturados
-  // com clientes reais pra sempre. Começa vazia agora; o botão "Limpar dados
-  // de teste" (handleClearMockData) já produzia esse mesmo estado antes, e o
-  // resto do componente já lida bem com ele (selectedLead undefined etc).
+  // com clientes reais pra sempre. Começa vazia agora.
   const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis })[]>(() => {
     const saved = localStorage.getItem('saas_crm_leads');
     return saved ? JSON.parse(saved) : [];
@@ -341,15 +339,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Handler to clear all mock/test examples
-  const handleClearMockData = () => {
-    if (window.confirm('Tem certeza que deseja remover todos os leads de teste/exemplo e iniciar uma lista limpa para produção?')) {
-      setLeads([]);
-      setActiveLeadId(null);
-      setMobileThreadOpen(false);
-    }
-  };
 
   // Auto analysis toggle — cada análise consome tokens reais do Gemini (ver
   // tokenUsageStore.ts), inclusive só de abrir uma conversa pra dar uma
@@ -2246,16 +2235,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             {canManageWhatsAppConnection && statusAvailable && activeTenant?.id && (
               <ReconectarWhatsAppQrCode tenantId={activeTenant.id} />
             )}
-
-            {/* Clear Mock Data Button */}
-            <button
-              onClick={handleClearMockData}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Limpar todos os leads/conversas da tela (não apaga nada no servidor — conversas reais voltam no próximo carregamento)"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
-              <span>Limpar Testes</span>
-            </button>
 
             {/* Desconectar Google Calendar (pra trocar de conta) — ação rara,
                 o botão principal (conectar/ver agenda) já é sempre visível
