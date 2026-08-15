@@ -29,7 +29,9 @@ import {
   Loader2,
   BrainCircuit,
   Video,
-  Play
+  Play,
+  Send,
+  X
 } from 'lucide-react';
 
 interface AgentKnowledgeBaseProps {
@@ -332,7 +334,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       setIsSavingHours(false);
     }
   };
-  const [activeSubSection, setActiveSubSection] = useState<'general' | 'products' | 'rules' | 'faqs' | 'docs'>('general');
+  const [activeSubSection, setActiveSubSection] = useState<'general' | 'products' | 'rules' | 'faqs' | 'docs' | 'firstContact'>('general');
 
   // Input states for adding new items
   const [newProductName, setNewProductName] = useState('');
@@ -513,6 +515,110 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       alert('Não foi possível abrir o vídeo.');
     } finally {
       setPreviewingVideoId(null);
+    }
+  };
+
+  // Mensagem Inicial de Primeiro Contato (pedido real, 14/08/2026, Clic
+  // Piscinas): bloco fixo de texto/imagem/vídeo mandado automaticamente na
+  // 1ª mensagem de uma conversa NOVA, em vez da pergunta de triagem padrão
+  // da IA — ver server/services/firstContactMessage.ts. Mesmos padrões de
+  // upload já usados nos produtos (imagem inline em base64, vídeo sobe pro
+  // Storage na hora e só a referência fica no formData), só que num único
+  // objeto do tenant em vez de um por produto.
+  const [uploadingFirstContactVideo, setUploadingFirstContactVideo] = useState(false);
+  const [previewingFirstContactVideo, setPreviewingFirstContactVideo] = useState(false);
+
+  const handleFirstContactTextChange = (value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      firstContactMessage: { ...prev.firstContactMessage, text: value },
+    }));
+  };
+
+  const handleFirstContactImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result);
+      setFormData((prev) => ({
+        ...prev,
+        firstContactMessage: { ...prev.firstContactMessage, imageBase64: base64, imageMimeType: file.type },
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFirstContactImageRemove = () => {
+    setFormData((prev) => ({
+      ...prev,
+      firstContactMessage: { ...prev.firstContactMessage, imageBase64: undefined, imageMimeType: undefined },
+    }));
+  };
+
+  const handleFirstContactVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('video/')) {
+      alert(`Arquivo não é um vídeo (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_VIDEO_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Vídeo maior que ${MAX_VIDEO_INPUT_SIZE_MB}MB. Comprima ou corte antes de enviar.`);
+      return;
+    }
+
+    const oldVideoId = formData.firstContactMessage?.videoId;
+    setUploadingFirstContactVideo(true);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64, oldVideoId }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { videoId, mimeType, fileName, sizeBytes } = await res.json();
+      setFormData((prev) => ({
+        ...prev,
+        firstContactMessage: { ...prev.firstContactMessage, videoId, videoMimeType: mimeType, videoFileName: fileName, videoSizeBytes: sizeBytes },
+      }));
+    } catch (err: any) {
+      console.error('Falha ao enviar vídeo:', err);
+      alert(`Não foi possível enviar o vídeo: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingFirstContactVideo(false);
+    }
+  };
+
+  const handleFirstContactVideoRemove = () => {
+    setFormData((prev) => ({
+      ...prev,
+      firstContactMessage: { ...prev.firstContactMessage, videoId: undefined, videoMimeType: undefined, videoFileName: undefined, videoSizeBytes: undefined },
+    }));
+  };
+
+  const handlePreviewFirstContactVideo = async () => {
+    const videoId = formData.firstContactMessage?.videoId;
+    if (!videoId) return;
+    setPreviewingFirstContactVideo(true);
+    try {
+      const res = await apiFetch(`/api/knowledge-base/videos/${videoId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      console.error('Falha ao abrir vídeo:', err);
+      alert('Não foi possível abrir o vídeo.');
+    } finally {
+      setPreviewingFirstContactVideo(false);
     }
   };
 
@@ -793,6 +899,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         >
           <FileText className="w-4 h-4 text-purple-400" />
           <span>5. Documentos Anexados ({formData.documents.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubSection('firstContact')}
+          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+            activeSubSection === 'firstContact'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Send className="w-4 h-4 text-pink-400" />
+          <span>6. Mensagem Inicial</span>
         </button>
       </div>
 
@@ -1369,6 +1487,126 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 6: Mensagem Inicial de Primeiro Contato — pedido real
+            (14/08/2026, Clic Piscinas): em vez da pergunta de triagem padrão
+            da IA logo na 1ª mensagem, mandar primeiro um bloco fixo (texto/
+            imagem/vídeo, não gerado pela IA) — a negociação com a IA só
+            começa a partir da PRÓXIMA mensagem do cliente. Ver
+            server/services/firstContactMessage.ts. Nenhum campo preenchido
+            aqui = comportamento de sempre (a IA responde a 1ª mensagem
+            normalmente), sem precisar de um toggle separado. */}
+        {activeSubSection === 'firstContact' && (
+          <div className="space-y-5">
+            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Send className="w-4 h-4 text-pink-400" />
+                  Mensagem Inicial Programada de Primeiro Contato
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Preenchendo algo aqui, a PRIMEIRA mensagem de uma conversa nova recebe este bloco fixo (texto + imagem + vídeo, o que estiver preenchido) em vez da pergunta de triagem padrão da IA — a negociação com a IA só começa a partir da próxima mensagem do cliente. Deixe tudo em branco pra manter o comportamento normal (a IA responde a 1ª mensagem sozinha).
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">Texto (bloco de informações)</label>
+              <AutoResizeTextarea
+                minRows={4}
+                value={formData.firstContactMessage?.text || ''}
+                onChange={(e) => handleFirstContactTextChange(e.target.value)}
+                placeholder="Ex: Oi! Que bom que você chegou até nós 🙌 Somos a Clic Piscinas — confira no vídeo abaixo como funciona nosso processo, do orçamento à instalação..."
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-pink-500 focus:outline-none leading-relaxed"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-xs font-bold text-slate-300 block">Imagem</span>
+                <div className="flex items-center gap-3">
+                  {formData.firstContactMessage?.imageBase64 ? (
+                    <img src={formData.firstContactMessage.imageBase64} alt="Primeiro contato" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem imagem</div>
+                  )}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
+                      {formData.firstContactMessage?.imageBase64 ? 'Trocar imagem' : 'Adicionar imagem'}
+                      <input type="file" accept="image/*" className="hidden" onChange={handleFirstContactImageChange} />
+                    </label>
+                    {formData.firstContactMessage?.imageBase64 && (
+                      <button
+                        type="button"
+                        onClick={handleFirstContactImageRemove}
+                        className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
+                      >
+                        <X className="w-3 h-3" />
+                        Remover
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-xs font-bold text-slate-300 block">Vídeo (até {MAX_VIDEO_INPUT_SIZE_MB}MB, qualquer formato — convertido automaticamente)</span>
+                <div className="flex items-center gap-3">
+                  {formData.firstContactMessage?.videoId ? (
+                    <button
+                      type="button"
+                      onClick={handlePreviewFirstContactVideo}
+                      disabled={previewingFirstContactVideo}
+                      title={formData.firstContactMessage.videoFileName || 'Ver vídeo'}
+                      className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
+                    >
+                      {previewingFirstContactVideo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                    </button>
+                  ) : (
+                    <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem vídeo</div>
+                  )}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold flex items-center gap-1 w-fit">
+                      {uploadingFirstContactVideo ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Enviando...
+                        </>
+                      ) : (
+                        <>
+                          <Video className="w-3 h-3" />
+                          {formData.firstContactMessage?.videoId ? 'Trocar vídeo' : 'Adicionar vídeo'}
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="video/*"
+                        className="hidden"
+                        disabled={uploadingFirstContactVideo}
+                        onChange={handleFirstContactVideoUpload}
+                      />
+                    </label>
+                    {formData.firstContactMessage?.videoId && (
+                      <button
+                        type="button"
+                        onClick={handleFirstContactVideoRemove}
+                        className="text-[11px] text-slate-500 hover:text-red-400 cursor-pointer font-semibold flex items-center gap-1 w-fit"
+                      >
+                        <X className="w-3 h-3" />
+                        Remover
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {formData.firstContactMessage?.videoSizeBytes && (
+                  <span className="text-[9px] text-slate-500 block">
+                    {(formData.firstContactMessage.videoSizeBytes / (1024 * 1024)).toFixed(1)} MB
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         )}
