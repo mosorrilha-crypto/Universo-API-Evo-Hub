@@ -9,6 +9,7 @@ import {
   type CalendarConfig,
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
+import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
@@ -584,6 +585,39 @@ function containsUnauthorizedConcessionPromise(text: string): boolean {
   return CONCESSION_PROMISE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+/**
+ * Gate determinístico pra confirmação prematura de agendamento (16/08/2026,
+ * "Opção A" — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seção 4.3): hoje
+ * `criar_agendamento` cria o evento REAL no Google Calendar assim que o
+ * modelo chama a ferramenta, sem checar `payment_status` nenhum — a linha em
+ * `appointments` (e o próprio payment_status) só existe DEPOIS que o evento
+ * já foi criado, então bloquear a criação em si exigiria reestruturar o
+ * fluxo (fora do escopo desta correção). O risco real não é o evento existir
+ * na agenda — é o cliente ser informado que o turno está "confirmado"
+ * enquanto o comprovante de sinal ainda não foi verificado por um operador
+ * (ou já foi rejeitado). Mesmo padrão do gate de reembolso/desconto acima:
+ * corrige o texto ANTES de sair, nunca só alerta em paralelo.
+ * Escopo deliberadamente restrito a paymentStatus 'pending_verification' ou
+ * 'rejected' — um paymentStatus ausente (null/undefined) é ambíguo entre
+ * "reserva combinada em efetivo, sem sinal" e "sinal exigido mas comprovante
+ * ainda não chegou", e o sistema não tem hoje nenhum sinal pra distinguir os
+ * dois casos, então gatear em cima de null arriscaria bloquear confirmações
+ * legítimas de reserva em efetivo.
+ */
+const CONFIRMATION_CLAIM_PATTERNS = [
+  /tu turno (ya )?(está|esta) confirmad[oa]/i,
+  /el pago (fue|ha sido) aprobado/i,
+  /ya est[áa] agendad[oa]/i,
+  /el horario es tuyo/i,
+  /(agendamento|hor[áa]rio|turno|reserva) (est[áa] )?confirmad[oa]/i,
+  /confirmad[oa] (tu|o seu) (turno|agendamento|hor[áa]rio)/i,
+];
+
+/** true quando o texto afirma que o turno/agendamento já está confirmado — ver comentário acima. */
+function containsPrematureBookingConfirmation(text: string): boolean {
+  return CONFIRMATION_CLAIM_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 async function executeCalendarTool(
   tenantId: string,
   name: string,
@@ -649,42 +683,76 @@ async function executeCalendarTool(
         // título) e o operador via o status de pagamento do ciclo antigo no
         // painel. Só um agendamento cujo horário ainda não passou bloqueia
         // um criar_agendamento novo.
-        const existingBeforeCreate = await getAppointmentForPhone(tenantId, phone);
-        const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
-        const existingIsUpcoming = existingBeforeCreate && Date.parse(`${existingBeforeCreate.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
-        if (existingIsUpcoming) {
+        //
+        // Tudo isso roda dentro do lock por tenant (Opção A, 16/08/2026, ver
+        // perTenantCalendarLock.ts) — sem ele, duas mensagens quase
+        // simultâneas (do mesmo cliente ou de dois clientes disputando o
+        // mesmo horário) podiam checar disponibilidade e criar o evento em
+        // paralelo, e as duas "ganhavam" a mesma vaga.
+        return await runExclusiveForTenant(tenantId, async () => {
+          const existingBeforeCreate = await getAppointmentForPhone(tenantId, phone);
+          const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
+          const existingIsUpcoming = existingBeforeCreate && Date.parse(`${existingBeforeCreate.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
+          if (existingIsUpcoming) {
+            return {
+              response: { erro: 'Este contato já tem um agendamento ativo — use remarcar_agendamento pra mudar o horário, nunca criar_agendamento de novo.' },
+              summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate!.summary}" em ${existingBeforeCreate!.startIso}) — precisa remarcar em vez de criar outro.`,
+            };
+          }
+          // Reconsulta de disponibilidade dentro do lock, imediatamente antes
+          // de criar o evento: o modelo pode ter chamado
+          // verificar_disponibilidade minutos antes na mesma conversa, mas
+          // nada garantia que o horário continuava livre no instante exato
+          // da criação — outra conversa podia ter ocupado o slot nesse
+          // meio-tempo.
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+          if (!stillFree) {
+            return {
+              response: { erro: 'Esse horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar criar o agendamento.' },
+              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da criação encontrou o horário OCUPADO — não criou, é preciso reconsultar disponibilidade.`,
+            };
+          }
+          const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+          // resetPaymentState: true — é sempre um agendamento novo aqui (o
+          // caso "já ativo" já foi recusado acima), nunca deve herdar
+          // payment_status de um ciclo anterior, existente ou não.
+          await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim }, { resetPaymentState: true });
+          notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
           return {
-            response: { erro: 'Este contato já tem um agendamento ativo — use remarcar_agendamento pra mudar o horário, nunca criar_agendamento de novo.' },
-            summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate!.summary}" em ${existingBeforeCreate!.startIso}) — precisa remarcar em vez de criar outro.`,
+            response: { sucesso: true, evento_id: eventId },
+            summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
+            confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
           };
-        }
-        const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
-        // resetPaymentState: true — é sempre um agendamento novo aqui (o
-        // caso "já ativo" já foi recusado acima), nunca deve herdar
-        // payment_status de um ciclo anterior, existente ou não.
-        await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim }, { resetPaymentState: true });
-        notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
-        return {
-          response: { sucesso: true, evento_id: eventId },
-          summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
-          confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
-        };
+        });
       }
       case 'remarcar_agendamento': {
-        const existing = await getAppointmentForPhone(tenantId, phone);
-        if (!existing) {
+        // Mesmo lock por tenant e mesma reconsulta de disponibilidade que
+        // criar_agendamento acima (Opção A, 16/08/2026) — antes desta
+        // correção, remarcar_agendamento não fazia NENHUMA checagem de
+        // disponibilidade, uma lacuna maior que a de criar_agendamento.
+        return await runExclusiveForTenant(tenantId, async () => {
+          const existing = await getAppointmentForPhone(tenantId, phone);
+          if (!existing) {
+            return {
+              response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
+              summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
+            };
+          }
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+          if (!stillFree) {
+            return {
+              response: { erro: 'Esse novo horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar remarcar.' },
+              summary: `Tentou remarcar para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da remarcação encontrou o horário OCUPADO — não remarcou, é preciso reconsultar disponibilidade.`,
+            };
+          }
+          await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+          await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
           return {
-            response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
-            summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
+            response: { sucesso: true },
+            summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
+            confirmedTimesHHmm: [extractHHmm(args.nova_data_hora_inicio)],
           };
-        }
-        await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
-        await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
-        return {
-          response: { sucesso: true },
-          summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
-          confirmedTimesHHmm: [extractHHmm(args.nova_data_hora_inicio)],
-        };
+        });
       }
       case 'cancelar_agendamento': {
         const existing = await getAppointmentForPhone(tenantId, phone);
@@ -1235,6 +1303,21 @@ export async function generateAutoReplyForText(
           forcedHumanConfirmation = true;
           stopAutoReply = true;
         }
+      }
+    }
+
+    // Gate determinístico de confirmação prematura de agendamento (16/08/2026,
+    // "Opção A", ver containsPrematureBookingConfirmation acima) — corrige
+    // ANTES de sair sempre que o pagamento ainda está pendente de verificação
+    // ou foi rejeitado, mesmo que o modelo (ou o histórico da conversa) tenha
+    // escrito uma frase de confirmação. Não bloqueia a criação do evento em
+    // si (já aconteceu, é real na agenda) — só o que o CLIENTE lê.
+    if (agent === 'agendamento' && phone) {
+      const currentAppointment = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
+      const paymentUnresolved = currentAppointment && (currentAppointment.paymentStatus === 'pending_verification' || currentAppointment.paymentStatus === 'rejected');
+      if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
+        console.warn(`⚠️  [Gate de pagamento pendente] tenant=${tenantId} modelo confirmou o turno em texto mas o pagamento ainda está "${currentAppointment.paymentStatus}" — corrigindo resposta.`);
+        bubbles = ['Recibí tu comprobante, gracias — todavía está pendiente de revisión por parte del estudio. Apenas esté aprobado, te confirmo el turno.'];
       }
     }
 

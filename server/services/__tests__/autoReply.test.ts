@@ -21,11 +21,21 @@ const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-vid
 const saveMediaImage = vi.fn(async (..._args: any[]) => undefined);
 // null = sem override salvo pelo saas_admin — cai no DEFAULT_GLOBAL_LAYER hardcoded, que é o que os testes abaixo verificam.
 const getGlobalPromptLayerOverride = vi.fn(async () => null as string | null);
+// undefined = nenhum agendamento rastreado pra este telefone — o gate de
+// confirmação prematura (16/08/2026) não deve mexer em nada nesse caso, que
+// é o default de todo teste que não seja sobre esse gate especificamente.
+const getAppointmentForPhone = vi.fn(async (..._args: any[]) => undefined as any);
 
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
 vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false) }));
+vi.mock('../appointmentStore', () => ({
+  getAppointmentForPhone,
+  setAppointmentForPhone: vi.fn(async () => undefined),
+  clearAppointmentForPhone: vi.fn(async () => undefined),
+  confirmPayment: vi.fn(async () => undefined),
+}));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
 vi.mock('../mediaImageStore', () => ({ saveMediaImage }));
 vi.mock('../globalPromptStore', async (importOriginal) => {
@@ -62,6 +72,8 @@ function makeFakeAi() {
 // systemInstruction por engano.
 beforeEach(() => {
   invalidateAllSystemInstructionCaches();
+  getAppointmentForPhone.mockReset();
+  getAppointmentForPhone.mockResolvedValue(undefined);
 });
 
 describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
@@ -689,5 +701,58 @@ describe('generateAutoReplyForText — headline do anúncio nomeando serviço do
     const userContent: string = calls[1].contents[0].text;
     expect(userContent).not.toContain('Pule a pergunta genérica');
     expect(userContent).not.toContain('clicou num anúncio');
+  });
+});
+
+describe('generateAutoReplyForText — gate de confirmação prematura de agendamento (16/08/2026, Opção A)', () => {
+  function makeFakeAiAgendamentoConfirming(confirmationText: string) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          return { text: JSON.stringify({ phase: 'confirmacao', bubbles: [confirmationText], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  const PHONE = '+595981234567';
+
+  it('corrige quando o modelo afirma que o turno está confirmado mas o pagamento ainda está pending_verification', async () => {
+    getAppointmentForPhone.mockResolvedValue({ eventId: 'evt-1', summary: 'Cejas', startIso: '2026-08-20T10:00:00', endIso: '2026-08-20T10:30:00', createdAt: '2026-08-16T00:00:00', paymentStatus: 'pending_verification' });
+    const ai = makeFakeAiAgendamentoConfirming('¡Listo! Tu turno ya está confirmado para el jueves a las 10.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'te mandé el comprobante', 'Cliente', undefined, undefined, PHONE);
+    expect(result?.agent).toBe('agendamento');
+    expect(result?.bubbles).not.toContain('¡Listo! Tu turno ya está confirmado para el jueves a las 10.');
+    expect(result?.bubbles.join(' ')).not.toMatch(/confirmad/i);
+  });
+
+  it('corrige quando o pagamento foi rejected (não só pending_verification)', async () => {
+    getAppointmentForPhone.mockResolvedValue({ eventId: 'evt-1', summary: 'Cejas', startIso: '2026-08-20T10:00:00', endIso: '2026-08-20T10:30:00', createdAt: '2026-08-16T00:00:00', paymentStatus: 'rejected' });
+    const ai = makeFakeAiAgendamentoConfirming('¡Perfecto! El horario es tuyo, ya quedó agendado.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'ya pagué', 'Cliente', undefined, undefined, PHONE);
+    expect(result?.bubbles.join(' ')).not.toMatch(/es tuyo|agendad[oa]/i);
+  });
+
+  it('não mexe na resposta quando o pagamento já está confirmed', async () => {
+    getAppointmentForPhone.mockResolvedValue({ eventId: 'evt-1', summary: 'Cejas', startIso: '2026-08-20T10:00:00', endIso: '2026-08-20T10:30:00', createdAt: '2026-08-16T00:00:00', paymentStatus: 'confirmed' });
+    const ai = makeFakeAiAgendamentoConfirming('¡Listo! Tu turno ya está confirmado para el jueves a las 10.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'gracias', 'Cliente', undefined, undefined, PHONE);
+    expect(result?.bubbles).toEqual(['¡Listo! Tu turno ya está confirmado para el jueves a las 10.']);
+  });
+
+  it('não mexe na resposta quando não há nenhum agendamento rastreado pra este telefone (paymentStatus indefinido)', async () => {
+    getAppointmentForPhone.mockResolvedValue(undefined);
+    const ai = makeFakeAiAgendamentoConfirming('¡Listo! Tu turno ya está confirmado para el jueves a las 10.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'hola', 'Cliente', undefined, undefined, PHONE);
+    expect(result?.bubbles).toEqual(['¡Listo! Tu turno ya está confirmado para el jueves a las 10.']);
+  });
+
+  it('não mexe quando o texto não afirma confirmação nenhuma, mesmo com pagamento pending_verification', async () => {
+    getAppointmentForPhone.mockResolvedValue({ eventId: 'evt-1', summary: 'Cejas', startIso: '2026-08-20T10:00:00', endIso: '2026-08-20T10:30:00', createdAt: '2026-08-16T00:00:00', paymentStatus: 'pending_verification' });
+    const ai = makeFakeAiAgendamentoConfirming('Recibí tu comprobante, ya lo estamos revisando.');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'te mandé el comprobante', 'Cliente', undefined, undefined, PHONE);
+    expect(result?.bubbles).toEqual(['Recibí tu comprobante, ya lo estamos revisando.']);
   });
 });
