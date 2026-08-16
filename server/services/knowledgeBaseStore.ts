@@ -101,6 +101,28 @@ export function findProductDurationMinutes(kb: AgentKnowledgeBase | null, produc
   return kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized)?.durationMinutes;
 }
 
+/**
+ * Todos os `videoId` (Storage, knowledgeBaseVideoStore.ts) referenciados
+ * nesta KB — issue #261: usado pra só apagar um vídeo do Storage depois que
+ * a troca foi salva de fato (POST /api/knowledge-base em conversations.ts),
+ * nunca no momento do upload em si. Antes, trocar o vídeo de um produto/bloco
+ * de 1º contato sem clicar em "Salvar Regras no Agente" (fechar a aba,
+ * queda de conexão etc.) apagava o vídeo ANTIGO do Storage imediatamente no
+ * upload, mesmo que a referência NOVA nunca chegasse a ser persistida —
+ * deixando a KB salva com uma referência órfã, apontando pra um arquivo que
+ * não existe mais.
+ */
+export function collectReferencedVideoIds(kb: AgentKnowledgeBase | null): Set<string> {
+  const ids = new Set<string>();
+  for (const product of kb?.products || []) {
+    if (product.exampleVideoId) ids.add(product.exampleVideoId);
+  }
+  for (const block of kb?.firstContactBlocks || []) {
+    if (block.videoId) ids.add(block.videoId);
+  }
+  return ids;
+}
+
 export type FirstContactBlockType = 'text' | 'image' | 'video' | 'file';
 
 /**

@@ -19,7 +19,7 @@ import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage,
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
-import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
+import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -723,7 +723,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!knowledgeBase || typeof knowledgeBase !== 'object') {
       return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
     }
-    await setKnowledgeBase(tenantOf(req), knowledgeBase);
+    const tenantId = tenantOf(req);
+    // Issue #261 — só agora (save real, bem-sucedido) é seguro apagar vídeo
+    // do Storage: qualquer videoId que estava referenciado na KB anterior e
+    // deixou de aparecer na nova é, de fato, lixo (produto/bloco removido ou
+    // vídeo trocado por outro) — nunca uma troca que ainda não foi salva.
+    const previousVideoIds = collectReferencedVideoIds(await getKnowledgeBase(tenantId));
+    await setKnowledgeBase(tenantId, knowledgeBase);
+    const currentVideoIds = collectReferencedVideoIds(knowledgeBase);
+    const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
+    await Promise.all(orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)));
     res.json({ success: true });
   }));
 
@@ -848,7 +857,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // de verdade quando a base inteira é salva (POST /api/knowledge-base acima).
   router.post('/api/knowledge-base/videos', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
-    const { fileName, mimeType, base64, oldVideoId } = req.body || {};
+    const { fileName, mimeType, base64 } = req.body || {};
     if (!fileName?.trim() || !base64 || !mimeType) {
       return res.status(400).json({ error: 'Campos "fileName", "mimeType" e "base64" são obrigatórios.' });
     }
@@ -883,13 +892,14 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const videoId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await uploadKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId, buffer, resolvedMimeType);
 
-    // Substituindo o vídeo anterior do mesmo produto — apaga o antigo do
-    // Storage pra não acumular lixo a cada troca (melhor esforço, nunca
-    // falha o upload novo por causa disso).
-    if (typeof oldVideoId === 'string' && oldVideoId.trim()) {
-      await deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, oldVideoId.trim());
-    }
-
+    // Issue #261 — NÃO apaga o vídeo anterior aqui. Isso era feito no
+    // momento do upload (recebendo oldVideoId), mas a referência nova só é
+    // persistida de fato quando "Salvar Regras no Agente" salva a KB
+    // inteira (POST /api/knowledge-base abaixo) — se o operador trocasse o
+    // vídeo e não salvasse depois (fechou a aba, caiu a conexão), o antigo
+    // já tinha sido apagado do Storage, deixando a KB salva com uma
+    // referência órfã. A limpeza do vídeo antigo agora acontece só depois
+    // do save real, comparando o que deixou de ser referenciado.
     res.json({
       videoId,
       mimeType: resolvedMimeType,
