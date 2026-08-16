@@ -46,13 +46,29 @@ describe('recordGeminiUsage', () => {
     initDb(null as any); // getDb() vai lançar "banco não configurado"
     await expect(recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 10 })).resolves.toBeUndefined();
   });
+
+  it('sem provider explícito, grava "gemini" (default — não quebra chamadas antigas)', async () => {
+    await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 10 });
+    expect(supabase.__tables.gemini_token_usage[0]).toMatchObject({ provider: 'gemini' });
+  });
+
+  it('router fallback Groq (plano aprovado): provider="groq" fica gravado separado, não misturado com o Gemini', async () => {
+    await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 20 }, 'groq');
+    expect(supabase.__tables.gemini_token_usage[0]).toMatchObject({ provider: 'groq' });
+  });
 });
 
 describe('getTokenTelemetry', () => {
   it('sem nenhuma chamada gravada, devolve tudo zerado/vazio — nunca um tenant fictício', async () => {
     const { summary, tenantsTelemetry } = await getTokenTelemetry();
     expect(tenantsTelemetry).toEqual([]);
-    expect(summary).toEqual({ totalSaaSTokens: 0, totalSaaSCostUSD: 0, totalCachedSaved: 0, totalRequests: 0 });
+    expect(summary).toEqual({
+      totalSaaSTokens: 0,
+      totalSaaSCostUSD: 0,
+      totalCachedSaved: 0,
+      totalRequests: 0,
+      providerBreakdown: { gemini: { tokens: 0, requests: 0 }, groq: { tokens: 0, requests: 0 } },
+    });
   });
 
   it('agrega múltiplas chamadas do mesmo tenant e resolve o nome real', async () => {
@@ -70,7 +86,30 @@ describe('getTokenTelemetry', () => {
       requestCount: 2,
       cachedTokensSaved: 5,
     });
-    expect(summary).toEqual({ totalSaaSTokens: 370, totalSaaSCostUSD: 0, totalCachedSaved: 5, totalRequests: 2 });
+    expect(summary).toEqual({
+      totalSaaSTokens: 370,
+      totalSaaSCostUSD: 0,
+      totalCachedSaved: 5,
+      totalRequests: 2,
+      providerBreakdown: { gemini: { tokens: 370, requests: 2 }, groq: { tokens: 0, requests: 0 } },
+    });
+  });
+
+  it('router fallback Groq (plano aprovado): providerBreakdown separa tokens/requisições de cada provedor, por tenant e no agregado', async () => {
+    await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 100 }, 'gemini');
+    await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 40 }, 'groq');
+    await recordGeminiUsage(TENANT_A, 'especialista', { totalTokenCount: 60 }, 'groq');
+
+    const { summary, tenantsTelemetry } = await getTokenTelemetry();
+
+    expect(tenantsTelemetry[0].providerBreakdown).toEqual({
+      gemini: { tokens: 100, requests: 1 },
+      groq: { tokens: 100, requests: 2 },
+    });
+    expect(summary.providerBreakdown).toEqual({
+      gemini: { tokens: 100, requests: 1 },
+      groq: { tokens: 100, requests: 2 },
+    });
   });
 
   it('isolamento: cada tenant só soma o próprio uso, ordenado do maior consumo pro menor', async () => {

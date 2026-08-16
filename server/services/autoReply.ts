@@ -9,6 +9,7 @@ import {
   type CalendarConfig,
 } from './googleCalendar';
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
+import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
@@ -21,6 +22,7 @@ import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
+import { callGroqJsonCompletion } from './groqClient';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -140,17 +142,10 @@ function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[
     .join('\n');
 }
 
-/**
- * Router leve: classifica qual agente especializado deve atender este turno,
- * ANTES de gastar tokens/latência gerando a resposta de verdade. Isso é o
- * "portão" que, quando o Agendamento real (Google Calendar) existir, decide
- * quando as ferramentas de agenda entram no prompt — sem isso, toda mensagem
- * (até "quanto custa?") carregaria ferramentas de agenda à toa, arriscando o
- * modelo tentar agendar por engano.
- */
-async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[], phone?: string): Promise<AgentType> {
-  const historyText = buildHistoryText(history);
-  const prompt = `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
+const ROUTER_VALID_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
+
+function buildRouterPrompt(text: string, historyText: string): string {
+  return `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
 - "faq": pergunta específica sobre preço, procedimento, horário de funcionamento, endereço/localização do negócio, ou política de pagamento/cancelamento — mesmo que a conversa esteja no meio de um agendamento, uma pergunta factual como essa é sempre "faq", nunca "agendamento".
 - "agendamento": o cliente quer marcar, confirmar, remarcar ou cancelar um horário específico — não classifique como agendamento uma pergunta que só busca informação (ex: onde fica, que horas abre), mesmo que relacionada a uma visita já combinada.
@@ -158,6 +153,61 @@ async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, hi
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
 Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "confidence": 0 a 1 (o quão confiante você está nessa classificação), "reasoning": "explicação breve de 1 frase do motivo da escolha"}`;
+}
+
+function logRouterDecision(tenantId: string, phone: string | undefined, provider: 'groq' | 'gemini', agent: AgentType, confidence: unknown, reasoning: unknown): void {
+  // Auditabilidade do roteamento (issue #99): sem confidence/reasoning um
+  // misroteamento (ex: reclamação classificada como faq) fica invisível —
+  // não dá pra auditar onde o agente está errando o tom com o lead sem
+  // reconstruir manualmente a conversa inteira. Log estruturado por
+  // enquanto (não persiste em banco) — não muda a decisão de roteamento em
+  // si, só torna ela auditável.
+  console.log(`[Router] tenant=${tenantId} phone=${phone ?? '-'} provider=${provider} agent=${agent} confidence=${typeof confidence === 'number' ? confidence : '-'} reasoning="${reasoning ?? '-'}"`);
+}
+
+/**
+ * Router leve: classifica qual agente especializado deve atender este turno,
+ * ANTES de gastar tokens/latência gerando a resposta de verdade. Isso é o
+ * "portão" que, quando o Agendamento real (Google Calendar) existir, decide
+ * quando as ferramentas de agenda entram no prompt — sem isso, toda mensagem
+ * (até "quanto custa?") carregaria ferramentas de agenda à toa, arriscando o
+ * modelo tentar agendar por engano.
+ *
+ * Fallback Groq → Gemini (plano aprovado, GROQ_API_KEY opcional): quando
+ * `groqApiKey` está configurada, o Groq (mais barato/rápido) é a PRIMEIRA
+ * tentativa, com 1 única chance e timeout curto (groqClient.ts) — nunca
+ * disputa retry com o Gemini. Qualquer falha (rede, timeout, HTTP não-2xx,
+ * JSON malformado, ou campo "agent" fora do enum) cai direto pro Gemini de
+ * sempre (3 tentativas, 20s), sem propagar o erro do Groq pro chamador —
+ * classificar errado por um provedor instável nunca pode virar "não
+ * respondeu" pro cliente. Sem `groqApiKey`, o comportamento é 100% o de
+ * antes: só Gemini.
+ */
+async function classifyAgent(
+  tenantId: string,
+  ai: GoogleGenAI,
+  text: string,
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  phone?: string,
+  groqApiKey?: string
+): Promise<AgentType> {
+  const historyText = buildHistoryText(history);
+  const prompt = buildRouterPrompt(text, historyText);
+
+  if (groqApiKey) {
+    try {
+      const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
+      if (!ROUTER_VALID_AGENTS.includes(parsed?.agent)) {
+        throw new Error(`Groq retornou "agent" fora do enum esperado: ${JSON.stringify(parsed?.agent)}`);
+      }
+      const agent = parsed.agent as AgentType;
+      recordGeminiUsage(tenantId, 'router', usage, 'groq').catch(() => {});
+      logRouterDecision(tenantId, phone, 'groq', agent, parsed?.confidence, parsed?.reasoning);
+      return agent;
+    } catch (err) {
+      console.warn(`⚠️  [Router] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
+    }
+  }
 
   const response = await withGeminiRetryAndUsage(
     tenantId,
@@ -172,17 +222,8 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "
   );
 
   const parsed = JSON.parse(response.text || '{}') as { agent?: string; confidence?: number; reasoning?: string };
-  const valid: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
-  const agent = valid.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
-
-  // Auditabilidade do roteamento (issue #99): sem confidence/reasoning um
-  // misroteamento (ex: reclamação classificada como faq) fica invisível —
-  // não dá pra auditar onde o agente está errando o tom com o lead sem
-  // reconstruir manualmente a conversa inteira. Log estruturado por
-  // enquanto (não persiste em banco) — não muda a decisão de roteamento em
-  // si, só torna ela auditável.
-  console.log(`[Router] tenant=${tenantId} phone=${phone ?? '-'} agent=${agent} confidence=${typeof parsed.confidence === 'number' ? parsed.confidence : '-'} reasoning="${parsed.reasoning ?? '-'}"`);
-
+  const agent = ROUTER_VALID_AGENTS.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
+  logRouterDecision(tenantId, phone, 'gemini', agent, parsed.confidence, parsed.reasoning);
   return agent;
 }
 
@@ -614,6 +655,39 @@ function containsUnauthorizedConcessionPromise(text: string): boolean {
   return CONCESSION_PROMISE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+/**
+ * Gate determinístico pra confirmação prematura de agendamento (16/08/2026,
+ * "Opção A" — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seção 4.3): hoje
+ * `criar_agendamento` cria o evento REAL no Google Calendar assim que o
+ * modelo chama a ferramenta, sem checar `payment_status` nenhum — a linha em
+ * `appointments` (e o próprio payment_status) só existe DEPOIS que o evento
+ * já foi criado, então bloquear a criação em si exigiria reestruturar o
+ * fluxo (fora do escopo desta correção). O risco real não é o evento existir
+ * na agenda — é o cliente ser informado que o turno está "confirmado"
+ * enquanto o comprovante de sinal ainda não foi verificado por um operador
+ * (ou já foi rejeitado). Mesmo padrão do gate de reembolso/desconto acima:
+ * corrige o texto ANTES de sair, nunca só alerta em paralelo.
+ * Escopo deliberadamente restrito a paymentStatus 'pending_verification' ou
+ * 'rejected' — um paymentStatus ausente (null/undefined) é ambíguo entre
+ * "reserva combinada em efetivo, sem sinal" e "sinal exigido mas comprovante
+ * ainda não chegou", e o sistema não tem hoje nenhum sinal pra distinguir os
+ * dois casos, então gatear em cima de null arriscaria bloquear confirmações
+ * legítimas de reserva em efetivo.
+ */
+const CONFIRMATION_CLAIM_PATTERNS = [
+  /tu turno (ya )?(está|esta) confirmad[oa]/i,
+  /el pago (fue|ha sido) aprobado/i,
+  /ya est[áa] agendad[oa]/i,
+  /el horario es tuyo/i,
+  /(agendamento|hor[áa]rio|turno|reserva) (est[áa] )?confirmad[oa]/i,
+  /confirmad[oa] (tu|o seu) (turno|agendamento|hor[áa]rio)/i,
+];
+
+/** true quando o texto afirma que o turno/agendamento já está confirmado — ver comentário acima. */
+function containsPrematureBookingConfirmation(text: string): boolean {
+  return CONFIRMATION_CLAIM_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 async function executeCalendarTool(
   tenantId: string,
   name: string,
@@ -679,42 +753,76 @@ async function executeCalendarTool(
         // título) e o operador via o status de pagamento do ciclo antigo no
         // painel. Só um agendamento cujo horário ainda não passou bloqueia
         // um criar_agendamento novo.
-        const existingBeforeCreate = await getAppointmentForPhone(tenantId, phone);
-        const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
-        const existingIsUpcoming = existingBeforeCreate && Date.parse(`${existingBeforeCreate.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
-        if (existingIsUpcoming) {
+        //
+        // Tudo isso roda dentro do lock por tenant (Opção A, 16/08/2026, ver
+        // perTenantCalendarLock.ts) — sem ele, duas mensagens quase
+        // simultâneas (do mesmo cliente ou de dois clientes disputando o
+        // mesmo horário) podiam checar disponibilidade e criar o evento em
+        // paralelo, e as duas "ganhavam" a mesma vaga.
+        return await runExclusiveForTenant(tenantId, async () => {
+          const existingBeforeCreate = await getAppointmentForPhone(tenantId, phone);
+          const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
+          const existingIsUpcoming = existingBeforeCreate && Date.parse(`${existingBeforeCreate.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
+          if (existingIsUpcoming) {
+            return {
+              response: { erro: 'Este contato já tem um agendamento ativo — use remarcar_agendamento pra mudar o horário, nunca criar_agendamento de novo.' },
+              summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate!.summary}" em ${existingBeforeCreate!.startIso}) — precisa remarcar em vez de criar outro.`,
+            };
+          }
+          // Reconsulta de disponibilidade dentro do lock, imediatamente antes
+          // de criar o evento: o modelo pode ter chamado
+          // verificar_disponibilidade minutos antes na mesma conversa, mas
+          // nada garantia que o horário continuava livre no instante exato
+          // da criação — outra conversa podia ter ocupado o slot nesse
+          // meio-tempo.
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+          if (!stillFree) {
+            return {
+              response: { erro: 'Esse horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar criar o agendamento.' },
+              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da criação encontrou o horário OCUPADO — não criou, é preciso reconsultar disponibilidade.`,
+            };
+          }
+          const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+          // resetPaymentState: true — é sempre um agendamento novo aqui (o
+          // caso "já ativo" já foi recusado acima), nunca deve herdar
+          // payment_status de um ciclo anterior, existente ou não.
+          await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim }, { resetPaymentState: true });
+          notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
           return {
-            response: { erro: 'Este contato já tem um agendamento ativo — use remarcar_agendamento pra mudar o horário, nunca criar_agendamento de novo.' },
-            summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate!.summary}" em ${existingBeforeCreate!.startIso}) — precisa remarcar em vez de criar outro.`,
+            response: { sucesso: true, evento_id: eventId },
+            summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
+            confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
           };
-        }
-        const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
-        // resetPaymentState: true — é sempre um agendamento novo aqui (o
-        // caso "já ativo" já foi recusado acima), nunca deve herdar
-        // payment_status de um ciclo anterior, existente ou não.
-        await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim }, { resetPaymentState: true });
-        notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
-        return {
-          response: { sucesso: true, evento_id: eventId },
-          summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
-          confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
-        };
+        });
       }
       case 'remarcar_agendamento': {
-        const existing = await getAppointmentForPhone(tenantId, phone);
-        if (!existing) {
+        // Mesmo lock por tenant e mesma reconsulta de disponibilidade que
+        // criar_agendamento acima (Opção A, 16/08/2026) — antes desta
+        // correção, remarcar_agendamento não fazia NENHUMA checagem de
+        // disponibilidade, uma lacuna maior que a de criar_agendamento.
+        return await runExclusiveForTenant(tenantId, async () => {
+          const existing = await getAppointmentForPhone(tenantId, phone);
+          if (!existing) {
+            return {
+              response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
+              summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
+            };
+          }
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+          if (!stillFree) {
+            return {
+              response: { erro: 'Esse novo horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar remarcar.' },
+              summary: `Tentou remarcar para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da remarcação encontrou o horário OCUPADO — não remarcou, é preciso reconsultar disponibilidade.`,
+            };
+          }
+          await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+          await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
           return {
-            response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
-            summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
+            response: { sucesso: true },
+            summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
+            confirmedTimesHHmm: [extractHHmm(args.nova_data_hora_inicio)],
           };
-        }
-        await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
-        await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
-        return {
-          response: { sucesso: true },
-          summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
-          confirmedTimesHHmm: [extractHHmm(args.nova_data_hora_inicio)],
-        };
+        });
       }
       case 'cancelar_agendamento': {
         const existing = await getAppointmentForPhone(tenantId, phone);
@@ -1130,13 +1238,15 @@ export async function generateAutoReplyForText(
    * da nota (webhooks.ts consome a nota pendente e chama isto) — nunca
    * dispara uma mensagem por conta própria sem o cliente ter escrito algo.
    */
-  operatorGuidance?: string
+  operatorGuidance?: string,
+  /** Router fallback Groq (plano aprovado) — ver classifyAgent. Opcional: sem ela, o router usa só o Gemini como sempre. */
+  groqApiKey?: string
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
   try {
     const routerStart = Date.now();
-    const agent = await classifyAgent(tenantId, ai, text, history, phone);
+    const agent = await classifyAgent(tenantId, ai, text, history, phone, groqApiKey);
     const routerElapsedMs = Date.now() - routerStart;
 
     let extraContext: string | undefined;
@@ -1265,6 +1375,21 @@ export async function generateAutoReplyForText(
           forcedHumanConfirmation = true;
           stopAutoReply = true;
         }
+      }
+    }
+
+    // Gate determinístico de confirmação prematura de agendamento (16/08/2026,
+    // "Opção A", ver containsPrematureBookingConfirmation acima) — corrige
+    // ANTES de sair sempre que o pagamento ainda está pendente de verificação
+    // ou foi rejeitado, mesmo que o modelo (ou o histórico da conversa) tenha
+    // escrito uma frase de confirmação. Não bloqueia a criação do evento em
+    // si (já aconteceu, é real na agenda) — só o que o CLIENTE lê.
+    if (agent === 'agendamento' && phone) {
+      const currentAppointment = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
+      const paymentUnresolved = currentAppointment && (currentAppointment.paymentStatus === 'pending_verification' || currentAppointment.paymentStatus === 'rejected');
+      if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
+        console.warn(`⚠️  [Gate de pagamento pendente] tenant=${tenantId} modelo confirmou o turno em texto mas o pagamento ainda está "${currentAppointment.paymentStatus}" — corrigindo resposta.`);
+        bubbles = ['Recibí tu comprobante, gracias — todavía está pendiente de revisión por parte del estudio. Apenas esté aprobado, te confirmo el turno.'];
       }
     }
 

@@ -46,6 +46,8 @@ interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
   evoHubWebhookSecret?: string;
   getAi?: () => GoogleGenAI | null;
+  /** Router fallback Groq (plano aprovado) — ver classifyAgent em autoReply.ts. Opcional: sem ela, o router usa só o Gemini como sempre. */
+  groqApiKey?: string;
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
   /** Instância/URL/API key compartilhadas (fallback), mesmo papel de metaAccessToken/metaPhoneNumberId acima pra Porta A (Epic 4.6). */
@@ -59,7 +61,7 @@ interface WebhooksRouterDeps {
   googleRedirectUri?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, groqApiKey, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri
     ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
     : undefined;
@@ -155,7 +157,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
         // janela — ver operatorFollowUpService.ts). Esta é a mensagem que
         // reabre.
         const pendingGuidance = await getPendingOperatorGuidance(tenantId, phone);
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply);
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey);
         if (!result) {
           // Achado real em produção (issue #82, item 4; revisado depois de
           // uma auditoria de conversas reais): mesmo com retry

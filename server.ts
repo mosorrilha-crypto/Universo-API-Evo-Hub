@@ -101,6 +101,7 @@ async function startServer() {
     metaWebhookVerifyToken: config.metaWebhookVerifyToken,
     evoHubWebhookSecret: config.evoHubWebhookSecret,
     getAi: () => getGeminiClient(config),
+    groqApiKey: config.groqApiKey,
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
     evolutionApiUrl: config.evolutionApiUrl,
@@ -161,6 +162,7 @@ async function startServer() {
   // de mídia → Gemini). Ver server/services/transcriptionQueue.ts.
   startTranscriptionWorker({
     getAi: () => getGeminiClient(config),
+    groqApiKey: config.groqApiKey,
     metaAccessToken: config.metaAccessToken,
     evolutionApiUrl: config.evolutionApiUrl,
     evolutionApiKey: config.evolutionApiKey,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, QueueSystemStatus, RoadmapItem, RoadmapPriority } from '../types';
+import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, ProviderBreakdown, QueueSystemStatus, RoadmapItem, RoadmapPriority } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
@@ -1151,7 +1151,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
   // Advanced Token Strategy & Telemetry state
   const [telemetryData, setTelemetryData] = useState<{
-    summary: { totalSaaSTokens: number; totalSaaSCostUSD: number; totalCachedSaved: number; totalRequests: number };
+    summary: { totalSaaSTokens: number; totalSaaSCostUSD: number; totalCachedSaved: number; totalRequests: number; providerBreakdown: ProviderBreakdown };
     tenantsTelemetry: TenantTokenTelemetry[];
   } | null>(null);
 
@@ -1466,7 +1466,17 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               <div className="text-2xl font-black text-white">
                 {telemetryData ? telemetryData.summary.totalSaaSTokens.toLocaleString('pt-BR') : '—'}
               </div>
-              <p className="text-[10px] text-purple-300">Medido via objeto `usageMetadata` do Gemini</p>
+              {/* Router fallback Groq (plano aprovado): split por provedor pra
+                  não esconder dentro de um total combinado quanto cada um
+                  está sendo usado de verdade — ver tokenUsageStore.ts. */}
+              {telemetryData ? (
+                <p className="text-[10px] text-slate-400">
+                  Gemini {telemetryData.summary.providerBreakdown.gemini.tokens.toLocaleString('pt-BR')} · Groq{' '}
+                  {telemetryData.summary.providerBreakdown.groq.tokens.toLocaleString('pt-BR')}
+                </p>
+              ) : (
+                <p className="text-[10px] text-purple-300">Medido via objeto `usageMetadata` do Gemini/Groq</p>
+              )}
             </div>
 
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">
@@ -1542,6 +1552,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     <th className="p-3">Total Tokens</th>
                     <th className="p-3">Tokens Salvos (Cache)</th>
                     <th className="p-3">Requisições</th>
+                    <th className="p-3">Provedor (Gemini / Groq)</th>
                     <th className="p-3">Última Atividade</th>
                   </tr>
                 </thead>
@@ -1569,6 +1580,11 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                         <td className="p-3 font-mono font-bold text-emerald-400">{tRecord.totalTokens.toLocaleString()}</td>
                         <td className="p-3 font-mono text-amber-400">{tRecord.cachedTokensSaved.toLocaleString()}</td>
                         <td className="p-3 font-mono text-slate-400">{tRecord.requestCount} reqs</td>
+                        <td className="p-3 font-mono text-[10px]">
+                          <span className="text-blue-300">G {tRecord.providerBreakdown.gemini.tokens.toLocaleString('pt-BR')}</span>
+                          {' / '}
+                          <span className="text-orange-300">Q {tRecord.providerBreakdown.groq.tokens.toLocaleString('pt-BR')}</span>
+                        </td>
                         <td className="p-3 text-[10px] text-slate-500 font-mono">
                           {new Date(tRecord.lastRequestAt).toLocaleTimeString('pt-BR')}
                         </td>
@@ -1576,7 +1592,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="p-6 text-center text-xs text-slate-500">
+                      <td colSpan={8} className="p-6 text-center text-xs text-slate-500">
                         {telemetryData ? 'Nenhum tenant com consumo de tokens registrado ainda.' : 'Carregando telemetria...'}
                       </td>
                     </tr>

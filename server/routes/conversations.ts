@@ -19,7 +19,7 @@ import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage,
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
-import { getKnowledgeBase, setKnowledgeBase } from '../services/knowledgeBaseStore';
+import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -30,8 +30,8 @@ import { getDb } from '../services/db';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
-import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification } from '../services/appointmentStore';
-import { checkFreeBusy, createCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
+import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, type TrackedAppointment } from '../services/appointmentStore';
+import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive } from '../services/autoReply';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -82,6 +82,29 @@ function tenantOf(req: AuthenticatedRequest): string {
 export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, googleClientId, googleClientSecret, googleRedirectUri }: ConversationsRouterDeps): Router {
   const router = Router();
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
+
+  /**
+   * Comprovante rejeitado (achado numa auditoria, 16/08/2026): setPaymentVerification
+   * só grava o status no banco — nunca libera o evento real no Google
+   * Calendar. Uma rejeição deixava o horário ocupado indefinidamente (só o
+   * agendamento passar da data liberava esse telefone pra um novo
+   * criar_agendamento, ver "existingIsUpcoming" em autoReply.ts), bloqueando
+   * outras clientes reais de reservar aquele mesmo horário enquanto isso.
+   * Best-effort: se o cancelamento no Calendar falhar, mantém a linha em
+   * `appointments` intacta (com o eventId) pra um humano cancelar
+   * manualmente depois, em vez de perder a referência de um evento órfão.
+   */
+  async function releaseSlotOnRejectedPayment(tenantId: string, phone: string, appointment: TrackedAppointment): Promise<boolean> {
+    if (!calendarConfig || !appointment.eventId) return false;
+    try {
+      await cancelCalendarEvent(tenantId, calendarConfig, appointment.eventId);
+      await clearAppointmentForPhone(tenantId, phone);
+      return true;
+    } catch (err: any) {
+      console.warn(`⚠️  [Pagamento rejeitado] falha ao liberar o horário no Calendar (tenant=${tenantId} phone=${phone}):`, err.message);
+      return false;
+    }
+  }
 
   /**
    * Avisa o painel em tempo real quando uma conversa muda, no lugar do
@@ -658,7 +681,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
     const updated = await setPaymentVerification(tenantId, req.params.phone, status, operatorId);
     if (!updated) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
-    res.json({ success: true, appointment: updated });
+    const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, req.params.phone, updated) : false;
+    res.json({ success: true, appointment: updated, calendarReleased });
   }));
 
   // Status do agente automático (Epic 1.3 — pausar/restringir horário) +
@@ -699,7 +723,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!knowledgeBase || typeof knowledgeBase !== 'object') {
       return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
     }
-    await setKnowledgeBase(tenantOf(req), knowledgeBase);
+    const tenantId = tenantOf(req);
+    // Issue #261 — só agora (save real, bem-sucedido) é seguro apagar vídeo
+    // do Storage: qualquer videoId que estava referenciado na KB anterior e
+    // deixou de aparecer na nova é, de fato, lixo (produto/bloco removido ou
+    // vídeo trocado por outro) — nunca uma troca que ainda não foi salva.
+    const previousVideoIds = collectReferencedVideoIds(await getKnowledgeBase(tenantId));
+    await setKnowledgeBase(tenantId, knowledgeBase);
+    const currentVideoIds = collectReferencedVideoIds(knowledgeBase);
+    const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
+    await Promise.all(orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)));
     res.json({ success: true });
   }));
 
@@ -824,7 +857,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // de verdade quando a base inteira é salva (POST /api/knowledge-base acima).
   router.post('/api/knowledge-base/videos', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
-    const { fileName, mimeType, base64, oldVideoId } = req.body || {};
+    const { fileName, mimeType, base64 } = req.body || {};
     if (!fileName?.trim() || !base64 || !mimeType) {
       return res.status(400).json({ error: 'Campos "fileName", "mimeType" e "base64" são obrigatórios.' });
     }
@@ -859,13 +892,14 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const videoId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await uploadKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId, buffer, resolvedMimeType);
 
-    // Substituindo o vídeo anterior do mesmo produto — apaga o antigo do
-    // Storage pra não acumular lixo a cada troca (melhor esforço, nunca
-    // falha o upload novo por causa disso).
-    if (typeof oldVideoId === 'string' && oldVideoId.trim()) {
-      await deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, oldVideoId.trim());
-    }
-
+    // Issue #261 — NÃO apaga o vídeo anterior aqui. Isso era feito no
+    // momento do upload (recebendo oldVideoId), mas a referência nova só é
+    // persistida de fato quando "Salvar Regras no Agente" salva a KB
+    // inteira (POST /api/knowledge-base abaixo) — se o operador trocasse o
+    // vídeo e não salvasse depois (fechou a aba, caiu a conexão), o antigo
+    // já tinha sido apagado do Storage, deixando a KB salva com uma
+    // referência órfã. A limpeza do vídeo antigo agora acontece só depois
+    // do save real, comparando o que deixou de ser referenciado.
     res.json({
       videoId,
       mimeType: resolvedMimeType,
@@ -1007,12 +1041,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     const appointment = await setPaymentVerification(tenantId, phone, status, operatorId);
     if (!appointment) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
+    const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, appointment) : false;
 
     const trimmedReply: string = (reply || '').trim();
     if (!trimmedReply) {
       const escalation = await resolveEscalation(tenantId, req.params.id);
       if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
-      return res.json({ appointment, escalation, outcome: null });
+      return res.json({ appointment, escalation, outcome: null, calendarReleased });
     }
 
     const escalation = await submitOperatorReply(tenantId, req.params.id, trimmedReply);
@@ -1024,7 +1059,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       metaPhoneNumberId,
       tenantName: tenant?.name || 'nosso time',
     });
-    res.json({ appointment, escalation, outcome });
+    res.json({ appointment, escalation, outcome, calendarReleased });
   }));
 
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {

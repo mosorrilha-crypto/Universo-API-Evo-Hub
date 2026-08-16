@@ -103,14 +103,14 @@ describe('POST /api/knowledge-base/videos', () => {
     expect(deleteKnowledgeBaseVideo).not.toHaveBeenCalled();
   });
 
-  it('apaga o vídeo antigo do Storage quando oldVideoId é passado (troca de vídeo)', async () => {
+  it('issue #261 — NUNCA apaga o vídeo antigo aqui, mesmo passando oldVideoId (evitaria referência órfã se o operador não salvar a KB depois)', async () => {
     const res = await fetch(`${baseUrl}/api/knowledge-base/videos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileName: 'video.mp4', mimeType: 'video/mp4', base64: Buffer.from('novo').toString('base64'), oldVideoId: 'video-existing' }),
     });
     expect(res.status).toBe(200);
-    expect(deleteKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', TENANT_A, 'video-existing');
+    expect(deleteKnowledgeBaseVideo).not.toHaveBeenCalled();
   });
 
   it('converte automaticamente um formato que a Meta não aceita direto (ex: .MOV/video-quicktime) via ffmpeg antes de subir', async () => {
