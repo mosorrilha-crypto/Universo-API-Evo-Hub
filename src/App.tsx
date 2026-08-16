@@ -258,6 +258,16 @@ export const App: React.FC = () => {
     const saved = localStorage.getItem('saas_agent_kb');
     return saved ? JSON.parse(saved) : moniqueStudioKnowledgeBase;
   });
+  // Bug real reportado (16/08/2026): imagem de produto salva no catálogo
+  // "sumia" depois de atualizar a página. Causa: o cache local acima nunca
+  // guarda `exampleImageBase64` (ver comentário na sync abaixo), e
+  // AgentKnowledgeBaseView captura `knowledgeBase` num useState preguiçoso só
+  // na montagem — se o operador abrisse a aba antes do GET /api/knowledge-base
+  // real terminar, o formulário ficava travado pra sempre no snapshot do
+  // cache sem imagem, mesmo depois do fetch real chegar. `kbLoaded` trava a
+  // montagem do editor até o fetch real (com imagem) ter respondido pelo
+  // menos uma vez.
+  const [kbLoaded, setKbLoaded] = useState(false);
 
   // Horário de funcionamento real do tenant (tabela `tenants`, GET/POST
   // /api/business-hours) — usado pelo agendamento automático pra nunca
@@ -362,7 +372,8 @@ export const App: React.FC = () => {
           }));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setKbLoaded(true));
   }, []);
 
   // Busca o horário de funcionamento real salvo no backend (usado pelo
@@ -812,7 +823,11 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'knowledge' && canSeeAdminTools && (
+        {activeTab === 'knowledge' && canSeeAdminTools && !kbLoaded && (
+          <div className="p-6 text-sm text-slate-400">Carregando base de conhecimento…</div>
+        )}
+
+        {activeTab === 'knowledge' && canSeeAdminTools && kbLoaded && (
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
             businessHours={businessHours}
