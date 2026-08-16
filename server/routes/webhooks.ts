@@ -15,7 +15,7 @@ import { hasFirstContactMessage, sendFirstContactMessage } from '../services/fir
 import { getTenantSegment } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
-import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { consumePendingEcho } from '../services/outboundEchoTracker';
@@ -307,6 +307,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
           if (msg.text && isPaymentRelated(msg.text)) {
             await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
+          }
+          if (msg.text && looksLikeHarassment(msg.text)) {
+            await logEscalation(tenantId, msg.from, msg.contactName, '🚫 Mensagem de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', msg.text);
           }
           if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
         } else if (msg.type === 'image') {

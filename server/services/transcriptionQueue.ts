@@ -10,7 +10,7 @@ import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { getTenantSegment } from './tenantProfileStore';
-import { logEscalation, isPaymentRelated } from './escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
@@ -158,6 +158,8 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
       await logEscalation(tenantId, message.from, message.contactName, 'Falha ao transcrever áudio automaticamente — operador precisa ouvir manualmente', outcome.result.transcription);
     } else if (isPaymentRelated(outcome.result.transcription)) {
       await logEscalation(tenantId, message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
+    } else if (looksLikeHarassment(outcome.result.transcription)) {
+      await logEscalation(tenantId, message.from, message.contactName, '🚫 Áudio de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', outcome.result.transcription);
     }
 
     // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
