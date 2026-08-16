@@ -28,6 +28,12 @@
 > `high_ticket_installation` criado (e removido no mesmo dia) pra Clic Piscinas. As menções a
 > "Camada 2"/"Regras do Segmento" no resto deste documento são registro histórico da decisão
 > original de 07/08 — não descrevem mais o código atual.
+>
+> **Atualização de 16/08/2026.** Pra quem procura o conteúdo REAL, campo a campo, do que está
+> rodando hoje (em vez do plano/histórico deste documento), ver
+> `docs/AGENTE-PROMPT-MONIQUE-CAMPOS.md` — retrato gerado direto do código + Supabase de
+> produção, com nota de avaliação e lista dos gaps ainda em aberto (gate de pagamento parcial,
+> sem máquina de estados formal, sem trilha de auditoria genérica).
 
 ---
 

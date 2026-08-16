@@ -739,6 +739,28 @@ async function executeCalendarTool(
               summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate!.summary}" em ${existingBeforeCreate!.startIso}) — precisa remarcar em vez de criar outro.`,
             };
           }
+          // Gate de pagamento (16/08/2026, ver docs/AGENTE-VERTICAL-ARQUITETURA.md
+          // seção 4.3 / issue #279) — escopo deliberadamente restrito: bloquear
+          // criar_agendamento até aprovação SEMPRE exigiria inverter o fluxo real
+          // (hoje o evento é criado primeiro, o pagamento é verificado depois —
+          // o próprio tratamento de comprovante em webhooks.ts só reconhece uma
+          // imagem como "possível comprovante" quando já existe um agendamento
+          // ativo pra aquele telefone). Reestruturar isso é decisão de produto,
+          // não uma correção pontual segura de aplicar sem testar com clientes
+          // reais. O que dá pra fechar sem mudar essa ordem: nunca deixar um
+          // criar_agendamento novo APAGAR silenciosamente um ciclo de pagamento
+          // ainda não resolvido do mesmo telefone — antes, se o agendamento
+          // antigo já tinha passado da data (existingIsUpcoming = false), nada
+          // impedia resetPaymentState:true sobrescrever um comprovante ainda
+          // "pending_verification"/"rejected" sem humano nenhum ter decidido
+          // esse caso, perdendo o rastro pra sempre.
+          const existingHasUnresolvedPayment = existingBeforeCreate && (existingBeforeCreate.paymentStatus === 'pending_verification' || existingBeforeCreate.paymentStatus === 'rejected');
+          if (existingHasUnresolvedPayment) {
+            return {
+              response: { erro: 'Este contato tem um comprovante de pagamento de um agendamento anterior ainda sem resolução humana — não crie nem remarque nada, isso precisa de um operador decidindo o caso antes.' },
+              summary: `Tentou criar um agendamento novo, mas este contato tem um pagamento de um ciclo anterior ainda não resolvido (status "${existingBeforeCreate!.paymentStatus}", agendamento "${existingBeforeCreate!.summary}") — recusado, precisa de decisão humana antes de qualquer novo agendamento.`,
+            };
+          }
           // Reconsulta de disponibilidade dentro do lock, imediatamente antes
           // de criar o evento: o modelo pode ter chamado
           // verificar_disponibilidade minutos antes na mesma conversa, mas

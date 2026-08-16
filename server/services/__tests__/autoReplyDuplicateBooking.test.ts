@@ -11,7 +11,7 @@ import type { GoogleGenAI } from '@google/genai';
 
 const createCalendarEvent = vi.fn(async () => 'evt-novo');
 const setAppointmentForPhone = vi.fn(async () => undefined);
-let mockAppointment: { eventId: string; summary: string; startIso: string; endIso: string } | null = null;
+let mockAppointment: { eventId: string; summary: string; startIso: string; endIso: string; paymentStatus?: string } | null = null;
 
 vi.mock('../googleCalendar', () => ({
   isGoogleCalendarConnected: vi.fn(async () => true),
@@ -116,5 +116,52 @@ describe('criar_agendamento — nunca sobrescreve um agendamento ativo (auditori
       expect.objectContaining({ summary: 'Microlips' }),
       { resetPaymentState: true }
     );
+  });
+});
+
+describe('criar_agendamento — gate de pagamento (issue #279): nunca apaga um ciclo de pagamento ainda não resolvido', () => {
+  it('recusa criar um agendamento novo quando o ciclo anterior (já passado) tem comprovante pending_verification', async () => {
+    // Mesmo cenário do teste "permite criar... já passou" acima, mas agora
+    // com um comprovante que NINGUÉM decidiu ainda — resetPaymentState:true
+    // apagaria esse rastro pra sempre sem decisão humana nenhuma.
+    mockAppointment = { eventId: 'evt-antigo', summary: 'Pelo a Pelo', startIso: '2026-08-09T09:00:00', endIso: '2026-08-09T10:30:00', paymentStatus: 'pending_verification' };
+    createCalendarEvent.mockClear();
+    setAppointmentForPhone.mockClear();
+
+    await generateAutoReplyForText(
+      'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(setAppointmentForPhone).not.toHaveBeenCalled();
+  });
+
+  it('recusa criar um agendamento novo quando o ciclo anterior (já passado) tem comprovante rejected ainda não limpo', async () => {
+    mockAppointment = { eventId: 'evt-antigo', summary: 'Pelo a Pelo', startIso: '2026-08-09T09:00:00', endIso: '2026-08-09T10:30:00', paymentStatus: 'rejected' };
+    createCalendarEvent.mockClear();
+    setAppointmentForPhone.mockClear();
+
+    await generateAutoReplyForText(
+      'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(setAppointmentForPhone).not.toHaveBeenCalled();
+  });
+
+  it('permite criar normalmente quando o ciclo anterior (já passado) foi resolvido (verified/confirmed)', async () => {
+    mockAppointment = { eventId: 'evt-antigo', summary: 'Pelo a Pelo', startIso: '2026-08-09T09:00:00', endIso: '2026-08-09T10:30:00', paymentStatus: 'confirmed' };
+    createCalendarEvent.mockClear();
+    setAppointmentForPhone.mockClear();
+
+    await generateAutoReplyForText(
+      'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(createCalendarEvent).toHaveBeenCalledTimes(1);
+    expect(setAppointmentForPhone).toHaveBeenCalledTimes(1);
   });
 });
