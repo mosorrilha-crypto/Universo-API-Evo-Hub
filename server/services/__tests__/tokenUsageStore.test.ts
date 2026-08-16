@@ -46,6 +46,16 @@ describe('recordGeminiUsage', () => {
     initDb(null as any); // getDb() vai lançar "banco não configurado"
     await expect(recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 10 })).resolves.toBeUndefined();
   });
+
+  it('sem provider explícito, grava "gemini" (default — não quebra chamadas antigas)', async () => {
+    await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 10 });
+    expect(supabase.__tables.gemini_token_usage[0]).toMatchObject({ provider: 'gemini' });
+  });
+
+  it('router fallback Groq (plano aprovado): provider="groq" fica gravado separado, não misturado com o Gemini', async () => {
+    await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 20 }, 'groq');
+    expect(supabase.__tables.gemini_token_usage[0]).toMatchObject({ provider: 'groq' });
+  });
 });
 
 describe('getTokenTelemetry', () => {
