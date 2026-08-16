@@ -53,6 +53,29 @@ export async function recordGeminiUsage(
   }
 }
 
+/** Recorte de tokens/requisições de um único provedor — ver ProviderTokenBreakdown abaixo. */
+export interface ProviderTokenBreakdown {
+  tokens: number;
+  requests: number;
+}
+
+/**
+ * Router fallback Groq (plano aprovado): quanto de cada total (por tenant e
+ * no agregado do SaaS) veio do Gemini vs. do Groq — sem isso, o painel
+ * "Telemetria de Tokens IA" mostraria só o total combinado, sem dar pra
+ * comparar quanto cada provedor está de fato sendo usado depois que o Groq
+ * entrar em produção. Sempre traz as duas chaves, mesmo zeradas — nunca
+ * omite 'groq' só porque um tenant específico não usou ainda.
+ */
+export interface ProviderBreakdown {
+  gemini: ProviderTokenBreakdown;
+  groq: ProviderTokenBreakdown;
+}
+
+function emptyProviderBreakdown(): ProviderBreakdown {
+  return { gemini: { tokens: 0, requests: 0 }, groq: { tokens: 0, requests: 0 } };
+}
+
 export interface TenantTokenSummary {
   tenantId: string;
   tenantName: string;
@@ -62,6 +85,7 @@ export interface TenantTokenSummary {
   requestCount: number;
   cachedTokensSaved: number;
   lastRequestAt: string;
+  providerBreakdown: ProviderBreakdown;
 }
 
 export interface TokenTelemetrySummary {
@@ -69,6 +93,7 @@ export interface TokenTelemetrySummary {
   totalSaaSCostUSD: number;
   totalCachedSaved: number;
   totalRequests: number;
+  providerBreakdown: ProviderBreakdown;
 }
 
 const TELEMETRY_WINDOW_DAYS = 30;
@@ -90,19 +115,35 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
   const since = new Date(Date.now() - TELEMETRY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data: rows, error } = await db
     .from('gemini_token_usage')
-    .select('tenant_id, prompt_tokens, candidates_tokens, total_tokens, cached_tokens, created_at')
+    .select('tenant_id, prompt_tokens, candidates_tokens, total_tokens, cached_tokens, provider, created_at')
     .gte('created_at', since);
   if (error) throw error;
 
-  const byTenant = new Map<string, { promptTokens: number; candidatesTokens: number; totalTokens: number; requestCount: number; cachedTokensSaved: number; lastRequestAt: string }>();
+  const byTenant = new Map<
+    string,
+    { promptTokens: number; candidatesTokens: number; totalTokens: number; requestCount: number; cachedTokensSaved: number; lastRequestAt: string; providerBreakdown: ProviderBreakdown }
+  >();
   for (const row of (rows || []) as any[]) {
-    const acc = byTenant.get(row.tenant_id) || { promptTokens: 0, candidatesTokens: 0, totalTokens: 0, requestCount: 0, cachedTokensSaved: 0, lastRequestAt: row.created_at };
+    const acc = byTenant.get(row.tenant_id) || {
+      promptTokens: 0,
+      candidatesTokens: 0,
+      totalTokens: 0,
+      requestCount: 0,
+      cachedTokensSaved: 0,
+      lastRequestAt: row.created_at,
+      providerBreakdown: emptyProviderBreakdown(),
+    };
     acc.promptTokens += row.prompt_tokens || 0;
     acc.candidatesTokens += row.candidates_tokens || 0;
     acc.totalTokens += row.total_tokens || 0;
     acc.cachedTokensSaved += row.cached_tokens || 0;
     acc.requestCount += 1;
     if (row.created_at > acc.lastRequestAt) acc.lastRequestAt = row.created_at;
+    // Linhas gravadas antes desta coluna existir não têm `provider` — trata
+    // como 'gemini' (única origem possível até aqui), nunca descarta o dado.
+    const provider: LlmProvider = row.provider === 'groq' ? 'groq' : 'gemini';
+    acc.providerBreakdown[provider].tokens += row.total_tokens || 0;
+    acc.providerBreakdown[provider].requests += 1;
     byTenant.set(row.tenant_id, acc);
   }
 
@@ -120,11 +161,20 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
     })
     .sort((a, b) => b.totalTokens - a.totalTokens);
 
+  const summaryProviderBreakdown = tenantsTelemetry.reduce((acc, t) => {
+    acc.gemini.tokens += t.providerBreakdown.gemini.tokens;
+    acc.gemini.requests += t.providerBreakdown.gemini.requests;
+    acc.groq.tokens += t.providerBreakdown.groq.tokens;
+    acc.groq.requests += t.providerBreakdown.groq.requests;
+    return acc;
+  }, emptyProviderBreakdown());
+
   const summary: TokenTelemetrySummary = {
     totalSaaSTokens: tenantsTelemetry.reduce((sum, t) => sum + t.totalTokens, 0),
     totalSaaSCostUSD: 0,
     totalCachedSaved: tenantsTelemetry.reduce((sum, t) => sum + t.cachedTokensSaved, 0),
     totalRequests: tenantsTelemetry.reduce((sum, t) => sum + t.requestCount, 0),
+    providerBreakdown: summaryProviderBreakdown,
   };
 
   return { summary, tenantsTelemetry };

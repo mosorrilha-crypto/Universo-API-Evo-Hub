@@ -58,6 +58,7 @@ describe('GET /api/telemetry/tokens — formato honesto, sem dado fabricado', ()
       totalSaaSCostUSD: 0,
       totalCachedSaved: 0,
       totalRequests: 0,
+      providerBreakdown: { gemini: { tokens: 0, requests: 0 }, groq: { tokens: 0, requests: 0 } },
     });
     // Nunca mais um nome fictício de tenant na resposta desta rota.
     expect(JSON.stringify(data)).not.toContain('Odonto');
@@ -76,7 +77,7 @@ describe('GET /api/telemetry/tokens — formato honesto, sem dado fabricado', ()
     expect(data.tenantsTelemetry).toHaveLength(1);
     const record = data.tenantsTelemetry[0];
     expect(Object.keys(record).sort()).toEqual(
-      ['candidatesTokens', 'cachedTokensSaved', 'lastRequestAt', 'promptTokens', 'requestCount', 'tenantId', 'tenantName', 'totalTokens'].sort()
+      ['candidatesTokens', 'cachedTokensSaved', 'lastRequestAt', 'promptTokens', 'providerBreakdown', 'requestCount', 'tenantId', 'tenantName', 'totalTokens'].sort()
     );
     expect(record).not.toHaveProperty('estimatedCostUSD');
     expect(record.tenantName).toBe('Cliente Real');
