@@ -389,6 +389,18 @@ export interface WebhookConfig {
  * (13/08/2026) — `tRecord.estimatedCostUSD.toFixed(5)` lançando sobre
  * `undefined` assim que telemetria real (não mais vazia) chegava do
  * backend, sem Error Boundary pra conter o crash. */
+/** Espelha ProviderTokenBreakdown (server/services/tokenUsageStore.ts). */
+export interface ProviderTokenBreakdown {
+  tokens: number;
+  requests: number;
+}
+
+/** Espelha ProviderBreakdown (server/services/tokenUsageStore.ts) — router fallback Groq: quanto do total veio de cada provedor. */
+export interface ProviderBreakdown {
+  gemini: ProviderTokenBreakdown;
+  groq: ProviderTokenBreakdown;
+}
+
 export interface TenantTokenTelemetry {
   tenantId: string;
   tenantName: string;
@@ -398,6 +410,7 @@ export interface TenantTokenTelemetry {
   requestCount: number;
   cachedTokensSaved: number;
   lastRequestAt: string;
+  providerBreakdown: ProviderBreakdown;
 }
 
 export interface QueueSystemStatus {
