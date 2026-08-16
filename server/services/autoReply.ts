@@ -22,6 +22,7 @@ import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
+import { callGroqJsonCompletion } from './groqClient';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -127,17 +128,10 @@ function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[
     .join('\n');
 }
 
-/**
- * Router leve: classifica qual agente especializado deve atender este turno,
- * ANTES de gastar tokens/latência gerando a resposta de verdade. Isso é o
- * "portão" que, quando o Agendamento real (Google Calendar) existir, decide
- * quando as ferramentas de agenda entram no prompt — sem isso, toda mensagem
- * (até "quanto custa?") carregaria ferramentas de agenda à toa, arriscando o
- * modelo tentar agendar por engano.
- */
-async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, history?: { sender: 'lead' | 'agent'; text?: string }[], phone?: string): Promise<AgentType> {
-  const historyText = buildHistoryText(history);
-  const prompt = `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
+const ROUTER_VALID_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
+
+function buildRouterPrompt(text: string, historyText: string): string {
+  return `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
 - "faq": pergunta específica sobre preço, procedimento, horário de funcionamento, endereço/localização do negócio, ou política de pagamento/cancelamento — mesmo que a conversa esteja no meio de um agendamento, uma pergunta factual como essa é sempre "faq", nunca "agendamento".
 - "agendamento": o cliente quer marcar, confirmar, remarcar ou cancelar um horário específico — não classifique como agendamento uma pergunta que só busca informação (ex: onde fica, que horas abre), mesmo que relacionada a uma visita já combinada.
@@ -145,6 +139,61 @@ async function classifyAgent(tenantId: string, ai: GoogleGenAI, text: string, hi
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
 Mensagem: "${text}"
 Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "confidence": 0 a 1 (o quão confiante você está nessa classificação), "reasoning": "explicação breve de 1 frase do motivo da escolha"}`;
+}
+
+function logRouterDecision(tenantId: string, phone: string | undefined, provider: 'groq' | 'gemini', agent: AgentType, confidence: unknown, reasoning: unknown): void {
+  // Auditabilidade do roteamento (issue #99): sem confidence/reasoning um
+  // misroteamento (ex: reclamação classificada como faq) fica invisível —
+  // não dá pra auditar onde o agente está errando o tom com o lead sem
+  // reconstruir manualmente a conversa inteira. Log estruturado por
+  // enquanto (não persiste em banco) — não muda a decisão de roteamento em
+  // si, só torna ela auditável.
+  console.log(`[Router] tenant=${tenantId} phone=${phone ?? '-'} provider=${provider} agent=${agent} confidence=${typeof confidence === 'number' ? confidence : '-'} reasoning="${reasoning ?? '-'}"`);
+}
+
+/**
+ * Router leve: classifica qual agente especializado deve atender este turno,
+ * ANTES de gastar tokens/latência gerando a resposta de verdade. Isso é o
+ * "portão" que, quando o Agendamento real (Google Calendar) existir, decide
+ * quando as ferramentas de agenda entram no prompt — sem isso, toda mensagem
+ * (até "quanto custa?") carregaria ferramentas de agenda à toa, arriscando o
+ * modelo tentar agendar por engano.
+ *
+ * Fallback Groq → Gemini (plano aprovado, GROQ_API_KEY opcional): quando
+ * `groqApiKey` está configurada, o Groq (mais barato/rápido) é a PRIMEIRA
+ * tentativa, com 1 única chance e timeout curto (groqClient.ts) — nunca
+ * disputa retry com o Gemini. Qualquer falha (rede, timeout, HTTP não-2xx,
+ * JSON malformado, ou campo "agent" fora do enum) cai direto pro Gemini de
+ * sempre (3 tentativas, 20s), sem propagar o erro do Groq pro chamador —
+ * classificar errado por um provedor instável nunca pode virar "não
+ * respondeu" pro cliente. Sem `groqApiKey`, o comportamento é 100% o de
+ * antes: só Gemini.
+ */
+async function classifyAgent(
+  tenantId: string,
+  ai: GoogleGenAI,
+  text: string,
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  phone?: string,
+  groqApiKey?: string
+): Promise<AgentType> {
+  const historyText = buildHistoryText(history);
+  const prompt = buildRouterPrompt(text, historyText);
+
+  if (groqApiKey) {
+    try {
+      const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
+      if (!ROUTER_VALID_AGENTS.includes(parsed?.agent)) {
+        throw new Error(`Groq retornou "agent" fora do enum esperado: ${JSON.stringify(parsed?.agent)}`);
+      }
+      const agent = parsed.agent as AgentType;
+      recordGeminiUsage(tenantId, 'router', usage, 'groq').catch(() => {});
+      logRouterDecision(tenantId, phone, 'groq', agent, parsed?.confidence, parsed?.reasoning);
+      return agent;
+    } catch (err) {
+      console.warn(`⚠️  [Router] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
+    }
+  }
 
   const response = await withGeminiRetryAndUsage(
     tenantId,
@@ -159,17 +208,8 @@ Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "
   );
 
   const parsed = JSON.parse(response.text || '{}') as { agent?: string; confidence?: number; reasoning?: string };
-  const valid: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
-  const agent = valid.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
-
-  // Auditabilidade do roteamento (issue #99): sem confidence/reasoning um
-  // misroteamento (ex: reclamação classificada como faq) fica invisível —
-  // não dá pra auditar onde o agente está errando o tom com o lead sem
-  // reconstruir manualmente a conversa inteira. Log estruturado por
-  // enquanto (não persiste em banco) — não muda a decisão de roteamento em
-  // si, só torna ela auditável.
-  console.log(`[Router] tenant=${tenantId} phone=${phone ?? '-'} agent=${agent} confidence=${typeof parsed.confidence === 'number' ? parsed.confidence : '-'} reasoning="${parsed.reasoning ?? '-'}"`);
-
+  const agent = ROUTER_VALID_AGENTS.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
+  logRouterDecision(tenantId, phone, 'gemini', agent, parsed.confidence, parsed.reasoning);
   return agent;
 }
 
@@ -1168,13 +1208,15 @@ export async function generateAutoReplyForText(
    * da nota (webhooks.ts consome a nota pendente e chama isto) — nunca
    * dispara uma mensagem por conta própria sem o cliente ter escrito algo.
    */
-  operatorGuidance?: string
+  operatorGuidance?: string,
+  /** Router fallback Groq (plano aprovado) — ver classifyAgent. Opcional: sem ela, o router usa só o Gemini como sempre. */
+  groqApiKey?: string
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
 
   try {
     const routerStart = Date.now();
-    const agent = await classifyAgent(tenantId, ai, text, history, phone);
+    const agent = await classifyAgent(tenantId, ai, text, history, phone, groqApiKey);
     const routerElapsedMs = Date.now() - routerStart;
 
     let extraContext: string | undefined;

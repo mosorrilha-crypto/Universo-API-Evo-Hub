@@ -9,6 +9,8 @@ export interface ServerConfig {
   evohubApiKey?: string;
   metaWebhookVerifyToken: string;
   geminiApiKey?: string;
+  /** Chave do Groq — primeira tentativa (mais barata/rápida) na classificação do router; sem ela, o router usa só o Gemini como sempre. */
+  groqApiKey?: string;
   /** Token de acesso à Graph API pra baixar mídia (diferente do META_APP_SECRET usado no HMAC). */
   metaAccessToken?: string;
   /** ID do número de telefone WhatsApp (Meta Cloud API), usado pra enviar mensagens (POST /{id}/messages). */
@@ -87,6 +89,7 @@ export function loadConfig(): ServerConfig {
     evohubApiKey,
     metaWebhookVerifyToken,
     geminiApiKey: process.env.GEMINI_API_KEY,
+    groqApiKey: process.env.GROQ_API_KEY,
     metaAccessToken: process.env.META_ACCESS_TOKEN,
     metaPhoneNumberId: process.env.META_PHONE_NUMBER_ID,
     evolutionApiUrl: process.env.EVOLUTION_API_URL,

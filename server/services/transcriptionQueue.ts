@@ -33,6 +33,8 @@ export interface TranscriptionJobResult {
 
 export interface TranscriptionQueueDeps {
   getAi: () => GoogleGenAI | null;
+  /** Router fallback Groq (plano aprovado) — ver classifyAgent em autoReply.ts. Opcional: sem ela, o router usa só o Gemini como sempre. */
+  groqApiKey?: string;
   metaAccessToken?: string;
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
@@ -178,7 +180,22 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         const segment = await getTenantSegment(tenantId);
         const history = conversation?.messages.slice(0, -1);
         try {
-          const result = await generateAutoReplyForText(tenantId, deps.getAi(), outcome.result.transcription, message.contactName, kbContext, history, message.from, undefined, segment, isEvolution ? undefined : { phoneNumberId, accessToken: token });
+          const result = await generateAutoReplyForText(
+            tenantId,
+            deps.getAi(),
+            outcome.result.transcription,
+            message.contactName,
+            kbContext,
+            history,
+            message.from,
+            undefined,
+            segment,
+            isEvolution ? undefined : { phoneNumberId, accessToken: token },
+            undefined,
+            undefined,
+            undefined,
+            deps.groqApiKey
+          );
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
             return;
