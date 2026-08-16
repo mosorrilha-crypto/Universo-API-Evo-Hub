@@ -3,11 +3,21 @@
  * ver @theme em src/index.css) como referência de como código novo deve
  * escrever isso. Mapeada 1:1 pro valor que rounded-lg/xl/full já tinham
  * aqui — zero mudança visual, só a intenção explícita no JSX.
+ *
+ * Issue #125 — os botões mais simples deste arquivo (menu mobile, scroll
+ * da faixa de abas, entrar/sair) usam o componente <Button> como
+ * referência de adoção (foco visível padronizado, que praticamente
+ * nenhum botão do painel tinha antes). As abas de navegação (com cor
+ * ativa própria por papel — roxo pro SaaS Admin, esmeralda pro resto)
+ * continuam com a classe condicional manual: o `active` do <Button> hoje
+ * só cobre um tom (esmeralda), não encaixa nesse caso sem estender o
+ * componente — fica como próximo passo, não bloqueia esta adoção inicial.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
 import { isStandalonePwa } from '../lib/pwa';
 import { hasRoleAtLeast } from '../lib/roles';
+import { Button } from './ui/Button';
 import {
   MessageSquare,
   Sparkles,
@@ -113,14 +123,9 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <span className="font-bold text-white text-sm truncate">Universo</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setIsMobileMenuOpen((open) => !open)}
-            className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-control transition-all flex-shrink-0"
-            title="Menu"
-          >
+          <Button variant="ghost" size="md" iconOnly onClick={() => setIsMobileMenuOpen((open) => !open)} title="Menu" className="flex-shrink-0">
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
+          </Button>
         </div>
 
         {isMobileMenuOpen && (
@@ -166,30 +171,19 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }}
-                    className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-control transition-all"
-                    title="Trocar Operador / Perfil"
-                  >
+                  <Button variant="ghost" size="sm" iconOnly onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }} title="Trocar Operador / Perfil">
                     <ChevronDown className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => { onLogout(); setIsMobileMenuOpen(false); }}
-                    className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-control transition-all"
-                    title="Sair"
-                  >
+                  </Button>
+                  <Button variant="danger" size="sm" iconOnly onClick={() => { onLogout(); setIsMobileMenuOpen(false); }} title="Sair">
                     <LogOut className="w-4 h-4" />
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
-              <button
-                onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }}
-                className="w-full px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-panel flex items-center justify-center space-x-1.5 shadow"
-              >
+              <Button variant="primary" size="md" onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }} className="w-full">
                 <User className="w-4 h-4" />
                 <span>Entrar / Login</span>
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -293,30 +287,19 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
                 </div>
 
-                <button
-                  onClick={onOpenLoginModal}
-                  className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded-control transition-all"
-                  title="Trocar Operador / Perfil"
-                >
+                <Button variant="ghost" size="xs" iconOnly onClick={onOpenLoginModal} title="Trocar Operador / Perfil">
                   <ChevronDown className="w-4 h-4" />
-                </button>
+                </Button>
 
-                <button
-                  onClick={onLogout}
-                  className="p-1 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-control transition-all ml-1"
-                  title="Sair"
-                >
+                <Button variant="danger" size="xs" iconOnly onClick={onLogout} title="Sair" className="ml-1">
                   <LogOut className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
             ) : (
-              <button
-                onClick={onOpenLoginModal}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-panel flex items-center space-x-1.5 shadow"
-              >
+              <Button variant="primary" size="md" onClick={onOpenLoginModal}>
                 <User className="w-4 h-4" />
                 <span>Entrar / Login</span>
-              </button>
+              </Button>
             )}
           </div>
 
