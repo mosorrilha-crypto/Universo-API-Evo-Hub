@@ -357,7 +357,17 @@ export const App: React.FC = () => {
 
   // Busca a base de conhecimento real salva no backend (usada pelo agente
   // automático de verdade) e sincroniza no painel, se existir.
+  //
+  // Bug real reportado (17/08/2026): um saas_admin trocava de tenant no
+  // seletor (Header.tsx) — o header X-Tenant-Id mudava certinho (efeito
+  // acima) — mas essa busca só rodava UMA VEZ, na montagem (`[]`), então o
+  // painel continuava mostrando a base de conhecimento do tenant anterior
+  // até um F5 na página. Depende de `activeTenant.id` agora: toda troca de
+  // tenant refaz a busca pro tenant certo. Reseta `kbLoaded` antes de buscar
+  // pelo mesmo motivo do fix de imagem sumindo — evita o editor capturar
+  // (mesmo que por um instante) a base de conhecimento do tenant errado.
   useEffect(() => {
+    setKbLoaded(false);
     apiFetch('/api/knowledge-base')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
@@ -374,7 +384,7 @@ export const App: React.FC = () => {
       })
       .catch(() => {})
       .finally(() => setKbLoaded(true));
-  }, []);
+  }, [activeTenant.id]);
 
   // Busca o horário de funcionamento real salvo no backend (usado pelo
   // agendamento automático de verdade) e sincroniza no painel, se existir.
