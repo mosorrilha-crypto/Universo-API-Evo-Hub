@@ -10,7 +10,7 @@ import {
   markGeoRestricted,
   forwardMessage,
   reactToMessage,
-  editMessage,
+  getMessageForReply,
   updateConversationState,
   markConversationRead,
 } from '../services/conversationStore';
@@ -193,10 +193,43 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
+
+      // Achado real (18/08/2026): "Responder" no painel só marcava
+      // replyToMessageId no nosso banco — o cliente nunca via "em resposta
+      // a X" no WhatsApp dele de verdade. Só dá pra citar de verdade quando
+      // a mensagem alvo tem um id REAL de provedor (wamid da Meta / id do
+      // Baileys, gravado como customId em recordIncomingMessage/
+      // recordOutgoingMessage) — nunca o id local `wa-<timestamp>-...` que
+      // esta mesma rota gerava antes desta correção pra mensagens enviadas
+      // sem esse id real. Citar um id inválido faria a Meta rejeitar o
+      // envio inteiro, então nesse caso a citação simplesmente não é
+      // enviada pra API real (a marcação interna do painel continua igual).
+      let replyTarget: Awaited<ReturnType<typeof getMessageForReply>> | undefined;
+      if (typeof replyToMessageId === 'string' && replyToMessageId) {
+        replyTarget = await getMessageForReply(tenantId, replyToMessageId);
+      }
+      const hasRealProviderId = !!replyTarget && !replyTarget.id.startsWith('wa-');
+
+      let realMessageId: string | undefined;
       if (channel.provider === 'evolution') {
-        await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, text.trim());
+        realMessageId = await sendEvolutionTextMessage(
+          channel.evolutionInstanceName,
+          channel.evolutionApiUrl,
+          channel.evolutionApiKey,
+          req.params.phone,
+          text.trim(),
+          hasRealProviderId
+            ? { id: replyTarget!.id, remoteJid: `${req.params.phone}@s.whatsapp.net`, fromMe: replyTarget!.sender === 'agent', text: replyTarget!.text }
+            : undefined
+        );
       } else {
-        await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, text.trim());
+        realMessageId = await sendWhatsAppTextMessage(
+          channel.metaPhoneNumberId,
+          channel.metaAccessToken,
+          req.params.phone,
+          text.trim(),
+          hasRealProviderId ? replyTarget!.id : undefined
+        );
       }
       const conv = await recordOutgoingMessage(
         tenantId,
@@ -207,7 +240,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         },
         'operator',
-        typeof replyToMessageId === 'string' ? replyToMessageId : undefined
+        typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
+        undefined,
+        realMessageId
       );
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
@@ -405,22 +440,6 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: true, reactions });
   }));
 
-  // Edita o texto de uma mensagem já enviada — só mensagem do agente/
-  // operador (sender='agent'); editar mensagem do lead seria falsificar o
-  // que o cliente disse de verdade.
-  router.patch('/api/conversations/:phone/messages/:messageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { text } = req.body || {};
-    if (!text || typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ error: 'Campo "text" é obrigatório.' });
-    }
-    const result = await editMessage(tenantOf(req), req.params.messageId, text.trim());
-    if (result.ok === false) {
-      if (result.reason === 'not_found') return res.status(404).json({ error: 'Mensagem não encontrada.' });
-      return res.status(403).json({ error: 'Só é possível editar mensagens enviadas pelo agente/operador.' });
-    }
-    const conv = await getConversation(tenantOf(req), req.params.phone);
-    res.json({ success: true, conversation: conv });
-  }));
 
   // Etiquetas livres por conversa (tipo WhatsApp Business) — características/
   // sinais que se acumulam, complementares ao estágio único do CRM.

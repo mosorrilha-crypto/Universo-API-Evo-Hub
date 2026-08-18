@@ -89,13 +89,22 @@ beforeEach(() => {
   saveMediaImage.mockClear();
   transcodeToWhatsAppVoiceNote.mockClear();
 
+  const now = new Date().toISOString();
   const supabase = createFakeSupabase({
     conversations: [
-      { id: 'conv-evo', tenant_id: TENANT_EVOLUTION, phone: '595981111111', name: 'Cliente Evolution', updated_at: new Date().toISOString(), geo_restriction: null },
-      { id: 'conv-meta', tenant_id: TENANT_META, phone: '595982222222', name: 'Cliente Meta', updated_at: new Date().toISOString(), geo_restriction: null },
+      { id: 'conv-evo', tenant_id: TENANT_EVOLUTION, phone: '595981111111', name: 'Cliente Evolution', updated_at: now, geo_restriction: null },
+      { id: 'conv-meta', tenant_id: TENANT_META, phone: '595982222222', name: 'Cliente Meta', updated_at: now, geo_restriction: null },
     ],
     tenant_evolution_credentials: [
       { tenant_id: TENANT_EVOLUTION, instance_name: 'instancia-cliente', api_url: 'https://evo-cliente.example.com', api_key: 'tenant-evo-key' },
+    ],
+    messages: [
+      // id real do Baileys (não começa com "wa-") — citação deve chegar na API real.
+      { id: 'BAE5-real-id-1', tenant_id: TENANT_EVOLUTION, conversation_id: 'conv-evo', sender: 'lead', type: 'text', text: 'Pergunta original do lead', created_at: now, reply_to_message_id: null, forwarded_from_message_id: null, reactions: null },
+      // id local gerado antes desta correção — nunca deve ser citado na API real (Meta/Evolution rejeitariam).
+      { id: 'wa-1234-abcd', tenant_id: TENANT_EVOLUTION, conversation_id: 'conv-evo', sender: 'agent', type: 'text', text: 'Mensagem antiga sem wamid real', created_at: now, reply_to_message_id: null, forwarded_from_message_id: null, reactions: null, sent_by: 'operator' },
+      // wamid real da Meta (formato "wamid.XXXX") — citação deve chegar na API real.
+      { id: 'wamid.HBgLNTk1OTgy', tenant_id: TENANT_META, conversation_id: 'conv-meta', sender: 'lead', type: 'text', text: 'Pergunta original do lead (Meta)', created_at: now, reply_to_message_id: null, forwarded_from_message_id: null, reactions: null },
     ],
   });
   initDb(supabase);
@@ -110,7 +119,7 @@ describe('Roteamento por provedor (Evolution vs Meta) no envio manual do painel'
       body: JSON.stringify({ text: 'Oi!' }),
     });
     expect(res.status).toBe(200);
-    expect(sendEvolutionTextMessage).toHaveBeenCalledWith('instancia-cliente', 'https://evo-cliente.example.com', 'tenant-evo-key', '595981111111', 'Oi!');
+    expect(sendEvolutionTextMessage).toHaveBeenCalledWith('instancia-cliente', 'https://evo-cliente.example.com', 'tenant-evo-key', '595981111111', 'Oi!', undefined);
     expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
   });
 
@@ -122,8 +131,46 @@ describe('Roteamento por provedor (Evolution vs Meta) no envio manual do painel'
       body: JSON.stringify({ text: 'Oi!' }),
     });
     expect(res.status).toBe(200);
-    expect(sendWhatsAppTextMessage).toHaveBeenCalledWith('shared-pn', 'shared-tok', '595982222222', 'Oi!');
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledWith('shared-pn', 'shared-tok', '595982222222', 'Oi!', undefined);
     expect(sendEvolutionTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('POST /send com replyToMessageId manda o contexto de citação real (Evolution) quando a mensagem alvo tem id real de provedor', async () => {
+    currentTenantId = TENANT_EVOLUTION;
+    const res = await fetch(`${baseUrl}/api/conversations/595981111111/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Resposta!', replyToMessageId: 'BAE5-real-id-1' }),
+    });
+    expect(res.status).toBe(200);
+    expect(sendEvolutionTextMessage).toHaveBeenCalledWith(
+      'instancia-cliente', 'https://evo-cliente.example.com', 'tenant-evo-key', '595981111111', 'Resposta!',
+      { id: 'BAE5-real-id-1', remoteJid: '595981111111@s.whatsapp.net', fromMe: false, text: 'Pergunta original do lead' }
+    );
+  });
+
+  it('POST /send com replyToMessageId NÃO cita na API real (Evolution) quando a mensagem alvo só tem id local (wa-...)', async () => {
+    currentTenantId = TENANT_EVOLUTION;
+    const res = await fetch(`${baseUrl}/api/conversations/595981111111/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Resposta!', replyToMessageId: 'wa-1234-abcd' }),
+    });
+    expect(res.status).toBe(200);
+    expect(sendEvolutionTextMessage).toHaveBeenCalledWith(
+      'instancia-cliente', 'https://evo-cliente.example.com', 'tenant-evo-key', '595981111111', 'Resposta!', undefined
+    );
+  });
+
+  it('POST /send com replyToMessageId manda context.message_id real (Meta) quando a mensagem alvo tem wamid real', async () => {
+    currentTenantId = TENANT_META;
+    const res = await fetch(`${baseUrl}/api/conversations/595982222222/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Resposta!', replyToMessageId: 'wamid.HBgLNTk1OTgy' }),
+    });
+    expect(res.status).toBe(200);
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledWith('shared-pn', 'shared-tok', '595982222222', 'Resposta!', 'wamid.HBgLNTk1OTgy');
   });
 
   it('POST /send-media (imagem) usa evolutionSend.sendEvolutionMediaMessage pra tenant Evolution', async () => {

@@ -56,16 +56,35 @@ async function throwMetaError(res: Response, contextMsg: string): Promise<never>
 /**
  * Envio de mensagem de texto via Meta Cloud API (POST /{phone-number-id}/messages).
  * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages
+ *
+ * `replyToWamid` (opcional) — quando o operador responde a uma mensagem
+ * específica no painel, passa o wamid real (da própria Meta) da mensagem
+ * citada em `context.message_id`, pra o WhatsApp do cliente mostrar "em
+ * resposta a" de verdade. Achado real (18/08/2026): antes disso o
+ * "Responder" do painel era só metadado nosso — o cliente nunca via que
+ * era uma resposta. Retorna o wamid real da mensagem que acabou de ser
+ * enviada (data.messages[0].id) pra podermos gravar esse id em vez de um
+ * id local nosso — sem isso, responder a uma mensagem do PRÓPRIO operador
+ * nunca funcionaria (não teríamos o wamid real dela pra citar depois).
  */
 export async function sendWhatsAppTextMessage(
   phoneNumberId: string | undefined,
   accessToken: string | undefined,
   to: string,
-  text: string
-): Promise<void> {
+  text: string,
+  replyToWamid?: string
+): Promise<string | undefined> {
   if (!phoneNumberId || !accessToken) {
     throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mensagem via Meta Cloud API.');
   }
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'text',
+    text: { body: text },
+  };
+  if (replyToWamid) body.context = { message_id: replyToWamid };
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
     method: 'POST',
@@ -73,17 +92,14 @@ export async function sendWhatsAppTextMessage(
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to,
-      type: 'text',
-      text: { body: text },
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     await throwMetaError(res, 'Falha ao enviar mensagem via Meta Cloud API');
   }
+  const data = await res.json().catch(() => ({}) as any);
+  return data?.messages?.[0]?.id;
 }
 
 /**

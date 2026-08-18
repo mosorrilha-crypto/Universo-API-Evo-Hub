@@ -268,12 +268,10 @@ export interface ChatMessage {
   timestamp: string;
   /** true quando o envio real via Meta Cloud API falhou — a mensagem ficou só local, o cliente nunca recebeu. */
   sendFailed?: boolean;
-  /** id de outra mensagem desta conversa que esta responde (quote) — metadado só do painel, não reflete no WhatsApp real. */
+  /** id de outra mensagem desta conversa que esta responde (quote) — quando a mensagem citada tem id real de provedor, também chega no WhatsApp real do cliente (ver server/services/conversationStore.ts). */
   replyToMessageId?: string;
   /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
   forwardedFromMessageId?: string;
-  /** presente quando o texto foi editado depois de enviado. */
-  editedAt?: string;
   reactions?: MessageReaction[];
   /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel. */
   sentBy?: 'ai' | 'operator';

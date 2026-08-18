@@ -45,7 +45,6 @@ import {
   Trash2,
   Reply,
   Forward,
-  Pencil,
   Tag,
   Plus,
   Pin,
@@ -513,14 +512,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Active Image Modal / Lightbox state
   const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
 
-  // Ações de mensagem — responder (quote), encaminhar, reagir, editar.
-  // Metadados só do painel (não refletem no WhatsApp real via Meta Cloud API).
+  // Ações de mensagem — responder (quote, chega no WhatsApp real quando a
+  // mensagem citada tem id de provedor — ver getMessageForReply no
+  // backend), encaminhar, reagir. "Editar" foi removido (18/08/2026,
+  // pedido direto): só alterava nosso registro interno, nunca o que o
+  // cliente já tinha recebido de verdade — só confundia o operador.
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-  /** Achado real (pedido direto, com print do WhatsApp de referência): a barra de ícones sempre visível no hover (Responder/Encaminhar/Reagir/Editar) mais o botão de apagar solto no rodapé do balão eram poluição visual — o WhatsApp de verdade usa um único gatilho "⋮" que abre um menu discreto, igual ao menu ⋮ do cabeçalho da conversa (ver isHeaderMenuOpen) já usado neste mesmo arquivo. Substituído por esse único estado. */
+  /** Achado real (pedido direto, com print do WhatsApp de referência): a barra de ícones sempre visível no hover (Responder/Encaminhar/Reagir) mais o botão de apagar solto no rodapé do balão eram poluição visual — o WhatsApp de verdade usa um único gatilho "⋮" que abre um menu discreto, igual ao menu ⋮ do cabeçalho da conversa (ver isHeaderMenuOpen) já usado neste mesmo arquivo. Substituído por esse único estado. */
   const [openMessageMenuFor, setOpenMessageMenuFor] = useState<string | null>(null);
 
   const scrollToMessage = (messageId: string) => {
@@ -1625,7 +1626,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Arquivar/fixar/silenciar/marcar como não lida — menu ⋮ de cada conversa.
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
-  // atualizam o estado local, igual ao padrão de handleSaveEditedMessage.
+  // atualizam o estado local.
   const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean }) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
@@ -1866,11 +1867,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (e) e.preventDefault();
     if (!inputMessage.trim() || !selectedLead) return;
 
-    if (editingMessageId) {
-      await handleSaveEditedMessage(editingMessageId, inputMessage.trim());
-      return;
-    }
-
     const replyToMessageId = replyingTo?.id;
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -1915,50 +1911,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const handleReplyToMessage = (msg: ChatMessage) => {
-    setEditingMessageId(null);
     setReplyingTo(msg);
-  };
-
-  const handleStartEditMessage = (msg: ChatMessage) => {
-    setReplyingTo(null);
-    setEditingMessageId(msg.id);
-    setInputMessage(msg.text || '');
-  };
-
-  const handleCancelEdit = () => {
-    setEditingMessageId(null);
-    setInputMessage('');
-  };
-
-  // Edita o texto de uma mensagem já enviada — só mensagens do agente/
-  // operador (o botão de editar só aparece nelas), nunca do lead (seria
-  // falsificar o que o cliente disse). Metadado só do painel.
-  const handleSaveEditedMessage = async (messageId: string, newText: string) => {
-    if (!selectedLead) return;
-    if ((selectedLead as any).isReal) {
-      try {
-        const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(messageId)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: newText }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      } catch (err) {
-        console.error('Falha ao editar mensagem real no servidor:', err);
-        setErrorMsg('Não foi possível editar a mensagem no servidor. Tente de novo.');
-        return;
-      }
-    }
-
-    setLeads((prev) =>
-      prev.map((l) =>
-        l.id === selectedLead.id
-          ? { ...l, messages: (l.messages || []).map((m) => (m.id === messageId ? { ...m, text: newText, editedAt: new Date().toISOString() } : m)) }
-          : l
-      )
-    );
-    setEditingMessageId(null);
-    setInputMessage('');
   };
 
   // Encaminha uma mensagem existente pra outro contato — metadado só do
@@ -3220,7 +3173,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         }`}
                       >
                         {msg.timestamp}
-                        {msg.editedAt && <span className="italic opacity-70"> (editado)</span>}
                         {!isLead && (msg.sendFailed ? (
                           <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
                         ) : (
@@ -3235,7 +3187,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         className={`group relative flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
                       >
                         {/* Menu de ações da mensagem — gatilho único "⋮" que abre um
-                            menu discreto (Responder/Copiar/Encaminhar/Reagir/Editar/
+                            menu discreto (Responder/Copiar/Encaminhar/Reagir/
                             Apagar), igual ao menu nativo do WhatsApp (print de
                             referência) e ao mesmo padrão visual já usado no menu ⋮ do
                             cabeçalho da conversa (isHeaderMenuOpen). Substitui a barra
@@ -3292,16 +3244,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   <Smile className="w-3.5 h-3.5" />
                                   <span>Reagir</span>
                                 </button>
-                                {!isLead && (
-                                  <button
-                                    type="button"
-                                    onClick={() => { handleStartEditMessage(msg); setOpenMessageMenuFor(null); }}
-                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                    <span>Editar</span>
-                                  </button>
-                                )}
                                 <div className="border-t border-slate-700" />
                                 <button
                                   type="button"
@@ -3376,7 +3318,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                     isLead ? 'bg-slate-800/60 border-emerald-500' : 'bg-black/20 border-emerald-300'
                                   }`}
                                 >
-                                  <div className="text-[9px] font-bold text-emerald-400">
+                                  <div className="text-[9px] font-bold text-emerald-400 truncate">
                                     {quotedMessage.sender === 'lead' ? selectedLead.name : 'Você'}
                                   </div>
                                   <div className="text-[10px] opacity-80 truncate">
@@ -3674,22 +3616,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 </div>
 
-                {/* Reply / Edit Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido/editado acima do campo de texto */}
-                {(replyingTo || editingMessageId) && (
+                {/* Reply Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido acima do campo de texto */}
+                {replyingTo && (
                   <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-[#00a884] rounded-lg px-3 py-1.5">
                     <div className="min-w-0">
-                      <div className="text-[10px] font-bold text-[#00a884]">
-                        {editingMessageId ? 'Editando mensagem' : `Respondendo a: ${replyingTo?.sender === 'lead' ? selectedLead.name : 'Você'}`}
+                      <div className="text-[10px] font-bold text-[#00a884] truncate">
+                        {`Respondendo a: ${replyingTo.sender === 'lead' ? selectedLead.name : 'Você'}`}
                       </div>
                       <div className="text-[11px] text-slate-300 truncate">
-                        {editingMessageId
-                          ? selectedLead.messages?.find((m) => m.id === editingMessageId)?.text
-                          : replyingTo?.text || (replyingTo?.type === 'image' ? '📷 Imagem' : replyingTo?.type === 'audio' ? '🎤 Áudio' : replyingTo?.type === 'file' ? '📎 Arquivo' : '')}
+                        {replyingTo.text || (replyingTo.type === 'image' ? '📷 Imagem' : replyingTo.type === 'audio' ? '🎤 Áudio' : replyingTo.type === 'file' ? '📎 Arquivo' : '')}
                       </div>
                     </div>
                     <button
                       type="button"
-                      onClick={editingMessageId ? handleCancelEdit : () => setReplyingTo(null)}
+                      onClick={() => setReplyingTo(null)}
                       className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer flex-shrink-0"
                     >
                       <X className="w-3.5 h-3.5" />

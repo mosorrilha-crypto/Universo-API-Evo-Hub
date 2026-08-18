@@ -1,8 +1,7 @@
 /**
- * Ações de mensagem — responder, encaminhar, reagir, editar
- * (WhatsAppLeadsSim.tsx hoje só manda/apaga mensagem). Cobre os três
- * pontos críticos do plano do card: PATCH de edição rejeita mensagem
- * sender='lead' (nunca falsificar o que o cliente disse), forward só
+ * Ações de mensagem — encaminhar, reagir ("editar" foi removido em
+ * 18/08/2026: só mudava nosso registro interno, nunca o que o cliente já
+ * tinha recebido de verdade). Cobre dois pontos críticos: forward só
  * resolve mensagem/destino dentro do tenant do JWT (nunca cross-tenant), e
  * react faz upsert por ator (reagir de novo troca a reação anterior, não
  * acumula).
@@ -69,40 +68,6 @@ beforeEach(() => {
     ],
   });
   initDb(supabase);
-});
-
-describe('PATCH /api/conversations/:phone/messages/:messageId — editar mensagem', () => {
-  it('rejeita (403) editar mensagem do lead — nunca falsificar o que o cliente disse', async () => {
-    const res = await fetch(`${baseUrl}/api/conversations/595981111111/messages/msg-lead-1`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'texto forjado' }),
-    });
-    expect(res.status).toBe(403);
-    const original = supabase.__tables.messages.find((m: any) => m.id === 'msg-lead-1');
-    expect(original.text).toBe('Oi, tudo bem?');
-  });
-
-  it('edita mensagem do agente e marca edited_at', async () => {
-    const res = await fetch(`${baseUrl}/api/conversations/595981111111/messages/msg-agent-1`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Olá! Tudo ótimo, e você?' }),
-    });
-    expect(res.status).toBe(200);
-    const updated = supabase.__tables.messages.find((m: any) => m.id === 'msg-agent-1');
-    expect(updated.text).toBe('Olá! Tudo ótimo, e você?');
-    expect(updated.edited_at).toBeTruthy();
-  });
-
-  it('404 pra mensagem inexistente', async () => {
-    const res = await fetch(`${baseUrl}/api/conversations/595981111111/messages/msg-inexistente`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'qualquer coisa' }),
-    });
-    expect(res.status).toBe(404);
-  });
 });
 
 describe('POST /api/conversations/:phone/messages/:messageId/react — reagir', () => {
