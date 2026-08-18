@@ -29,12 +29,10 @@ export interface StoredMessage {
   type: 'text' | 'audio' | 'image' | 'file';
   text?: string;
   timestamp: string;
-  /** id de outra mensagem desta conversa que esta responde (quote) — metadado só do painel. */
+  /** id de outra mensagem desta conversa que esta responde (quote). Quando a mensagem citada tem um id real de provedor (wamid da Meta / id do Baileys, não o `wa-...` gerado localmente), o envio real (metaSend.ts/evolutionSend.ts) também manda esse contexto pra API — o cliente vê "em resposta a" de verdade no WhatsApp dele, não só no nosso painel. */
   replyToMessageId?: string;
   /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
   forwardedFromMessageId?: string;
-  /** presente quando o texto foi editado depois de enviado — só mensagens do agente/operador podem ser editadas. */
-  editedAt?: string;
   reactions?: MessageReaction[];
   /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel (ver issue #126). */
   sentBy?: 'ai' | 'operator';
@@ -100,7 +98,6 @@ type MessageRow = {
   created_at: string;
   reply_to_message_id: string | null;
   forwarded_from_message_id: string | null;
-  edited_at: string | null;
   reactions: MessageReaction[] | null;
   sent_by: 'ai' | 'operator' | null;
 };
@@ -134,14 +131,13 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
         timestamp: m.created_at,
         replyToMessageId: m.reply_to_message_id || undefined,
         forwardedFromMessageId: m.forwarded_from_message_id || undefined,
-        editedAt: m.edited_at || undefined,
         reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
         sentBy: m.sent_by || undefined,
       })),
   };
 }
 
-const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, edited_at, reactions, sent_by)';
+const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by)';
 
 /** Resolve o telefone da conversa a partir do id (usado por mutações que só têm o id da mensagem, não o telefone) e dispara o evento. */
 async function emitUpdatedByConversationId(tenantId: string, conversationId: string): Promise<void> {
@@ -417,23 +413,23 @@ export async function reactToMessage(tenantId: string, messageId: string, emoji:
   return reactions;
 }
 
-export type EditMessageResult = { ok: true } | { ok: false; reason: 'not_found' | 'forbidden' };
+export interface MessageForReply {
+  id: string;
+  sender: 'lead' | 'agent';
+  type: StoredMessage['type'];
+  text?: string;
+}
 
 /**
- * Edita o texto de uma mensagem já enviada — só permite mensagem do
- * agente/operador (sender='agent'); editar mensagem do lead seria
- * falsificar o que o cliente disse de verdade. Marca edited_at, pro
- * frontend mostrar "(editado)" igual ao WhatsApp real. Metadado só do
- * painel, não reflete no WhatsApp real via Meta Cloud API.
+ * Busca só os campos necessários pra montar o contexto de "responder a"
+ * numa API real (Meta `context.message_id` / Evolution `quoted`) — nunca
+ * cross-tenant. Ver server/routes/conversations.ts (POST /send).
  */
-export async function editMessage(tenantId: string, messageId: string, newText: string): Promise<EditMessageResult> {
+export async function getMessageForReply(tenantId: string, messageId: string): Promise<MessageForReply | undefined> {
   const db = getDb();
-  const { data: existing } = await db.from('messages').select('id, sender, conversation_id').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
-  if (!existing) return { ok: false, reason: 'not_found' };
-  if (existing.sender !== 'agent') return { ok: false, reason: 'forbidden' };
-  await db.from('messages').update({ text: newText, edited_at: new Date().toISOString() }).eq('id', existing.id);
-  await emitUpdatedByConversationId(tenantId, existing.conversation_id);
-  return { ok: true };
+  const { data } = await db.from('messages').select('id, sender, type, text').eq('tenant_id', tenantId).eq('id', messageId).maybeSingle();
+  if (!data) return undefined;
+  return { id: data.id, sender: data.sender, type: data.type, text: data.text ?? undefined };
 }
 
 /** Atualiza o texto de uma mensagem já registrada (ex: placeholder de áudio → transcrição real). */
