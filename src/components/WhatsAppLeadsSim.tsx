@@ -3892,6 +3892,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onCreateAdHocContactForAppointment={handleCreateAdHocContactForAppointment}
         onPickLeadForNewAppointment={handlePickLeadForNewAppointment}
         monthLabel={calendarMonthLabel}
+        calendarYear={calendarMonth.year}
+        calendarMonthNumber={calendarMonth.month}
         onPrevMonth={() => changeCalendarMonth(-1)}
         onNextMonth={() => changeCalendarMonth(1)}
         onToggleCompleted={handleToggleEventCompleted}
