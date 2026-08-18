@@ -13,12 +13,12 @@
  *   promocional vigente até 31/12/2026, dobra em 01/01/2027. Os dois tiers
  *   estão registrados abaixo; a chamada é resolvida pela data de cada linha
  *   de uso, nunca pela data de hoje.
- * - Groq llama-3.1-8b-instant (`server/services/groqClient.ts`, único
- *   modelo Groq usado hoje): console.groq.com/pricing é uma SPA que não
- *   expõe a tabela via fetch simples; $0.05 / $0.08 por 1M tokens confirmado
- *   de forma consistente em múltiplos agregadores independentes de preço de
- *   LLM (portkey.ai, getmaxim.ai) — preço estável desse modelo, sem indício
- *   de tier promocional/expiração como o do Gemini.
+ * - Groq openai/gpt-oss-20b (`server/services/groqClient.ts`, único modelo
+ *   Groq usado hoje — trocado em 18/08/2026: llama-3.1-8b-instant, o modelo
+ *   anterior, foi descontinuado pela Groq em 16/08/2026 e toda chamada
+ *   vinha respondendo 404 há dois dias, sempre caindo pro Gemini sem
+ *   nenhum aviso visível — ver comentário em groqClient.ts): preço oficial
+ *   direto da Groq, $0.075 / $0.30 por 1M tokens (input/output).
  *
  * Se o modelo usado em `autoReply.ts`/`groqClient.ts` mudar, este arquivo
  * precisa ser atualizado junto — o preço aqui é específico do modelo, não
@@ -64,16 +64,21 @@ const PRICING: Record<LlmProvider, ModelPricing> = {
     ],
   },
   groq: {
-    model: 'llama-3.1-8b-instant',
-    sourceUrl: 'https://groq.com/pricing (agregado — ver comentário no topo do arquivo)',
+    model: 'openai/gpt-oss-20b',
+    sourceUrl: 'https://console.groq.com/docs/model/openai/gpt-oss-20b (preço oficial direto da Groq)',
     tiers: [
       {
+        // Sem tier antigo pra preservar: toda chamada Groq com o modelo
+        // anterior (llama-3.1-8b-instant) vinha respondendo 404 desde a
+        // depreciação em 16/08/2026 — recordGeminiUsage(..., 'groq') só
+        // roda no caminho de sucesso (ver classifyAgent em autoReply.ts),
+        // então nenhuma linha de uso real foi gravada no preço antigo.
         effectiveFrom: '2000-01-01T00:00:00.000Z',
-        inputPerMillionUSD: 0.05,
-        outputPerMillionUSD: 0.08,
+        inputPerMillionUSD: 0.075,
+        outputPerMillionUSD: 0.3,
         // Groq não oferece context caching hoje — preço de cache igual ao de input
         // pra nunca subestimar custo se um dia `cached_tokens` vier != 0 pra este provedor.
-        cachedInputPerMillionUSD: 0.05,
+        cachedInputPerMillionUSD: 0.075,
       },
     ],
   },
