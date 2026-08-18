@@ -1,6 +1,6 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
-import { downloadMetaMedia, downloadEvolutionMedia, downloadEvoHubMedia } from './mediaDownload';
+import { downloadMetaMedia, downloadEvolutionMedia } from './mediaDownload';
 import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles, type OutboundChannel } from './sendBubbles';
@@ -39,8 +39,6 @@ export interface TranscriptionQueueDeps {
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
   evolutionInstanceName?: string;
-  evoHubApiUrl?: string;
-  evoHubChannelToken?: string;
   metaPhoneNumberId?: string;
   supabaseUrl?: string;
   supabaseKey?: string;
@@ -112,11 +110,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     let audioBase64: string | undefined;
     let mimeType: string | undefined;
 
-    if (message.type === 'audio' && message.metaAudio && message.provider === 'evohub') {
-      const downloaded = await downloadEvoHubMedia(message.metaAudio.mediaId, deps.evoHubChannelToken, deps.evoHubApiUrl);
-      audioBase64 = downloaded.base64;
-      mimeType = downloaded.mimeType;
-    } else if (message.type === 'audio' && message.metaAudio) {
+    if (message.type === 'audio' && message.metaAudio) {
       const downloaded = await downloadMetaMedia(message.metaAudio.mediaId, token);
       audioBase64 = downloaded.base64;
       mimeType = downloaded.mimeType;

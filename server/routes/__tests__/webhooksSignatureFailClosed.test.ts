@@ -5,7 +5,7 @@
  * legítimo, mesmo com META_APP_SECRET configurado (fail-open). Isso
  * permitia forjar mensagens de WhatsApp inteiras só omitindo o header.
  * Trava que, com o secret configurado, o header é sempre obrigatório
- * (fail-closed) — mesmo padrão que handleEvoHubWebhook já usava.
+ * (fail-closed).
  */
 import express from 'express';
 import type { Server } from 'http';
