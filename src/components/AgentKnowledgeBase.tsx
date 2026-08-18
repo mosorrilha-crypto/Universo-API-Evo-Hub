@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
+import { AgentKnowledgeBase, AgentProduct, ProductVariant, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
@@ -549,6 +549,52 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setFormData((prev) => ({
       ...prev,
       products: prev.products.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
+    }));
+  };
+
+  // Variantes de tamanho/modelo dentro de um produto unificado (ex: "Piscina Fapac
+  // Maresias" cobrindo 4x2.20m/5x2.60m/6x2.80m/7x3m, cada tamanho com preço próprio) —
+  // permite 1 foto/vídeo só pro produto em vez de 1 produto por tamanho, evitando que
+  // o agente envie a mesma mídia repetida várias vezes na mesma conversa.
+  const handleAddVariant = (productId: string) => {
+    const variant: ProductVariant = { code: '', price: 'Sob consulta' };
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) =>
+        p.id === productId ? { ...p, variants: [...(p.variants || []), variant] } : p
+      ),
+    }));
+  };
+
+  const handleVariantFieldChange = (
+    productId: string,
+    index: number,
+    field: keyof ProductVariant,
+    value: string
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => {
+        if (p.id !== productId || !p.variants) return p;
+        const variants = p.variants.map((v, i) => {
+          if (i !== index) return v;
+          if (field === 'litros' || field === 'priceAmount') {
+            const numeric = value.trim() === '' ? undefined : Number(value);
+            return { ...v, [field]: numeric === undefined || Number.isNaN(numeric) ? undefined : numeric };
+          }
+          return { ...v, [field]: value };
+        });
+        return { ...p, variants };
+      }),
+    }));
+  };
+
+  const handleDeleteVariant = (productId: string, index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) =>
+        p.id === productId ? { ...p, variants: (p.variants || []).filter((_, i) => i !== index) } : p
+      ),
     }));
   };
 
@@ -1564,6 +1610,52 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       className="w-full bg-transparent text-[11px] text-slate-400 leading-relaxed focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar descrição"
                     />
+                  </div>
+                  <div className="border-t border-slate-800 pt-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-cyan-400 font-semibold block">Variantes de tamanho (opcional):</span>
+                      <button
+                        type="button"
+                        onClick={() => handleAddVariant(prod.id)}
+                        className="text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer flex items-center gap-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Adicionar
+                      </button>
+                    </div>
+                    {(prod.variants || []).map((variant, vIndex) => (
+                      <div key={vIndex} className="flex gap-1 items-center">
+                        <input
+                          type="text"
+                          placeholder="Modelo (ex: MS F600)"
+                          value={variant.code}
+                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'code', e.target.value)}
+                          className="w-24 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Medidas"
+                          value={variant.dimensions || ''}
+                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'dimensions', e.target.value)}
+                          className="w-16 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Preço"
+                          value={variant.price}
+                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'price', e.target.value)}
+                          className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-emerald-400 font-semibold"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteVariant(prod.id, vIndex)}
+                          className="text-slate-500 hover:text-red-400 cursor-pointer p-0.5"
+                          title="Excluir variante"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                   <div className="border-t border-slate-800 pt-2 space-y-1.5">
                     <span className="text-[10px] text-amber-400 font-semibold block">Promoção (opcional, expira sozinha):</span>
