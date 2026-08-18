@@ -584,6 +584,35 @@ function extractHHmm(naiveIso: string): string {
   return naiveIso.slice(11, 16);
 }
 
+/**
+ * Soma minutos a uma data/hora LOCAL naive ("YYYY-MM-DDTHH:mm:ss", sem
+ * offset — mesmo formato de DATA_HORA_PARAM_DESCRIPTION). Trata a string
+ * como UTC só pra fazer a aritmética de calendário (nunca converte fuso de
+ * verdade) — cruza hora/dia corretamente sem risco de bug de DST.
+ */
+function addMinutesToNaiveIso(naiveIso: string, minutes: number): string {
+  const d = new Date(`${naiveIso}Z`);
+  d.setUTCMinutes(d.getUTCMinutes() + minutes);
+  return d.toISOString().slice(0, 19);
+}
+
+/**
+ * Fim REAL do evento a partir da duração cadastrada no catálogo pro
+ * serviço — nunca o `data_hora_fim`/`nova_data_hora_fim` que o próprio
+ * modelo calculou. Achado real em produção (18/08/2026): mesmo com
+ * `consultar_disponibilidade_semana` já usando a duração certa pra listar
+ * horários livres, nada impedia o modelo de errar a conta na hora de
+ * CRIAR o evento (ex: agendar só 1h de um serviço de 3h) — o evento real
+ * no Google Calendar ficava mais curto que o serviço de verdade, deixando
+ * o restante do horário aparecer como livre pra outro cliente com o MESMO
+ * profissional. Duração desconhecida no catálogo cai no mesmo fallback
+ * conservador (1h) já usado em consultar_disponibilidade_semana.
+ */
+function resolveAuthoritativeEndIso(kb: AgentKnowledgeBase | null, servico: string, startIso: string): string {
+  const durationMinutes = findProductDurationMinutes(kb, servico) ?? DEFAULT_SLOT_DURATION_MINUTES;
+  return addMinutesToNaiveIso(startIso, durationMinutes);
+}
+
 /** Extrai todo horário no formato H:mm/HH:mm citado num texto livre, normalizado com zero à esquerda — usado pela validação anti-alucinação (Epic 4.5.7). */
 function extractCitedTimes(text: string): string[] {
   const matches = text.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/g) || [];
@@ -761,28 +790,35 @@ async function executeCalendarTool(
               summary: `Tentou criar um agendamento novo, mas este contato tem um pagamento de um ciclo anterior ainda não resolvido (status "${existingBeforeCreate!.paymentStatus}", agendamento "${existingBeforeCreate!.summary}") — recusado, precisa de decisão humana antes de qualquer novo agendamento.`,
             };
           }
+          // Fim REAL calculado a partir da duração cadastrada — nunca o
+          // data_hora_fim que o modelo mandou (ver resolveAuthoritativeEndIso
+          // acima). Loga quando o modelo errou a conta, só pra visibilidade.
+          const authoritativeEndIso = resolveAuthoritativeEndIso(kb, args.titulo, args.data_hora_inicio);
+          if (authoritativeEndIso !== args.data_hora_fim) {
+            console.warn(`⚠️  [Agendamento] tenant=${tenantId} data_hora_fim do modelo ("${args.data_hora_fim}") não batia com a duração real de "${args.titulo}" — corrigido pra "${authoritativeEndIso}".`);
+          }
           // Reconsulta de disponibilidade dentro do lock, imediatamente antes
           // de criar o evento: o modelo pode ter chamado
           // verificar_disponibilidade minutos antes na mesma conversa, mas
           // nada garantia que o horário continuava livre no instante exato
           // da criação — outra conversa podia ter ocupado o slot nesse
-          // meio-tempo.
-          const stillFree = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+          // meio-tempo. Usa o fim CORRIGIDO acima, não o do modelo.
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
           if (!stillFree) {
             return {
               response: { erro: 'Esse horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar criar o agendamento.' },
-              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da criação encontrou o horário OCUPADO — não criou, é preciso reconsultar disponibilidade.`,
+              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso}, mas a reconsulta de disponibilidade feita no momento da criação encontrou o horário OCUPADO — não criou, é preciso reconsultar disponibilidade.`,
             };
           }
-          const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+          const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
           // resetPaymentState: true — é sempre um agendamento novo aqui (o
           // caso "já ativo" já foi recusado acima), nunca deve herdar
           // payment_status de um ciclo anterior, existente ou não.
-          await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim }, { resetPaymentState: true });
+          await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: authoritativeEndIso }, { resetPaymentState: true });
           notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
           return {
             response: { sucesso: true, evento_id: eventId },
-            summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
+            summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso} com sucesso.`,
             confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
           };
         });
@@ -800,18 +836,25 @@ async function executeCalendarTool(
               summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
             };
           }
-          const stillFree = await checkFreeBusy(tenantId, cfg, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+          // Mesma correção de duração de criar_agendamento acima — o serviço
+          // continua sendo o do agendamento existente (remarcar_agendamento
+          // não muda o título), só o horário muda.
+          const authoritativeEndIso = resolveAuthoritativeEndIso(kb, existing.summary, args.nova_data_hora_inicio);
+          if (authoritativeEndIso !== args.nova_data_hora_fim) {
+            console.warn(`⚠️  [Agendamento] tenant=${tenantId} nova_data_hora_fim do modelo ("${args.nova_data_hora_fim}") não batia com a duração real de "${existing.summary}" — corrigido pra "${authoritativeEndIso}".`);
+          }
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.nova_data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
           if (!stillFree) {
             return {
               response: { erro: 'Esse novo horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar remarcar.' },
-              summary: `Tentou remarcar para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da remarcação encontrou o horário OCUPADO — não remarcou, é preciso reconsultar disponibilidade.`,
+              summary: `Tentou remarcar para ${args.nova_data_hora_inicio}–${authoritativeEndIso}, mas a reconsulta de disponibilidade feita no momento da remarcação encontrou o horário OCUPADO — não remarcou, é preciso reconsultar disponibilidade.`,
             };
           }
-          await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
-          await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
+          await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
+          await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: authoritativeEndIso });
           return {
             response: { sucesso: true },
-            summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
+            summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${authoritativeEndIso} com sucesso.`,
             confirmedTimesHHmm: [extractHHmm(args.nova_data_hora_inicio)],
           };
         });

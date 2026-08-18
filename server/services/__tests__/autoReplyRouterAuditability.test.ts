@@ -16,6 +16,7 @@ vi.mock('../knowledgeBaseStore', () => ({
   getKnowledgeBase: vi.fn(async () => ({ products: [] })),
   resolveProductPriceAmount: vi.fn(() => 0),
   isNonBookableProduct: vi.fn(() => false),
+  findProductDurationMinutes: vi.fn(() => undefined),
 }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
