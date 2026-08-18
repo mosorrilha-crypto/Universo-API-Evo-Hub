@@ -342,7 +342,7 @@ REGRAS DE ESTILO (sempre aplicar):
 10. As bolhas de uma mesma resposta são fragmentos de UM ÚNICO pensamento contínuo, na ordem certa — nunca duas ideias que se contradizem ou dois começos de resposta diferentes colados um atrás do outro.
 11. No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.
 12. Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.
-13. Se a "Nova mensagem do cliente" vier com mais de uma mensagem numerada (mensagens que ela mandou em sequência rápida), a mensagem marcada como "mais recente" é a que define o que responder agora — se ela muda de assunto ou pivota o pedido (ex: pergunta pelo combo e na sequência pergunta só por um item), responda à mais recente; não reabra nem repita informação sobre a mensagem anterior que ela já deixou pra trás, a menos que a mais recente dependa diretamente dela.
+13. Se o cliente mandou mais de uma mensagem em sequência rápida (você vai ver isso como mais de um turno seu de "mensagem do cliente" seguidos, sem nenhuma resposta sua entre eles), a última dessas mensagens é a que define o que responder agora — se ela muda de assunto ou pivota o pedido (ex: pergunta pelo combo e na sequência pergunta só por um item), responda à mais recente; não reabra nem repita informação sobre a mensagem anterior que ela já deixou pra trás, a menos que a mais recente dependa diretamente dela.
 ${knowledgeBaseContext || ''}
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
@@ -415,8 +415,37 @@ async function generateSpecialistReply(
   // exatamente como sempre funcionou.
   const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${tenantId}`, systemInstruction);
 
-  const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
-Nova mensagem do cliente: ${formatClientMessageForPrompt(text)}`;
+  const contextPreamble = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`;
+
+  // Estrutural, não só textual (18/08/2026): messageBuffer.ts agrupa
+  // mensagens de rajada do cliente (dentro da janela de 6s de silêncio) num
+  // único `text` com `\n` entre elas. Antes isso virava uma string achatada
+  // só, sem sinal de recência real pro modelo — em vez de confiar só numa
+  // marcação textual ("mensagem mais recente"), cada linha de rajada agora
+  // vira seu próprio turno `role: 'user'` no array de `contents`, na ordem
+  // em que o cliente mandou. O array `contents` do Gemini já é uma sequência
+  // ordenada de turnos — deixar a recência ser estrutural (posição no
+  // array), não uma convenção textual que o modelo precisa interpretar
+  // corretamente, é mais robusto contra o modelo tratar mensagens antigas e
+  // novas como igualmente atuais.
+  const burstLines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const burstMessages = burstLines.length ? burstLines : [text];
+  // Caso comum (uma única mensagem, sem rajada): mantém o formato de sempre
+  // (`contents: [{ text }]`, sem role/parts) — inclusive pra não mudar o
+  // formato de request que os testes/fakes de Gemini já assumem pra esse
+  // caso. Só entra no formato multi-turno (abaixo) quando há de fato mais
+  // de uma mensagem agrupada pelo buffer de rajada, que é o único cenário
+  // onde a ambiguidade de recência acontecia de verdade.
+  const contents: Content[] | { text: string }[] =
+    burstMessages.length === 1
+      ? [{ text: `${contextPreamble}Nova mensagem do cliente: "${burstMessages[0]}"` }]
+      : burstMessages.map((line, i) => ({
+          role: 'user' as const,
+          parts: [{ text: i === 0 ? `${contextPreamble}Nova mensagem do cliente: "${line}"` : `Mensagem seguinte do cliente (mais recente): "${line}"` }],
+        }));
 
   const callSpecialist = (config: { cachedContent: string } | { systemInstruction: string }) =>
     withGeminiRetryAndUsage(
@@ -425,7 +454,7 @@ Nova mensagem do cliente: ${formatClientMessageForPrompt(text)}`;
       () =>
         ai.models.generateContent({
           model: specialistModel,
-          contents: [{ text: userContent }],
+          contents,
           config: { ...config, responseMimeType: 'application/json' },
         }),
       GEMINI_TIMEOUT_MS
