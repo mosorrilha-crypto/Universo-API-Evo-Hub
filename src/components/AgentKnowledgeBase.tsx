@@ -361,6 +361,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [newProductName, setNewProductName] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductDesc, setNewProductDesc] = useState('');
+  // Achado real (18/08/2026, Clic Piscinas): durationMinutes já existe no
+  // tipo do produto e já é usado pra calcular o fim real do evento no
+  // Calendar (ver criar_agendamento/consultar_disponibilidade_semana em
+  // autoReply.ts) — mas não existia campo nenhum no painel pra cadastrar
+  // isso, só vinha preenchido pro seed hardcoded da Monique. Sem duração
+  // configurada, todo produto caía no fallback conservador de 1h, errado
+  // pra serviços mais longos (ex: instalação de piscina).
+  const [newProductDuration, setNewProductDuration] = useState('');
 
   const [newRuleText, setNewRuleText] = useState('');
 
@@ -438,7 +446,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: newProductName.trim(),
       price: newProductPrice.trim() || 'Sob Consulta',
-      description: newProductDesc.trim() || 'Sem descrição cadastrada'
+      description: newProductDesc.trim() || 'Sem descrição cadastrada',
+      durationMinutes: newProductDuration.trim() ? Number(newProductDuration) : undefined,
     };
     setFormData((prev) => ({
       ...prev,
@@ -447,6 +456,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setNewProductName('');
     setNewProductPrice('');
     setNewProductDesc('');
+    setNewProductDuration('');
   };
 
   const handleDeleteProduct = (id: string) => {
@@ -470,6 +480,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setFormData((prev) => ({
       ...prev,
       products: prev.products.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
+    }));
+  };
+
+  const handleProductDurationChange = (id: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === id ? { ...p, durationMinutes: value.trim() ? Number(value) : undefined } : p)),
     }));
   };
 
@@ -1313,7 +1330,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             {/* Add New Product Form */}
             <form onSubmit={handleAddProduct} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
               <span className="text-xs font-bold text-emerald-400 block">Cadastrar Novo Produto ou Serviço:</span>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <input
                   type="text"
                   value={newProductName}
@@ -1333,6 +1350,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   value={newProductDesc}
                   onChange={(e) => setNewProductDesc(e.target.value)}
                   placeholder="Descrição resumida do item"
+                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  value={newProductDuration}
+                  onChange={(e) => setNewProductDuration(e.target.value)}
+                  placeholder="Duração (min)"
+                  title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
                   className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
                 />
               </div>
@@ -1372,6 +1398,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar preço"
                     />
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="w-3 h-3 text-slate-500 shrink-0" />
+                      <input
+                        type="number"
+                        min="0"
+                        value={prod.durationMinutes ?? ''}
+                        onChange={(e) => handleProductDurationChange(prod.id, e.target.value)}
+                        placeholder="Duração (min)"
+                        title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
+                        className="w-full bg-transparent text-xs text-slate-300 focus:outline-none focus:bg-slate-900 rounded py-0.5"
+                      />
+                    </div>
                     <AutoResizeTextarea
                       minRows={2}
                       value={prod.description}
