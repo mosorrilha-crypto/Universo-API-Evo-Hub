@@ -121,10 +121,26 @@ async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<ty
   return result;
 }
 
+/**
+ * Janela de histórico recente que entra no prompt (router + especialista) —
+ * era 10, aumentada pra 24 (18/08/2026, achado real em produção, contato
+ * "Alba Diana"): ela informou o serviço desejado nas mensagens 1, 7, 10 e
+ * 17 da conversa, mas a IA voltou a perguntar "qué servicio te gustaría
+ * realizarte?" na mensagem 38 — a última menção ao serviço já tinha caído
+ * fora da janela de 10 mensagens bem antes disso (contando ~20 mensagens de
+ * distância no caso real). Mesma classe de falha que capturedClientName já
+ * resolve pro nome do cliente (persistido fora da janela, ver comentário
+ * dele acima) — aqui é só um ajuste do tamanho da janela em si, não um
+ * mecanismo de persistência; se um gap muito grande (conversa retomada
+ * depois de semanas) continuar causando isso, o próximo passo é replicar o
+ * padrão de capturedClientName pro serviço identificado.
+ */
+const HISTORY_WINDOW_SIZE = 24;
+
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
   return (history || [])
     .filter((m) => m.text)
-    .slice(-10)
+    .slice(-HISTORY_WINDOW_SIZE)
     .map((m) => `${m.sender === 'lead' ? 'Cliente' : 'Atendente'}: ${m.text}`)
     .join('\n');
 }
