@@ -10,7 +10,7 @@ import {
   markGeoRestricted,
   forwardMessage,
   reactToMessage,
-  editMessage,
+  getMessageForReply,
   updateConversationState,
   markConversationRead,
 } from '../services/conversationStore';
@@ -27,6 +27,8 @@ import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
+import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
+import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
@@ -36,7 +38,7 @@ import { getNowLocalNaive } from '../services/autoReply';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { resolveTenantId } from '../middleware/rbac';
+import { resolveTenantId, requireRole } from '../middleware/rbac';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
@@ -191,10 +193,43 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
+
+      // Achado real (18/08/2026): "Responder" no painel só marcava
+      // replyToMessageId no nosso banco — o cliente nunca via "em resposta
+      // a X" no WhatsApp dele de verdade. Só dá pra citar de verdade quando
+      // a mensagem alvo tem um id REAL de provedor (wamid da Meta / id do
+      // Baileys, gravado como customId em recordIncomingMessage/
+      // recordOutgoingMessage) — nunca o id local `wa-<timestamp>-...` que
+      // esta mesma rota gerava antes desta correção pra mensagens enviadas
+      // sem esse id real. Citar um id inválido faria a Meta rejeitar o
+      // envio inteiro, então nesse caso a citação simplesmente não é
+      // enviada pra API real (a marcação interna do painel continua igual).
+      let replyTarget: Awaited<ReturnType<typeof getMessageForReply>> | undefined;
+      if (typeof replyToMessageId === 'string' && replyToMessageId) {
+        replyTarget = await getMessageForReply(tenantId, replyToMessageId);
+      }
+      const hasRealProviderId = !!replyTarget && !replyTarget.id.startsWith('wa-');
+
+      let realMessageId: string | undefined;
       if (channel.provider === 'evolution') {
-        await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, text.trim());
+        realMessageId = await sendEvolutionTextMessage(
+          channel.evolutionInstanceName,
+          channel.evolutionApiUrl,
+          channel.evolutionApiKey,
+          req.params.phone,
+          text.trim(),
+          hasRealProviderId
+            ? { id: replyTarget!.id, remoteJid: `${req.params.phone}@s.whatsapp.net`, fromMe: replyTarget!.sender === 'agent', text: replyTarget!.text }
+            : undefined
+        );
       } else {
-        await sendWhatsAppTextMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, text.trim());
+        realMessageId = await sendWhatsAppTextMessage(
+          channel.metaPhoneNumberId,
+          channel.metaAccessToken,
+          req.params.phone,
+          text.trim(),
+          hasRealProviderId ? replyTarget!.id : undefined
+        );
       }
       const conv = await recordOutgoingMessage(
         tenantId,
@@ -205,7 +240,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
         },
         'operator',
-        typeof replyToMessageId === 'string' ? replyToMessageId : undefined
+        typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
+        undefined,
+        realMessageId
       );
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
@@ -403,22 +440,6 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: true, reactions });
   }));
 
-  // Edita o texto de uma mensagem já enviada — só mensagem do agente/
-  // operador (sender='agent'); editar mensagem do lead seria falsificar o
-  // que o cliente disse de verdade.
-  router.patch('/api/conversations/:phone/messages/:messageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { text } = req.body || {};
-    if (!text || typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ error: 'Campo "text" é obrigatório.' });
-    }
-    const result = await editMessage(tenantOf(req), req.params.messageId, text.trim());
-    if (result.ok === false) {
-      if (result.reason === 'not_found') return res.status(404).json({ error: 'Mensagem não encontrada.' });
-      return res.status(403).json({ error: 'Só é possível editar mensagens enviadas pelo agente/operador.' });
-    }
-    const conv = await getConversation(tenantOf(req), req.params.phone);
-    res.json({ success: true, conversation: conv });
-  }));
 
   // Etiquetas livres por conversa (tipo WhatsApp Business) — características/
   // sinais que se acumulam, complementares ao estágio único do CRM.
@@ -614,7 +635,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const { serviceName, startIso, endIso, notes } = req.body || {};
+    const { serviceName, startIso, endIso, notes, paymentReceived } = req.body || {};
     if (!serviceName?.trim() || !startIso || !endIso) {
       return res.status(400).json({ error: 'Campos "serviceName", "startIso" e "endIso" são obrigatórios.' });
     }
@@ -659,6 +680,15 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // isto é sempre um ciclo de pagamento novo (nunca deve herdar payment_status
     // de um agendamento antigo, existente ou não), mesmo raciocínio do PR #203.
     await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: true });
+
+    // Agendamento fechado fora do WhatsApp (ex: presencial, telefone) já pode
+    // vir com o comprovante conferido na hora do cadastro — sem isso não
+    // havia como marcar isso no painel, e o agendamento ficava indistinguível
+    // de um sem pagamento nenhum ainda verificado.
+    if (paymentReceived === true) {
+      await setPaymentVerification(tenantId, phone, 'verified', req.user!.id);
+    }
+
     const appointment = await getAppointmentForPhone(tenantId, phone);
     res.status(201).json({ appointment });
   }));
@@ -734,6 +764,43 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
     await Promise.all(orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)));
     res.json({ success: true });
+  }));
+
+  // Camada 1 (regras universais) por tenant (18/08/2026) — leitura sempre
+  // mostra o texto EFETIVO em vigor pra este tenant (a cópia própria se
+  // existir, senão a Camada 1 global herdada), pra o admin nunca duplicar
+  // ou entrar em conflito com uma regra que já está coberta ali. Edição
+  // exige a senha do próprio admin de novo (não é a senha de login válida
+  // pra sempre — só confirma que é a mesma pessoa autenticada tentando
+  // mudar uma regra que afeta TODO o comportamento de segurança do agente
+  // deste tenant), e cria uma cópia independente que nunca mais herda
+  // mudança futura da Camada 1 global (decisão do dono do produto).
+  router.get('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json(await getTenantPromptLayerRow(tenantOf(req)));
+  }));
+
+  router.put('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { content, currentPassword } = req.body || {};
+    if (typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ error: 'Campo "content" é obrigatório.' });
+    }
+    if (typeof currentPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ error: 'Confirme sua senha atual pra salvar esta mudança.' });
+    }
+    const { data: operator, error } = await getDb().from('operators').select('password_hash').eq('id', req.user!.id).maybeSingle();
+    if (error || !operator) return res.status(401).json({ error: 'Sessão inválida — faça login de novo.' });
+    const validPassword = await bcrypt.compare(currentPassword, operator.password_hash as string);
+    if (!validPassword) return res.status(401).json({ error: 'Senha incorreta.' });
+
+    await setTenantPromptLayer(tenantOf(req), content, req.user!.id);
+    res.json(await getTenantPromptLayerRow(tenantOf(req)));
+  }));
+
+  // "Restaurar padrão" — apaga a cópia própria, volta a herdar a Camada 1
+  // global (inclusive mudanças futuras) a partir de agora.
+  router.delete('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    await clearTenantPromptLayer(tenantOf(req));
+    res.json(await getTenantPromptLayerRow(tenantOf(req)));
   }));
 
   // Horário de funcionamento real do tenant (tabela `tenants`, não a base de

@@ -201,6 +201,21 @@ export const App: React.FC = () => {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data?.tenant?.id) return;
+        // Achado real em produção (18/08/2026): esta chamada e a de
+        // /api/admin/tenants logo abaixo (que restaura a escolha manual do
+        // seletor) disparam juntas, sem ordem garantida entre si. Quando
+        // /api/admin/tenants resolvia primeiro e restaurava, por exemplo,
+        // "Clic Piscinas", ESTA promise podia resolver depois e sobrescrever
+        // `activeTenant` de volta pro tenant do próprio login do saas_admin
+        // (ex: Monique) — indo contra o que o comentário acima já dizia ser
+        // a intenção ("nunca sobrescrever uma escolha manual"), só que sem
+        // checar isso de verdade. Resultado: o seletor no cabeçalho mudava
+        // de novo sozinho, e a tela toda (leads, conversas, CRM) passava a
+        // mostrar os dados do tenant errado outra vez. Só aplica o tenant
+        // do próprio login se não houver uma escolha manual salva apontando
+        // pra outro tenant.
+        const savedOverrideId = currentUser.role === 'saas_admin' ? localStorage.getItem(ACTIVE_TENANT_OVERRIDE_KEY) : null;
+        if (savedOverrideId && savedOverrideId !== data.tenant.id) return;
         setActiveTenant((prev) => (prev.id === data.tenant.id && prev.name === data.tenant.name ? prev : { ...prev, id: data.tenant.id, name: data.tenant.name }));
       })
       .catch(() => {});
@@ -269,9 +284,23 @@ export const App: React.FC = () => {
   // logado é saas_admin — pra qualquer outro papel o backend ignora esse
   // header de qualquer forma, mas nem faz sentido mandar (o seletor nem
   // aparece pra eles).
-  useEffect(() => {
-    setTenantOverride(currentUser?.role === 'saas_admin' ? activeTenant.id : null);
-  }, [currentUser?.role, activeTenant.id]);
+  //
+  // Segundo achado real (18/08/2026, mesma classe de bug voltando de outro
+  // jeito): isso estava num useEffect, e o React roda efeitos de FILHO antes
+  // do PAI no mesmo commit. WhatsAppLeadsSim (filho) também tem um efeito
+  // que depende de `activeTenant.id` e lê `getTenantOverride()` pra montar o
+  // fetch de `/api/conversations` e a URL do EventSource — esse efeito
+  // sempre rodava ANTES deste aqui, então via o override ainda apontando pro
+  // tenant ANTERIOR (ou nulo, no primeiro load), caindo no tenant do próprio
+  // token do saas_admin. Resultado: trocar pra "Clic Piscinas" no seletor
+  // buscava e assinava (SSE) as conversas de "Monique" por engano — e como
+  // não tinha reatividade nenhuma pra corrigir depois, ficava preso nesse
+  // tenant errado até o próximo F5. Chamar direto no corpo do componente (em
+  // vez de useEffect) roda de forma síncrona durante o render do PAI, antes
+  // de qualquer efeito de filho — a leitura em WhatsAppLeadsSim já vê o
+  // valor certo. É só uma atribuição de variável (sem I/O), então chamar em
+  // todo render não tem custo real.
+  setTenantOverride(currentUser?.role === 'saas_admin' ? activeTenant.id : null);
 
   // CRM Leads — bug real em produção (12/08/2026): sempre que o cache local
   // estava vazio (navegador novo, aba anônima, ou depois de limpar dados do
@@ -958,6 +987,29 @@ export const App: React.FC = () => {
               }
             }}
             onGoToWhatsAppSim={() => setActiveTab('whatsapp')}
+            // Pedido real do saas_admin (18/08/2026): os "Modelos de Negócio
+            // Prontos" são fixos em código — isso deixa carregar a Base de
+            // Conhecimento REAL de outro tenant como ponto de partida pra
+            // configurar um tenant novo. Só saas_admin vê essa opção (outras
+            // tenants são dado de outro cliente); a rota no backend também
+            // exige esse papel.
+            copyableTenants={canSeeSaasMaster ? tenants.filter((t) => t.id !== activeTenant.id) : []}
+            onFetchTenantKnowledgeBase={async (sourceTenantId) => {
+              try {
+                const res = await apiFetch(`/api/admin/tenants/${encodeURIComponent(sourceTenantId)}/knowledge-base`);
+                if (!res.ok) {
+                  const data = await res.json().catch(() => null);
+                  showToast(data?.error || 'Não foi possível carregar a base de conhecimento desse tenant.');
+                  return null;
+                }
+                const data = await res.json();
+                return data.knowledgeBase as AgentKnowledgeBase;
+              } catch (err) {
+                console.error('Falha ao buscar base de conhecimento de outro tenant:', err);
+                showToast('Não foi possível carregar a base de conhecimento desse tenant. Tente de novo.');
+                return null;
+              }
+            }}
           />
         )}
 

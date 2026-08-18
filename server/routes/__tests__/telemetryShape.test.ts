@@ -57,14 +57,15 @@ describe('GET /api/telemetry/tokens — formato honesto, sem dado fabricado', ()
       totalSaaSTokens: 0,
       totalSaaSCostUSD: 0,
       totalCachedSaved: 0,
+      totalCacheSavingsUSD: 0,
       totalRequests: 0,
-      providerBreakdown: { gemini: { tokens: 0, requests: 0 }, groq: { tokens: 0, requests: 0 } },
+      providerBreakdown: { gemini: { tokens: 0, requests: 0, costUSD: 0 }, groq: { tokens: 0, requests: 0, costUSD: 0 } },
     });
     // Nunca mais um nome fictício de tenant na resposta desta rota.
     expect(JSON.stringify(data)).not.toContain('Odonto');
   });
 
-  it('achado real em produção (13/08/2026): cada registro por tenant tem exatamente os campos de TenantTokenTelemetry (src/types.ts) — sem "estimatedCostUSD" nenhum, campo que só o frontend achava que existia e nunca veio do backend; o frontend lia `tRecord.estimatedCostUSD.toFixed(5)` sobre `undefined` assim que telemetria real (não mais vazia) chegava, jogando a aba "Telemetria de Tokens IA" inteira em branco (React desmonta a árvore sem Error Boundary)', async () => {
+  it('cada registro por tenant tem exatamente os campos de TenantTokenTelemetry (src/types.ts), incluindo "estimatedCostUSD" — sempre um número, nunca ausente. Um incidente real em produção (13/08/2026) veio do caminho oposto: o frontend lia `tRecord.estimatedCostUSD.toFixed(5)` sobre `undefined` porque o backend nunca enviava o campo; agora o backend calcula o custo de verdade (modelPricing.ts) e sempre o envia', async () => {
     supabase.__tables['tenants'] = [{ id: 'tenant-real-1', name: 'Cliente Real' }];
     supabase.__tables['gemini_token_usage'] = [
       { tenant_id: 'tenant-real-1', prompt_tokens: 100, candidates_tokens: 40, total_tokens: 140, cached_tokens: 10, created_at: new Date().toISOString() },
@@ -77,9 +78,22 @@ describe('GET /api/telemetry/tokens — formato honesto, sem dado fabricado', ()
     expect(data.tenantsTelemetry).toHaveLength(1);
     const record = data.tenantsTelemetry[0];
     expect(Object.keys(record).sort()).toEqual(
-      ['candidatesTokens', 'cachedTokensSaved', 'lastRequestAt', 'promptTokens', 'providerBreakdown', 'requestCount', 'tenantId', 'tenantName', 'totalTokens'].sort()
+      [
+        'candidatesTokens',
+        'cachedTokensSaved',
+        'cacheSavingsUSD',
+        'estimatedCostUSD',
+        'lastRequestAt',
+        'promptTokens',
+        'providerBreakdown',
+        'requestCount',
+        'tenantId',
+        'tenantName',
+        'totalTokens',
+      ].sort()
     );
-    expect(record).not.toHaveProperty('estimatedCostUSD');
+    expect(typeof record.estimatedCostUSD).toBe('number');
+    expect(Number.isFinite(record.estimatedCostUSD)).toBe(true);
     expect(record.tenantName).toBe('Cliente Real');
     expect(record.totalTokens).toBe(140);
   });

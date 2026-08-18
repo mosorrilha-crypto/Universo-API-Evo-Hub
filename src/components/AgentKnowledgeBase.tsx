@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { AgentKnowledgeBase, AgentProduct, ProductVariant, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType } from '../types';
+import React, { useState, useEffect } from 'react';
+import { AgentKnowledgeBase, AgentProduct, ProductVariant, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
@@ -46,6 +46,10 @@ interface AgentKnowledgeBaseProps {
   businessHours: BusinessHours;
   onSaveBusinessHours: (hours: BusinessHours) => Promise<boolean>;
   onGoToWhatsAppSim: () => void;
+  /** Tenants cuja Base de Conhecimento pode ser copiada como ponto de partida — vazio pra quem não é saas_admin (a rota no backend também exige esse papel). */
+  copyableTenants?: Tenant[];
+  /** Busca a Base de Conhecimento REAL de outro tenant (GET /api/admin/tenants/:id/knowledge-base) — null em caso de falha, o próprio App.tsx já mostra o toast de erro. */
+  onFetchTenantKnowledgeBase?: (tenantId: string) => Promise<AgentKnowledgeBase | null>;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -306,7 +310,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   onSaveKnowledgeBase,
   businessHours,
   onSaveBusinessHours,
-  onGoToWhatsAppSim
+  onGoToWhatsAppSim,
+  copyableTenants = [],
+  onFetchTenantKnowledgeBase,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -355,6 +361,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [newProductName, setNewProductName] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductDesc, setNewProductDesc] = useState('');
+  // Achado real (18/08/2026, Clic Piscinas): durationMinutes já existe no
+  // tipo do produto e já é usado pra calcular o fim real do evento no
+  // Calendar (ver criar_agendamento/consultar_disponibilidade_semana em
+  // autoReply.ts) — mas não existia campo nenhum no painel pra cadastrar
+  // isso, só vinha preenchido pro seed hardcoded da Monique. Sem duração
+  // configurada, todo produto caía no fallback conservador de 1h, errado
+  // pra serviços mais longos (ex: instalação de piscina).
+  const [newProductDuration, setNewProductDuration] = useState('');
 
   const [newRuleText, setNewRuleText] = useState('');
 
@@ -396,6 +410,104 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  // Pedido real (18/08/2026): os "Modelos de Negócio Prontos" acima são
+  // fixos em código, sem jeito de editar sem deploy — isso deixa carregar a
+  // Base de Conhecimento REAL de outro tenant como ponto de partida (mesmo
+  // raciocínio de handleApplyPreset acima, mas buscando do servidor em vez
+  // de um preset hardcoded). Vídeos/arquivos anexados via Storage (bloco de
+  // 1º contato tipo vídeo/arquivo) NÃO vêm nessa cópia — ver comentário da
+  // rota GET /api/admin/tenants/:id/knowledge-base no backend — precisam
+  // ser re-anexados manualmente se fizerem falta.
+  const [copySourceTenantId, setCopySourceTenantId] = useState('');
+  const [isCopyingKb, setIsCopyingKb] = useState(false);
+  const handleCopyFromTenant = async () => {
+    if (!copySourceTenantId || !onFetchTenantKnowledgeBase) return;
+    setIsCopyingKb(true);
+    try {
+      const copied = await onFetchTenantKnowledgeBase(copySourceTenantId);
+      if (!copied) return; // erro já mostrado via toast em App.tsx
+      setFormData((prev) => ({
+        ...prev,
+        ...copied,
+        products: ensureUniqueIds(copied.products, 'prod'),
+        faqs: ensureUniqueIds(copied.faqs, 'faq'),
+        documents: ensureUniqueIds(copied.documents, 'doc'),
+        firstContactBlocks: ensureUniqueIds(copied.firstContactBlocks, 'fcblock'),
+      }));
+    } finally {
+      setIsCopyingKb(false);
+    }
+  };
+
+  // Camada 1 (regras universais) por tenant (18/08/2026, pedido real do
+  // dono do produto) — até aqui era uma regra só, global, editável só por
+  // saas_admin; o admin de um tenant não tinha como nem ler esse texto,
+  // risco real de duplicar/entrar em conflito com uma regra que já está
+  // coberta ali. GET /api/tenant-prompt-layer exige papel admin+ — se este
+  // usuário não tiver (403), a seção simplesmente não aparece (nunca mostra
+  // erro pra quem não pode ver mesmo).
+  const [tenantPromptLayer, setTenantPromptLayer] = useState<{ content: string; isCustomized: boolean; updatedAt: string | null } | null>(null);
+  const [tenantPromptLayerVisible, setTenantPromptLayerVisible] = useState(false);
+  const [isEditingTenantPromptLayer, setIsEditingTenantPromptLayer] = useState(false);
+  const [tenantPromptLayerDraft, setTenantPromptLayerDraft] = useState('');
+  const [tenantPromptLayerPassword, setTenantPromptLayerPassword] = useState('');
+  const [tenantPromptLayerError, setTenantPromptLayerError] = useState<string | null>(null);
+  const [isSavingTenantPromptLayer, setIsSavingTenantPromptLayer] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/tenant-prompt-layer')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return; // 403 (papel abaixo de admin) — seção fica oculta
+        setTenantPromptLayer(data);
+        setTenantPromptLayerVisible(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleStartEditTenantPromptLayer = () => {
+    setTenantPromptLayerDraft(tenantPromptLayer?.content || '');
+    setTenantPromptLayerPassword('');
+    setTenantPromptLayerError(null);
+    setIsEditingTenantPromptLayer(true);
+  };
+
+  const handleSaveTenantPromptLayer = async () => {
+    if (!tenantPromptLayerDraft.trim() || !tenantPromptLayerPassword) {
+      setTenantPromptLayerError('Preencha o texto e confirme sua senha.');
+      return;
+    }
+    setIsSavingTenantPromptLayer(true);
+    setTenantPromptLayerError(null);
+    try {
+      const res = await apiFetch('/api/tenant-prompt-layer', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: tenantPromptLayerDraft, currentPassword: tenantPromptLayerPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setTenantPromptLayer(data);
+      setIsEditingTenantPromptLayer(false);
+      setTenantPromptLayerPassword('');
+    } catch (err: any) {
+      setTenantPromptLayerError(err.message || 'Não foi possível salvar. Tente de novo.');
+    } finally {
+      setIsSavingTenantPromptLayer(false);
+    }
+  };
+
+  const handleResetTenantPromptLayer = async () => {
+    setIsSavingTenantPromptLayer(true);
+    try {
+      const res = await apiFetch('/api/tenant-prompt-layer', { method: 'DELETE' });
+      if (res.ok) setTenantPromptLayer(await res.json());
+      setIsEditingTenantPromptLayer(false);
+    } finally {
+      setIsSavingTenantPromptLayer(false);
+    }
+  };
+
   const handleAddProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProductName.trim()) return;
@@ -403,7 +515,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: newProductName.trim(),
       price: newProductPrice.trim() || 'Sob Consulta',
-      description: newProductDesc.trim() || 'Sem descrição cadastrada'
+      description: newProductDesc.trim() || 'Sem descrição cadastrada',
+      durationMinutes: newProductDuration.trim() ? Number(newProductDuration) : undefined,
     };
     setFormData((prev) => ({
       ...prev,
@@ -412,6 +525,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setNewProductName('');
     setNewProductPrice('');
     setNewProductDesc('');
+    setNewProductDuration('');
   };
 
   const handleDeleteProduct = (id: string) => {
@@ -481,6 +595,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       products: prev.products.map((p) =>
         p.id === productId ? { ...p, variants: (p.variants || []).filter((_, i) => i !== index) } : p
       ),
+    }));
+  };
+
+  const handleProductDurationChange = (id: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === id ? { ...p, durationMinutes: value.trim() ? Number(value) : undefined } : p)),
     }));
   };
 
@@ -963,6 +1084,120 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       </div>
 
+      {/* Copiar Base de Conhecimento real de outro tenant (só saas_admin) */}
+      {copyableTenants.length > 0 && (
+        <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-md space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <Download className="w-4 h-4 text-sky-400" />
+              Copiar Base de Conhecimento de outra empresa
+            </span>
+            <span className="text-[11px] text-slate-500">Só saas_admin • útil pra configurar um tenant novo a partir de um já pronto</span>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <select
+              value={copySourceTenantId}
+              onChange={(e) => setCopySourceTenantId(e.target.value)}
+              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/60"
+            >
+              <option value="">Selecione a empresa de origem...</option>
+              {copyableTenants.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleCopyFromTenant}
+              disabled={!copySourceTenantId || isCopyingKb}
+              className="px-4 py-2 rounded-xl font-bold text-xs bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              {isCopyingKb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              <span>Carregar nesta base</span>
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Preenche o formulário abaixo com produtos, regras, FAQs e mensagem inicial (texto/imagem) dessa empresa — vídeos e arquivos anexados não são copiados, precisam ser re-anexados aqui se fizerem falta. Nada é salvo até você clicar em "Salvar Regras no Agente".
+          </p>
+        </div>
+      )}
+
+      {/* Camada 1 (regras universais) por tenant — só aparece pra quem tem papel admin+ (403 do backend = seção oculta) */}
+      {tenantPromptLayerVisible && tenantPromptLayer && (
+        <div className="bg-slate-900/90 border border-amber-800/40 rounded-2xl p-4 shadow-md space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-amber-400" />
+              Regras Universais da Plataforma (Camada 1)
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {tenantPromptLayer.isCustomized ? 'Personalizada por esta empresa' : 'Herdada da regra padrão da plataforma'}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Regras de segurança/comportamento que valem antes de qualquer coisa cadastrada abaixo (ex: nunca inventar preço, nunca confirmar pagamento sozinho). Só pra você saber o que já está garantido — evita cadastrar uma regra duplicada ou conflitante aqui embaixo sem saber que isso já existe. Editar aqui muda só esta empresa, nunca as outras.
+          </p>
+          {!isEditingTenantPromptLayer ? (
+            <>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 leading-relaxed max-h-40 overflow-y-auto whitespace-pre-wrap">
+                {tenantPromptLayer.content}
+              </div>
+              <button
+                type="button"
+                onClick={handleStartEditTenantPromptLayer}
+                className="px-3 py-2 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer"
+              >
+                Editar pra esta empresa
+              </button>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <AutoResizeTextarea
+                minRows={6}
+                value={tenantPromptLayerDraft}
+                onChange={(e) => setTenantPromptLayerDraft(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-200 focus:outline-none focus:border-amber-500/60"
+              />
+              <input
+                type="password"
+                value={tenantPromptLayerPassword}
+                onChange={(e) => setTenantPromptLayerPassword(e.target.value)}
+                placeholder="Confirme sua senha pra salvar"
+                className="w-full sm:w-72 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500/60"
+              />
+              {tenantPromptLayerError && <p className="text-[11px] text-red-400">{tenantPromptLayerError}</p>}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveTenantPromptLayer}
+                  disabled={isSavingTenantPromptLayer}
+                  className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSavingTenantPromptLayer ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>Salvar (só esta empresa)</span>
+                </button>
+                {tenantPromptLayer.isCustomized && (
+                  <button
+                    type="button"
+                    onClick={handleResetTenantPromptLayer}
+                    disabled={isSavingTenantPromptLayer}
+                    className="px-3 py-2 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Restaurar padrão da plataforma</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsEditingTenantPromptLayer(false)}
+                  className="px-3 py-2 text-slate-500 hover:text-slate-300 text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Sub-navigation Tabs inside Knowledge Base */}
       <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto scrollbar-none text-xs">
         <button
@@ -1288,7 +1523,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             {/* Add New Product Form */}
             <form onSubmit={handleAddProduct} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
               <span className="text-xs font-bold text-emerald-400 block">Cadastrar Novo Produto ou Serviço:</span>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <input
                   type="text"
                   value={newProductName}
@@ -1308,6 +1543,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   value={newProductDesc}
                   onChange={(e) => setNewProductDesc(e.target.value)}
                   placeholder="Descrição resumida do item"
+                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  value={newProductDuration}
+                  onChange={(e) => setNewProductDuration(e.target.value)}
+                  placeholder="Duração (min)"
+                  title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
                   className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
                 />
               </div>
@@ -1347,6 +1591,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar preço"
                     />
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="w-3 h-3 text-slate-500 shrink-0" />
+                      <input
+                        type="number"
+                        min="0"
+                        value={prod.durationMinutes ?? ''}
+                        onChange={(e) => handleProductDurationChange(prod.id, e.target.value)}
+                        placeholder="Duração (min)"
+                        title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
+                        className="w-full bg-transparent text-xs text-slate-300 focus:outline-none focus:bg-slate-900 rounded py-0.5"
+                      />
+                    </div>
                     <AutoResizeTextarea
                       minRows={2}
                       value={prod.description}

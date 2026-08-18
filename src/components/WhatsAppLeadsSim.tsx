@@ -45,7 +45,6 @@ import {
   Trash2,
   Reply,
   Forward,
-  Pencil,
   Tag,
   Plus,
   Pin,
@@ -430,6 +429,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Achado real em produção: o aviso de erro ficava preso na tela pra sempre —
+  // "Tentar Novamente" sempre reanalisava a conversa com IA, mesmo quando o
+  // que falhou foi outra coisa (ex: arquivar/fixar/silenciar conversa), e não
+  // havia nenhum jeito de simplesmente dispensar o aviso. Guarda a ação que
+  // realmente falhou pra retentar a coisa certa; undefined = sem retry
+  // específico (cai no fallback de reanalisar), null = falha já resolvida
+  // (não mostra botão de retry, só dispensar).
+  const [errorRetryAction, setErrorRetryAction] = useState<(() => void) | null | undefined>(undefined);
 
   // Auto analysis toggle — cada análise consome tokens reais do Gemini (ver
   // tokenUsageStore.ts), inclusive só de abrir uma conversa pra dar uma
@@ -505,14 +512,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Active Image Modal / Lightbox state
   const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
 
-  // Ações de mensagem — responder (quote), encaminhar, reagir, editar.
-  // Metadados só do painel (não refletem no WhatsApp real via Meta Cloud API).
+  // Ações de mensagem — responder (quote, chega no WhatsApp real quando a
+  // mensagem citada tem id de provedor — ver getMessageForReply no
+  // backend), encaminhar, reagir. "Editar" foi removido (18/08/2026,
+  // pedido direto): só alterava nosso registro interno, nunca o que o
+  // cliente já tinha recebido de verdade — só confundia o operador.
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-  /** Achado real (pedido direto, com print do WhatsApp de referência): a barra de ícones sempre visível no hover (Responder/Encaminhar/Reagir/Editar) mais o botão de apagar solto no rodapé do balão eram poluição visual — o WhatsApp de verdade usa um único gatilho "⋮" que abre um menu discreto, igual ao menu ⋮ do cabeçalho da conversa (ver isHeaderMenuOpen) já usado neste mesmo arquivo. Substituído por esse único estado. */
+  /** Achado real (pedido direto, com print do WhatsApp de referência): a barra de ícones sempre visível no hover (Responder/Encaminhar/Reagir) mais o botão de apagar solto no rodapé do balão eram poluição visual — o WhatsApp de verdade usa um único gatilho "⋮" que abre um menu discreto, igual ao menu ⋮ do cabeçalho da conversa (ver isHeaderMenuOpen) já usado neste mesmo arquivo. Substituído por esse único estado. */
   const [openMessageMenuFor, setOpenMessageMenuFor] = useState<string | null>(null);
 
   const scrollToMessage = (messageId: string) => {
@@ -1418,6 +1427,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [manualDate, setManualDate] = useState('');
   const [manualTime, setManualTime] = useState('');
   const [manualNotes, setManualNotes] = useState('');
+  const [manualPaymentReceived, setManualPaymentReceived] = useState(false);
   const [isCreatingManualAppointment, setIsCreatingManualAppointment] = useState(false);
   const [manualAppointmentError, setManualAppointmentError] = useState<string | null>(null);
   const [manualAppointmentSuccess, setManualAppointmentSuccess] = useState(false);
@@ -1437,7 +1447,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/manual-appointment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso, notes: manualNotes.trim() || undefined }),
+        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso, notes: manualNotes.trim() || undefined, paymentReceived: manualPaymentReceived }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -1447,6 +1457,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setManualDate('');
       setManualTime('');
       setManualNotes('');
+      setManualPaymentReceived(false);
       setManualAppointmentSuccess(true);
       setTimeout(() => setManualAppointmentSuccess(false), 4000);
     } catch (err: any) {
@@ -1617,7 +1628,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Arquivar/fixar/silenciar/marcar como não lida — menu ⋮ de cada conversa.
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
-  // atualizam o estado local, igual ao padrão de handleSaveEditedMessage.
+  // atualizam o estado local.
   const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean }) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
@@ -1640,9 +1651,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           manuallyUnread: !!data.conversation?.manuallyUnread,
           aiBlockedAt: data.conversation?.aiBlockedAt,
         } : l)));
+        setErrorMsg(null);
+        setErrorRetryAction(undefined);
       } catch (err) {
         console.error('Falha ao atualizar organização da conversa no servidor:', err);
         setErrorMsg('Não foi possível salvar essa ação no servidor. Tente de novo.');
+        setErrorRetryAction(() => () => handleUpdateConversationState(leadId, patch));
       }
       return;
     }
@@ -1855,11 +1869,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (e) e.preventDefault();
     if (!inputMessage.trim() || !selectedLead) return;
 
-    if (editingMessageId) {
-      await handleSaveEditedMessage(editingMessageId, inputMessage.trim());
-      return;
-    }
-
     const replyToMessageId = replyingTo?.id;
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -1904,50 +1913,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const handleReplyToMessage = (msg: ChatMessage) => {
-    setEditingMessageId(null);
     setReplyingTo(msg);
-  };
-
-  const handleStartEditMessage = (msg: ChatMessage) => {
-    setReplyingTo(null);
-    setEditingMessageId(msg.id);
-    setInputMessage(msg.text || '');
-  };
-
-  const handleCancelEdit = () => {
-    setEditingMessageId(null);
-    setInputMessage('');
-  };
-
-  // Edita o texto de uma mensagem já enviada — só mensagens do agente/
-  // operador (o botão de editar só aparece nelas), nunca do lead (seria
-  // falsificar o que o cliente disse). Metadado só do painel.
-  const handleSaveEditedMessage = async (messageId: string, newText: string) => {
-    if (!selectedLead) return;
-    if ((selectedLead as any).isReal) {
-      try {
-        const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(messageId)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: newText }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      } catch (err) {
-        console.error('Falha ao editar mensagem real no servidor:', err);
-        setErrorMsg('Não foi possível editar a mensagem no servidor. Tente de novo.');
-        return;
-      }
-    }
-
-    setLeads((prev) =>
-      prev.map((l) =>
-        l.id === selectedLead.id
-          ? { ...l, messages: (l.messages || []).map((m) => (m.id === messageId ? { ...m, text: newText, editedAt: new Date().toISOString() } : m)) }
-          : l
-      )
-    );
-    setEditingMessageId(null);
-    setInputMessage('');
   };
 
   // Encaminha uma mensagem existente pra outro contato — metadado só do
@@ -2590,13 +2556,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <span>{errorMsg}</span>
             </div>
           </div>
-          <button
-            onClick={() => selectedLead && handleAnalyzeConversation(selectedLead)}
-            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 flex-shrink-0 transition-all cursor-pointer"
-          >
-            <RefreshCw className="w-3 h-3" />
-            <span>Tentar Novamente</span>
-          </button>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => {
+                if (errorRetryAction) {
+                  errorRetryAction();
+                } else if (selectedLead) {
+                  handleAnalyzeConversation(selectedLead);
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Tentar Novamente</span>
+            </button>
+            <button
+              onClick={() => { setErrorMsg(null); setErrorRetryAction(undefined); }}
+              className="p-1.5 rounded-lg text-amber-400 hover:text-amber-200 hover:bg-amber-500/10 transition-all cursor-pointer"
+              title="Dispensar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -2793,12 +2774,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 Não lidos ({unreadLeadsCount})
               </button>
 
-              {/* Status e Arquivadas — vieram da barra de ações acima
-                  (14/08/2026, pedido direto: ficavam redundantes lá em cima,
-                  fazem mais sentido junto dos filtros da própria lista de
-                  conversas que afetam). Só ícone aqui por causa do espaço
-                  estreito desta fileira — título explica cada um. */}
-              {statusAvailable ? (
+              {/* Status — só aparece pra números conectados via Evolution API
+                  (QR Code); na Meta Cloud API oficial nunca funciona, então
+                  nem mostra o ícone desabilitado (pedido direto, 18/08/2026:
+                  ícone inútil/confuso pra quem tá na Meta). O botão de "Ver
+                  Arquivadas" separado foi removido no mesmo pedido — ficou
+                  redundante depois que a seção "Arquivadas" passou a
+                  aparecer fixa no topo da própria lista quando há alguma
+                  conversa arquivada (ver abaixo). */}
+              {statusAvailable && (
                 <button
                   type="button"
                   onClick={() => setIsStatusModalOpen(true)}
@@ -2807,24 +2791,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 >
                   <CircleDashed className="w-3.5 h-3.5" />
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial"
-                  className="flex-shrink-0 p-1.5 rounded-full bg-[#202c33] text-slate-500 opacity-50 cursor-not-allowed"
-                >
-                  <CircleDashed className="w-3.5 h-3.5" />
-                </button>
               )}
-              <button
-                type="button"
-                onClick={() => { setShowArchived(true); setMobileThreadOpen(false); }}
-                title="Ver conversas arquivadas"
-                className="flex-shrink-0 p-1.5 rounded-full bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white transition-all cursor-pointer"
-              >
-                <Archive className="w-3.5 h-3.5" />
-              </button>
 
               {tenantLabelSuggestions.length > 0 && (
                 <select
@@ -3208,7 +3175,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         }`}
                       >
                         {msg.timestamp}
-                        {msg.editedAt && <span className="italic opacity-70"> (editado)</span>}
                         {!isLead && (msg.sendFailed ? (
                           <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
                         ) : (
@@ -3223,7 +3189,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         className={`group relative flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
                       >
                         {/* Menu de ações da mensagem — gatilho único "⋮" que abre um
-                            menu discreto (Responder/Copiar/Encaminhar/Reagir/Editar/
+                            menu discreto (Responder/Copiar/Encaminhar/Reagir/
                             Apagar), igual ao menu nativo do WhatsApp (print de
                             referência) e ao mesmo padrão visual já usado no menu ⋮ do
                             cabeçalho da conversa (isHeaderMenuOpen). Substitui a barra
@@ -3280,16 +3246,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   <Smile className="w-3.5 h-3.5" />
                                   <span>Reagir</span>
                                 </button>
-                                {!isLead && (
-                                  <button
-                                    type="button"
-                                    onClick={() => { handleStartEditMessage(msg); setOpenMessageMenuFor(null); }}
-                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                    <span>Editar</span>
-                                  </button>
-                                )}
                                 <div className="border-t border-slate-700" />
                                 <button
                                   type="button"
@@ -3364,7 +3320,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                     isLead ? 'bg-slate-800/60 border-emerald-500' : 'bg-black/20 border-emerald-300'
                                   }`}
                                 >
-                                  <div className="text-[9px] font-bold text-emerald-400">
+                                  <div className="text-[9px] font-bold text-emerald-400 truncate">
                                     {quotedMessage.sender === 'lead' ? selectedLead.name : 'Você'}
                                   </div>
                                   <div className="text-[10px] opacity-80 truncate">
@@ -3662,22 +3618,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 </div>
 
-                {/* Reply / Edit Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido/editado acima do campo de texto */}
-                {(replyingTo || editingMessageId) && (
+                {/* Reply Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido acima do campo de texto */}
+                {replyingTo && (
                   <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-[#00a884] rounded-lg px-3 py-1.5">
                     <div className="min-w-0">
-                      <div className="text-[10px] font-bold text-[#00a884]">
-                        {editingMessageId ? 'Editando mensagem' : `Respondendo a: ${replyingTo?.sender === 'lead' ? selectedLead.name : 'Você'}`}
+                      <div className="text-[10px] font-bold text-[#00a884] truncate">
+                        {`Respondendo a: ${replyingTo.sender === 'lead' ? selectedLead.name : 'Você'}`}
                       </div>
                       <div className="text-[11px] text-slate-300 truncate">
-                        {editingMessageId
-                          ? selectedLead.messages?.find((m) => m.id === editingMessageId)?.text
-                          : replyingTo?.text || (replyingTo?.type === 'image' ? '📷 Imagem' : replyingTo?.type === 'audio' ? '🎤 Áudio' : replyingTo?.type === 'file' ? '📎 Arquivo' : '')}
+                        {replyingTo.text || (replyingTo.type === 'image' ? '📷 Imagem' : replyingTo.type === 'audio' ? '🎤 Áudio' : replyingTo.type === 'file' ? '📎 Arquivo' : '')}
                       </div>
                     </div>
                     <button
                       type="button"
-                      onClick={editingMessageId ? handleCancelEdit : () => setReplyingTo(null)}
+                      onClick={() => setReplyingTo(null)}
                       className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer flex-shrink-0"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -3855,10 +3809,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onTimeChange={setManualTime}
         notes={manualNotes}
         onNotesChange={setManualNotes}
+        paymentReceived={manualPaymentReceived}
+        onPaymentReceivedChange={setManualPaymentReceived}
         error={manualAppointmentError}
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
-        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); }}
+        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); }}
       />
 
       <ContractModal
@@ -3940,6 +3896,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onCreateAdHocContactForAppointment={handleCreateAdHocContactForAppointment}
         onPickLeadForNewAppointment={handlePickLeadForNewAppointment}
         monthLabel={calendarMonthLabel}
+        calendarYear={calendarMonth.year}
+        calendarMonthNumber={calendarMonth.month}
         onPrevMonth={() => changeCalendarMonth(-1)}
         onNextMonth={() => changeCalendarMonth(1)}
         onToggleCompleted={handleToggleEventCompleted}

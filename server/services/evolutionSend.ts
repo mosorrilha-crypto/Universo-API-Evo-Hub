@@ -13,20 +13,39 @@ function requireCredentials(instanceName: string | undefined, apiUrl: string | u
   }
 }
 
-/** Envio de mensagem de texto via Evolution API (POST /message/sendText/{instance}). */
+/**
+ * Envio de mensagem de texto via Evolution API (POST /message/sendText/{instance}).
+ *
+ * `quoted` (opcional) — mesmo objetivo do `replyToWamid` de metaSend.ts:
+ * quando o operador responde a uma mensagem específica no painel, monta o
+ * formato de citação que o Baileys/Evolution espera (`quoted.key` +
+ * `quoted.message.conversation`), pra o WhatsApp do cliente mostrar "em
+ * resposta a" de verdade em vez de só um metadado nosso. Retorna o id real
+ * da mensagem enviada (`data.key.id`) — precisamos dele pra permitir citar
+ * essa mesma mensagem numa resposta futura.
+ */
 export async function sendEvolutionTextMessage(
   instanceName: string | undefined,
   apiUrl: string | undefined,
   apiKey: string | undefined,
   to: string,
-  text: string
-): Promise<void> {
+  text: string,
+  quoted?: { id: string; remoteJid: string; fromMe: boolean; text?: string }
+): Promise<string | undefined> {
   requireCredentials(instanceName, apiUrl, apiKey);
+
+  const body: Record<string, unknown> = { number: to, text };
+  if (quoted) {
+    body.quoted = {
+      key: { id: quoted.id, remoteJid: quoted.remoteJid, fromMe: quoted.fromMe },
+      message: { conversation: quoted.text || '' },
+    };
+  }
 
   const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/message/sendText/${instanceName}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: apiKey! },
-    body: JSON.stringify({ number: to, text }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
@@ -34,6 +53,8 @@ export async function sendEvolutionTextMessage(
     const data = await res.json().catch(() => ({}) as any);
     throw new Error(`Falha ao enviar mensagem via Evolution API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
   }
+  const data = await res.json().catch(() => ({}) as any);
+  return data?.key?.id;
 }
 
 /** Envio de mídia (imagem, áudio, documento) via Evolution API (POST /message/sendMedia/{instance}). */
