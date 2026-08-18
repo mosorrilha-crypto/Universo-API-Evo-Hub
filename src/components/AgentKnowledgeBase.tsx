@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType } from '../types';
+import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
@@ -46,6 +46,10 @@ interface AgentKnowledgeBaseProps {
   businessHours: BusinessHours;
   onSaveBusinessHours: (hours: BusinessHours) => Promise<boolean>;
   onGoToWhatsAppSim: () => void;
+  /** Tenants cuja Base de Conhecimento pode ser copiada como ponto de partida — vazio pra quem não é saas_admin (a rota no backend também exige esse papel). */
+  copyableTenants?: Tenant[];
+  /** Busca a Base de Conhecimento REAL de outro tenant (GET /api/admin/tenants/:id/knowledge-base) — null em caso de falha, o próprio App.tsx já mostra o toast de erro. */
+  onFetchTenantKnowledgeBase?: (tenantId: string) => Promise<AgentKnowledgeBase | null>;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -306,7 +310,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   onSaveKnowledgeBase,
   businessHours,
   onSaveBusinessHours,
-  onGoToWhatsAppSim
+  onGoToWhatsAppSim,
+  copyableTenants = [],
+  onFetchTenantKnowledgeBase,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -394,6 +400,35 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       documents: preset.data.documents ?? [],
       ...preset.data,
     }));
+  };
+
+  // Pedido real (18/08/2026): os "Modelos de Negócio Prontos" acima são
+  // fixos em código, sem jeito de editar sem deploy — isso deixa carregar a
+  // Base de Conhecimento REAL de outro tenant como ponto de partida (mesmo
+  // raciocínio de handleApplyPreset acima, mas buscando do servidor em vez
+  // de um preset hardcoded). Vídeos/arquivos anexados via Storage (bloco de
+  // 1º contato tipo vídeo/arquivo) NÃO vêm nessa cópia — ver comentário da
+  // rota GET /api/admin/tenants/:id/knowledge-base no backend — precisam
+  // ser re-anexados manualmente se fizerem falta.
+  const [copySourceTenantId, setCopySourceTenantId] = useState('');
+  const [isCopyingKb, setIsCopyingKb] = useState(false);
+  const handleCopyFromTenant = async () => {
+    if (!copySourceTenantId || !onFetchTenantKnowledgeBase) return;
+    setIsCopyingKb(true);
+    try {
+      const copied = await onFetchTenantKnowledgeBase(copySourceTenantId);
+      if (!copied) return; // erro já mostrado via toast em App.tsx
+      setFormData((prev) => ({
+        ...prev,
+        ...copied,
+        products: ensureUniqueIds(copied.products, 'prod'),
+        faqs: ensureUniqueIds(copied.faqs, 'faq'),
+        documents: ensureUniqueIds(copied.documents, 'doc'),
+        firstContactBlocks: ensureUniqueIds(copied.firstContactBlocks, 'fcblock'),
+      }));
+    } finally {
+      setIsCopyingKb(false);
+    }
   };
 
   const handleAddProduct = (e: React.FormEvent) => {
@@ -916,6 +951,42 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           ))}
         </div>
       </div>
+
+      {/* Copiar Base de Conhecimento real de outro tenant (só saas_admin) */}
+      {copyableTenants.length > 0 && (
+        <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-md space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <Download className="w-4 h-4 text-sky-400" />
+              Copiar Base de Conhecimento de outra empresa
+            </span>
+            <span className="text-[11px] text-slate-500">Só saas_admin • útil pra configurar um tenant novo a partir de um já pronto</span>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <select
+              value={copySourceTenantId}
+              onChange={(e) => setCopySourceTenantId(e.target.value)}
+              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/60"
+            >
+              <option value="">Selecione a empresa de origem...</option>
+              {copyableTenants.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleCopyFromTenant}
+              disabled={!copySourceTenantId || isCopyingKb}
+              className="px-4 py-2 rounded-xl font-bold text-xs bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              {isCopyingKb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              <span>Carregar nesta base</span>
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Preenche o formulário abaixo com produtos, regras, FAQs e mensagem inicial (texto/imagem) dessa empresa — vídeos e arquivos anexados não são copiados, precisam ser re-anexados aqui se fizerem falta. Nada é salvo até você clicar em "Salvar Regras no Agente".
+          </p>
+        </div>
+      )}
 
       {/* Sub-navigation Tabs inside Knowledge Base */}
       <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto scrollbar-none text-xs">

@@ -6,6 +6,7 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { setEvolutionWebhook } from '../services/evolutionSend';
 import { getGlobalPromptLayerRow, setGlobalPromptLayer } from '../services/globalPromptStore';
+import { getKnowledgeBase } from '../services/knowledgeBaseStore';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 
 interface AdminRouterDeps {
@@ -604,6 +605,35 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (upsertError) return res.status(500).json({ error: upsertError.message });
 
     res.json({ success: true });
+  }));
+
+  // ── Copiar Base de Conhecimento de outro tenant (18/08/2026) ────────────
+  // Pedido real do saas_admin: os "Modelos de Negócio Prontos" do painel
+  // (AgentKnowledgeBase.tsx) são fixos em código, sem jeito de editar sem
+  // deploy. Isso deixa carregar a Base de Conhecimento REAL de qualquer
+  // tenant existente como ponto de partida pra configurar um tenant novo —
+  // só LEITURA aqui (não grava nada; quem chama decide se aplica e depois
+  // clica em "Salvar Regras no Agente" no tenant de destino).
+  //
+  // Remove referências de Storage (`firstContactBlocks` do tipo
+  // video/file, `exampleVideoId` dos produtos) antes de devolver: esses
+  // arquivos vivem sob o PREFIXO do tenant de origem (ver
+  // knowledgeBaseVideoStore.ts/knowledgeBaseDocumentStore.ts, sempre
+  // scoped por tenantId) — copiar a referência crua faria o tenant novo
+  // tentar mandar um vídeo/arquivo que não existe no storage dele, uma
+  // falha silenciosa só visível no log do servidor (ver
+  // firstContactMessage.ts). Conteúdo inline (imagem base64 de produto e
+  // de bloco de 1º contato) não tem esse problema, continua igual.
+  router.get('/api/admin/tenants/:id/knowledge-base', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+    const kb = await getKnowledgeBase(req.params.id);
+    if (!kb) return res.status(404).json({ error: 'Este tenant ainda não tem Base de Conhecimento salva.' });
+    res.json({
+      knowledgeBase: {
+        ...kb,
+        products: (kb.products || []).map(({ exampleVideoId, ...product }) => product),
+        firstContactBlocks: (kb.firstContactBlocks || []).filter((block) => block.type === 'text' || block.type === 'image'),
+      },
+    });
   }));
 
   // ── Instagram DM (Fase 1) — credenciais por tenant ──────────────────────

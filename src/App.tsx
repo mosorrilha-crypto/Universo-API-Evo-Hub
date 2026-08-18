@@ -958,6 +958,29 @@ export const App: React.FC = () => {
               }
             }}
             onGoToWhatsAppSim={() => setActiveTab('whatsapp')}
+            // Pedido real do saas_admin (18/08/2026): os "Modelos de Negócio
+            // Prontos" são fixos em código — isso deixa carregar a Base de
+            // Conhecimento REAL de outro tenant como ponto de partida pra
+            // configurar um tenant novo. Só saas_admin vê essa opção (outras
+            // tenants são dado de outro cliente); a rota no backend também
+            // exige esse papel.
+            copyableTenants={canSeeSaasMaster ? tenants.filter((t) => t.id !== activeTenant.id) : []}
+            onFetchTenantKnowledgeBase={async (sourceTenantId) => {
+              try {
+                const res = await apiFetch(`/api/admin/tenants/${encodeURIComponent(sourceTenantId)}/knowledge-base`);
+                if (!res.ok) {
+                  const data = await res.json().catch(() => null);
+                  showToast(data?.error || 'Não foi possível carregar a base de conhecimento desse tenant.');
+                  return null;
+                }
+                const data = await res.json();
+                return data.knowledgeBase as AgentKnowledgeBase;
+              } catch (err) {
+                console.error('Falha ao buscar base de conhecimento de outro tenant:', err);
+                showToast('Não foi possível carregar a base de conhecimento desse tenant. Tente de novo.');
+                return null;
+              }
+            }}
           />
         )}
 
