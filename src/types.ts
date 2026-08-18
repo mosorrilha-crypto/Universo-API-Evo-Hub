@@ -382,17 +382,11 @@ export interface WebhookConfig {
   minUrgencyForAlert: number;
 }
 
-/** Espelha TenantTokenSummary (server/services/tokenUsageStore.ts) — sem
- * `estimatedCostUSD`: não existe uma constante confiável de preço por token
- * pro modelo em uso, e o backend nunca calculou isso por tenant. Esse campo
- * chegou a existir aqui e causou uma tela branca real em produção
- * (13/08/2026) — `tRecord.estimatedCostUSD.toFixed(5)` lançando sobre
- * `undefined` assim que telemetria real (não mais vazia) chegava do
- * backend, sem Error Boundary pra conter o crash. */
 /** Espelha ProviderTokenBreakdown (server/services/tokenUsageStore.ts). */
 export interface ProviderTokenBreakdown {
   tokens: number;
   requests: number;
+  costUSD: number;
 }
 
 /** Espelha ProviderBreakdown (server/services/tokenUsageStore.ts) — router fallback Groq: quanto do total veio de cada provedor. */
@@ -401,6 +395,15 @@ export interface ProviderBreakdown {
   groq: ProviderTokenBreakdown;
 }
 
+/** Espelha TenantTokenSummary (server/services/tokenUsageStore.ts).
+ * `estimatedCostUSD`/`cacheSavingsUSD`: calculados a partir do preço
+ * confirmado do modelo em uso (server/services/modelPricing.ts) — sempre um
+ * número, o backend nunca omite este campo (ver
+ * server/routes/__tests__/telemetryShape.test.ts, que trava isso). Um
+ * incidente real em produção (13/08/2026) veio do caminho oposto: este
+ * campo existia só no frontend, sem o backend nunca enviá-lo —
+ * `tRecord.estimatedCostUSD.toFixed(5)` lançava sobre `undefined` assim que
+ * telemetria real chegava, sem Error Boundary pra conter o crash. */
 export interface TenantTokenTelemetry {
   tenantId: string;
   tenantName: string;
@@ -409,6 +412,8 @@ export interface TenantTokenTelemetry {
   totalTokens: number;
   requestCount: number;
   cachedTokensSaved: number;
+  estimatedCostUSD: number;
+  cacheSavingsUSD: number;
   lastRequestAt: string;
   providerBreakdown: ProviderBreakdown;
 }
