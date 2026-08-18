@@ -87,6 +87,19 @@ const ACTIVE_TENANT_OVERRIDE_KEY = 'saas_active_tenant_override';
 // colisão.
 const kbCacheKey = (tenantId: string) => `saas_agent_kb_${tenantId}`;
 
+// Bug real relatado (18/08/2026): o cache de leads do CRM (`saas_crm_leads`)
+// também usava uma chave única global — e pior, o efeito que busca leads
+// reais (fetchCrmLeads, abaixo) nunca removia do estado um lead que não veio
+// mais na resposta atual (só ADICIONA/ATUALIZA por id), diferente do
+// equivalente em WhatsAppLeadsSim.tsx (fetchRealConversations), que já poda
+// corretamente. Resultado: trocar de tenant no seletor acumulava leads reais
+// de todos os tenants já vistos no navegador, gravados na mesma chave global
+// que WhatsAppLeadsSim.tsx também lê ao montar — contato de um tenant
+// aparecia na lista de outro. Chave por tenant + poda corrigem os dois lados.
+const leadsCacheKey = (tenantId: string) => `saas_crm_leads_${tenantId}`;
+/** Mesmo raciocínio de leadsCacheKey acima, pro cache de transações financeiras. */
+const transactionsCacheKey = (tenantId: string) => `saas_transactions_${tenantId}`;
+
 export const App: React.FC = () => {
   // Navigation & View State
   // Aberto pelo ícone instalado (PWA do atendente, issue #159), ou papel
@@ -269,7 +282,7 @@ export const App: React.FC = () => {
   // remove, os fictícios ficavam "grudados" na lista pra sempre, misturados
   // com clientes reais. Começa vazia agora.
   const [leads, setLeads] = useState<LeadInfo[]>(() => {
-    const saved = localStorage.getItem('saas_crm_leads');
+    const saved = localStorage.getItem(leadsCacheKey(activeTenant.id));
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -279,7 +292,7 @@ export const App: React.FC = () => {
   // GET /api/financial/transactions abaixo, só ADICIONA por id, nunca
   // remove). Começa vazia.
   const [transactions, setTransactions] = useState<FinancialTransaction[]>(() => {
-    const saved = localStorage.getItem('saas_transactions');
+    const saved = localStorage.getItem(transactionsCacheKey(activeTenant.id));
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -333,12 +346,19 @@ export const App: React.FC = () => {
   // no logout — o próximo login sempre recomeça do zero e busca os dados
   // reais do tenant certo.
   const clearCachedTenantScopedData = () => {
-    localStorage.removeItem('saas_crm_leads');
-    localStorage.removeItem('saas_agent_kb'); // chave antiga (pré cache por tenant) — remove se sobrar de sessão anterior
-    localStorage.removeItem('saas_transactions');
+    localStorage.removeItem('saas_crm_leads'); // chave antiga (pré cache por tenant) — remove se sobrar de sessão anterior
+    localStorage.removeItem('saas_agent_kb'); // idem
+    localStorage.removeItem('saas_transactions'); // chave antiga (pré cache por tenant)
     localStorage.removeItem(ACTIVE_TENANT_OVERRIDE_KEY);
     for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('saas_agent_kb_')) localStorage.removeItem(key);
+      if (
+        key.startsWith('saas_agent_kb_') ||
+        key.startsWith('saas_crm_leads_') ||
+        key.startsWith('saas_whatsapp_leads_') ||
+        key.startsWith('saas_transactions_')
+      ) {
+        localStorage.removeItem(key);
+      }
     }
     setLeads([]);
     setTransactions([]);
@@ -369,12 +389,24 @@ export const App: React.FC = () => {
   }, [tenants]);
 
   useEffect(() => {
-    safeSetLocalStorage('saas_crm_leads', JSON.stringify(leads));
-  }, [leads]);
+    safeSetLocalStorage(leadsCacheKey(activeTenant.id), JSON.stringify(leads));
+  }, [leads, activeTenant.id]);
+
+  // Troca de tenant: carrega o cache do tenant novo (ou começa vazio) na
+  // hora, em vez de deixar os leads/transações do tenant anterior visíveis
+  // até o próximo tick do polling (até 8s) — mesmo raciocínio do fix de base
+  // de conhecimento acima.
+  useEffect(() => {
+    const cachedLeads = localStorage.getItem(leadsCacheKey(activeTenant.id));
+    setLeads(cachedLeads ? JSON.parse(cachedLeads) : []);
+    const cachedTx = localStorage.getItem(transactionsCacheKey(activeTenant.id));
+    setTransactions(cachedTx ? JSON.parse(cachedTx) : []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
 
   useEffect(() => {
-    safeSetLocalStorage('saas_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+    safeSetLocalStorage(transactionsCacheKey(activeTenant.id), JSON.stringify(transactions));
+  }, [transactions, activeTenant.id]);
 
   // As fotos de exemplo (`exampleImageBase64`, Epic 4.5.2) são o que estoura
   // a cota — e não precisam estar no cache: são carregadas de novo, completas,
@@ -452,8 +484,14 @@ export const App: React.FC = () => {
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!data?.leads || cancelled) return;
+          // Poda leads reais que não vêm mais nesta resposta (ex: sobraram
+          // de um tenant anterior, ver leadsCacheKey acima) — mesmo padrão
+          // de currentRealIds em WhatsAppLeadsSim.tsx.fetchRealConversations.
+          const currentRealIds = new Set((data.leads as any[]).map((crmLead) => `real-${crmLead.phone}`));
           setLeads((prev) => {
-            const byId = new Map<string, LeadInfo>(prev.map((l) => [l.id, l]));
+            const byId = new Map<string, LeadInfo>(
+              prev.filter((l) => !(l as any).isReal || currentRealIds.has(l.id)).map((l) => [l.id, l])
+            );
             for (const crmLead of data.leads as any[]) {
               const id = `real-${crmLead.phone}`;
               const existing = byId.get(id);
@@ -496,8 +534,11 @@ export const App: React.FC = () => {
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!data?.transactions || cancelled) return;
+          const currentRealIds = new Set((data.transactions as any[]).map((tx) => tx.id));
           setTransactions((prev) => {
-            const byId = new Map<string, FinancialTransaction>(prev.map((t) => [t.id, t]));
+            const byId = new Map<string, FinancialTransaction>(
+              prev.filter((t) => !(t as any).isReal || currentRealIds.has(t.id)).map((t) => [t.id, t])
+            );
             for (const tx of data.transactions as any[]) {
               byId.set(tx.id, { ...tx, tenantId: activeTenant.id, isReal: true } as FinancialTransaction);
             }

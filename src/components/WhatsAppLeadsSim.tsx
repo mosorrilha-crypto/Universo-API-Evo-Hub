@@ -400,8 +400,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // reais (buscados em App.tsx e sincronizados de volta nesta mesma chave)
   // só são ADICIONADOS, nunca removidos, os fictícios ficavam misturados
   // com clientes reais pra sempre. Começa vazia agora.
+  // Bug real relatado (18/08/2026): esta lista usava a MESMA chave global
+  // 'saas_crm_leads' que App.tsx usa pra um formato de dado diferente (CRM),
+  // e nenhuma delas era separada por tenant — trocar de empresa no seletor
+  // (saas_admin) e atualizar a página podia mostrar, por um instante,
+  // contatos reais de OUTRO tenant (chave própria + por tenant corrige).
+  const whatsappLeadsCacheKey = (tenantId: string) => `saas_whatsapp_leads_${tenantId}`;
   const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis })[]>(() => {
-    const saved = localStorage.getItem('saas_crm_leads');
+    const saved = localStorage.getItem(whatsappLeadsCacheKey(activeTenant.id));
     return saved ? JSON.parse(saved) : [];
   });
   type PanelLead = (typeof leads)[number];
@@ -1130,6 +1136,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // de tenant, pra não arriscar comparar a contagem de mensagens de um
     // telefone contra o valor guardado de um tenant diferente.
     lastMessageCountRef.current = new Map();
+    // Troca de tenant: carrega o cache do tenant novo (ou começa vazio) na
+    // hora, em vez de deixar a lista do tenant anterior visível até
+    // fetchRealConversations() terminar logo abaixo.
+    const cachedForTenant = localStorage.getItem(whatsappLeadsCacheKey(activeTenant.id));
+    setLeads(cachedForTenant ? JSON.parse(cachedForTenant) : []);
 
     const fetchRealConversations = async () => {
       try {
@@ -1591,7 +1602,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     const remaining = leads.filter((l) => l.id !== leadId);
     setLeads(remaining);
-    localStorage.setItem('saas_crm_leads', JSON.stringify(remaining));
+    localStorage.setItem(whatsappLeadsCacheKey(activeTenant.id), JSON.stringify(remaining));
     if (onDeleteLead) {
       onDeleteLead(leadId);
     }
@@ -2213,7 +2224,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     setLeads((prev) => {
       const updated = [newLeadItem, ...prev];
-      localStorage.setItem('saas_crm_leads', JSON.stringify(updated));
+      localStorage.setItem(whatsappLeadsCacheKey(activeTenant.id), JSON.stringify(updated));
       return updated;
     });
     // Propaga pro state do App.tsx (usado pelo CRM/Financeiro/Atribuição) —
