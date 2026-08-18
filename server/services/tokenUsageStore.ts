@@ -111,7 +111,7 @@ const TELEMETRY_WINDOW_DAYS = 30;
  *
  * `estimatedCostUSD`/`totalSaaSCostUSD` são calculados por linha via
  * `estimateUsageCostUSD` (modelPricing.ts), usando o preço confirmado do
- * modelo efetivamente usado (`gemini-3.6-flash`/`llama-3.1-8b-instant`) na
+ * modelo efetivamente usado (`gemini-3.6-flash`/`openai/gpt-oss-20b`) na
  * data de cada chamada (`created_at` da linha, não a data de hoje) — nunca
  * um preço genérico "por token" sem fonte.
  */

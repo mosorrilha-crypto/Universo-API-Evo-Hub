@@ -8,7 +8,14 @@
  */
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.1-8b-instant';
+// Achado real em produção (18/08/2026): llama-3.1-8b-instant foi
+// descontinuado pela Groq em 16/08/2026 — toda chamada passou a responder
+// 404 "model_not_found" (100% de fallback silencioso pro Gemini, sem
+// nenhum aviso visível, já que o router trata qualquer falha do Groq como
+// "cai pro Gemini" por design). Substituto oficial recomendado pela própria
+// Groq na doc de depreciação (console.groq.com/docs/deprecations):
+// openai/gpt-oss-20b.
+const GROQ_MODEL = 'openai/gpt-oss-20b';
 
 /**
  * Timeout curto e sem retry — decisão explícita do plano aprovado: Groq

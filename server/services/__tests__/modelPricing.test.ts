@@ -16,7 +16,7 @@ describe('estimateUsageCostUSD', () => {
 
   it('groq: sem context caching real ainda — cached_tokens=0 não afeta o custo', () => {
     const cost = estimateUsageCostUSD('groq', 1_000_000, 1_000_000, 0, '2026-08-18T00:00:00.000Z');
-    expect(cost).toBeCloseTo(0.05 + 0.08, 8);
+    expect(cost).toBeCloseTo(0.075 + 0.3, 8);
   });
 
   it('nunca fica negativo mesmo se cached_tokens > prompt_tokens (dado inconsistente)', () => {
