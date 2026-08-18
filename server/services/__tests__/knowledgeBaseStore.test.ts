@@ -45,6 +45,28 @@ describe('formatKnowledgeBaseForPrompt', () => {
     const text = formatKnowledgeBaseForPrompt(kb);
     expect(text).not.toContain('maps');
   });
+
+  it('lista as variantes (tamanho + preço) de um produto unificado, pro agente cotar pelo tamanho certo', () => {
+    const kb: AgentKnowledgeBase = {
+      companyName: 'Clic Piscinas',
+      products: [
+        {
+          name: 'Piscina Fibratec Acapulco',
+          price: 'Sob consulta (varia por tamanho, ver descrição)',
+          description: 'Familia Acapulco.',
+          variants: [
+            { code: 'AC F400', dimensions: '4,10x2,30m', litros: 7800, price: 'Gs 12.000.000' },
+            { code: 'AC F500', dimensions: '5,20x2,70m', litros: 13600, price: 'Gs 15.000.000' },
+          ],
+        },
+      ],
+    };
+    const text = formatKnowledgeBaseForPrompt(kb);
+    expect(text).toContain('AC F400');
+    expect(text).toContain('Gs 12.000.000');
+    expect(text).toContain('AC F500');
+    expect(text).toContain('Gs 15.000.000');
+  });
 });
 
 /**

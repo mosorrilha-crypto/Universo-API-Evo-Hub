@@ -141,11 +141,22 @@ export interface LeadAttribution {
   capiEvents?: MetaCAPIEvent[];
 }
 
+/** Uma variante de tamanho/modelo dentro de um produto unificado — ver AgentProduct.variants. */
+export interface ProductVariant {
+  code: string;
+  dimensions?: string;
+  litros?: number;
+  price: string;
+  priceAmount?: number;
+}
+
 export interface AgentProduct {
   id: string;
   name: string;
   price: string;
   description: string;
+  /** Tamanhos/modelos dessa família, cada um com preço próprio (ver server/services/knowledgeBaseStore.ts). */
+  variants?: ProductVariant[];
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
   /**
