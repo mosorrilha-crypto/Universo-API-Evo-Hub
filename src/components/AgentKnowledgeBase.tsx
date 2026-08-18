@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AgentKnowledgeBase, AgentProduct, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
@@ -436,6 +436,75 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       }));
     } finally {
       setIsCopyingKb(false);
+    }
+  };
+
+  // Camada 1 (regras universais) por tenant (18/08/2026, pedido real do
+  // dono do produto) — até aqui era uma regra só, global, editável só por
+  // saas_admin; o admin de um tenant não tinha como nem ler esse texto,
+  // risco real de duplicar/entrar em conflito com uma regra que já está
+  // coberta ali. GET /api/tenant-prompt-layer exige papel admin+ — se este
+  // usuário não tiver (403), a seção simplesmente não aparece (nunca mostra
+  // erro pra quem não pode ver mesmo).
+  const [tenantPromptLayer, setTenantPromptLayer] = useState<{ content: string; isCustomized: boolean; updatedAt: string | null } | null>(null);
+  const [tenantPromptLayerVisible, setTenantPromptLayerVisible] = useState(false);
+  const [isEditingTenantPromptLayer, setIsEditingTenantPromptLayer] = useState(false);
+  const [tenantPromptLayerDraft, setTenantPromptLayerDraft] = useState('');
+  const [tenantPromptLayerPassword, setTenantPromptLayerPassword] = useState('');
+  const [tenantPromptLayerError, setTenantPromptLayerError] = useState<string | null>(null);
+  const [isSavingTenantPromptLayer, setIsSavingTenantPromptLayer] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/tenant-prompt-layer')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return; // 403 (papel abaixo de admin) — seção fica oculta
+        setTenantPromptLayer(data);
+        setTenantPromptLayerVisible(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleStartEditTenantPromptLayer = () => {
+    setTenantPromptLayerDraft(tenantPromptLayer?.content || '');
+    setTenantPromptLayerPassword('');
+    setTenantPromptLayerError(null);
+    setIsEditingTenantPromptLayer(true);
+  };
+
+  const handleSaveTenantPromptLayer = async () => {
+    if (!tenantPromptLayerDraft.trim() || !tenantPromptLayerPassword) {
+      setTenantPromptLayerError('Preencha o texto e confirme sua senha.');
+      return;
+    }
+    setIsSavingTenantPromptLayer(true);
+    setTenantPromptLayerError(null);
+    try {
+      const res = await apiFetch('/api/tenant-prompt-layer', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: tenantPromptLayerDraft, currentPassword: tenantPromptLayerPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setTenantPromptLayer(data);
+      setIsEditingTenantPromptLayer(false);
+      setTenantPromptLayerPassword('');
+    } catch (err: any) {
+      setTenantPromptLayerError(err.message || 'Não foi possível salvar. Tente de novo.');
+    } finally {
+      setIsSavingTenantPromptLayer(false);
+    }
+  };
+
+  const handleResetTenantPromptLayer = async () => {
+    setIsSavingTenantPromptLayer(true);
+    try {
+      const res = await apiFetch('/api/tenant-prompt-layer', { method: 'DELETE' });
+      if (res.ok) setTenantPromptLayer(await res.json());
+      setIsEditingTenantPromptLayer(false);
+    } finally {
+      setIsSavingTenantPromptLayer(false);
     }
   };
 
@@ -1002,6 +1071,84 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <p className="text-[11px] text-slate-500 leading-relaxed">
             Preenche o formulário abaixo com produtos, regras, FAQs e mensagem inicial (texto/imagem) dessa empresa — vídeos e arquivos anexados não são copiados, precisam ser re-anexados aqui se fizerem falta. Nada é salvo até você clicar em "Salvar Regras no Agente".
           </p>
+        </div>
+      )}
+
+      {/* Camada 1 (regras universais) por tenant — só aparece pra quem tem papel admin+ (403 do backend = seção oculta) */}
+      {tenantPromptLayerVisible && tenantPromptLayer && (
+        <div className="bg-slate-900/90 border border-amber-800/40 rounded-2xl p-4 shadow-md space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-amber-400" />
+              Regras Universais da Plataforma (Camada 1)
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {tenantPromptLayer.isCustomized ? 'Personalizada por esta empresa' : 'Herdada da regra padrão da plataforma'}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Regras de segurança/comportamento que valem antes de qualquer coisa cadastrada abaixo (ex: nunca inventar preço, nunca confirmar pagamento sozinho). Só pra você saber o que já está garantido — evita cadastrar uma regra duplicada ou conflitante aqui embaixo sem saber que isso já existe. Editar aqui muda só esta empresa, nunca as outras.
+          </p>
+          {!isEditingTenantPromptLayer ? (
+            <>
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 leading-relaxed max-h-40 overflow-y-auto whitespace-pre-wrap">
+                {tenantPromptLayer.content}
+              </div>
+              <button
+                type="button"
+                onClick={handleStartEditTenantPromptLayer}
+                className="px-3 py-2 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer"
+              >
+                Editar pra esta empresa
+              </button>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <AutoResizeTextarea
+                minRows={6}
+                value={tenantPromptLayerDraft}
+                onChange={(e) => setTenantPromptLayerDraft(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-200 focus:outline-none focus:border-amber-500/60"
+              />
+              <input
+                type="password"
+                value={tenantPromptLayerPassword}
+                onChange={(e) => setTenantPromptLayerPassword(e.target.value)}
+                placeholder="Confirme sua senha pra salvar"
+                className="w-full sm:w-72 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500/60"
+              />
+              {tenantPromptLayerError && <p className="text-[11px] text-red-400">{tenantPromptLayerError}</p>}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveTenantPromptLayer}
+                  disabled={isSavingTenantPromptLayer}
+                  className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSavingTenantPromptLayer ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>Salvar (só esta empresa)</span>
+                </button>
+                {tenantPromptLayer.isCustomized && (
+                  <button
+                    type="button"
+                    onClick={handleResetTenantPromptLayer}
+                    disabled={isSavingTenantPromptLayer}
+                    className="px-3 py-2 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Restaurar padrão da plataforma</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsEditingTenantPromptLayer(false)}
+                  className="px-3 py-2 text-slate-500 hover:text-slate-300 text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

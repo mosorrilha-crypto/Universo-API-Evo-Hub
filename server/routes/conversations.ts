@@ -27,6 +27,8 @@ import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
+import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
+import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
@@ -36,7 +38,7 @@ import { getNowLocalNaive } from '../services/autoReply';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { resolveTenantId } from '../middleware/rbac';
+import { resolveTenantId, requireRole } from '../middleware/rbac';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
@@ -734,6 +736,43 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
     await Promise.all(orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)));
     res.json({ success: true });
+  }));
+
+  // Camada 1 (regras universais) por tenant (18/08/2026) — leitura sempre
+  // mostra o texto EFETIVO em vigor pra este tenant (a cópia própria se
+  // existir, senão a Camada 1 global herdada), pra o admin nunca duplicar
+  // ou entrar em conflito com uma regra que já está coberta ali. Edição
+  // exige a senha do próprio admin de novo (não é a senha de login válida
+  // pra sempre — só confirma que é a mesma pessoa autenticada tentando
+  // mudar uma regra que afeta TODO o comportamento de segurança do agente
+  // deste tenant), e cria uma cópia independente que nunca mais herda
+  // mudança futura da Camada 1 global (decisão do dono do produto).
+  router.get('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json(await getTenantPromptLayerRow(tenantOf(req)));
+  }));
+
+  router.put('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { content, currentPassword } = req.body || {};
+    if (typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ error: 'Campo "content" é obrigatório.' });
+    }
+    if (typeof currentPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ error: 'Confirme sua senha atual pra salvar esta mudança.' });
+    }
+    const { data: operator, error } = await getDb().from('operators').select('password_hash').eq('id', req.user!.id).maybeSingle();
+    if (error || !operator) return res.status(401).json({ error: 'Sessão inválida — faça login de novo.' });
+    const validPassword = await bcrypt.compare(currentPassword, operator.password_hash as string);
+    if (!validPassword) return res.status(401).json({ error: 'Senha incorreta.' });
+
+    await setTenantPromptLayer(tenantOf(req), content, req.user!.id);
+    res.json(await getTenantPromptLayerRow(tenantOf(req)));
+  }));
+
+  // "Restaurar padrão" — apaga a cópia própria, volta a herdar a Camada 1
+  // global (inclusive mudanças futuras) a partir de agora.
+  router.delete('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    await clearTenantPromptLayer(tenantOf(req));
+    res.json(await getTenantPromptLayerRow(tenantOf(req)));
   }));
 
   // Horário de funcionamento real do tenant (tabela `tenants`, não a base de

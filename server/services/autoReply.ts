@@ -17,6 +17,7 @@ import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
+import { resolveEffectiveGlobalLayer } from './tenantPromptLayerStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
@@ -273,8 +274,16 @@ DESISTÊNCIA/CANCELAMENTO: se o cliente sinalizar que quer desistir ou cancelar,
  * histórico, mensagem atual, resultado de ferramentas) nunca é cacheado,
  * como sempre.
  */
-async function buildCachedSystemInstruction(agent: AgentType, knowledgeBaseContext?: string): Promise<string> {
-  const globalLayer = (await getGlobalPromptLayerOverride().catch(() => null)) || DEFAULT_GLOBAL_LAYER;
+async function buildCachedSystemInstruction(tenantId: string, agent: AgentType, knowledgeBaseContext?: string): Promise<string> {
+  // Camada 1 por tenant (18/08/2026) — tenant com cópia própria (editada
+  // pelo admin dele) tem prioridade; sem cópia própria, cai na Camada 1
+  // global de sempre (override do saas_admin, ou o padrão hardcoded).
+  let globalLayer: string;
+  try {
+    globalLayer = await resolveEffectiveGlobalLayer(tenantId);
+  } catch {
+    globalLayer = (await getGlobalPromptLayerOverride().catch(() => null)) || DEFAULT_GLOBAL_LAYER;
+  }
   return `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
 
 ${AGENT_INSTRUCTIONS[agent]}
@@ -354,7 +363,7 @@ async function generateSpecialistReply(
   adContext?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
-  const systemInstruction = await buildCachedSystemInstruction(agent, knowledgeBaseContext);
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
   const specialistModel = 'gemini-3.6-flash';
   // Camada 1 (global) + Camada 3 (Base de Conhecimento do tenant) juntas
   // são idênticas em toda chamada deste (agent, tenantId) enquanto ninguém
