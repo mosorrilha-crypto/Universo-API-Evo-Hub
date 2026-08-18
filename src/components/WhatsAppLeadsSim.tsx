@@ -430,6 +430,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Achado real em produção: o aviso de erro ficava preso na tela pra sempre —
+  // "Tentar Novamente" sempre reanalisava a conversa com IA, mesmo quando o
+  // que falhou foi outra coisa (ex: arquivar/fixar/silenciar conversa), e não
+  // havia nenhum jeito de simplesmente dispensar o aviso. Guarda a ação que
+  // realmente falhou pra retentar a coisa certa; undefined = sem retry
+  // específico (cai no fallback de reanalisar), null = falha já resolvida
+  // (não mostra botão de retry, só dispensar).
+  const [errorRetryAction, setErrorRetryAction] = useState<(() => void) | null | undefined>(undefined);
 
   // Auto analysis toggle — cada análise consome tokens reais do Gemini (ver
   // tokenUsageStore.ts), inclusive só de abrir uma conversa pra dar uma
@@ -1640,9 +1648,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           manuallyUnread: !!data.conversation?.manuallyUnread,
           aiBlockedAt: data.conversation?.aiBlockedAt,
         } : l)));
+        setErrorMsg(null);
+        setErrorRetryAction(undefined);
       } catch (err) {
         console.error('Falha ao atualizar organização da conversa no servidor:', err);
         setErrorMsg('Não foi possível salvar essa ação no servidor. Tente de novo.');
+        setErrorRetryAction(() => () => handleUpdateConversationState(leadId, patch));
       }
       return;
     }
@@ -2590,13 +2601,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <span>{errorMsg}</span>
             </div>
           </div>
-          <button
-            onClick={() => selectedLead && handleAnalyzeConversation(selectedLead)}
-            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 flex-shrink-0 transition-all cursor-pointer"
-          >
-            <RefreshCw className="w-3 h-3" />
-            <span>Tentar Novamente</span>
-          </button>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => {
+                if (errorRetryAction) {
+                  errorRetryAction();
+                } else if (selectedLead) {
+                  handleAnalyzeConversation(selectedLead);
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Tentar Novamente</span>
+            </button>
+            <button
+              onClick={() => { setErrorMsg(null); setErrorRetryAction(undefined); }}
+              className="p-1.5 rounded-lg text-amber-400 hover:text-amber-200 hover:bg-amber-500/10 transition-all cursor-pointer"
+              title="Dispensar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
