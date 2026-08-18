@@ -486,8 +486,8 @@ export interface EscalationInfo {
   /** true = ainda dentro da janela de 24h da Meta (desde a última mensagem do lead) — só presente pra escalonamentos pendentes, ver GET /api/escalations. */
   withinServiceWindow?: boolean;
   serviceWindowExpiresAt?: string;
-  /** 'payment_proof' = card mostra "Confirmar pagamento"/"Rejeitar pagamento" em vez das ações genéricas — verificação de pagamento unificada aqui (não mais um banner separado dentro da conversa). */
-  kind?: 'general' | 'payment_proof';
+  /** 'payment_proof' = card mostra "Confirmar pagamento"/"Rejeitar pagamento" em vez das ações genéricas — verificação de pagamento unificada aqui (não mais um banner separado dentro da conversa). 'owner_review'/'customer_reply' = acompanhamento de funil (server/services/pendingFollowUpJob.ts) — mesmas ações genéricas do 'general'. */
+  kind?: 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
 }
 
 export interface Operator {

@@ -4,7 +4,9 @@ import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWe
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode } from '../services/conversationStore';
-import { generateAutoReplyForText } from '../services/autoReply';
+import { generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
+import { localNaiveToUtcIso } from '../services/googleCalendar';
+import { markPendingFollowUp, clearPendingFollowUp } from '../services/pendingFollowUpStore';
 import { sendBubbles } from '../services/sendBubbles';
 import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaSend';
 import { showEvolutionTyping } from '../services/evolutionSend';
@@ -12,7 +14,7 @@ import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
-import { getTenantSegment } from '../services/tenantProfileStore';
+import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
 import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
@@ -25,6 +27,20 @@ import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolve
 import { redactMessageForLog } from '../services/logRedaction';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
+
+// Acompanhamento de funil (pedido real, 15/08/2026 — server/services/pendingFollowUpJob.ts).
+const BUSINESS_TIMEZONE = 'America/Asuncion';
+const DEFAULT_CLOSE_TIME = '20:00';
+const CUSTOMER_REPLY_FOLLOWUP_MS = 2.5 * 60 * 60 * 1000;
+
+/** Fim do dia útil de hoje (horário de fechamento cadastrado pro dia da semana atual, ou 20h se o tenant não configurou) — quando um "aguardando avaliação" vence e escala pro operador. */
+async function endOfBusinessDayIso(tenantId: string): Promise<string> {
+  const hours = await getTenantBusinessHours(tenantId).catch(() => null);
+  const { naive, weekdayNum } = getNowLocalNaive(BUSINESS_TIMEZONE);
+  const todayDateKey = naive.slice(0, 10);
+  const closeTime = hours?.[String(weekdayNum)]?.close || DEFAULT_CLOSE_TIME;
+  return localNaiveToUtcIso(`${todayDateKey}T${closeTime}:00`, BUSINESS_TIMEZONE);
+}
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
@@ -187,6 +203,19 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
         if (result.capturedClientName) {
           await setConversationNameIfMissing(tenantId, phone, result.capturedClientName);
         }
+        // Acompanhamento de funil (pedido real, 15/08/2026 — auditoria de
+        // conversas reais mostrou lead esfriando sem ninguém perceber, ver
+        // server/services/pendingFollowUpJob.ts). "owner_review" vence no
+        // fim do dia útil (horário de fechamento cadastrado, ou 20h se o
+        // tenant não configurou); "customer_reply" vence em ~2h30 — nenhum
+        // dos dois reabre contato sozinho, só escala pro operador via
+        // Escalonamentos se ninguém resolver antes.
+        if (result.pendingOwnerReview) {
+          await markPendingFollowUp(tenantId, phone, contactName, 'owner_review', result.pendingOwnerReview, await endOfBusinessDayIso(tenantId));
+        }
+        if (result.awaitingCustomerChoice) {
+          await markPendingFollowUp(tenantId, phone, contactName, 'customer_reply', result.awaitingCustomerChoice, new Date(Date.now() + CUSTOMER_REPLY_FOLLOWUP_MS).toISOString());
+        }
       } catch (err: any) {
         if (isGeoRestrictedError(err)) {
           await markGeoRestricted(tenantId, phone, err.message);
@@ -297,6 +326,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
             console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar ctwa_clid de ${msg.from}:`, err.message)
           );
         }
+
+        // Acompanhamento de funil — o cliente respondeu de novo (qualquer
+        // tipo de mensagem real, não eco), então "sumiu esperando escolher"
+        // não se aplica mais. Só cancela 'customer_reply' (esperando
+        // avaliação da dona do negócio é outra coisa, resolve só quando um
+        // humano marcar o escalonamento como resolvido). Nunca lança —
+        // rede de segurança extra, não pode travar o processamento real da
+        // mensagem.
+        clearPendingFollowUp(tenantId, msg.from, 'customer_reply').catch((err) =>
+          console.warn(`⚠️  [Acompanhamento de funil] Falha ao cancelar pendência de ${msg.from}:`, err.message)
+        );
 
         if (msg.type === 'audio') {
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
