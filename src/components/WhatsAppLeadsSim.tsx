@@ -2819,12 +2819,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 Não lidos ({unreadLeadsCount})
               </button>
 
-              {/* Status e Arquivadas — vieram da barra de ações acima
-                  (14/08/2026, pedido direto: ficavam redundantes lá em cima,
-                  fazem mais sentido junto dos filtros da própria lista de
-                  conversas que afetam). Só ícone aqui por causa do espaço
-                  estreito desta fileira — título explica cada um. */}
-              {statusAvailable ? (
+              {/* Status — só aparece pra números conectados via Evolution API
+                  (QR Code); na Meta Cloud API oficial nunca funciona, então
+                  nem mostra o ícone desabilitado (pedido direto, 18/08/2026:
+                  ícone inútil/confuso pra quem tá na Meta). O botão de "Ver
+                  Arquivadas" separado foi removido no mesmo pedido — ficou
+                  redundante depois que a seção "Arquivadas" passou a
+                  aparecer fixa no topo da própria lista quando há alguma
+                  conversa arquivada (ver abaixo). */}
+              {statusAvailable && (
                 <button
                   type="button"
                   onClick={() => setIsStatusModalOpen(true)}
@@ -2833,24 +2836,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 >
                   <CircleDashed className="w-3.5 h-3.5" />
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  title="Status só disponível pra números conectados via Evolution API (QR Code) — este está na Meta Cloud API oficial"
-                  className="flex-shrink-0 p-1.5 rounded-full bg-[#202c33] text-slate-500 opacity-50 cursor-not-allowed"
-                >
-                  <CircleDashed className="w-3.5 h-3.5" />
-                </button>
               )}
-              <button
-                type="button"
-                onClick={() => { setShowArchived(true); setMobileThreadOpen(false); }}
-                title="Ver conversas arquivadas"
-                className="flex-shrink-0 p-1.5 rounded-full bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white transition-all cursor-pointer"
-              >
-                <Archive className="w-3.5 h-3.5" />
-              </button>
 
               {tenantLabelSuggestions.length > 0 && (
                 <select
