@@ -70,6 +70,23 @@ function safeSetLocalStorage(key: string, value: string): void {
   }
 }
 
+// Chave onde o saas_admin persiste a empresa escolhida manualmente no
+// seletor do Header — sem isso, um F5 recarregava `currentUser` do
+// localStorage e o efeito de sincronização (linha ~154) tratava isso como um
+// "novo login", voltando `activeTenant` pro tenant do próprio login do
+// saas_admin em vez de manter a empresa selecionada (bug real relatado
+// 18/08/2026: seletor "não fixa" a troca de empresa a cada refresh).
+const ACTIVE_TENANT_OVERRIDE_KEY = 'saas_active_tenant_override';
+
+// Bug real relatado junto com o anterior (18/08/2026): a base de
+// conhecimento cacheada em localStorage usava uma chave única global
+// (`saas_agent_kb`), então trocar de tenant no seletor sobrescrevia o cache
+// do tenant anterior com o do novo — reabrir a empresa anterior mostrava por
+// um instante a base de conhecimento errada até o fetch real terminar,
+// dando a sensação de bases "se misturando". Uma chave por tenant elimina a
+// colisão.
+const kbCacheKey = (tenantId: string) => `saas_agent_kb_${tenantId}`;
+
 export const App: React.FC = () => {
   // Navigation & View State
   // Aberto pelo ícone instalado (PWA do atendente, issue #159), ou papel
@@ -192,25 +209,38 @@ export const App: React.FC = () => {
         .then((data) => {
           const real = (data?.tenants || []) as Array<{ id: string; name: string; slug: string; created_at?: string; whatsappConnected?: boolean }>;
           if (!real.length) return;
-          setTenants(
-            real.map((t) => ({
-              id: t.id,
-              name: t.name,
-              slug: t.slug,
-              plan: 'enterprise',
-              monthlyMRR: 0,
-              status: 'ativo',
-              createdAt: t.created_at ? new Date(t.created_at).toLocaleDateString('pt-BR') : '',
-              whatsappPhone: '',
-              whatsappStatus: t.whatsappConnected ? 'conectado' : 'desconectado',
-              whatsappEngine: 'meta_cloud_api',
-              maxLeadsPerMonth: 0,
-              currentLeadsMonth: 0,
-              webhookEndpoint: '',
-            }))
-          );
+          const mapped = real.map((t) => ({
+            id: t.id,
+            name: t.name,
+            slug: t.slug,
+            plan: 'enterprise',
+            monthlyMRR: 0,
+            status: 'ativo',
+            createdAt: t.created_at ? new Date(t.created_at).toLocaleDateString('pt-BR') : '',
+            whatsappPhone: '',
+            whatsappStatus: t.whatsappConnected ? 'conectado' : 'desconectado',
+            whatsappEngine: 'meta_cloud_api',
+            maxLeadsPerMonth: 0,
+            currentLeadsMonth: 0,
+            webhookEndpoint: '',
+          }));
+          setTenants(mapped);
+
+          // Restaura a empresa escolhida manualmente no seletor antes do
+          // último refresh, em vez de deixar o efeito acima (que roda
+          // sempre que `currentUser` é recarregado do localStorage, inclusive
+          // num F5) prender o saas_admin de volta no próprio tenant de login.
+          const savedOverrideId = localStorage.getItem(ACTIVE_TENANT_OVERRIDE_KEY);
+          const overrideTenant = savedOverrideId ? mapped.find((t) => t.id === savedOverrideId) : undefined;
+          if (overrideTenant) {
+            setActiveTenant((prev) => (prev.id === overrideTenant.id ? prev : overrideTenant));
+          }
         })
         .catch(() => {});
+    } else {
+      // Só saas_admin usa o seletor manual — outros papéis nunca devem
+      // carregar um override de sessão anterior.
+      localStorage.removeItem(ACTIVE_TENANT_OVERRIDE_KEY);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
@@ -255,7 +285,7 @@ export const App: React.FC = () => {
 
   // Agent Knowledge Base
   const [knowledgeBase, setKnowledgeBase] = useState<AgentKnowledgeBase>(() => {
-    const saved = localStorage.getItem('saas_agent_kb');
+    const saved = localStorage.getItem(kbCacheKey(activeTenant.id));
     return saved ? JSON.parse(saved) : moniqueStudioKnowledgeBase;
   });
   // Bug real reportado (16/08/2026): imagem de produto salva no catálogo
@@ -304,8 +334,12 @@ export const App: React.FC = () => {
   // reais do tenant certo.
   const clearCachedTenantScopedData = () => {
     localStorage.removeItem('saas_crm_leads');
-    localStorage.removeItem('saas_agent_kb');
+    localStorage.removeItem('saas_agent_kb'); // chave antiga (pré cache por tenant) — remove se sobrar de sessão anterior
     localStorage.removeItem('saas_transactions');
+    localStorage.removeItem(ACTIVE_TENANT_OVERRIDE_KEY);
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('saas_agent_kb_')) localStorage.removeItem(key);
+    }
     setLeads([]);
     setTransactions([]);
     setKnowledgeBase(moniqueStudioKnowledgeBase);
@@ -352,8 +386,8 @@ export const App: React.FC = () => {
       ...knowledgeBase,
       products: knowledgeBase.products.map(({ exampleImageBase64, exampleImageMimeType, ...rest }) => rest),
     };
-    safeSetLocalStorage('saas_agent_kb', JSON.stringify(cacheableKb));
-  }, [knowledgeBase]);
+    safeSetLocalStorage(kbCacheKey(activeTenant.id), JSON.stringify(cacheableKb));
+  }, [knowledgeBase, activeTenant.id]);
 
   // Busca a base de conhecimento real salva no backend (usada pelo agente
   // automático de verdade) e sincroniza no painel, se existir.
@@ -368,6 +402,13 @@ export const App: React.FC = () => {
   // (mesmo que por um instante) a base de conhecimento do tenant errado.
   useEffect(() => {
     setKbLoaded(false);
+    // Carrega o cache do TENANT NOVO (ou o placeholder padrão) na hora —
+    // sem isso a tela continuava mostrando, por um instante, a base de
+    // conhecimento do tenant anterior (ainda em memória) até essa busca real
+    // terminar, o que dava a sensação de bases "se misturando" ao trocar de
+    // empresa no seletor.
+    const cachedForTenant = localStorage.getItem(kbCacheKey(activeTenant.id));
+    setKnowledgeBase(cachedForTenant ? JSON.parse(cachedForTenant) : moniqueStudioKnowledgeBase);
     apiFetch('/api/knowledge-base')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
@@ -703,6 +744,7 @@ export const App: React.FC = () => {
 
   const handleSelectTenant = (tenant: Tenant) => {
     setActiveTenant(tenant);
+    safeSetLocalStorage(ACTIVE_TENANT_OVERRIDE_KEY, tenant.id);
     showToast(`Empresa alterada para: ${tenant.name}`);
   };
 
