@@ -130,6 +130,11 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
   }
 }
 
+/** Espera curta entre tentativas — só cobre blip de rede transitório, não vale a pena esperar mais que isso num fluxo síncrono de envio. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Manda os blocos em ordem, um de cada vez (aguarda cada envio antes do
  * próximo) — preserva a sequência texto/vídeo/texto/... exatamente como
@@ -141,7 +146,33 @@ async function sendBlock(tenantId: string, phone: string, block: FirstContactBlo
  * nenhuma com o bloco que falhou. Cada bloco agora falha isoladamente: um
  * erro é logado e a sequência continua pro próximo bloco, em vez de abortar
  * tudo.
+ *
+ * Achado real em produção (18/08/2026, Clic Piscinas, contato "Ariel"): o
+ * bloco 1 (texto de saudação) falhou com "fetch failed" — um blip de rede
+ * transitório, não uma rejeição da Meta/Evolution — e a mensagem de
+ * saudação nunca chegou, enquanto os blocos seguintes (vídeo, pergunta),
+ * enviados poucos segundos depois, foram sem problema. Sem retry nenhum,
+ * um blip de 1 request derrubava um bloco inteiro pro cliente pra sempre.
+ * 2 tentativas extras com espera curta cobrem esse caso sem atrasar
+ * perceptivelmente o fluxo normal (a maioria dos blocos nunca precisa da
+ * 2ª tentativa).
  */
+async function sendBlockWithRetry(tenantId: string, phone: string, block: FirstContactBlock, mediaConfig: MediaSendConfig, index: number, total: number): Promise<void> {
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = 1500;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await sendBlock(tenantId, phone, block, mediaConfig);
+      return;
+    } catch (err: any) {
+      const isLastAttempt = attempt === MAX_ATTEMPTS;
+      console.error(`❌ [Primeiro Contato] tenant=${tenantId} falhou ao enviar o bloco ${index + 1}/${total} (${block.type}) pra ${phone} na tentativa ${attempt}/${MAX_ATTEMPTS}: ${err.message}${isLastAttempt ? ' — desistindo, seguindo pros próximos blocos.' : ' — tentando de novo.'}`);
+      if (isLastAttempt) return;
+      await sleep(RETRY_DELAY_MS);
+    }
+  }
+}
+
 export async function sendFirstContactMessage(
   tenantId: string,
   phone: string,
@@ -152,10 +183,6 @@ export async function sendFirstContactMessage(
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
     if (!blockHasContent(block)) continue;
-    try {
-      await sendBlock(tenantId, phone, block, mediaConfig);
-    } catch (err: any) {
-      console.error(`❌ [Primeiro Contato] tenant=${tenantId} falhou ao enviar o bloco ${i + 1}/${blocks.length} (${block.type}) pra ${phone}: ${err.message} — seguindo pros próximos blocos.`);
-    }
+    await sendBlockWithRetry(tenantId, phone, block, mediaConfig, i, blocks.length);
   }
 }
