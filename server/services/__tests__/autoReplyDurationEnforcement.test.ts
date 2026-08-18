@@ -16,7 +16,8 @@ import type { GoogleGenAI } from '@google/genai';
 const createCalendarEvent = vi.fn(async () => 'evt-novo');
 const rescheduleCalendarEvent = vi.fn(async () => undefined);
 const setAppointmentForPhone = vi.fn(async () => undefined);
-let mockAppointment: { eventId: string; summary: string; startIso: string; endIso: string; paymentStatus?: string } | null = null;
+const createAppointmentHold = vi.fn(async () => undefined);
+let mockAppointment: { eventId?: string; summary: string; startIso: string; endIso: string; paymentStatus?: string } | null = null;
 let mockKb: { products: Array<{ name: string; price: string; durationMinutes?: number }> } | null = null;
 
 vi.mock('../googleCalendar', () => ({
@@ -30,6 +31,8 @@ vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone: vi.fn(async () => mockAppointment),
   setAppointmentForPhone,
   clearAppointmentForPhone: vi.fn(async () => undefined),
+  createAppointmentHold,
+  findOverlappingHold: vi.fn(async () => undefined),
 }));
 vi.mock('../conversationStore', () => ({
   getConversationCtwaClid: vi.fn(async () => null),
@@ -73,7 +76,7 @@ describe('criar_agendamento/remarcar_agendamento ignoram o data_hora_fim errado 
     mockAppointment = null;
     mockKb = { products: [{ name: 'Combo Triple', price: 'Gs 600.000', durationMinutes: 180 }] };
     createCalendarEvent.mockClear();
-    setAppointmentForPhone.mockClear();
+    createAppointmentHold.mockClear();
 
     const ai = makeFakeAiSingleTool({
       name: 'criar_agendamento',
@@ -86,12 +89,12 @@ describe('criar_agendamento/remarcar_agendamento ignoram o data_hora_fim errado 
       '595981234567', CALENDAR_CONFIG
     );
 
-    // O evento REAL no Calendar tem que cobrir as 3h inteiras (14:00–17:00), não os 30min que o modelo mandou.
-    expect(createCalendarEvent).toHaveBeenCalledWith('tenant-a', CALENDAR_CONFIG, 'Combo Triple', '', '2026-08-10T14:00:00', '2026-08-10T17:00:00', expect.any(String));
-    expect(setAppointmentForPhone).toHaveBeenCalledWith(
+    // Issue #289: não cria mais o evento real na hora — a RESERVA tem que
+    // cobrir as 3h inteiras (14:00–17:00), não os 30min que o modelo mandou.
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(createAppointmentHold).toHaveBeenCalledWith(
       'tenant-a', '595981234567',
-      expect.objectContaining({ startIso: '2026-08-10T14:00:00', endIso: '2026-08-10T17:00:00' }),
-      expect.anything()
+      expect.objectContaining({ summary: 'Combo Triple', startIso: '2026-08-10T14:00:00', endIso: '2026-08-10T17:00:00' })
     );
   });
 
@@ -122,6 +125,7 @@ describe('criar_agendamento/remarcar_agendamento ignoram o data_hora_fim errado 
     mockAppointment = null;
     mockKb = { products: [] };
     createCalendarEvent.mockClear();
+    createAppointmentHold.mockClear();
 
     const ai = makeFakeAiSingleTool({
       name: 'criar_agendamento',
@@ -133,6 +137,10 @@ describe('criar_agendamento/remarcar_agendamento ignoram o data_hora_fim errado 
       '595981234567', CALENDAR_CONFIG
     );
 
-    expect(createCalendarEvent).toHaveBeenCalledWith('tenant-a', CALENDAR_CONFIG, 'Serviço Novo Sem Cadastro', '', '2026-08-10T14:00:00', '2026-08-10T15:00:00', expect.any(String));
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(createAppointmentHold).toHaveBeenCalledWith(
+      'tenant-a', '595981234567',
+      expect.objectContaining({ summary: 'Serviço Novo Sem Cadastro', startIso: '2026-08-10T14:00:00', endIso: '2026-08-10T15:00:00' })
+    );
   });
 });

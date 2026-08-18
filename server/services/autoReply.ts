@@ -1,14 +1,13 @@
 import { Type, FunctionCallingConfigMode, type GoogleGenAI, type Content, type Part, type FunctionDeclaration } from '@google/genai';
 import {
   checkFreeBusy,
-  createCalendarEvent,
   rescheduleCalendarEvent,
   cancelCalendarEvent,
   isGoogleCalendarConnected,
   findWeeklyAvailability,
   type CalendarConfig,
 } from './googleCalendar';
-import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
+import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
@@ -498,6 +497,9 @@ const DATA_HORA_PARAM_DESCRIPTION = `Data e hora LOCAL (fuso ${BUSINESS_TIMEZONE
 /** Usada só quando consultar_disponibilidade_semana é chamada sem um serviço reconhecido no catálogo (sem durationMinutes cadastrado) — valor conservador (1h), nunca 0 nem um número inventado maior. */
 const DEFAULT_SLOT_DURATION_MINUTES = 60;
 
+/** Issue #289 (decisão do dono do produto, 18/08/2026) — quanto tempo uma reserva feita por criar_agendamento fica válida sem evento real no Calendar, esperando o comprovante ser aprovado, antes de expirar (ver heldAppointmentExpiryJob.ts). */
+const HOLD_EXPIRY_MS = 2 * 60 * 60 * 1000;
+
 /**
  * Ferramentas reais de agenda expostas ao agente de agendamento via
  * function-calling do Gemini. Nenhuma delas recebe um "evento_id" do
@@ -681,21 +683,21 @@ function containsUnauthorizedConcessionPromise(text: string): boolean {
 
 /**
  * Gate determinístico pra confirmação prematura de agendamento (16/08/2026,
- * "Opção A" — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seção 4.3): hoje
- * `criar_agendamento` cria o evento REAL no Google Calendar assim que o
- * modelo chama a ferramenta, sem checar `payment_status` nenhum — a linha em
- * `appointments` (e o próprio payment_status) só existe DEPOIS que o evento
- * já foi criado, então bloquear a criação em si exigiria reestruturar o
- * fluxo (fora do escopo desta correção). O risco real não é o evento existir
- * na agenda — é o cliente ser informado que o turno está "confirmado"
- * enquanto o comprovante de sinal ainda não foi verificado por um operador
+ * "Opção A" — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seção 4.3). Desde a
+ * issue #289 (18/08/2026) `criar_agendamento` não cria mais o evento REAL no
+ * Google Calendar direto — só reserva o horário (`payment_status =
+ * 'awaiting_payment'`, sem eventId) até um operador aprovar o comprovante
+ * (ver attachCalendarEventToHold em appointmentStore.ts). O risco que este
+ * gate corrige continua o mesmo: o cliente ser informado que o turno está
+ * "confirmado" enquanto o pagamento ainda não foi aprovado por um operador
  * (ou já foi rejeitado). Mesmo padrão do gate de reembolso/desconto acima:
  * corrige o texto ANTES de sair, nunca só alerta em paralelo.
- * Escopo deliberadamente restrito a paymentStatus 'pending_verification' ou
- * 'rejected' — um paymentStatus ausente (null/undefined) é ambíguo entre
+ * Escopo restrito a paymentStatus 'awaiting_payment', 'pending_verification'
+ * ou 'rejected' — um paymentStatus ausente (null/undefined) é ambíguo entre
  * "reserva combinada em efetivo, sem sinal" e "sinal exigido mas comprovante
- * ainda não chegou", e o sistema não tem hoje nenhum sinal pra distinguir os
- * dois casos, então gatear em cima de null arriscaria bloquear confirmações
+ * ainda não chegou" (caso legado, de antes da issue #289, ou reserva sem
+ * sinal), e o sistema não tem hoje nenhum sinal pra distinguir os dois
+ * casos, então gatear em cima de null arriscaria bloquear confirmações
  * legítimas de reserva em efetivo.
  */
 const CONFIRMATION_CLAIM_PATTERNS = [
@@ -794,21 +796,18 @@ async function executeCalendarTool(
             };
           }
           // Gate de pagamento (16/08/2026, ver docs/AGENTE-VERTICAL-ARQUITETURA.md
-          // seção 4.3 / issue #279) — escopo deliberadamente restrito: bloquear
-          // criar_agendamento até aprovação SEMPRE exigiria inverter o fluxo real
-          // (hoje o evento é criado primeiro, o pagamento é verificado depois —
-          // o próprio tratamento de comprovante em webhooks.ts só reconhece uma
-          // imagem como "possível comprovante" quando já existe um agendamento
-          // ativo pra aquele telefone). Reestruturar isso é decisão de produto,
-          // não uma correção pontual segura de aplicar sem testar com clientes
-          // reais. O que dá pra fechar sem mudar essa ordem: nunca deixar um
-          // criar_agendamento novo APAGAR silenciosamente um ciclo de pagamento
-          // ainda não resolvido do mesmo telefone — antes, se o agendamento
-          // antigo já tinha passado da data (existingIsUpcoming = false), nada
-          // impedia resetPaymentState:true sobrescrever um comprovante ainda
-          // "pending_verification"/"rejected" sem humano nenhum ter decidido
-          // esse caso, perdendo o rastro pra sempre.
-          const existingHasUnresolvedPayment = existingBeforeCreate && (existingBeforeCreate.paymentStatus === 'pending_verification' || existingBeforeCreate.paymentStatus === 'rejected');
+          // seção 4.3 / issue #279) — nunca deixar um criar_agendamento novo
+          // APAGAR silenciosamente um ciclo de pagamento ainda não resolvido
+          // do mesmo telefone: se o agendamento/reserva antigo já tinha
+          // passado da data (existingIsUpcoming = false), nada impedia
+          // resetPaymentState:true sobrescrever um comprovante ainda
+          // "awaiting_payment"/"pending_verification"/"rejected" sem humano
+          // nenhum ter decidido esse caso, perdendo o rastro pra sempre.
+          const existingHasUnresolvedPayment = existingBeforeCreate && (
+            existingBeforeCreate.paymentStatus === 'awaiting_payment'
+            || existingBeforeCreate.paymentStatus === 'pending_verification'
+            || existingBeforeCreate.paymentStatus === 'rejected'
+          );
           if (existingHasUnresolvedPayment) {
             return {
               response: { erro: 'Este contato tem um comprovante de pagamento de um agendamento anterior ainda sem resolução humana — não crie nem remarque nada, isso precisa de um operador decidindo o caso antes.' },
@@ -823,10 +822,10 @@ async function executeCalendarTool(
             console.warn(`⚠️  [Agendamento] tenant=${tenantId} data_hora_fim do modelo ("${args.data_hora_fim}") não batia com a duração real de "${args.titulo}" — corrigido pra "${authoritativeEndIso}".`);
           }
           // Reconsulta de disponibilidade dentro do lock, imediatamente antes
-          // de criar o evento: o modelo pode ter chamado
+          // de reservar o horário: o modelo pode ter chamado
           // verificar_disponibilidade minutos antes na mesma conversa, mas
           // nada garantia que o horário continuava livre no instante exato
-          // da criação — outra conversa podia ter ocupado o slot nesse
+          // da reserva — outra conversa podia ter ocupado o slot nesse
           // meio-tempo. Usa o fim CORRIGIDO acima, não o do modelo.
           const stillFree = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
           if (!stillFree) {
@@ -835,15 +834,31 @@ async function executeCalendarTool(
               summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso}, mas a reconsulta de disponibilidade feita no momento da criação encontrou o horário OCUPADO — não criou, é preciso reconsultar disponibilidade.`,
             };
           }
-          const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
-          // resetPaymentState: true — é sempre um agendamento novo aqui (o
-          // caso "já ativo" já foi recusado acima), nunca deve herdar
-          // payment_status de um ciclo anterior, existente ou não.
-          await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: authoritativeEndIso }, { resetPaymentState: true });
+          // Issue #289 (decisão do dono do produto, 18/08/2026) — reduz (não
+          // elimina) o risco de dois clientes disputarem o mesmo horário
+          // enquanto o primeiro ainda não pagou: como o horário só fica
+          // reservado aqui (sem evento real ainda), checkFreeBusy sozinho não
+          // vê outra reserva concorrente pra esse mesmo intervalo.
+          const overlappingHold = await findOverlappingHold(tenantId, phone, args.data_hora_inicio, authoritativeEndIso);
+          if (overlappingHold) {
+            return {
+              response: { erro: 'Esse horário está reservado por outro cliente que ainda está esperando aprovação de pagamento — ofereça um horário alternativo.' },
+              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso}, mas outro cliente já reservou esse mesmo horário aguardando aprovação de pagamento — não criou, ofereça outro horário.`,
+            };
+          }
+          // Issue #289 (decisão do dono do produto, 18/08/2026): NÃO cria mais
+          // o evento real no Google Calendar aqui — só reserva o horário
+          // (payment_status 'awaiting_payment', sem eventId) por até
+          // HOLD_EXPIRY_MS enquanto aguarda o comprovante. O evento real só é
+          // criado quando um operador aprova o pagamento (ver
+          // attachCalendarEventToHold, POST /verify-payment em
+          // conversations.ts) — nunca antes disso.
+          const heldUntil = new Date(Date.now() + HOLD_EXPIRY_MS).toISOString();
+          await createAppointmentHold(tenantId, phone, { summary: args.titulo, startIso: args.data_hora_inicio, endIso: authoritativeEndIso, heldUntil });
           notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
           return {
-            response: { sucesso: true, evento_id: eventId },
-            summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso} com sucesso.`,
+            response: { sucesso: true, aguardando_pagamento: true },
+            summary: `Reservou o horário "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso}, aguardando o comprovante de pagamento ser enviado e aprovado por um operador — ainda NÃO é um agendamento confirmado, diga isso claramente pro cliente.`,
             confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
           };
         });
@@ -875,7 +890,21 @@ async function executeCalendarTool(
               summary: `Tentou remarcar para ${args.nova_data_hora_inicio}–${authoritativeEndIso}, mas a reconsulta de disponibilidade feita no momento da remarcação encontrou o horário OCUPADO — não remarcou, é preciso reconsultar disponibilidade.`,
             };
           }
-          await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
+          // Issue #289 — sem evento real ainda (reserva aguardando
+          // pagamento), remarcar só muda o horário reservado, sem tocar no
+          // Calendar. Mesma checagem de reserva concorrente de outro
+          // telefone de criar_agendamento acima.
+          if (!existing.eventId) {
+            const overlappingHold = await findOverlappingHold(tenantId, phone, args.nova_data_hora_inicio, authoritativeEndIso);
+            if (overlappingHold) {
+              return {
+                response: { erro: 'Esse horário está reservado por outro cliente que ainda está esperando aprovação de pagamento — ofereça um horário alternativo.' },
+                summary: `Tentou remarcar a reserva pra ${args.nova_data_hora_inicio}–${authoritativeEndIso}, mas outro cliente já reservou esse mesmo horário aguardando aprovação de pagamento — não remarcou, ofereça outro horário.`,
+              };
+            }
+          } else {
+            await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
+          }
           await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: authoritativeEndIso });
           return {
             response: { sucesso: true },
@@ -891,6 +920,15 @@ async function executeCalendarTool(
             response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
             summary: 'Tentou cancelar mas não há nenhum agendamento ativo registrado pra este contato.',
           };
+        }
+        // Issue #289 — uma reserva ainda sem evento real (aguardando
+        // pagamento) nunca teve sinal transferido de verdade, então não há
+        // devolução em jogo nenhuma — a política de 24h abaixo só se aplica
+        // a um agendamento que já tem evento real (ciclo de pagamento em
+        // andamento ou concluído). Cancela direto, sem escalar.
+        if (!existing.eventId) {
+          await clearAppointmentForPhone(tenantId, phone);
+          return { response: { sucesso: true }, summary: 'Cancelou a reserva existente (ainda sem evento real, aguardando pagamento) com sucesso — sem devolução em jogo, nenhum sinal tinha sido transferido ainda.' };
         }
         // Epic 4.5.9 — política real de sinal (ver knowledge_base/pricingAndPolicies):
         // devolvido com 24h+ de antecedência, não devolvido com menos. Como o
@@ -1440,16 +1478,23 @@ export async function generateAutoReplyForText(
 
     // Gate determinístico de confirmação prematura de agendamento (16/08/2026,
     // "Opção A", ver containsPrematureBookingConfirmation acima) — corrige
-    // ANTES de sair sempre que o pagamento ainda está pendente de verificação
-    // ou foi rejeitado, mesmo que o modelo (ou o histórico da conversa) tenha
-    // escrito uma frase de confirmação. Não bloqueia a criação do evento em
-    // si (já aconteceu, é real na agenda) — só o que o CLIENTE lê.
+    // ANTES de sair sempre que o pagamento ainda não foi aprovado (aguardando
+    // comprovante, pendente de verificação, ou rejeitado), mesmo que o
+    // modelo (ou o histórico da conversa) tenha escrito uma frase de
+    // confirmação. Desde a issue #289, 'awaiting_payment' significa que nem
+    // existe evento real na agenda ainda — só uma reserva temporária.
     if (agent === 'agendamento' && phone) {
       const currentAppointment = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
-      const paymentUnresolved = currentAppointment && (currentAppointment.paymentStatus === 'pending_verification' || currentAppointment.paymentStatus === 'rejected');
+      const paymentUnresolved = currentAppointment && (
+        currentAppointment.paymentStatus === 'awaiting_payment'
+        || currentAppointment.paymentStatus === 'pending_verification'
+        || currentAppointment.paymentStatus === 'rejected'
+      );
       if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
         console.warn(`⚠️  [Gate de pagamento pendente] tenant=${tenantId} modelo confirmou o turno em texto mas o pagamento ainda está "${currentAppointment.paymentStatus}" — corrigindo resposta.`);
-        bubbles = ['Recibí tu comprobante, gracias — todavía está pendiente de revisión por parte del estudio. Apenas esté aprobado, te confirmo el turno.'];
+        bubbles = [currentAppointment.paymentStatus === 'awaiting_payment'
+          ? 'Ese horario queda reservado para vos hasta que llegue tu comprobante y sea aprobado — todavía no está confirmado, así que enviálo cuanto antes para no perderlo.'
+          : 'Recibí tu comprobante, gracias — todavía está pendiente de revisión por parte del estudio. Apenas esté aprobado, te confirmo el turno.'];
       }
     }
 
