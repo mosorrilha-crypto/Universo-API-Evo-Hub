@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Universo is a multi-tenant WhatsApp AI-agent SaaS: Express + TypeScript backend (Postgres/Supabase), React + Vite frontend, Gemini-powered conversational agent. Tenants get an AI agent that answers WhatsApp leads, books real Google Calendar appointments, and tracks payment/CRM state. **The platform is live in production** with a real paying tenant (a beauty studio) receiving real customer messages — treat anything touching the message/booking/payment path with the care that implies.
 
-Three living docs carry architecture decisions and roadmap state; read them before large changes:
+Four living docs carry architecture decisions and roadmap state; read them before large changes:
 - `docs/AGENTE-VERTICAL-ARQUITETURA.md` — the layered-prompt agent architecture and its rollout plan.
 - `docs/PLANO-EVOLUCAO.md` — evolution roadmap and known pending items.
 - `docs/REVISAO_E_REESTRUTURACAO.md` — structural review/restructuring notes.
+- `docs/AGENTE-PROMPT-MONIQUE-CAMPOS.md` — field-by-field snapshot of the real Layer 1 (universal, code) and Layer 3 (tenant Knowledge Base) prompt content for Monique, plus known open gaps (e.g. the payment gate). It's a snapshot of editable KB content, not a live source — re-check Supabase for the current value before relying on it operationally.
 
 **Before picking up any task from the backlog, read `.github/WORKFLOW.md`** — how to find work, branch/PR/merge rules (including which areas never self-merge), and status-reporting conventions. GitHub (issues + PRs) is the official work-tracking channel; a prior Trello board was migrated out of use on 2026-08-09.
 
@@ -38,7 +39,7 @@ Database migrations are hand-written idempotent SQL files under `supabase/migrat
 
 ## Backend architecture
 
-`server.ts` is the entrypoint: builds config, initializes the Supabase client, and mounts one router per domain from `server/routes/` (`auth`, `ai`, `telemetry`, `webhooks`, `metaCapi`, `evoHub`, `conversations`, `googleCalendar`, `admin`, `crm`). Routes are a thin HTTP layer; real logic lives in `server/services/`.
+`server.ts` is the entrypoint: builds config, initializes the Supabase client, and mounts one router per domain from `server/routes/` (`auth`, `ai`, `telemetry`, `webhooks`, `metaCapi`, `conversations`, `googleCalendar`, `admin`, `crm`). Routes are a thin HTTP layer; real logic lives in `server/services/`.
 
 **Async error handling is load-bearing.** Express 4 does not catch rejected promises from async route handlers — an unhandled rejection crashes the entire Node process (this caused a real production outage). Every async route handler must be wrapped in `asyncHandler` (`server/middleware/asyncHandler.ts`), and `server.ts` mounts a global 4-arg error middleware after all routers as a last-resort catch. `server.ts` also installs process-level `unhandledRejection`/`uncaughtException` handlers that log and never `process.exit`.
 

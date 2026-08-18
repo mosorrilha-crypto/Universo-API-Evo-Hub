@@ -1,7 +1,23 @@
+/**
+ * Issue #124 — usa a escala nomeada de raio (rounded-control/panel/pill,
+ * ver @theme em src/index.css) como referência de como código novo deve
+ * escrever isso. Mapeada 1:1 pro valor que rounded-lg/xl/full já tinham
+ * aqui — zero mudança visual, só a intenção explícita no JSX.
+ *
+ * Issue #125 — os botões mais simples deste arquivo (menu mobile, scroll
+ * da faixa de abas, entrar/sair) usam o componente <Button> como
+ * referência de adoção (foco visível padronizado, que praticamente
+ * nenhum botão do painel tinha antes). As abas de navegação (com cor
+ * ativa própria por papel — roxo pro SaaS Admin, esmeralda pro resto)
+ * continuam com a classe condicional manual: o `active` do <Button> hoje
+ * só cobre um tom (esmeralda), não encaixa nesse caso sem estender o
+ * componente — fica como próximo passo, não bloqueia esta adoção inicial.
+ */
 import React, { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
 import { isStandalonePwa } from '../lib/pwa';
 import { hasRoleAtLeast } from '../lib/roles';
+import { Button } from './ui/Button';
 import {
   MessageSquare,
   Sparkles,
@@ -102,19 +118,14 @@ export const Header: React.FC<HeaderProps> = ({
             qualquer conteúdo real aparecer na tela pequena. */}
         <div className="flex md:hidden items-center justify-between py-3">
           <div className="flex items-center space-x-2 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
+            <div className="w-8 h-8 rounded-control bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
               <MessageSquare className="w-4 h-4 text-emerald-400" />
             </div>
             <span className="font-bold text-white text-sm truncate">Universo</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setIsMobileMenuOpen((open) => !open)}
-            className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all flex-shrink-0"
-            title="Menu"
-          >
+          <Button variant="ghost" size="md" iconOnly onClick={() => setIsMobileMenuOpen((open) => !open)} title="Menu" className="flex-shrink-0">
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
+          </Button>
         </div>
 
         {isMobileMenuOpen && (
@@ -131,7 +142,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <button
                       key={t.id}
                       onClick={() => { onSelectTenant(t); setIsMobileMenuOpen(false); }}
-                      className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition-all ${
+                      className={`w-full text-left px-2.5 py-2 rounded-control text-xs font-medium flex items-center justify-between transition-all ${
                         t.id === activeTenant.id
                           ? 'bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50'
                           : 'text-slate-300 bg-slate-950 border border-slate-800'
@@ -144,46 +155,35 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300" title={activeTenant.name}>
+              <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-control bg-slate-950 border border-slate-800 text-slate-300" title={activeTenant.name}>
                 <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
                 <span className="font-semibold text-xs truncate">{activeTenant.name}</span>
               </div>
             )}
 
             {currentUser ? (
-              <div className="flex items-center justify-between bg-slate-800/90 border border-slate-700/80 p-2 rounded-xl text-slate-200">
+              <div className="flex items-center justify-between bg-slate-800/90 border border-slate-700/80 p-2 rounded-panel text-slate-200">
                 <div className="flex items-center gap-2 min-w-0">
-                  <img src={currentUser.avatar} alt={currentUser.name} className="w-8 h-8 rounded-full object-cover border border-emerald-500/50 flex-shrink-0" />
+                  <img src={currentUser.avatar} alt={currentUser.name} className="w-8 h-8 rounded-pill object-cover border border-emerald-500/50 flex-shrink-0" />
                   <div className="text-left min-w-0">
                     <div className="font-bold text-white text-xs leading-none truncate">{currentUser.name}</div>
                     <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }}
-                    className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-all"
-                    title="Trocar Operador / Perfil"
-                  >
+                  <Button variant="ghost" size="sm" iconOnly onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }} title="Trocar Operador / Perfil">
                     <ChevronDown className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => { onLogout(); setIsMobileMenuOpen(false); }}
-                    className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition-all"
-                    title="Sair"
-                  >
+                  </Button>
+                  <Button variant="danger" size="sm" iconOnly onClick={() => { onLogout(); setIsMobileMenuOpen(false); }} title="Sair">
                     <LogOut className="w-4 h-4" />
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
-              <button
-                onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }}
-                className="w-full px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl flex items-center justify-center space-x-1.5 shadow"
-              >
+              <Button variant="primary" size="md" onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }} className="w-full">
                 <User className="w-4 h-4" />
                 <span>Entrar / Login</span>
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -194,7 +194,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Brand & App Title */}
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
+            <div className="w-10 h-10 rounded-panel bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
               <MessageSquare className="w-5 h-5 text-emerald-400" />
             </div>
             <div>
@@ -225,7 +225,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsTenantMenuOpen((open) => !open)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer transition-all"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-control text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer transition-all"
                   title={`Empresa ativa: ${activeTenant.name} — clique pra trocar`}
                 >
                   <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
@@ -238,7 +238,7 @@ export const Header: React.FC<HeaderProps> = ({
                     (linha única, botão perto da borda direita) — evita vazar pra fora
                     da tela nos dois casos. */}
                 {isTenantMenuOpen && (
-                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50 origin-top-left md:origin-top-right animate-pop-in">
+                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-panel shadow-2xl p-2 z-50 origin-top-left md:origin-top-right animate-pop-in">
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 border-b border-slate-800 mb-1">
                       Alternar Cliente (Tenant)
                     </div>
@@ -250,7 +250,7 @@ export const Header: React.FC<HeaderProps> = ({
                             onSelectTenant(t);
                             setIsTenantMenuOpen(false);
                           }}
-                          className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition-all ${
+                          className={`w-full text-left px-2.5 py-2 rounded-control text-xs font-medium flex items-center justify-between transition-all ${
                             t.id === activeTenant.id
                               ? 'bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50'
                               : 'text-slate-300 hover:bg-slate-800'
@@ -276,41 +276,30 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* User Profile */}
             {currentUser ? (
-              <div className="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 p-1.5 pl-2.5 rounded-xl text-slate-200">
+              <div className="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 p-1.5 pl-2.5 rounded-panel text-slate-200">
                 <img
                   src={currentUser.avatar}
                   alt={currentUser.name}
-                  className="w-7 h-7 rounded-full object-cover border border-emerald-500/50"
+                  className="w-7 h-7 rounded-pill object-cover border border-emerald-500/50"
                 />
                 <div className="text-left hidden sm:block">
                   <div className="font-bold text-white text-xs leading-none">{currentUser.name}</div>
                   <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
                 </div>
 
-                <button
-                  onClick={onOpenLoginModal}
-                  className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-all"
-                  title="Trocar Operador / Perfil"
-                >
+                <Button variant="ghost" size="xs" iconOnly onClick={onOpenLoginModal} title="Trocar Operador / Perfil">
                   <ChevronDown className="w-4 h-4" />
-                </button>
+                </Button>
 
-                <button
-                  onClick={onLogout}
-                  className="p-1 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition-all ml-1"
-                  title="Sair"
-                >
+                <Button variant="danger" size="xs" iconOnly onClick={onLogout} title="Sair" className="ml-1">
                   <LogOut className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
             ) : (
-              <button
-                onClick={onOpenLoginModal}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl flex items-center space-x-1.5 shadow"
-              >
+              <Button variant="primary" size="md" onClick={onOpenLoginModal}>
                 <User className="w-4 h-4" />
                 <span>Entrar / Login</span>
-              </button>
+              </Button>
             )}
           </div>
 
@@ -321,7 +310,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Scroll Left Button */}
           <button
             onClick={() => scrollTabs('left')}
-            className="flex-shrink-0 p-1.5 mr-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition-all border border-slate-800 shadow bg-slate-900/90"
+            className="flex-shrink-0 p-1.5 mr-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-control transition-all border border-slate-800 shadow bg-slate-900/90"
             title="Rolar menu para esquerda"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -336,7 +325,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="tab-saas-admin"
                 onClick={() => setActiveTab('saas')}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
                   activeTab === 'saas'
                     ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
                     : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
@@ -344,7 +333,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Layers className="w-4 h-4 text-purple-300" />
                 <span>Painel</span>
-                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/30 text-purple-200 font-bold">
+                <span className="ml-1 px-1.5 py-0.5 rounded-pill text-[10px] bg-purple-500/30 text-purple-200 font-bold">
                   Multi-Tenant
                 </span>
               </button>
@@ -353,7 +342,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="tab-whatsapp-sim"
               onClick={() => setActiveTab('whatsapp')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === 'whatsapp'
                   ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -371,7 +360,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="tab-crm"
               onClick={() => setActiveTab('crm')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === 'crm'
                   ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -391,7 +380,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 id="tab-financial"
                 onClick={() => setActiveTab('financial')}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
                   activeTab === 'financial'
                     ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
                     : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -407,7 +396,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   id="tab-attribution"
                   onClick={() => setActiveTab('attribution')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
                     activeTab === 'attribution'
                       ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
                       : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -420,7 +409,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   id="tab-knowledge"
                   onClick={() => setActiveTab('knowledge')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
                     activeTab === 'knowledge'
                       ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
                       : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -430,11 +419,12 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>Base de Conhecimento</span>
                 </button>
 
-                {/* "Evo Hub (Meta API)" e "Guia Conexão API" removidas da
-                    navegação (pedido direto, "pode descartar"/"não é
-                    necessário no momento") — as telas (EvoHubIntegration.tsx
-                    e o guia) continuam existindo no código, só não têm mais
-                    aba própria; reativar é só devolver os dois botões aqui. */}
+                {/* "Guia Conexão API" removida da navegação (pedido direto,
+                    "pode descartar"/"não é necessário no momento") — a tela
+                    continua existindo no código, só não tem mais aba
+                    própria; reativar é só devolver o botão aqui. A integração
+                    "Evo Hub" (api.evohub.ai) que também tinha aba aqui foi
+                    descontinuada de vez e removida do código. */}
               </>
             )}
           </div>
@@ -442,7 +432,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Scroll Right Button */}
           <button
             onClick={() => scrollTabs('right')}
-            className="flex-shrink-0 p-1.5 ml-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition-all border border-slate-800 shadow bg-slate-900/90"
+            className="flex-shrink-0 p-1.5 ml-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-control transition-all border border-slate-800 shadow bg-slate-900/90"
             title="Rolar menu para direita"
           >
             <ChevronRight className="w-4 h-4" />

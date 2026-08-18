@@ -66,12 +66,13 @@ describe('getTokenTelemetry', () => {
       totalSaaSTokens: 0,
       totalSaaSCostUSD: 0,
       totalCachedSaved: 0,
+      totalCacheSavingsUSD: 0,
       totalRequests: 0,
-      providerBreakdown: { gemini: { tokens: 0, requests: 0 }, groq: { tokens: 0, requests: 0 } },
+      providerBreakdown: { gemini: { tokens: 0, requests: 0, costUSD: 0 }, groq: { tokens: 0, requests: 0, costUSD: 0 } },
     });
   });
 
-  it('agrega múltiplas chamadas do mesmo tenant e resolve o nome real', async () => {
+  it('agrega múltiplas chamadas do mesmo tenant, resolve o nome real e calcula custo pelo preço confirmado do modelo', async () => {
     await recordGeminiUsage(TENANT_A, 'router', { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 120, cachedContentTokenCount: 5 });
     await recordGeminiUsage(TENANT_A, 'especialista', { promptTokenCount: 200, candidatesTokenCount: 50, totalTokenCount: 250, cachedContentTokenCount: 0 });
 
@@ -86,30 +87,32 @@ describe('getTokenTelemetry', () => {
       requestCount: 2,
       cachedTokensSaved: 5,
     });
-    expect(summary).toEqual({
-      totalSaaSTokens: 370,
-      totalSaaSCostUSD: 0,
-      totalCachedSaved: 5,
-      totalRequests: 2,
-      providerBreakdown: { gemini: { tokens: 370, requests: 2 }, groq: { tokens: 0, requests: 0 } },
-    });
+    // Preço vigente hoje (tier promocional até 31/12/2026, modelPricing.ts):
+    // input $0.75/1M, output $3.75/1M, cache $0.075/1M.
+    // Linha 1: (100-5)/1e6*0.75 + 5/1e6*0.075 + 20/1e6*3.75 = 0.000146625
+    // Linha 2: 200/1e6*0.75 + 50/1e6*3.75 = 0.0003375
+    const expectedCostUSD = 0.000146625 + 0.0003375;
+    expect(tenantsTelemetry[0].estimatedCostUSD).toBeCloseTo(expectedCostUSD, 8);
+    expect(summary.totalSaaSTokens).toBe(370);
+    expect(summary.totalCachedSaved).toBe(5);
+    expect(summary.totalRequests).toBe(2);
+    expect(summary.totalSaaSCostUSD).toBeCloseTo(expectedCostUSD, 8);
+    // Economia de cache: 5/1e6 * (0.75 - 0.075)
+    expect(summary.totalCacheSavingsUSD).toBeCloseTo((5 / 1_000_000) * (0.75 - 0.075), 10);
+    expect(summary.providerBreakdown.groq).toEqual({ tokens: 0, requests: 0, costUSD: 0 });
   });
 
-  it('router fallback Groq (plano aprovado): providerBreakdown separa tokens/requisições de cada provedor, por tenant e no agregado', async () => {
+  it('router fallback Groq (plano aprovado): providerBreakdown separa tokens/requisições/custo de cada provedor, por tenant e no agregado', async () => {
     await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 100 }, 'gemini');
     await recordGeminiUsage(TENANT_A, 'router', { totalTokenCount: 40 }, 'groq');
     await recordGeminiUsage(TENANT_A, 'especialista', { totalTokenCount: 60 }, 'groq');
 
     const { summary, tenantsTelemetry } = await getTokenTelemetry();
 
-    expect(tenantsTelemetry[0].providerBreakdown).toEqual({
-      gemini: { tokens: 100, requests: 1 },
-      groq: { tokens: 100, requests: 2 },
-    });
-    expect(summary.providerBreakdown).toEqual({
-      gemini: { tokens: 100, requests: 1 },
-      groq: { tokens: 100, requests: 2 },
-    });
+    expect(tenantsTelemetry[0].providerBreakdown.gemini).toMatchObject({ tokens: 100, requests: 1 });
+    expect(tenantsTelemetry[0].providerBreakdown.groq).toMatchObject({ tokens: 100, requests: 2 });
+    expect(summary.providerBreakdown.gemini).toMatchObject({ tokens: 100, requests: 1 });
+    expect(summary.providerBreakdown.groq).toMatchObject({ tokens: 100, requests: 2 });
   });
 
   it('isolamento: cada tenant só soma o próprio uso, ordenado do maior consumo pro menor', async () => {

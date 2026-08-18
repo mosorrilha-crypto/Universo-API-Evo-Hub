@@ -1,14 +1,13 @@
 import { Type, FunctionCallingConfigMode, type GoogleGenAI, type Content, type Part, type FunctionDeclaration } from '@google/genai';
 import {
   checkFreeBusy,
-  createCalendarEvent,
   rescheduleCalendarEvent,
   cancelCalendarEvent,
   isGoogleCalendarConnected,
   findWeeklyAvailability,
   type CalendarConfig,
 } from './googleCalendar';
-import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment } from './appointmentStore';
+import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
@@ -17,6 +16,7 @@ import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
+import { resolveEffectiveGlobalLayer } from './tenantPromptLayerStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
@@ -134,10 +134,26 @@ async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<ty
   return result;
 }
 
+/**
+ * Janela de histórico recente que entra no prompt (router + especialista) —
+ * era 10, aumentada pra 24 (18/08/2026, achado real em produção, contato
+ * "Alba Diana"): ela informou o serviço desejado nas mensagens 1, 7, 10 e
+ * 17 da conversa, mas a IA voltou a perguntar "qué servicio te gustaría
+ * realizarte?" na mensagem 38 — a última menção ao serviço já tinha caído
+ * fora da janela de 10 mensagens bem antes disso (contando ~20 mensagens de
+ * distância no caso real). Mesma classe de falha que capturedClientName já
+ * resolve pro nome do cliente (persistido fora da janela, ver comentário
+ * dele acima) — aqui é só um ajuste do tamanho da janela em si, não um
+ * mecanismo de persistência; se um gap muito grande (conversa retomada
+ * depois de semanas) continuar causando isso, o próximo passo é replicar o
+ * padrão de capturedClientName pro serviço identificado.
+ */
+const HISTORY_WINDOW_SIZE = 24;
+
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
   return (history || [])
     .filter((m) => m.text)
-    .slice(-10)
+    .slice(-HISTORY_WINDOW_SIZE)
     .map((m) => `${m.sender === 'lead' ? 'Cliente' : 'Atendente'}: ${m.text}`)
     .join('\n');
 }
@@ -287,8 +303,16 @@ DESISTÊNCIA/CANCELAMENTO: se o cliente sinalizar que quer desistir ou cancelar,
  * histórico, mensagem atual, resultado de ferramentas) nunca é cacheado,
  * como sempre.
  */
-async function buildCachedSystemInstruction(agent: AgentType, knowledgeBaseContext?: string): Promise<string> {
-  const globalLayer = (await getGlobalPromptLayerOverride().catch(() => null)) || DEFAULT_GLOBAL_LAYER;
+async function buildCachedSystemInstruction(tenantId: string, agent: AgentType, knowledgeBaseContext?: string): Promise<string> {
+  // Camada 1 por tenant (18/08/2026) — tenant com cópia própria (editada
+  // pelo admin dele) tem prioridade; sem cópia própria, cai na Camada 1
+  // global de sempre (override do saas_admin, ou o padrão hardcoded).
+  let globalLayer: string;
+  try {
+    globalLayer = await resolveEffectiveGlobalLayer(tenantId);
+  } catch {
+    globalLayer = (await getGlobalPromptLayerOverride().catch(() => null)) || DEFAULT_GLOBAL_LAYER;
+  }
   return `Você é a pessoa real que atende o WhatsApp de um negócio — não um robô, não uma IA se apresentando como tal. A resposta precisa ser indistinguível de uma pessoa de verdade digitando no celular.
 
 ${AGENT_INSTRUCTIONS[agent]}
@@ -372,7 +396,7 @@ async function generateSpecialistReply(
   adContext?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string } | null> {
   const historyText = buildHistoryText(history);
-  const systemInstruction = await buildCachedSystemInstruction(agent, knowledgeBaseContext);
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
   const specialistModel = 'gemini-3.6-flash';
   // Camada 1 (global) + Camada 3 (Base de Conhecimento do tenant) juntas
   // são idênticas em toda chamada deste (agent, tenantId) enquanto ninguém
@@ -503,6 +527,9 @@ const DATA_HORA_PARAM_DESCRIPTION = `Data e hora LOCAL (fuso ${BUSINESS_TIMEZONE
 /** Usada só quando consultar_disponibilidade_semana é chamada sem um serviço reconhecido no catálogo (sem durationMinutes cadastrado) — valor conservador (1h), nunca 0 nem um número inventado maior. */
 const DEFAULT_SLOT_DURATION_MINUTES = 60;
 
+/** Issue #289 (decisão do dono do produto, 18/08/2026) — quanto tempo uma reserva feita por criar_agendamento fica válida sem evento real no Calendar, esperando o comprovante ser aprovado, antes de expirar (ver heldAppointmentExpiryJob.ts). */
+const HOLD_EXPIRY_MS = 2 * 60 * 60 * 1000;
+
 /**
  * Ferramentas reais de agenda expostas ao agente de agendamento via
  * function-calling do Gemini. Nenhuma delas recebe um "evento_id" do
@@ -614,6 +641,35 @@ function extractHHmm(naiveIso: string): string {
   return naiveIso.slice(11, 16);
 }
 
+/**
+ * Soma minutos a uma data/hora LOCAL naive ("YYYY-MM-DDTHH:mm:ss", sem
+ * offset — mesmo formato de DATA_HORA_PARAM_DESCRIPTION). Trata a string
+ * como UTC só pra fazer a aritmética de calendário (nunca converte fuso de
+ * verdade) — cruza hora/dia corretamente sem risco de bug de DST.
+ */
+function addMinutesToNaiveIso(naiveIso: string, minutes: number): string {
+  const d = new Date(`${naiveIso}Z`);
+  d.setUTCMinutes(d.getUTCMinutes() + minutes);
+  return d.toISOString().slice(0, 19);
+}
+
+/**
+ * Fim REAL do evento a partir da duração cadastrada no catálogo pro
+ * serviço — nunca o `data_hora_fim`/`nova_data_hora_fim` que o próprio
+ * modelo calculou. Achado real em produção (18/08/2026): mesmo com
+ * `consultar_disponibilidade_semana` já usando a duração certa pra listar
+ * horários livres, nada impedia o modelo de errar a conta na hora de
+ * CRIAR o evento (ex: agendar só 1h de um serviço de 3h) — o evento real
+ * no Google Calendar ficava mais curto que o serviço de verdade, deixando
+ * o restante do horário aparecer como livre pra outro cliente com o MESMO
+ * profissional. Duração desconhecida no catálogo cai no mesmo fallback
+ * conservador (1h) já usado em consultar_disponibilidade_semana.
+ */
+function resolveAuthoritativeEndIso(kb: AgentKnowledgeBase | null, servico: string, startIso: string): string {
+  const durationMinutes = findProductDurationMinutes(kb, servico) ?? DEFAULT_SLOT_DURATION_MINUTES;
+  return addMinutesToNaiveIso(startIso, durationMinutes);
+}
+
 /** Extrai todo horário no formato H:mm/HH:mm citado num texto livre, normalizado com zero à esquerda — usado pela validação anti-alucinação (Epic 4.5.7). */
 function extractCitedTimes(text: string): string[] {
   const matches = text.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/g) || [];
@@ -657,21 +713,21 @@ function containsUnauthorizedConcessionPromise(text: string): boolean {
 
 /**
  * Gate determinístico pra confirmação prematura de agendamento (16/08/2026,
- * "Opção A" — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seção 4.3): hoje
- * `criar_agendamento` cria o evento REAL no Google Calendar assim que o
- * modelo chama a ferramenta, sem checar `payment_status` nenhum — a linha em
- * `appointments` (e o próprio payment_status) só existe DEPOIS que o evento
- * já foi criado, então bloquear a criação em si exigiria reestruturar o
- * fluxo (fora do escopo desta correção). O risco real não é o evento existir
- * na agenda — é o cliente ser informado que o turno está "confirmado"
- * enquanto o comprovante de sinal ainda não foi verificado por um operador
+ * "Opção A" — ver docs/AGENTE-VERTICAL-ARQUITETURA.md seção 4.3). Desde a
+ * issue #289 (18/08/2026) `criar_agendamento` não cria mais o evento REAL no
+ * Google Calendar direto — só reserva o horário (`payment_status =
+ * 'awaiting_payment'`, sem eventId) até um operador aprovar o comprovante
+ * (ver attachCalendarEventToHold em appointmentStore.ts). O risco que este
+ * gate corrige continua o mesmo: o cliente ser informado que o turno está
+ * "confirmado" enquanto o pagamento ainda não foi aprovado por um operador
  * (ou já foi rejeitado). Mesmo padrão do gate de reembolso/desconto acima:
  * corrige o texto ANTES de sair, nunca só alerta em paralelo.
- * Escopo deliberadamente restrito a paymentStatus 'pending_verification' ou
- * 'rejected' — um paymentStatus ausente (null/undefined) é ambíguo entre
+ * Escopo restrito a paymentStatus 'awaiting_payment', 'pending_verification'
+ * ou 'rejected' — um paymentStatus ausente (null/undefined) é ambíguo entre
  * "reserva combinada em efetivo, sem sinal" e "sinal exigido mas comprovante
- * ainda não chegou", e o sistema não tem hoje nenhum sinal pra distinguir os
- * dois casos, então gatear em cima de null arriscaria bloquear confirmações
+ * ainda não chegou" (caso legado, de antes da issue #289, ou reserva sem
+ * sinal), e o sistema não tem hoje nenhum sinal pra distinguir os dois
+ * casos, então gatear em cima de null arriscaria bloquear confirmações
  * legítimas de reserva em efetivo.
  */
 const CONFIRMATION_CLAIM_PATTERNS = [
@@ -769,28 +825,70 @@ async function executeCalendarTool(
               summary: `Tentou criar um agendamento novo, mas este contato já tem um ativo ("${existingBeforeCreate!.summary}" em ${existingBeforeCreate!.startIso}) — precisa remarcar em vez de criar outro.`,
             };
           }
+          // Gate de pagamento (16/08/2026, ver docs/AGENTE-VERTICAL-ARQUITETURA.md
+          // seção 4.3 / issue #279) — nunca deixar um criar_agendamento novo
+          // APAGAR silenciosamente um ciclo de pagamento ainda não resolvido
+          // do mesmo telefone: se o agendamento/reserva antigo já tinha
+          // passado da data (existingIsUpcoming = false), nada impedia
+          // resetPaymentState:true sobrescrever um comprovante ainda
+          // "awaiting_payment"/"pending_verification"/"rejected" sem humano
+          // nenhum ter decidido esse caso, perdendo o rastro pra sempre.
+          const existingHasUnresolvedPayment = existingBeforeCreate && (
+            existingBeforeCreate.paymentStatus === 'awaiting_payment'
+            || existingBeforeCreate.paymentStatus === 'pending_verification'
+            || existingBeforeCreate.paymentStatus === 'rejected'
+          );
+          if (existingHasUnresolvedPayment) {
+            return {
+              response: { erro: 'Este contato tem um comprovante de pagamento de um agendamento anterior ainda sem resolução humana — não crie nem remarque nada, isso precisa de um operador decidindo o caso antes.' },
+              summary: `Tentou criar um agendamento novo, mas este contato tem um pagamento de um ciclo anterior ainda não resolvido (status "${existingBeforeCreate!.paymentStatus}", agendamento "${existingBeforeCreate!.summary}") — recusado, precisa de decisão humana antes de qualquer novo agendamento.`,
+            };
+          }
+          // Fim REAL calculado a partir da duração cadastrada — nunca o
+          // data_hora_fim que o modelo mandou (ver resolveAuthoritativeEndIso
+          // acima). Loga quando o modelo errou a conta, só pra visibilidade.
+          const authoritativeEndIso = resolveAuthoritativeEndIso(kb, args.titulo, args.data_hora_inicio);
+          if (authoritativeEndIso !== args.data_hora_fim) {
+            console.warn(`⚠️  [Agendamento] tenant=${tenantId} data_hora_fim do modelo ("${args.data_hora_fim}") não batia com a duração real de "${args.titulo}" — corrigido pra "${authoritativeEndIso}".`);
+          }
           // Reconsulta de disponibilidade dentro do lock, imediatamente antes
-          // de criar o evento: o modelo pode ter chamado
+          // de reservar o horário: o modelo pode ter chamado
           // verificar_disponibilidade minutos antes na mesma conversa, mas
           // nada garantia que o horário continuava livre no instante exato
-          // da criação — outra conversa podia ter ocupado o slot nesse
-          // meio-tempo.
-          const stillFree = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
+          // da reserva — outra conversa podia ter ocupado o slot nesse
+          // meio-tempo. Usa o fim CORRIGIDO acima, não o do modelo.
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
           if (!stillFree) {
             return {
               response: { erro: 'Esse horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar criar o agendamento.' },
-              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da criação encontrou o horário OCUPADO — não criou, é preciso reconsultar disponibilidade.`,
+              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso}, mas a reconsulta de disponibilidade feita no momento da criação encontrou o horário OCUPADO — não criou, é preciso reconsultar disponibilidade.`,
             };
           }
-          const eventId = await createCalendarEvent(tenantId, cfg, args.titulo, args.descricao || '', args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
-          // resetPaymentState: true — é sempre um agendamento novo aqui (o
-          // caso "já ativo" já foi recusado acima), nunca deve herdar
-          // payment_status de um ciclo anterior, existente ou não.
-          await setAppointmentForPhone(tenantId, phone, { eventId, summary: args.titulo, startIso: args.data_hora_inicio, endIso: args.data_hora_fim }, { resetPaymentState: true });
+          // Issue #289 (decisão do dono do produto, 18/08/2026) — reduz (não
+          // elimina) o risco de dois clientes disputarem o mesmo horário
+          // enquanto o primeiro ainda não pagou: como o horário só fica
+          // reservado aqui (sem evento real ainda), checkFreeBusy sozinho não
+          // vê outra reserva concorrente pra esse mesmo intervalo.
+          const overlappingHold = await findOverlappingHold(tenantId, phone, args.data_hora_inicio, authoritativeEndIso);
+          if (overlappingHold) {
+            return {
+              response: { erro: 'Esse horário está reservado por outro cliente que ainda está esperando aprovação de pagamento — ofereça um horário alternativo.' },
+              summary: `Tentou criar o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso}, mas outro cliente já reservou esse mesmo horário aguardando aprovação de pagamento — não criou, ofereça outro horário.`,
+            };
+          }
+          // Issue #289 (decisão do dono do produto, 18/08/2026): NÃO cria mais
+          // o evento real no Google Calendar aqui — só reserva o horário
+          // (payment_status 'awaiting_payment', sem eventId) por até
+          // HOLD_EXPIRY_MS enquanto aguarda o comprovante. O evento real só é
+          // criado quando um operador aprova o pagamento (ver
+          // attachCalendarEventToHold, POST /verify-payment em
+          // conversations.ts) — nunca antes disso.
+          const heldUntil = new Date(Date.now() + HOLD_EXPIRY_MS).toISOString();
+          await createAppointmentHold(tenantId, phone, { summary: args.titulo, startIso: args.data_hora_inicio, endIso: authoritativeEndIso, heldUntil });
           notifyBookingCompleted(tenantId, phone, args.titulo).catch(() => {});
           return {
-            response: { sucesso: true, evento_id: eventId },
-            summary: `Criou o agendamento "${args.titulo}" para ${args.data_hora_inicio}–${args.data_hora_fim} com sucesso.`,
+            response: { sucesso: true, aguardando_pagamento: true },
+            summary: `Reservou o horário "${args.titulo}" para ${args.data_hora_inicio}–${authoritativeEndIso}, aguardando o comprovante de pagamento ser enviado e aprovado por um operador — ainda NÃO é um agendamento confirmado, diga isso claramente pro cliente.`,
             confirmedTimesHHmm: [extractHHmm(args.data_hora_inicio)],
           };
         });
@@ -808,18 +906,39 @@ async function executeCalendarTool(
               summary: 'Tentou remarcar mas não há nenhum agendamento ativo registrado pra este contato.',
             };
           }
-          const stillFree = await checkFreeBusy(tenantId, cfg, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
+          // Mesma correção de duração de criar_agendamento acima — o serviço
+          // continua sendo o do agendamento existente (remarcar_agendamento
+          // não muda o título), só o horário muda.
+          const authoritativeEndIso = resolveAuthoritativeEndIso(kb, existing.summary, args.nova_data_hora_inicio);
+          if (authoritativeEndIso !== args.nova_data_hora_fim) {
+            console.warn(`⚠️  [Agendamento] tenant=${tenantId} nova_data_hora_fim do modelo ("${args.nova_data_hora_fim}") não batia com a duração real de "${existing.summary}" — corrigido pra "${authoritativeEndIso}".`);
+          }
+          const stillFree = await checkFreeBusy(tenantId, cfg, args.nova_data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
           if (!stillFree) {
             return {
               response: { erro: 'Esse novo horário acabou de ficar ocupado — consulte a disponibilidade de novo antes de tentar remarcar.' },
-              summary: `Tentou remarcar para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim}, mas a reconsulta de disponibilidade feita no momento da remarcação encontrou o horário OCUPADO — não remarcou, é preciso reconsultar disponibilidade.`,
+              summary: `Tentou remarcar para ${args.nova_data_hora_inicio}–${authoritativeEndIso}, mas a reconsulta de disponibilidade feita no momento da remarcação encontrou o horário OCUPADO — não remarcou, é preciso reconsultar disponibilidade.`,
             };
           }
-          await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, args.nova_data_hora_fim, BUSINESS_TIMEZONE);
-          await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: args.nova_data_hora_fim });
+          // Issue #289 — sem evento real ainda (reserva aguardando
+          // pagamento), remarcar só muda o horário reservado, sem tocar no
+          // Calendar. Mesma checagem de reserva concorrente de outro
+          // telefone de criar_agendamento acima.
+          if (!existing.eventId) {
+            const overlappingHold = await findOverlappingHold(tenantId, phone, args.nova_data_hora_inicio, authoritativeEndIso);
+            if (overlappingHold) {
+              return {
+                response: { erro: 'Esse horário está reservado por outro cliente que ainda está esperando aprovação de pagamento — ofereça um horário alternativo.' },
+                summary: `Tentou remarcar a reserva pra ${args.nova_data_hora_inicio}–${authoritativeEndIso}, mas outro cliente já reservou esse mesmo horário aguardando aprovação de pagamento — não remarcou, ofereça outro horário.`,
+              };
+            }
+          } else {
+            await rescheduleCalendarEvent(tenantId, cfg, existing.eventId, args.nova_data_hora_inicio, authoritativeEndIso, BUSINESS_TIMEZONE);
+          }
+          await setAppointmentForPhone(tenantId, phone, { ...existing, startIso: args.nova_data_hora_inicio, endIso: authoritativeEndIso });
           return {
             response: { sucesso: true },
-            summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${args.nova_data_hora_fim} com sucesso.`,
+            summary: `Remarcou o agendamento existente para ${args.nova_data_hora_inicio}–${authoritativeEndIso} com sucesso.`,
             confirmedTimesHHmm: [extractHHmm(args.nova_data_hora_inicio)],
           };
         });
@@ -831,6 +950,15 @@ async function executeCalendarTool(
             response: { erro: 'Nenhum agendamento ativo encontrado pra este contato.' },
             summary: 'Tentou cancelar mas não há nenhum agendamento ativo registrado pra este contato.',
           };
+        }
+        // Issue #289 — uma reserva ainda sem evento real (aguardando
+        // pagamento) nunca teve sinal transferido de verdade, então não há
+        // devolução em jogo nenhuma — a política de 24h abaixo só se aplica
+        // a um agendamento que já tem evento real (ciclo de pagamento em
+        // andamento ou concluído). Cancela direto, sem escalar.
+        if (!existing.eventId) {
+          await clearAppointmentForPhone(tenantId, phone);
+          return { response: { sucesso: true }, summary: 'Cancelou a reserva existente (ainda sem evento real, aguardando pagamento) com sucesso — sem devolução em jogo, nenhum sinal tinha sido transferido ainda.' };
         }
         // Epic 4.5.9 — política real de sinal (ver knowledge_base/pricingAndPolicies):
         // devolvido com 24h+ de antecedência, não devolvido com menos. Como o
@@ -1066,13 +1194,52 @@ const FOTO_TOOLS: FunctionDeclaration[] = [
  * se algum tenant precisar, é regra de negócio dele (Base de Conhecimento,
  * `businessRules` — ver Clic Piscinas), não está garantido aqui.
  */
+/** Ações válidas que o Groq (ou o Gemini) pode decidir em runMidiaTool — mesmo enum nos dois caminhos. */
+const MIDIA_VALID_ACTIONS = ['enviar_foto_exemplo', 'enviar_video_exemplo', 'nenhuma'] as const;
+type MidiaAction = (typeof MIDIA_VALID_ACTIONS)[number];
+
+/** Forma unificada do resultado dessa decisão, venha do function-calling do Gemini ou do JSON do Groq — o resto de runMidiaTool só conhece isso. */
+interface MidiaCall {
+  name: 'enviar_foto_exemplo' | 'enviar_video_exemplo';
+  args: { nome_produto?: string };
+}
+
+/**
+ * Pedido direto do dono do produto (18/08/2026, mesma decisão do roteador):
+ * decidir se manda foto/vídeo de exemplo é baixo risco — o pior caso de um
+ * engano é mandar a mídia errada ou nenhuma, nunca criar/cancelar nada real
+ * (diferente de runAgendamentoTools, que mexe em agenda/pagamento e por
+ * isso continua só no Gemini). Bom candidato pro mesmo padrão
+ * Groq-primeiro-Gemini-de-fallback já usado em classifyAgent: 1 única
+ * tentativa, timeout curto, qualquer falha (rede, JSON malformado, "action"
+ * fora do enum) cai pro Gemini de sempre sem propagar erro.
+ */
+async function decideMidiaActionViaGroq(
+  tenantId: string,
+  groqApiKey: string,
+  prompt: string
+): Promise<MidiaCall | undefined> {
+  const { parsed, usage } = await callGroqJsonCompletion(
+    groqApiKey,
+    `${prompt}\n\nResponda estritamente em formato JSON: { "action": "enviar_foto_exemplo" | "enviar_video_exemplo" | "nenhuma", "nome_produto": "nome EXATO do catálogo, ou string vazia se action for \\"nenhuma\\"" }`
+  );
+  const action = parsed?.action as MidiaAction;
+  if (!MIDIA_VALID_ACTIONS.includes(action)) {
+    throw new Error(`Groq retornou "action" fora do enum esperado: ${JSON.stringify(parsed?.action)}`);
+  }
+  recordGeminiUsage(tenantId, 'foto', usage, 'groq').catch(() => {});
+  if (action === 'nenhuma') return undefined;
+  return { name: action, args: { nome_produto: (parsed?.nome_produto as string) || '' } };
+}
+
 async function runMidiaTool(
   tenantId: string,
   ai: GoogleGenAI,
   text: string,
   phone: string,
   mediaConfig: MediaSendConfig,
-  history?: { sender: 'lead' | 'agent'; text?: string }[]
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  groqApiKey?: string
 ): Promise<{ actionsSummary: string[] }> {
   const kb = await getKnowledgeBase(tenantId);
   const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64);
@@ -1085,27 +1252,42 @@ async function runMidiaTool(
 
   const prompt = `${productsWithPhoto.length ? `Produtos/serviços com FOTO de exemplo disponível pra enviar de verdade:\n${photoList}\n\n` : ''}${productsWithVideo.length ? `Produtos/serviços com VÍDEO de exemplo disponível pra enviar de verdade (prefira vídeo quando o mesmo produto tiver os dois — é mais persuasivo):\n${videoList}\n\n` : ''}${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensagem do cliente: "${text}"
 
-Só chame enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explicitamente pra ver foto/vídeo/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e isso ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
+Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explicitamente pra ver foto/vídeo/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e isso ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, decida "nenhuma".`;
 
-  const response = await withGeminiRetryAndUsage(
-    tenantId,
-    'foto',
-    () =>
-      ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          tools: [{ functionDeclarations: FOTO_TOOLS }],
-          toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
-        },
-      }),
-    GEMINI_TIMEOUT_MS
-  );
+  let call: MidiaCall | undefined;
 
-  const call = response.functionCalls?.[0];
-  if (!call || (call.name !== 'enviar_foto_exemplo' && call.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
+  if (groqApiKey) {
+    try {
+      call = await decideMidiaActionViaGroq(tenantId, groqApiKey, prompt);
+      if (!call) return { actionsSummary: [] };
+    } catch (err) {
+      console.warn(`⚠️  [Mídia] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
+      call = undefined;
+    }
+  }
 
-  const nomeProduto = (call.args?.nome_produto as string) || '';
+  if (!call) {
+    const response = await withGeminiRetryAndUsage(
+      tenantId,
+      'foto',
+      () =>
+        ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            tools: [{ functionDeclarations: FOTO_TOOLS }],
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+          },
+        }),
+      GEMINI_TIMEOUT_MS
+    );
+
+    const geminiCall = response.functionCalls?.[0];
+    if (!geminiCall || (geminiCall.name !== 'enviar_foto_exemplo' && geminiCall.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
+    call = { name: geminiCall.name, args: { nome_produto: geminiCall.args?.nome_produto as string | undefined } };
+  }
+
+  const nomeProduto = call.args.nome_produto || '';
   // Achado real em produção: o Gemini nem sempre devolve o nome EXATO
   // (mesma caixa/espaçamento) do catálogo — comparação estrita (p.name ===
   // nomeProduto) já causou "produto não tem mídia cadastrada" pra um
@@ -1284,7 +1466,7 @@ export async function generateAutoReplyForText(
       confirmedTimes = result.confirmedTimes;
       agendamentoToolsRan = result.actionsSummary.length > 0;
     } else if (agent !== 'agendamento' && phone && hasMediaSendConfig(mediaConfig)) {
-      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history);
+      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history, groqApiKey);
       if (actionsSummary.length) {
         extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
       }
@@ -1380,16 +1562,23 @@ export async function generateAutoReplyForText(
 
     // Gate determinístico de confirmação prematura de agendamento (16/08/2026,
     // "Opção A", ver containsPrematureBookingConfirmation acima) — corrige
-    // ANTES de sair sempre que o pagamento ainda está pendente de verificação
-    // ou foi rejeitado, mesmo que o modelo (ou o histórico da conversa) tenha
-    // escrito uma frase de confirmação. Não bloqueia a criação do evento em
-    // si (já aconteceu, é real na agenda) — só o que o CLIENTE lê.
+    // ANTES de sair sempre que o pagamento ainda não foi aprovado (aguardando
+    // comprovante, pendente de verificação, ou rejeitado), mesmo que o
+    // modelo (ou o histórico da conversa) tenha escrito uma frase de
+    // confirmação. Desde a issue #289, 'awaiting_payment' significa que nem
+    // existe evento real na agenda ainda — só uma reserva temporária.
     if (agent === 'agendamento' && phone) {
       const currentAppointment = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
-      const paymentUnresolved = currentAppointment && (currentAppointment.paymentStatus === 'pending_verification' || currentAppointment.paymentStatus === 'rejected');
+      const paymentUnresolved = currentAppointment && (
+        currentAppointment.paymentStatus === 'awaiting_payment'
+        || currentAppointment.paymentStatus === 'pending_verification'
+        || currentAppointment.paymentStatus === 'rejected'
+      );
       if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
         console.warn(`⚠️  [Gate de pagamento pendente] tenant=${tenantId} modelo confirmou o turno em texto mas o pagamento ainda está "${currentAppointment.paymentStatus}" — corrigindo resposta.`);
-        bubbles = ['Recibí tu comprobante, gracias — todavía está pendiente de revisión por parte del estudio. Apenas esté aprobado, te confirmo el turno.'];
+        bubbles = [currentAppointment.paymentStatus === 'awaiting_payment'
+          ? 'Ese horario queda reservado para vos hasta que llegue tu comprobante y sea aprobado — todavía no está confirmado, así que enviálo cuanto antes para no perderlo.'
+          : 'Recibí tu comprobante, gracias — todavía está pendiente de revisión por parte del estudio. Apenas esté aprobado, te confirmo el turno.'];
       }
     }
 

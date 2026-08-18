@@ -20,12 +20,32 @@ export function AutoResizeTextarea({
 }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { minRows?: number }) {
   const ref = React.useRef<HTMLTextAreaElement>(null);
 
-  React.useLayoutEffect(() => {
+  const resize = React.useCallback(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
+  }, []);
+
+  React.useLayoutEffect(() => {
+    resize();
+  }, [value, resize]);
+
+  // Achado real (18/08/2026): quando este campo monta dentro de uma aba
+  // escondida via CSS `display:none` (o painel mantém abas montadas o
+  // tempo todo, só alterna display — ver WhatsAppLeadsSim.tsx), o
+  // scrollHeight lido acima no mount é 0, e como o efeito só depende de
+  // `value`, essa altura errada ficava travada pra sempre — o texto
+  // aparecia cortado assim que a aba enfim ficava visível. ResizeObserver
+  // detecta o elemento ganhando layout de verdade (0 -> tamanho real) e
+  // recalcula nesse momento, sem precisar de nenhuma mudança em `value`.
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => resize());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [resize]);
 
   return (
     <textarea

@@ -37,7 +37,23 @@ export const getAuthToken = () => currentToken;
 // outro tenant no seletor, configurou algo lá (achando que estava editando
 // aquele tenant) e a gravação foi silenciosamente pro tenant do PRÓPRIO
 // login — um cliente real chegou a receber conteúdo de outro tenant.
-let tenantOverride: string | null = null;
+// Achado real em produção (18/08/2026): diferente do token (linha 11
+// acima), esse valor nunca era restaurado do localStorage no carregamento
+// do módulo — só App.tsx o define, de forma assíncrona, depois que
+// `currentUser`/`activeTenant` terminam de carregar. Qualquer `apiFetch`
+// disparado antes disso (ou, com o bug de ordem de efeitos corrigido em
+// App.tsx, mesmo já sincronizado corretamente) partia de `null`, caindo no
+// tenant do próprio token do saas_admin em vez do tenant selecionado.
+// Restaurar aqui, espelhando `readStoredToken()`, fecha essa janela.
+const readStoredTenantOverride = (): string | null => {
+  try {
+    return localStorage.getItem('saas_active_tenant_override');
+  } catch {
+    return null;
+  }
+};
+
+let tenantOverride: string | null = readStoredTenantOverride();
 
 export const setTenantOverride = (tenantId: string | null) => {
   tenantOverride = tenantId;

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Router } from 'express';
-import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseEvoHubLifecycleEvent, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
+import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode } from '../services/conversationStore';
@@ -17,7 +17,7 @@ import { hasFirstContactMessage, sendFirstContactMessage } from '../services/fir
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
-import { logEscalation, isPaymentRelated, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { consumePendingEcho } from '../services/outboundEchoTracker';
@@ -44,7 +44,6 @@ async function endOfBusinessDayIso(tenantId: string): Promise<string> {
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
-  evoHubWebhookSecret?: string;
   getAi?: () => GoogleGenAI | null;
   /** Router fallback Groq (plano aprovado) — ver classifyAgent em autoReply.ts. Opcional: sem ela, o router usa só o Gemini como sempre. */
   groqApiKey?: string;
@@ -61,7 +60,7 @@ interface WebhooksRouterDeps {
   googleRedirectUri?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecret, getAi, groqApiKey, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri
     ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
     : undefined;
@@ -348,6 +347,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           if (msg.text && isPaymentRelated(msg.text)) {
             await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
           }
+          if (msg.text && looksLikeHarassment(msg.text)) {
+            await logEscalation(tenantId, msg.from, msg.contactName, '🚫 Mensagem de conteúdo pessoal/romântico dirigido à assistente — possível assédio, considere bloquear a IA pra este contato (menu ⋮ na conversa)', msg.text);
+          }
           if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
         } else if (msg.type === 'image') {
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
@@ -390,7 +392,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
           // continua sendo sempre humana.
           getAppointmentForPhone(tenantId, msg.from)
             .then(async (appointment) => {
-              if (!appointment || appointment.paymentStatus) return;
+              // Issue #289: 'awaiting_payment' é o estado normal de uma
+              // reserva que ainda não tem evento real no Calendar,
+              // esperando exatamente esta imagem chegar — não é "já tem
+              // comprovante registrado" (esse continua sendo qualquer outro
+              // valor de paymentStatus).
+              if (!appointment || (appointment.paymentStatus && appointment.paymentStatus !== 'awaiting_payment')) return;
               let receiptHint: string | undefined;
               if (downloadPromise) {
                 try {
@@ -448,9 +455,8 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     // vier" — um POST sem x-hub-signature-256/x-hub-signature pulava a
     // validação inteira e era processado como legítimo (fail-open), mesmo
     // com o app secret configurado. Isso permitia forjar mensagens de
-    // WhatsApp inteiras só omitindo o header. Corrigido pra fail-closed,
-    // igual ao handleEvoHubWebhook já fazia: com o secret configurado, o
-    // header é obrigatório.
+    // WhatsApp inteiras só omitindo o header. Corrigido pra fail-closed:
+    // com o secret configurado, o header é obrigatório.
     const signatureHeader = (req.headers['x-hub-signature-256'] || req.headers['x-hub-signature']) as string | undefined;
     const appSecret = process.env.META_APP_SECRET || process.env.META_API_TOKEN;
 
@@ -575,77 +581,6 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
     });
   };
 
-  /**
-   * Webhook dedicado do Evo Hub real (api.evohub.ai, canal BYO). Diferente do
-   * handler genérico acima: a assinatura HMAC usa o webhook_secret que a gente
-   * escolhe ao criar o canal (EVO_HUB_WEBHOOK_SECRET), não o META_APP_SECRET —
-   * o Hub é quem fala com a Meta, nunca recebemos o payload direto dela. Não
-   * expõe o alias /api/webhooks/evolution_hub (esse é o endpoint mockado do
-   * nosso próprio facade /api/v1/*, usado só como URL de exemplo no frontend).
-   */
-  const handleEvoHubVerification = (req: any, res: any) => {
-    res.status(200).json({
-      status: 'active',
-      message: 'Webhook do Evo Hub (real) operando e pronto para receber eventos.',
-    });
-  };
-
-  const handleEvoHubWebhook = async (req: any, res: any) => {
-    const signatureHeader = req.headers['x-hub-signature-256'] as string | undefined;
-
-    if (evoHubWebhookSecret) {
-      if (!signatureHeader) {
-        console.warn('❌ Webhook Evo Hub: assinatura ausente. Rejeitando requisição.');
-        return res.status(403).json({ error: 'Assinatura ausente.' });
-      }
-      try {
-        const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
-        const hash = crypto.createHmac('sha256', evoHubWebhookSecret).update(rawBody).digest('hex');
-        const expectedSignature = `sha256=${hash}`;
-        const sigBuffer = Buffer.from(signatureHeader);
-        const expectedBuffer = Buffer.from(expectedSignature);
-
-        if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
-          console.warn('❌ Webhook Evo Hub: assinatura HMAC-SHA256 inválida. Rejeitando requisição fraudulenta.');
-          return res.status(403).json({ error: 'Assinatura HMAC-SHA256 inválida. Requisição rejeitada.' });
-        }
-      } catch (err) {
-        console.error('Erro na validação HMAC do Webhook Evo Hub:', err);
-        return res.status(403).json({ error: 'Erro ao validar assinatura HMAC-SHA256.' });
-      }
-    } else {
-      console.warn('⚠️  EVO_HUB_WEBHOOK_SECRET não configurado — aceitando webhook do Evo Hub sem verificar assinatura (dev only).');
-    }
-
-    const body = req.body || {};
-
-    // Evento de ciclo de vida do canal (conectado/desconectado etc.) — não é
-    // mensagem de WhatsApp, só log por ora.
-    const lifecycle = parseEvoHubLifecycleEvent(body);
-    if (lifecycle) {
-      console.log(`🔔 [Evo Hub] Evento de ciclo de vida: ${lifecycle.eventName}`, lifecycle.details);
-      return res.status(200).json({ success: true, received: 'lifecycle_event' });
-    }
-
-    // Passthrough de mensagem no formato Meta Cloud API (BYO: o Hub repassa a
-    // estrutura oficial da Meta sem alterar).
-    if (body?.object === 'whatsapp_business_account') {
-      const parsedMessages = parseMetaWebhookPayload(body, 'evohub');
-      const enqueued = await enqueueAudioMessages(parsedMessages);
-
-      const messages = body.entry?.[0]?.changes?.[0]?.value?.messages;
-      if (messages && messages.length > 0) {
-        const msg = messages[0];
-        console.log(`📱 [Webhook Evo Hub] Nova mensagem de ${msg.from}:`, msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
-      }
-
-      return res.status(200).json({ success: true, processedMessages: messages?.length || 0 });
-    }
-
-    console.warn('🔔 [Evo Hub] Payload de webhook não reconhecido:', JSON.stringify(body).slice(0, 500));
-    return res.status(200).json({ success: true, received: 'unknown_payload' });
-  };
-
   // Webhook Routes (Supports /webhook, /api/webhooks/meta, /api/webhooks/evolution, /api/webhooks/whatsapp)
   router.get('/webhook', handleWebhookVerification);
   router.post('/webhook', handleWebhookPayload);
@@ -656,11 +591,6 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   router.get('/api/webhooks/evolution', handleWebhookVerification);
   router.post('/api/webhooks/evolution', handleWebhookPayload);
 
-  // Alias: o EvoHubIntegration.tsx usa esse caminho como URL padrão de webhook
-  // no frontend — sem essa rota, ele apontava pra um endpoint inexistente (404).
-  router.get('/api/webhooks/evolution_hub', handleWebhookVerification);
-  router.post('/api/webhooks/evolution_hub', handleWebhookPayload);
-
   router.get('/api/webhooks/whatsapp', handleWebhookVerification);
   router.post('/api/webhooks/whatsapp', handleWebhookPayload);
 
@@ -668,11 +598,6 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, evoHubWebhookSecr
   // da Meta — mesmo handler genérico acima, que já despacha por body.object.
   router.get('/api/webhooks/instagram', handleWebhookVerification);
   router.post('/api/webhooks/instagram', handleWebhookPayload);
-
-  // Endpoint dedicado do Evo Hub real — é esse que deve ser cadastrado como
-  // webhook_url ao criar o canal via POST /api/v1/channels no Evo Hub.
-  router.get('/api/webhooks/evohub', handleEvoHubVerification);
-  router.post('/api/webhooks/evohub', handleEvoHubWebhook);
 
   return router;
 }

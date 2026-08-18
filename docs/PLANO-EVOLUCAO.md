@@ -324,6 +324,11 @@ WhatsApp, agenda e login, sem nenhum dado vazando entre eles. Isso é o que tran
 
 ### Epic 4.2 — Evo Hub / WhatsApp outbound (facade)
 
+> **Descontinuado (2026-08-18):** o dono do produto decidiu não usar mais a
+> integração Evo Hub (api.evohub.ai) — todo o código relacionado (router
+> `/api/v1/*`, webhook dedicado, tela do painel) foi removido do repositório.
+> Itens abaixo ficam só como histórico, não são mais trabalho a fazer.
+
 | ID | Issue | Prioridade | Esforço | Status |
 |---|---|---|---|---|
 | 4.2.1–4.2.2 | Persistir channels reais, `/api/v1/messages/send` chamando Meta de verdade | P1 | M/L | Pendente — reavaliar necessidade após Fase 2 (o roteamento multi-tenant do Bloco 2.B pode tornar esse facade desnecessário) |

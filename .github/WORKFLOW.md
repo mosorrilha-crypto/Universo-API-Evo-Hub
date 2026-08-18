@@ -1,9 +1,18 @@
 # Como pegar e executar trabalho neste repo
 
+**Comece sempre pela issue [#290](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/290)**
+("[PAINEL] Status consolidado do backlog") — é o painel único e vivo com
+todo o backlog real organizado por categoria e o status mais recente de cada
+item. Ela substitui o padrão antigo de abrir uma issue `[REGISTRO] Sessão X`
+nova a cada handoff (que virou 5+ issues longas pra reler toda vez): agora o
+handoff é editar o corpo da #290 (mover item concluído pra lá, atualizar
+status), nunca abrir registro novo. Ler só essa issue já dá o contexto
+completo de "onde paramos" sem precisar escanear todas as issues abertas ou
+o histórico de commits.
+
 Migrado do board Trello "Universo — Backlog Técnico" (lista "📜 Diretrizes") em
 2026-08-09 — GitHub (issues + PRs) passou a ser o canal oficial de trabalho e
-status, no lugar do Trello. Ver a issue [#82](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/82)
-pra um exemplo real de como uma auditoria vira issues rastreáveis.
+status, no lugar do Trello.
 
 ## Onde encontrar trabalho
 

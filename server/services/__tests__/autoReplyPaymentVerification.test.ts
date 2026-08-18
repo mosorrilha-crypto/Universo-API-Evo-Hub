@@ -36,6 +36,7 @@ vi.mock('../knowledgeBaseStore', () => ({
   parsePriceToNumber: vi.fn(() => 0),
   resolveProductPriceAmount: vi.fn(() => 0),
   isNonBookableProduct: vi.fn(() => false),
+  findProductDurationMinutes: vi.fn(() => undefined),
 }));
 vi.mock('../metaCapiService', () => ({ fireMetaCapiEventForTenant }));
 

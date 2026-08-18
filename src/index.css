@@ -1,5 +1,49 @@
 @import "tailwindcss";
 
+/*
+ * Escala de referência do painel (issue #124) — Tailwind v4, CSS-first
+ * (`@theme`, sem tailwind.config.js neste projeto). Levantamento real do
+ * código (16/08/2026, `grep` em src/components/*.tsx) confirmou que o
+ * painel já usa a escala PADRÃO do Tailwind de forma consistente — zero
+ * ocorrência de `rounded-[...]`/`shadow-[...]` arbitrário em todo o
+ * frontend, só as 578 (rounded) + 130 (shadow) instâncias das classes
+ * nomeadas abaixo. Ou seja: o "problema" que a issue #124 descrevia
+ * (valores escolhidos caso a caso, sem uma escala documentada) já não
+ * existe na prática — o que faltava era só ISSO aqui, uma referência
+ * escrita do que já é convenção tácita, pra não derivar no futuro.
+ *
+ * `--radius-*` gera classes `rounded-control`/`rounded-panel`/etc,
+ * mapeadas 1:1 pro valor que a classe padrão do Tailwind já teria
+ * (`rounded-lg`/`rounded-xl`/...) — usar a nomeada ou a padrão dá
+ * exatamente o mesmo resultado visual; a nomeada só deixa a INTENÇÃO
+ * explícita no JSX (ex: `rounded-control` avisa "isto é um controle
+ * pequeno", não só "isto tem 8px de raio"). Não migramos as instâncias
+ * já existentes (risco de diff mecânico gigante sem ganho visual nenhum,
+ * já que o resultado final é idêntico) — Header.tsx usa a versão nomeada
+ * como referência de como código novo deve escrever isso.
+ */
+@theme {
+  /* Controles pequenos — botão, input, pill de aba/filtro. Mesmo valor de rounded-lg. */
+  --radius-control: 0.5rem;
+  /* Badge de ícone, CTA, item de lista/card pequeno. Mesmo valor de rounded-xl. */
+  --radius-panel: 0.75rem;
+  /* Painel maior — dropdown, card de conteúdo, modal pequeno. Mesmo valor de rounded-2xl. */
+  --radius-card: 1rem;
+  /* Avatar, badge de status, pill de filtro 100% arredondada. Mesmo valor de rounded-full. */
+  --radius-pill: 9999px;
+}
+
+/*
+ * Sombra — convenção por contexto (não geramos classe nomeada nova aqui,
+ * risco de reproduzir um box-shadow ligeiramente diferente do valor real
+ * do Tailwind pra zero ganho; a classe padrão já é a fonte da verdade).
+ * Documentado como referência de qual usar em código novo:
+ *   - controle/pill em estado ativo (ex: aba selecionada): shadow-sm
+ *   - card/painel de conteúdo: shadow-md ou shadow-lg
+ *   - dropdown/popover flutuante: shadow-xl ou shadow-2xl
+ *   - modal (sobrepõe a tela inteira): shadow-2xl
+ */
+
 /* Impressão do Contrato (ContractModal.tsx, pedido real 15/08/2026): sem
    isso, o Ctrl+P/window.print() imprimia a tela inteira do painel por
    baixo do modal (cabeçalho, abas, conversa) junto com o contrato — as

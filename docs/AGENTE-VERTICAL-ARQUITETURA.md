@@ -28,6 +28,12 @@
 > `high_ticket_installation` criado (e removido no mesmo dia) pra Clic Piscinas. As menções a
 > "Camada 2"/"Regras do Segmento" no resto deste documento são registro histórico da decisão
 > original de 07/08 — não descrevem mais o código atual.
+>
+> **Atualização de 16/08/2026.** Pra quem procura o conteúdo REAL, campo a campo, do que está
+> rodando hoje (em vez do plano/histórico deste documento), ver
+> `docs/AGENTE-PROMPT-MONIQUE-CAMPOS.md` — retrato gerado direto do código + Supabase de
+> produção, com nota de avaliação e lista dos gaps ainda em aberto (gate de pagamento parcial,
+> sem máquina de estados formal, sem trilha de auditoria genérica).
 
 ---
 
@@ -125,10 +131,18 @@ Confirmado pelo dono do produto: só falta conectar isso ao sistema — o prompt
 ### 4.3 — Verificação de transferência → confirmação de pagamento
 
 - Hoje: comprovante (imagem) chega, fica salvo (`mediaImageStore`), sem estado nenhum.
-- Novo: estado explícito por agendamento — `pending_verification → verified → confirmed`
-  (ou `rejected`). Painel do operador marca "verifiquei, bate" → sistema libera a mensagem de
-  confirmação de turno (seção 21 do script) — a IA nunca confirma pagamento sozinha, só o
-  operador ou uma integração bancária real (fora de escopo por ora).
+- Novo: estado explícito por agendamento — `awaiting_payment → pending_verification → verified →
+  confirmed` (ou `rejected`). Painel do operador marca "verifiquei, bate" → sistema libera a
+  mensagem de confirmação de turno (seção 21 do script) — a IA nunca confirma pagamento sozinha,
+  só o operador ou uma integração bancária real (fora de escopo por ora).
+- **Issue #289 (18/08/2026, decisão do dono do produto):** `criar_agendamento` não cria mais o
+  evento real no Google Calendar de forma otimista — só reserva o horário (`awaiting_payment`,
+  sem evento real) por até 2h enquanto aguarda o comprovante. O evento real só é criado quando
+  o operador aprova (`verified`) — `attachCalendarEventToHold` em `appointmentStore.ts`. Se o
+  comprovante nunca chega, `heldAppointmentExpiryJob.ts` libera o horário sozinho depois do
+  prazo. Risco aceito explicitamente: como não existe evento real durante a espera,
+  `checkFreeBusy` sozinho não vê essa reserva — `findOverlappingHold` reduz (não elimina) o
+  risco de dois clientes disputarem o mesmo horário nesse meio-tempo.
 
 ### 4.4 — Ferramenta nova pro agente: disponibilidade da semana
 

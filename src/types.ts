@@ -1,4 +1,4 @@
-export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'evohub' | 'escalations';
+export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'escalations';
 
 export type UserRole = 'operator' | 'manager' | 'admin' | 'saas_admin';
 
@@ -141,11 +141,22 @@ export interface LeadAttribution {
   capiEvents?: MetaCAPIEvent[];
 }
 
+/** Uma variante de tamanho/modelo dentro de um produto unificado — ver AgentProduct.variants. */
+export interface ProductVariant {
+  code: string;
+  dimensions?: string;
+  litros?: number;
+  price: string;
+  priceAmount?: number;
+}
+
 export interface AgentProduct {
   id: string;
   name: string;
   price: string;
   description: string;
+  /** Tamanhos/modelos dessa família, cada um com preço próprio (ver server/services/knowledgeBaseStore.ts). */
+  variants?: ProductVariant[];
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
   /**
@@ -268,12 +279,10 @@ export interface ChatMessage {
   timestamp: string;
   /** true quando o envio real via Meta Cloud API falhou — a mensagem ficou só local, o cliente nunca recebeu. */
   sendFailed?: boolean;
-  /** id de outra mensagem desta conversa que esta responde (quote) — metadado só do painel, não reflete no WhatsApp real. */
+  /** id de outra mensagem desta conversa que esta responde (quote) — quando a mensagem citada tem id real de provedor, também chega no WhatsApp real do cliente (ver server/services/conversationStore.ts). */
   replyToMessageId?: string;
   /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
   forwardedFromMessageId?: string;
-  /** presente quando o texto foi editado depois de enviado. */
-  editedAt?: string;
   reactions?: MessageReaction[];
   /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel. */
   sentBy?: 'ai' | 'operator';
@@ -382,17 +391,11 @@ export interface WebhookConfig {
   minUrgencyForAlert: number;
 }
 
-/** Espelha TenantTokenSummary (server/services/tokenUsageStore.ts) — sem
- * `estimatedCostUSD`: não existe uma constante confiável de preço por token
- * pro modelo em uso, e o backend nunca calculou isso por tenant. Esse campo
- * chegou a existir aqui e causou uma tela branca real em produção
- * (13/08/2026) — `tRecord.estimatedCostUSD.toFixed(5)` lançando sobre
- * `undefined` assim que telemetria real (não mais vazia) chegava do
- * backend, sem Error Boundary pra conter o crash. */
 /** Espelha ProviderTokenBreakdown (server/services/tokenUsageStore.ts). */
 export interface ProviderTokenBreakdown {
   tokens: number;
   requests: number;
+  costUSD: number;
 }
 
 /** Espelha ProviderBreakdown (server/services/tokenUsageStore.ts) — router fallback Groq: quanto do total veio de cada provedor. */
@@ -401,6 +404,15 @@ export interface ProviderBreakdown {
   groq: ProviderTokenBreakdown;
 }
 
+/** Espelha TenantTokenSummary (server/services/tokenUsageStore.ts).
+ * `estimatedCostUSD`/`cacheSavingsUSD`: calculados a partir do preço
+ * confirmado do modelo em uso (server/services/modelPricing.ts) — sempre um
+ * número, o backend nunca omite este campo (ver
+ * server/routes/__tests__/telemetryShape.test.ts, que trava isso). Um
+ * incidente real em produção (13/08/2026) veio do caminho oposto: este
+ * campo existia só no frontend, sem o backend nunca enviá-lo —
+ * `tRecord.estimatedCostUSD.toFixed(5)` lançava sobre `undefined` assim que
+ * telemetria real chegava, sem Error Boundary pra conter o crash. */
 export interface TenantTokenTelemetry {
   tenantId: string;
   tenantName: string;
@@ -409,6 +421,8 @@ export interface TenantTokenTelemetry {
   totalTokens: number;
   requestCount: number;
   cachedTokensSaved: number;
+  estimatedCostUSD: number;
+  cacheSavingsUSD: number;
   lastRequestAt: string;
   providerBreakdown: ProviderBreakdown;
 }

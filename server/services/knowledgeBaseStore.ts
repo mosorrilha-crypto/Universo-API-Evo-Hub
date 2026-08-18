@@ -6,12 +6,39 @@
  */
 import { getDb } from './db';
 
+/**
+ * Uma variante de tamanho/modelo dentro de um produto unificado (ex: catálogo
+ * de piscinas — um produto "Acapulco" cobrindo AC F400/F500/F600, cada um com
+ * preço próprio) — pedido real: unificar por família evita o agente mandar a
+ * mesma foto de exemplo várias vezes na mesma conversa (a foto é uma só por
+ * família), mas sem perder o preço específico de cada tamanho pro agente
+ * vender de acordo com a especificação escolhida pelo cliente.
+ */
+export interface ProductVariant {
+  /** Código do modelo no catálogo do fabricante (ex: "AC F400"). */
+  code: string;
+  /** Medidas em texto livre (ex: "4,10x2,30m"), opcional. */
+  dimensions?: string;
+  /** Capacidade em litros, opcional. */
+  litros?: number;
+  price: string;
+  /** Valor numérico do preço da variante — mesmo papel de AgentProduct.priceAmount, mas por tamanho. */
+  priceAmount?: number;
+}
+
 export interface AgentProduct {
   name: string;
   price: string;
   /** Agrupamento pro prompt (ex: "Pestañas", "Cejas") — opcional, catálogos pequenos podem ficar sem. */
   category?: string;
   description?: string;
+  /**
+   * Tamanhos/modelos dessa família, cada um com preço próprio — quando
+   * presente, o agente deve cotar pelo preço da variante escolhida em vez do
+   * `price` genérico acima (que vira só um texto de fallback tipo "a partir
+   * de" ou "sob consulta").
+   */
+  variants?: ProductVariant[];
   /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
@@ -267,7 +294,14 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   if (kb.pricingAndPolicies) parts.push(`Políticas de preço/pagamento: ${kb.pricingAndPolicies}`);
   if (kb.businessRules?.length) parts.push(`Regras de negócio:\n- ${kb.businessRules.join('\n- ')}`);
   if (kb.products?.length) {
-    const line = (p: AgentProduct) => `- ${p.name}: ${resolveProductPrice(p)}${p.description ? ` — ${p.description}` : ''}`;
+    const line = (p: AgentProduct) => {
+      const variantsLine = p.variants?.length
+        ? `\n  Tamanhos/modelos disponíveis (cote SEMPRE o preço do tamanho específico escolhido pelo cliente, nunca o preço genérico do produto):\n${p.variants
+            .map((v) => `    • ${v.code}${v.dimensions ? ` (${v.dimensions}${v.litros ? `, ${v.litros}L` : ''})` : ''}: ${v.price}`)
+            .join('\n')}`
+        : '';
+      return `- ${p.name}: ${resolveProductPrice(p)}${p.description ? ` — ${p.description}` : ''}${variantsLine}`;
+    };
     const categories = [...new Set(kb.products.map((p) => p.category).filter((c): c is string => !!c))];
     if (categories.length) {
       const uncategorized = kb.products.filter((p) => !p.category);

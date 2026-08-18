@@ -6,6 +6,7 @@
  * chamada que gravam aqui.
  */
 import { getDb } from './db';
+import { estimateUsageCostUSD, estimateCacheSavingsUSD } from './modelPricing';
 
 export type GeminiCallSite = 'router' | 'especialista' | 'agendamento' | 'foto';
 
@@ -57,6 +58,7 @@ export async function recordGeminiUsage(
 export interface ProviderTokenBreakdown {
   tokens: number;
   requests: number;
+  costUSD: number;
 }
 
 /**
@@ -73,7 +75,7 @@ export interface ProviderBreakdown {
 }
 
 function emptyProviderBreakdown(): ProviderBreakdown {
-  return { gemini: { tokens: 0, requests: 0 }, groq: { tokens: 0, requests: 0 } };
+  return { gemini: { tokens: 0, requests: 0, costUSD: 0 }, groq: { tokens: 0, requests: 0, costUSD: 0 } };
 }
 
 export interface TenantTokenSummary {
@@ -84,6 +86,8 @@ export interface TenantTokenSummary {
   totalTokens: number;
   requestCount: number;
   cachedTokensSaved: number;
+  estimatedCostUSD: number;
+  cacheSavingsUSD: number;
   lastRequestAt: string;
   providerBreakdown: ProviderBreakdown;
 }
@@ -92,6 +96,7 @@ export interface TokenTelemetrySummary {
   totalSaaSTokens: number;
   totalSaaSCostUSD: number;
   totalCachedSaved: number;
+  totalCacheSavingsUSD: number;
   totalRequests: number;
   providerBreakdown: ProviderBreakdown;
 }
@@ -104,11 +109,11 @@ const TELEMETRY_WINDOW_DAYS = 30;
  * hoje (poucos tenants, baixo volume de mensagens); revisar se algum dia
  * isso virar um gargalo de verdade.
  *
- * `estimatedCostUSD` fica sempre 0: não existe uma constante confiável de
- * preço por token pro modelo em uso neste projeto — reportar um custo
- * estimado sem fonte real seria inventar dado de negócio (CLAUDE.md:
- * "AI fallbacks never fabricate business data"). Volta a computar de
- * verdade quando houver um preço por token confirmado.
+ * `estimatedCostUSD`/`totalSaaSCostUSD` são calculados por linha via
+ * `estimateUsageCostUSD` (modelPricing.ts), usando o preço confirmado do
+ * modelo efetivamente usado (`gemini-3.6-flash`/`openai/gpt-oss-20b`) na
+ * data de cada chamada (`created_at` da linha, não a data de hoje) — nunca
+ * um preço genérico "por token" sem fonte.
  */
 export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySummary; tenantsTelemetry: TenantTokenSummary[] }> {
   const db = getDb();
@@ -121,7 +126,17 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
 
   const byTenant = new Map<
     string,
-    { promptTokens: number; candidatesTokens: number; totalTokens: number; requestCount: number; cachedTokensSaved: number; lastRequestAt: string; providerBreakdown: ProviderBreakdown }
+    {
+      promptTokens: number;
+      candidatesTokens: number;
+      totalTokens: number;
+      requestCount: number;
+      cachedTokensSaved: number;
+      estimatedCostUSD: number;
+      cacheSavingsUSD: number;
+      lastRequestAt: string;
+      providerBreakdown: ProviderBreakdown;
+    }
   >();
   for (const row of (rows || []) as any[]) {
     const acc = byTenant.get(row.tenant_id) || {
@@ -130,20 +145,31 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
       totalTokens: 0,
       requestCount: 0,
       cachedTokensSaved: 0,
+      estimatedCostUSD: 0,
+      cacheSavingsUSD: 0,
       lastRequestAt: row.created_at,
       providerBreakdown: emptyProviderBreakdown(),
     };
-    acc.promptTokens += row.prompt_tokens || 0;
-    acc.candidatesTokens += row.candidates_tokens || 0;
-    acc.totalTokens += row.total_tokens || 0;
-    acc.cachedTokensSaved += row.cached_tokens || 0;
-    acc.requestCount += 1;
-    if (row.created_at > acc.lastRequestAt) acc.lastRequestAt = row.created_at;
+    const promptTokens = row.prompt_tokens || 0;
+    const candidatesTokens = row.candidates_tokens || 0;
+    const cachedTokens = row.cached_tokens || 0;
     // Linhas gravadas antes desta coluna existir não têm `provider` — trata
     // como 'gemini' (única origem possível até aqui), nunca descarta o dado.
     const provider: LlmProvider = row.provider === 'groq' ? 'groq' : 'gemini';
+    const rowCostUSD = estimateUsageCostUSD(provider, promptTokens, candidatesTokens, cachedTokens, row.created_at);
+    const rowCacheSavingsUSD = estimateCacheSavingsUSD(provider, cachedTokens, row.created_at);
+
+    acc.promptTokens += promptTokens;
+    acc.candidatesTokens += candidatesTokens;
+    acc.totalTokens += row.total_tokens || 0;
+    acc.cachedTokensSaved += cachedTokens;
+    acc.estimatedCostUSD += rowCostUSD;
+    acc.cacheSavingsUSD += rowCacheSavingsUSD;
+    acc.requestCount += 1;
+    if (row.created_at > acc.lastRequestAt) acc.lastRequestAt = row.created_at;
     acc.providerBreakdown[provider].tokens += row.total_tokens || 0;
     acc.providerBreakdown[provider].requests += 1;
+    acc.providerBreakdown[provider].costUSD += rowCostUSD;
     byTenant.set(row.tenant_id, acc);
   }
 
@@ -164,15 +190,18 @@ export async function getTokenTelemetry(): Promise<{ summary: TokenTelemetrySumm
   const summaryProviderBreakdown = tenantsTelemetry.reduce((acc, t) => {
     acc.gemini.tokens += t.providerBreakdown.gemini.tokens;
     acc.gemini.requests += t.providerBreakdown.gemini.requests;
+    acc.gemini.costUSD += t.providerBreakdown.gemini.costUSD;
     acc.groq.tokens += t.providerBreakdown.groq.tokens;
     acc.groq.requests += t.providerBreakdown.groq.requests;
+    acc.groq.costUSD += t.providerBreakdown.groq.costUSD;
     return acc;
   }, emptyProviderBreakdown());
 
   const summary: TokenTelemetrySummary = {
     totalSaaSTokens: tenantsTelemetry.reduce((sum, t) => sum + t.totalTokens, 0),
-    totalSaaSCostUSD: 0,
+    totalSaaSCostUSD: tenantsTelemetry.reduce((sum, t) => sum + t.estimatedCostUSD, 0),
     totalCachedSaved: tenantsTelemetry.reduce((sum, t) => sum + t.cachedTokensSaved, 0),
+    totalCacheSavingsUSD: tenantsTelemetry.reduce((sum, t) => sum + t.cacheSavingsUSD, 0),
     totalRequests: tenantsTelemetry.reduce((sum, t) => sum + t.requestCount, 0),
     providerBreakdown: summaryProviderBreakdown,
   };

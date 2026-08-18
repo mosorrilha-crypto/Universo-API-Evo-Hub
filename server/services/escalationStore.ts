@@ -80,6 +80,28 @@ export function isPaymentRelated(text: string): boolean {
   return /\b(pago|pagu[eé]i|se[ñn]a|transfer[êe]nc[ií]a|transferir|comprobante|comprovante|dep[oó]sit(o|ei))\b/i.test(text || '');
 }
 
+/**
+ * Sinal forte de conteúdo pessoal/romântico dirigido à assistente — achado
+ * real (16/08/2026): alguns contatos usam o WhatsApp do negócio pra
+ * paquerar/assediar a persona da IA (declaração de amor, apelido que não é
+ * o do negócio, pedido de foto pessoal), gastando transcrição de áudio à
+ * toa e ocupando a fila de Escalonamentos sem nenhuma intenção real de
+ * cliente. Deliberadamente conservador — frases fortes e inequívocas, nunca
+ * palavras soltas tipo "amor"/"linda"/"reina", que são vocativos culturais
+ * normais no espanhol paraguaio (o próprio toneOfVoice da Monique usa esses
+ * termos de volta pra clientes reais) e gerariam alarme falso o tempo todo.
+ *
+ * Sem `\b` no fim de cada alternativa de propósito — `\b` em JavaScript só
+ * enxerga [A-Za-z0-9_] como "caractere de palavra" (sem a flag `u`, nem com
+ * ela pra `\b` especificamente), então falha logo depois de um acento
+ * (ex: "enamoré " — a fronteira entre "é" e o espaço não conta como boundary
+ * nenhuma, as duas bordas contam como "não-palavra"). Frases longas o
+ * bastante pra não precisar de fronteira pra evitar falso positivo.
+ */
+export function looksLikeHarassment(text: string): boolean {
+  return /(te quiero mucho|te amo\b|me enamor[eé]|eres hermosa|quiero conocerte en persona|tienes novia|tienes novio|est[aá]s soltera|c[aá]sate conmigo|c[aá]sese conmigo|m[aá]ndame una foto tuya|una foto tuya real|b[eé]same|te extra[ñn]o mi amor)/i.test(text || '');
+}
+
 export async function logEscalation(tenantId: string, phone: string, contactName: string | undefined, reason: string, lastMessage?: string, kind: EscalationKind = 'general'): Promise<Escalation> {
   const db = getDb();
   const id = `esc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

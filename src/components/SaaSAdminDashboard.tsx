@@ -1151,7 +1151,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
   // Advanced Token Strategy & Telemetry state
   const [telemetryData, setTelemetryData] = useState<{
-    summary: { totalSaaSTokens: number; totalSaaSCostUSD: number; totalCachedSaved: number; totalRequests: number; providerBreakdown: ProviderBreakdown };
+    summary: { totalSaaSTokens: number; totalSaaSCostUSD: number; totalCachedSaved: number; totalCacheSavingsUSD: number; totalRequests: number; providerBreakdown: ProviderBreakdown };
     tenantsTelemetry: TenantTokenTelemetry[];
   } | null>(null);
 
@@ -1481,17 +1481,22 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">
               <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Custo Estimado Gemini API</span>
+                <span>Custo Estimado (Gemini + Groq)</span>
                 <DollarSign className="w-4 h-4 text-emerald-400" />
               </div>
-              {/* Achado real em produção (13/08/2026): não existe uma
-                  constante confiável de preço por token pro modelo em uso —
-                  o backend nunca calculou isso de verdade, sempre devolvia
-                  totalSaaSCostUSD=0 fixo (tokenUsageStore.ts). Mostrar
-                  "$0.00000 USD" tinha a mesma cara de um custo medido; "—" é
-                  honesto sobre não ter essa métrica ainda. */}
-              <div className="text-2xl font-black text-slate-500">—</div>
-              <p className="text-[10px] text-slate-500 font-medium">Sem preço por token confirmado ainda pro modelo em uso</p>
+              {/* Calculado a partir do preço confirmado por 1M tokens do
+                  modelo em uso (server/services/modelPricing.ts), aplicado
+                  linha a linha na data de cada chamada — nunca um preço
+                  genérico "por token" sem fonte (ver comentário no arquivo
+                  de pricing pra fonte/data de checagem de cada preço). */}
+              <div className="text-2xl font-black text-emerald-400">
+                {telemetryData ? `$${telemetryData.summary.totalSaaSCostUSD.toFixed(4)}` : '—'}
+              </div>
+              <p className="text-[10px] text-slate-500 font-medium">
+                {telemetryData
+                  ? `G $${telemetryData.summary.providerBreakdown.gemini.costUSD.toFixed(4)} · Q $${telemetryData.summary.providerBreakdown.groq.costUSD.toFixed(4)}`
+                  : 'Preço confirmado por 1M tokens (ai.google.dev/gemini-api/docs/pricing)'}
+              </p>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">
@@ -1502,7 +1507,11 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               <div className="text-2xl font-black text-amber-400">
                 {telemetryData ? telemetryData.summary.totalCachedSaved.toLocaleString('pt-BR') : '—'}
               </div>
-              <p className="text-[10px] text-amber-300 font-medium">Até 75% de desconto via Context Caching</p>
+              <p className="text-[10px] text-amber-300 font-medium">
+                {telemetryData
+                  ? `Economia estimada: $${telemetryData.summary.totalCacheSavingsUSD.toFixed(4)} via Context Caching`
+                  : 'Até 90% de desconto via Context Caching'}
+              </p>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">
@@ -1551,6 +1560,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     <th className="p-3">Candidate Tokens (Output)</th>
                     <th className="p-3">Total Tokens</th>
                     <th className="p-3">Tokens Salvos (Cache)</th>
+                    <th className="p-3">Custo Estimado (USD)</th>
                     <th className="p-3">Requisições</th>
                     <th className="p-3">Provedor (Gemini / Groq)</th>
                     <th className="p-3">Última Atividade</th>
@@ -1562,12 +1572,11 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                       "Advocacia Silva & Associados") com tokens/custos fixos no
                       código — dado de negócio fabricado, com a mesma cara de uma
                       medição real. Mostra um estado vazio honesto em vez disso.
-                      Achado real em produção (13/08/2026): a coluna "Custo
-                      Estimado (USD)" lia `tRecord.estimatedCostUSD.toFixed(5)`,
-                      campo que o backend nunca envia por tenant (ver
-                      TenantTokenSummary em tokenUsageStore.ts) — tela branca
-                      assim que telemetria real (não mais vazia) chegava.
-                      Removida — não existe custo real por tenant hoje. */}
+                      A coluna "Custo Estimado (USD)" chegou a existir e causar
+                      tela branca real em produção (13/08/2026) porque o backend
+                      nunca enviava `estimatedCostUSD` — agora o backend calcula
+                      esse valor de verdade (server/services/modelPricing.ts) e
+                      sempre o envia como número, então a coluna voltou. */}
                   {telemetryData && telemetryData.tenantsTelemetry.length > 0 ? (
                     telemetryData.tenantsTelemetry.map((tRecord) => (
                       <tr key={tRecord.tenantId} className="hover:bg-slate-800/50">
@@ -1579,6 +1588,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                         <td className="p-3 font-mono text-purple-300">{tRecord.candidatesTokens.toLocaleString()}</td>
                         <td className="p-3 font-mono font-bold text-emerald-400">{tRecord.totalTokens.toLocaleString()}</td>
                         <td className="p-3 font-mono text-amber-400">{tRecord.cachedTokensSaved.toLocaleString()}</td>
+                        <td className="p-3 font-mono font-bold text-emerald-400">${tRecord.estimatedCostUSD.toFixed(4)}</td>
                         <td className="p-3 font-mono text-slate-400">{tRecord.requestCount} reqs</td>
                         <td className="p-3 font-mono text-[10px]">
                           <span className="text-blue-300">G {tRecord.providerBreakdown.gemini.tokens.toLocaleString('pt-BR')}</span>
@@ -1592,7 +1602,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={8} className="p-6 text-center text-xs text-slate-500">
+                      <td colSpan={9} className="p-6 text-center text-xs text-slate-500">
                         {telemetryData ? 'Nenhum tenant com consumo de tokens registrado ainda.' : 'Carregando telemetria...'}
                       </td>
                     </tr>
