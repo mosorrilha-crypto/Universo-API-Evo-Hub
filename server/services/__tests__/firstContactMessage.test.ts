@@ -136,23 +136,41 @@ describe('sendFirstContactMessage', () => {
     expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
   });
 
-  it('bloco que falha ao enviar de verdade (ex: erro de rede/timeout) não derruba os blocos seguintes da sequência', async () => {
-    uploadWhatsAppMedia.mockRejectedValueOnce(new Error('timeout na Evolution API'));
+  it('bloco que falha em TODAS as tentativas (ex: erro de rede persistente) não derruba os blocos seguintes da sequência', async () => {
+    uploadWhatsAppMedia
+      .mockRejectedValueOnce(new Error('timeout na Evolution API'))
+      .mockRejectedValueOnce(new Error('timeout na Evolution API'))
+      .mockRejectedValueOnce(new Error('timeout na Evolution API')); // as 3 tentativas de retry esgotam
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const kb: AgentKnowledgeBase = {
       firstContactBlocks: [
         textBlock('Bem-vindo!', 'b1'),
-        videoBlock('b2'), // falha aqui — uploadWhatsAppMedia rejeita
+        videoBlock('b2'), // falha aqui — uploadWhatsAppMedia rejeita nas 3 tentativas
         textBlock('Lo que queda a cargo del cliente sería...', 'b3'),
       ],
     };
 
     await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
 
+    expect(uploadWhatsAppMedia).toHaveBeenCalledTimes(3); // esgotou as 3 tentativas de retry
     expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(2); // blocos 1 e 3, mesmo com o 2 falhando
     expect(sendWhatsAppTextMessage).toHaveBeenNthCalledWith(2, 'pnid-1', 'token-1', PHONE, 'Lo que queda a cargo del cliente sería...');
     expect(recordOutgoingMessage).toHaveBeenCalledTimes(2); // só os 2 que realmente enviaram, nunca o vídeo que falhou
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('falhou ao enviar o bloco 2/3 (video)'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('tentativa 3/3'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('desistindo'));
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('achado real (18/08/2026, Clic Piscinas, contato "Ariel"): bloco com falha TRANSITÓRIA (blip de rede que se recupera) é reenviado com sucesso em vez de descartado — antes não existia retry nenhum e a saudação inicial simplesmente sumia', async () => {
+    sendWhatsAppTextMessage.mockRejectedValueOnce(new Error('fetch failed'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const kb: AgentKnowledgeBase = { firstContactBlocks: [textBlock('¡Hola! Bem-vindo à Clic Piscinas!', 'b1')] };
+
+    await sendFirstContactMessage(TENANT_ID, PHONE, kb, META_CONFIG);
+
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(2); // 1ª tentativa falhou, 2ª foi
+    expect(recordOutgoingMessage).toHaveBeenCalledTimes(1); // só grava depois do envio ter sucesso de verdade
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('tentativa 1/3'));
     consoleErrorSpy.mockRestore();
   });
 
