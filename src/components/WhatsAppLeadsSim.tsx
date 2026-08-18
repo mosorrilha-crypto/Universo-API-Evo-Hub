@@ -103,18 +103,6 @@ const COMPOSER_EMOJIS = [
 // por tenant fica pra quando outro tenant precisar de contrato de verdade.
 const CLIC_PISCINAS_TENANT_ID = '45dbb383-522e-400b-9804-0ea65f589d40';
 
-/**
- * Acompanhamento de funil (pedido real, 15/08/2026 — auditoria de conversas
- * reais mostrou um operador fechando verbalmente no chat ("Podemos dejar
- * reservada tu fecha") sem clicar no botão real de Agendamento Manual — o
- * fechamento nunca virava um evento de verdade no Google Calendar. Detecção
- * heurística (nunca 100% precisa) só pra sugerir o lembrete, nunca bloqueia
- * nem some nada — o operador decide se cabe ou não.
- */
-export function looksLikeClosingConfirmation(text: string): boolean {
-  return /\b(reserv\w*|confirm\w*|agend\w*)\b/i.test(text) || /\banot\w*\b.*\bturno\b/i.test(text) || /\bguard\w*\b.*\b(horario|turno)\b/i.test(text);
-}
-
 interface WhatsAppLeadsSimProps {
   onSaveTranscript: (item: SavedTranscriptItem) => void;
   knowledgeBase?: AgentKnowledgeBase;
@@ -1444,13 +1432,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [manualAppointmentError, setManualAppointmentError] = useState<string | null>(null);
   const [manualAppointmentSuccess, setManualAppointmentSuccess] = useState(false);
 
-  // Lembrete de fechamento manual (ver looksLikeClosingConfirmation acima) —
-  // reseta ao trocar de conversa, pra nunca sobrar de um lead pro outro.
-  const [closingNudgeVisible, setClosingNudgeVisible] = useState(false);
-  useEffect(() => {
-    setClosingNudgeVisible(false);
-  }, [activeLeadId]);
-
   const handleCreateManualAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLead?.phone || !manualServiceName || !manualDate || !manualTime) return;
@@ -1909,14 +1890,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     if (senderRole === 'agent' && (selectedLead as any).isReal) {
       sendRealWhatsAppMessage(selectedLead.id, selectedLead.phone, newMsg.id, newMsg.text!, replyToMessageId);
-    }
-
-    // Lembrete de fechamento manual (pedido real, 15/08/2026) — mensagem do
-    // OPERADOR (não da IA) que parece confirmar um horário, numa conversa
-    // real, sem agendamento já rastreado pra esse contato. Só sugere, nunca
-    // bloqueia — o operador decide se já registrou ou se é o caso.
-    if (senderRole === 'agent' && (selectedLead as any).isReal && !paymentAppointment && looksLikeClosingConfirmation(newMsg.text!)) {
-      setClosingNudgeVisible(true);
     }
 
     if (autoAnalyze) {
@@ -3678,36 +3651,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
-                  </div>
-                )}
-
-                {/* Lembrete de fechamento manual (pedido real, 15/08/2026) —
-                    ver looksLikeClosingConfirmation acima: auditoria de
-                    conversas reais mostrou fechamento verbal no chat nunca
-                    virando um evento real no Google Calendar. */}
-                {closingNudgeVisible && (
-                  <div className="flex items-center justify-between gap-2 bg-amber-950/40 border border-amber-700/50 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2 min-w-0 text-[11px] text-amber-200">
-                      <CalendarPlus className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span className="truncate">Parece que você confirmou um horário aqui — já registrou no Agendamento Manual?</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => { setIsManualAppointmentModalOpen(true); setClosingNudgeVisible(false); }}
-                        className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 text-[10px] font-bold cursor-pointer"
-                      >
-                        Registrar agora
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setClosingNudgeVisible(false)}
-                        className="p-1 text-amber-300 hover:text-white rounded-lg cursor-pointer"
-                        title="Dispensar"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
                   </div>
                 )}
 
