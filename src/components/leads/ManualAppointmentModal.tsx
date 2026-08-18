@@ -15,6 +15,8 @@ interface ManualAppointmentModalProps {
   onTimeChange: (value: string) => void;
   notes: string;
   onNotesChange: (value: string) => void;
+  paymentReceived: boolean;
+  onPaymentReceivedChange: (value: boolean) => void;
   error: string | null;
   isCreating: boolean;
   onSubmit: (e: React.FormEvent) => void;
@@ -22,7 +24,7 @@ interface ManualAppointmentModalProps {
 }
 
 export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
-  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, date, onDateChange, time, onTimeChange, notes, onNotesChange, error, isCreating, onSubmit, onClose,
+  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, date, onDateChange, time, onTimeChange, notes, onNotesChange, paymentReceived, onPaymentReceivedChange, error, isCreating, onSubmit, onClose,
 }) => {
   if (!isOpen) return null;
   return (
@@ -106,6 +108,16 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
             />
           </div>
+
+          <label className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl p-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={paymentReceived}
+              onChange={(e) => onPaymentReceivedChange(e.target.checked)}
+              className="w-4 h-4 accent-emerald-500 cursor-pointer"
+            />
+            <span className="text-xs text-slate-300">Comprovante de pagamento já recebido (marca como verificado)</span>
+          </label>
 
           <div className="flex justify-end space-x-2 pt-2">
             <button

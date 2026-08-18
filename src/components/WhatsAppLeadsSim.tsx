@@ -1427,6 +1427,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [manualDate, setManualDate] = useState('');
   const [manualTime, setManualTime] = useState('');
   const [manualNotes, setManualNotes] = useState('');
+  const [manualPaymentReceived, setManualPaymentReceived] = useState(false);
   const [isCreatingManualAppointment, setIsCreatingManualAppointment] = useState(false);
   const [manualAppointmentError, setManualAppointmentError] = useState<string | null>(null);
   const [manualAppointmentSuccess, setManualAppointmentSuccess] = useState(false);
@@ -1446,7 +1447,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/manual-appointment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso, notes: manualNotes.trim() || undefined }),
+        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso, notes: manualNotes.trim() || undefined, paymentReceived: manualPaymentReceived }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -1456,6 +1457,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setManualDate('');
       setManualTime('');
       setManualNotes('');
+      setManualPaymentReceived(false);
       setManualAppointmentSuccess(true);
       setTimeout(() => setManualAppointmentSuccess(false), 4000);
     } catch (err: any) {
@@ -3807,10 +3809,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onTimeChange={setManualTime}
         notes={manualNotes}
         onNotesChange={setManualNotes}
+        paymentReceived={manualPaymentReceived}
+        onPaymentReceivedChange={setManualPaymentReceived}
         error={manualAppointmentError}
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
-        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); }}
+        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); }}
       />
 
       <ContractModal

@@ -635,7 +635,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const { serviceName, startIso, endIso, notes } = req.body || {};
+    const { serviceName, startIso, endIso, notes, paymentReceived } = req.body || {};
     if (!serviceName?.trim() || !startIso || !endIso) {
       return res.status(400).json({ error: 'Campos "serviceName", "startIso" e "endIso" são obrigatórios.' });
     }
@@ -680,6 +680,15 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // isto é sempre um ciclo de pagamento novo (nunca deve herdar payment_status
     // de um agendamento antigo, existente ou não), mesmo raciocínio do PR #203.
     await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: true });
+
+    // Agendamento fechado fora do WhatsApp (ex: presencial, telefone) já pode
+    // vir com o comprovante conferido na hora do cadastro — sem isso não
+    // havia como marcar isso no painel, e o agendamento ficava indistinguível
+    // de um sem pagamento nenhum ainda verificado.
+    if (paymentReceived === true) {
+      await setPaymentVerification(tenantId, phone, 'verified', req.user!.id);
+    }
+
     const appointment = await getAppointmentForPhone(tenantId, phone);
     res.status(201).json({ appointment });
   }));

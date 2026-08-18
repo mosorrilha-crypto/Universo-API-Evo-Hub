@@ -162,6 +162,35 @@ describe('POST /api/conversations/:phone/manual-appointment', () => {
     expect(rows[0]).toMatchObject({ phone: PHONE, source: 'manual', event_id: 'evt-manual-123', payment_status: null });
   });
 
+  it('paymentReceived=true marca o comprovante como verificado direto na criação', async () => {
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00', paymentReceived: true }),
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.appointment).toMatchObject({ paymentStatus: 'verified', paymentVerifiedBy: 'op-1' });
+
+    const rows = supabase.__tables.appointments;
+    expect(rows[0]).toMatchObject({ payment_status: 'verified', payment_verified_by: 'op-1' });
+  });
+
+  it('sem paymentReceived (default), o agendamento fica sem status de pagamento', async () => {
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.appointment.paymentStatus).toBeUndefined();
+  });
+
   it('409 quando o horário está ocupado na agenda', async () => {
     checkFreeBusy.mockResolvedValue(false);
     ({ server, baseUrl } = await startServer());
