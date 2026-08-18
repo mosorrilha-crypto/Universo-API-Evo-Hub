@@ -1164,13 +1164,52 @@ const FOTO_TOOLS: FunctionDeclaration[] = [
  * se algum tenant precisar, é regra de negócio dele (Base de Conhecimento,
  * `businessRules` — ver Clic Piscinas), não está garantido aqui.
  */
+/** Ações válidas que o Groq (ou o Gemini) pode decidir em runMidiaTool — mesmo enum nos dois caminhos. */
+const MIDIA_VALID_ACTIONS = ['enviar_foto_exemplo', 'enviar_video_exemplo', 'nenhuma'] as const;
+type MidiaAction = (typeof MIDIA_VALID_ACTIONS)[number];
+
+/** Forma unificada do resultado dessa decisão, venha do function-calling do Gemini ou do JSON do Groq — o resto de runMidiaTool só conhece isso. */
+interface MidiaCall {
+  name: 'enviar_foto_exemplo' | 'enviar_video_exemplo';
+  args: { nome_produto?: string };
+}
+
+/**
+ * Pedido direto do dono do produto (18/08/2026, mesma decisão do roteador):
+ * decidir se manda foto/vídeo de exemplo é baixo risco — o pior caso de um
+ * engano é mandar a mídia errada ou nenhuma, nunca criar/cancelar nada real
+ * (diferente de runAgendamentoTools, que mexe em agenda/pagamento e por
+ * isso continua só no Gemini). Bom candidato pro mesmo padrão
+ * Groq-primeiro-Gemini-de-fallback já usado em classifyAgent: 1 única
+ * tentativa, timeout curto, qualquer falha (rede, JSON malformado, "action"
+ * fora do enum) cai pro Gemini de sempre sem propagar erro.
+ */
+async function decideMidiaActionViaGroq(
+  tenantId: string,
+  groqApiKey: string,
+  prompt: string
+): Promise<MidiaCall | undefined> {
+  const { parsed, usage } = await callGroqJsonCompletion(
+    groqApiKey,
+    `${prompt}\n\nResponda estritamente em formato JSON: { "action": "enviar_foto_exemplo" | "enviar_video_exemplo" | "nenhuma", "nome_produto": "nome EXATO do catálogo, ou string vazia se action for \\"nenhuma\\"" }`
+  );
+  const action = parsed?.action as MidiaAction;
+  if (!MIDIA_VALID_ACTIONS.includes(action)) {
+    throw new Error(`Groq retornou "action" fora do enum esperado: ${JSON.stringify(parsed?.action)}`);
+  }
+  recordGeminiUsage(tenantId, 'foto', usage, 'groq').catch(() => {});
+  if (action === 'nenhuma') return undefined;
+  return { name: action, args: { nome_produto: (parsed?.nome_produto as string) || '' } };
+}
+
 async function runMidiaTool(
   tenantId: string,
   ai: GoogleGenAI,
   text: string,
   phone: string,
   mediaConfig: MediaSendConfig,
-  history?: { sender: 'lead' | 'agent'; text?: string }[]
+  history?: { sender: 'lead' | 'agent'; text?: string }[],
+  groqApiKey?: string
 ): Promise<{ actionsSummary: string[] }> {
   const kb = await getKnowledgeBase(tenantId);
   const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64);
@@ -1183,27 +1222,42 @@ async function runMidiaTool(
 
   const prompt = `${productsWithPhoto.length ? `Produtos/serviços com FOTO de exemplo disponível pra enviar de verdade:\n${photoList}\n\n` : ''}${productsWithVideo.length ? `Produtos/serviços com VÍDEO de exemplo disponível pra enviar de verdade (prefira vídeo quando o mesmo produto tiver os dois — é mais persuasivo):\n${videoList}\n\n` : ''}${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensagem do cliente: "${text}"
 
-Só chame enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explicitamente pra ver foto/vídeo/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e isso ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, NÃO chame nenhuma ferramenta.`;
+Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explicitamente pra ver foto/vídeo/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e isso ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, decida "nenhuma".`;
 
-  const response = await withGeminiRetryAndUsage(
-    tenantId,
-    'foto',
-    () =>
-      ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          tools: [{ functionDeclarations: FOTO_TOOLS }],
-          toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
-        },
-      }),
-    GEMINI_TIMEOUT_MS
-  );
+  let call: MidiaCall | undefined;
 
-  const call = response.functionCalls?.[0];
-  if (!call || (call.name !== 'enviar_foto_exemplo' && call.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
+  if (groqApiKey) {
+    try {
+      call = await decideMidiaActionViaGroq(tenantId, groqApiKey, prompt);
+      if (!call) return { actionsSummary: [] };
+    } catch (err) {
+      console.warn(`⚠️  [Mídia] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
+      call = undefined;
+    }
+  }
 
-  const nomeProduto = (call.args?.nome_produto as string) || '';
+  if (!call) {
+    const response = await withGeminiRetryAndUsage(
+      tenantId,
+      'foto',
+      () =>
+        ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            tools: [{ functionDeclarations: FOTO_TOOLS }],
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
+          },
+        }),
+      GEMINI_TIMEOUT_MS
+    );
+
+    const geminiCall = response.functionCalls?.[0];
+    if (!geminiCall || (geminiCall.name !== 'enviar_foto_exemplo' && geminiCall.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
+    call = { name: geminiCall.name, args: { nome_produto: geminiCall.args?.nome_produto as string | undefined } };
+  }
+
+  const nomeProduto = call.args.nome_produto || '';
   // Achado real em produção: o Gemini nem sempre devolve o nome EXATO
   // (mesma caixa/espaçamento) do catálogo — comparação estrita (p.name ===
   // nomeProduto) já causou "produto não tem mídia cadastrada" pra um
@@ -1382,7 +1436,7 @@ export async function generateAutoReplyForText(
       confirmedTimes = result.confirmedTimes;
       agendamentoToolsRan = result.actionsSummary.length > 0;
     } else if (agent !== 'agendamento' && phone && hasMediaSendConfig(mediaConfig)) {
-      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history);
+      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history, groqApiKey);
       if (actionsSummary.length) {
         extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
       }
