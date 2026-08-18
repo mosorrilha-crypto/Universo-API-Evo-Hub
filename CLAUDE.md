@@ -39,7 +39,7 @@ Database migrations are hand-written idempotent SQL files under `supabase/migrat
 
 ## Backend architecture
 
-`server.ts` is the entrypoint: builds config, initializes the Supabase client, and mounts one router per domain from `server/routes/` (`auth`, `ai`, `telemetry`, `webhooks`, `metaCapi`, `evoHub`, `conversations`, `googleCalendar`, `admin`, `crm`). Routes are a thin HTTP layer; real logic lives in `server/services/`.
+`server.ts` is the entrypoint: builds config, initializes the Supabase client, and mounts one router per domain from `server/routes/` (`auth`, `ai`, `telemetry`, `webhooks`, `metaCapi`, `conversations`, `googleCalendar`, `admin`, `crm`). Routes are a thin HTTP layer; real logic lives in `server/services/`.
 
 **Async error handling is load-bearing.** Express 4 does not catch rejected promises from async route handlers — an unhandled rejection crashes the entire Node process (this caused a real production outage). Every async route handler must be wrapped in `asyncHandler` (`server/middleware/asyncHandler.ts`), and `server.ts` mounts a global 4-arg error middleware after all routers as a last-resort catch. `server.ts` also installs process-level `unhandledRejection`/`uncaughtException` handlers that log and never `process.exit`.
 

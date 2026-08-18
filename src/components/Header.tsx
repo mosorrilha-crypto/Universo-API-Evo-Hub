@@ -419,11 +419,12 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>Base de Conhecimento</span>
                 </button>
 
-                {/* "Evo Hub (Meta API)" e "Guia Conexão API" removidas da
-                    navegação (pedido direto, "pode descartar"/"não é
-                    necessário no momento") — as telas (EvoHubIntegration.tsx
-                    e o guia) continuam existindo no código, só não têm mais
-                    aba própria; reativar é só devolver os dois botões aqui. */}
+                {/* "Guia Conexão API" removida da navegação (pedido direto,
+                    "pode descartar"/"não é necessário no momento") — a tela
+                    continua existindo no código, só não tem mais aba
+                    própria; reativar é só devolver o botão aqui. A integração
+                    "Evo Hub" (api.evohub.ai) que também tinha aba aqui foi
+                    descontinuada de vez e removida do código. */}
               </>
             )}
           </div>

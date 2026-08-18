@@ -8,13 +8,11 @@ import { createSupabaseClientFromConfig } from './server/supabaseClient';
 import { getGeminiClient } from './server/gemini';
 import { createAuthenticateToken } from './server/middleware/auth';
 import { aiRateLimiter } from './server/middleware/rateLimit';
-import { createAuthenticateEvoHub } from './server/middleware/evoHubAuth';
 import { createAuthRouter } from './server/routes/auth';
 import { createAiRouter } from './server/routes/ai';
 import { createTelemetryRouter } from './server/routes/telemetry';
 import { createWebhooksRouter } from './server/routes/webhooks';
 import { createMetaCapiRouter } from './server/routes/metaCapi';
-import { createEvoHubRouter } from './server/routes/evoHub';
 import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
@@ -75,7 +73,6 @@ async function startServer() {
 
   const supabase = createSupabaseClientFromConfig(config);
   const authenticateToken = createAuthenticateToken(config.jwtSecret);
-  const authenticateEvoHub = createAuthenticateEvoHub(config.evohubApiKey, config.isProduction);
 
   // Os 8 serviços (Bloco 2.A) leem/escrevem em tabelas Postgres reais
   // através deste único cliente Supabase compartilhado — nada mais fica em
@@ -98,7 +95,6 @@ async function startServer() {
   app.use(createTelemetryRouter({ authenticateToken }));
   app.use(createWebhooksRouter({
     metaWebhookVerifyToken: config.metaWebhookVerifyToken,
-    evoHubWebhookSecret: config.evoHubWebhookSecret,
     getAi: () => getGeminiClient(config),
     groqApiKey: config.groqApiKey,
     metaAccessToken: config.metaAccessToken,
@@ -113,7 +109,6 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
   }));
   app.use(createMetaCapiRouter({ authenticateToken }));
-  app.use(createEvoHubRouter({ authenticateEvoHub }));
   app.use(createConversationsRouter({
     authenticateToken,
     jwtSecret: config.jwtSecret,
@@ -166,8 +161,6 @@ async function startServer() {
     evolutionApiUrl: config.evolutionApiUrl,
     evolutionApiKey: config.evolutionApiKey,
     evolutionInstanceName: config.evolutionInstanceName,
-    evoHubApiUrl: config.evoHubApiUrl,
-    evoHubChannelToken: config.evoHubChannelToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
