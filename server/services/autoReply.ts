@@ -146,6 +146,29 @@ function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[
 
 const ROUTER_VALID_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
 
+/**
+ * `text` pode chegar aqui já com várias mensagens de rajada coladas por
+ * `\n` (messageBuffer.ts junta tudo que o cliente mandou picotado dentro da
+ * janela de silêncio de 6s num único `texts.join('\n')`, sem marcar qual
+ * linha é a mais recente). Achado real (18/08/2026): cliente perguntou pelo
+ * combo, e antes da janela de silêncio fechar mandou uma segunda mensagem
+ * pivotando pra "só cejas, preço?" — as duas linhas chegavam juntas como
+ * "a Nova mensagem do cliente", sem nenhum sinal de recência, e o modelo
+ * tratava as duas como igualmente atuais, respondendo ao combo (já
+ * ultrapassado) e à pergunta nova na mesma resposta. Quando há mais de uma
+ * linha, numera e marca explicitamente a última como a prioritária — uma
+ * linha só (o caso comum) fica exatamente como antes, sem numeração.
+ */
+function formatClientMessageForPrompt(text: string): string {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length <= 1) return text;
+  const numbered = lines.map((line, i) => `${i + 1}. "${line}"${i === lines.length - 1 ? ' ← mensagem mais recente, priorize responder a esta' : ''}`).join('\n');
+  return `o cliente mandou estas mensagens em sequência rápida (numeradas da mais antiga pra mais recente):\n${numbered}`;
+}
+
 function buildRouterPrompt(text: string, historyText: string): string {
   return `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
@@ -153,7 +176,8 @@ function buildRouterPrompt(text: string, historyText: string): string {
 - "agendamento": o cliente quer marcar, confirmar, remarcar ou cancelar um horário específico — não classifique como agendamento uma pergunta que só busca informação (ex: onde fica, que horas abre), mesmo que relacionada a uma visita já combinada.
 - "reclamacao": o cliente está insatisfeito ou reclamando de um serviço JÁ REALIZADO (resultado, dor, alergia, reação), ou claramente irritado/chateado com o negócio.
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
-Mensagem: "${text}"
+Mensagem: ${formatClientMessageForPrompt(text)}
+Classifique com base na mensagem mais recente do cliente — se houver mais de uma mensagem em sequência, uma pergunta anterior já superada pela última não deve mudar a categoria.
 Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "confidence": 0 a 1 (o quão confiante você está nessa classificação), "reasoning": "explicação breve de 1 frase do motivo da escolha"}`;
 }
 
@@ -318,6 +342,7 @@ REGRAS DE ESTILO (sempre aplicar):
 10. As bolhas de uma mesma resposta são fragmentos de UM ÚNICO pensamento contínuo, na ordem certa — nunca duas ideias que se contradizem ou dois começos de resposta diferentes colados um atrás do outro.
 11. No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.
 12. Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.
+13. Se a "Nova mensagem do cliente" vier com mais de uma mensagem numerada (mensagens que ela mandou em sequência rápida), a mensagem marcada como "mais recente" é a que define o que responder agora — se ela muda de assunto ou pivota o pedido (ex: pergunta pelo combo e na sequência pergunta só por um item), responda à mais recente; não reabra nem repita informação sobre a mensagem anterior que ela já deixou pra trás, a menos que a mais recente dependa diretamente dela.
 ${knowledgeBaseContext || ''}
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
@@ -391,7 +416,7 @@ async function generateSpecialistReply(
   const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${tenantId}`, systemInstruction);
 
   const userContent = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}
-Nova mensagem do cliente: "${text}"`;
+Nova mensagem do cliente: ${formatClientMessageForPrompt(text)}`;
 
   const callSpecialist = (config: { cachedContent: string } | { systemInstruction: string }) =>
     withGeminiRetryAndUsage(
