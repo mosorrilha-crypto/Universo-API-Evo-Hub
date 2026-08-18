@@ -540,7 +540,8 @@ export async function updateConversationState(tenantId: string, phone: string, p
   if (patch.aiBlocked !== undefined) update.ai_blocked_at = patch.aiBlocked ? new Date().toISOString() : null;
 
   if (Object.keys(update).length > 0) {
-    await db.from('conversations').update(update).eq('id', existing.id);
+    const { error } = await db.from('conversations').update(update).eq('id', existing.id);
+    if (error) throw error;
   }
   emitConversationUpdated(tenantId, phone);
   return getConversation(tenantId, phone);
