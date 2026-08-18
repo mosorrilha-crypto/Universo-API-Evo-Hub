@@ -29,10 +29,13 @@ vi.mock('../googleCalendar', () => ({
   rescheduleCalendarEvent: vi.fn(async () => undefined),
   cancelCalendarEvent: vi.fn(async () => undefined),
 }));
+const createAppointmentHold = vi.fn(async () => undefined);
 vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone: vi.fn(async () => null),
   setAppointmentForPhone,
   clearAppointmentForPhone: vi.fn(async () => undefined),
+  createAppointmentHold,
+  findOverlappingHold: vi.fn(async () => undefined),
 }));
 vi.mock('../conversationStore', () => ({
   getConversationCtwaClid: vi.fn(async () => null),
@@ -92,10 +95,10 @@ describe('criar_agendamento recusa serviço não-agendável (bookable:false)', (
     expect(setAppointmentForPhone).not.toHaveBeenCalled();
   });
 
-  it('cria normalmente um serviço sem bookable:false', async () => {
+  it('cria normalmente (reserva, issue #289) um serviço sem bookable:false', async () => {
     mockKb = { products: [{ name: 'Microlips', price: 'Gs 500.000', durationMinutes: 120 }] };
     createCalendarEvent.mockClear();
-    setAppointmentForPhone.mockClear();
+    createAppointmentHold.mockClear();
 
     const ai = makeFakeAiSingleTool({
       name: 'criar_agendamento',
@@ -107,8 +110,8 @@ describe('criar_agendamento recusa serviço não-agendável (bookable:false)', (
       '595981234567', CALENDAR_CONFIG
     );
 
-    expect(createCalendarEvent).toHaveBeenCalledTimes(1);
-    expect(setAppointmentForPhone).toHaveBeenCalledTimes(1);
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(createAppointmentHold).toHaveBeenCalledTimes(1);
   });
 });
 

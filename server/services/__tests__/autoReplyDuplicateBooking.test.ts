@@ -11,7 +11,8 @@ import type { GoogleGenAI } from '@google/genai';
 
 const createCalendarEvent = vi.fn(async () => 'evt-novo');
 const setAppointmentForPhone = vi.fn(async () => undefined);
-let mockAppointment: { eventId: string; summary: string; startIso: string; endIso: string; paymentStatus?: string } | null = null;
+const createAppointmentHold = vi.fn(async () => undefined);
+let mockAppointment: { eventId?: string; summary: string; startIso: string; endIso: string; paymentStatus?: string } | null = null;
 
 vi.mock('../googleCalendar', () => ({
   isGoogleCalendarConnected: vi.fn(async () => true),
@@ -24,6 +25,8 @@ vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone: vi.fn(async () => mockAppointment),
   setAppointmentForPhone,
   clearAppointmentForPhone: vi.fn(async () => undefined),
+  createAppointmentHold,
+  findOverlappingHold: vi.fn(async () => undefined),
 }));
 vi.mock('../conversationStore', () => ({
   getConversationCtwaClid: vi.fn(async () => null),
@@ -81,18 +84,18 @@ describe('criar_agendamento — nunca sobrescreve um agendamento ativo (auditori
     expect(setAppointmentForPhone).not.toHaveBeenCalled();
   });
 
-  it('cria normalmente quando o contato não tem agendamento ativo', async () => {
+  it('cria normalmente quando o contato não tem agendamento ativo (issue #289: reserva, sem evento real ainda)', async () => {
     mockAppointment = null;
     createCalendarEvent.mockClear();
-    setAppointmentForPhone.mockClear();
+    createAppointmentHold.mockClear();
 
     await generateAutoReplyForText(
       'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
 
-    expect(createCalendarEvent).toHaveBeenCalledTimes(1);
-    expect(setAppointmentForPhone).toHaveBeenCalledTimes(1);
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(createAppointmentHold).toHaveBeenCalledTimes(1);
   });
 
   it('permite criar um agendamento novo quando o único existente já passou, e reseta o estado de pagamento', async () => {
@@ -102,20 +105,19 @@ describe('criar_agendamento — nunca sobrescreve um agendamento ativo (auditori
     // payment_status do ciclo antigo.
     mockAppointment = { eventId: 'evt-antigo', summary: 'Pelo a Pelo', startIso: '2026-08-09T09:00:00', endIso: '2026-08-09T10:30:00' };
     createCalendarEvent.mockClear();
-    setAppointmentForPhone.mockClear();
+    createAppointmentHold.mockClear();
 
     await generateAutoReplyForText(
       'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
 
-    expect(createCalendarEvent).toHaveBeenCalledTimes(1);
-    expect(setAppointmentForPhone).toHaveBeenCalledTimes(1);
-    expect(setAppointmentForPhone).toHaveBeenCalledWith(
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(createAppointmentHold).toHaveBeenCalledTimes(1);
+    expect(createAppointmentHold).toHaveBeenCalledWith(
       'tenant-a',
       '595981234567',
-      expect.objectContaining({ summary: 'Microlips' }),
-      { resetPaymentState: true }
+      expect.objectContaining({ summary: 'Microlips' })
     );
   });
 });
@@ -155,14 +157,14 @@ describe('criar_agendamento — gate de pagamento (issue #279): nunca apaga um c
   it('permite criar normalmente quando o ciclo anterior (já passado) foi resolvido (verified/confirmed)', async () => {
     mockAppointment = { eventId: 'evt-antigo', summary: 'Pelo a Pelo', startIso: '2026-08-09T09:00:00', endIso: '2026-08-09T10:30:00', paymentStatus: 'confirmed' };
     createCalendarEvent.mockClear();
-    setAppointmentForPhone.mockClear();
+    createAppointmentHold.mockClear();
 
     await generateAutoReplyForText(
       'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
 
-    expect(createCalendarEvent).toHaveBeenCalledTimes(1);
-    expect(setAppointmentForPhone).toHaveBeenCalledTimes(1);
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(createAppointmentHold).toHaveBeenCalledTimes(1);
   });
 });

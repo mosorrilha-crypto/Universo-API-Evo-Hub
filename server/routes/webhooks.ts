@@ -352,7 +352,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
           // continua sendo sempre humana.
           getAppointmentForPhone(tenantId, msg.from)
             .then(async (appointment) => {
-              if (!appointment || appointment.paymentStatus) return;
+              // Issue #289: 'awaiting_payment' é o estado normal de uma
+              // reserva que ainda não tem evento real no Calendar,
+              // esperando exatamente esta imagem chegar — não é "já tem
+              // comprovante registrado" (esse continua sendo qualquer outro
+              // valor de paymentStatus).
+              if (!appointment || (appointment.paymentStatus && appointment.paymentStatus !== 'awaiting_payment')) return;
               let receiptHint: string | undefined;
               if (downloadPromise) {
                 try {

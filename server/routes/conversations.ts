@@ -32,7 +32,7 @@ import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
-import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, type TrackedAppointment } from '../services/appointmentStore';
+import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive } from '../services/autoReply';
 import { subscribeTenant } from '../services/conversationEvents';
@@ -95,9 +95,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
    * Best-effort: se o cancelamento no Calendar falhar, mantém a linha em
    * `appointments` intacta (com o eventId) pra um humano cancelar
    * manualmente depois, em vez de perder a referência de um evento órfão.
+   *
+   * Issue #289 (18/08/2026): uma reserva rejeitada que AINDA não tinha
+   * virado evento real (criar_agendamento não cria mais o evento otimista —
+   * só o operador aprovando cria) não tem nada pra cancelar no Calendar,
+   * só a linha da reserva mesmo — libera direto.
    */
   async function releaseSlotOnRejectedPayment(tenantId: string, phone: string, appointment: TrackedAppointment): Promise<boolean> {
-    if (!calendarConfig || !appointment.eventId) return false;
+    if (!appointment.eventId) {
+      await clearAppointmentForPhone(tenantId, phone);
+      return false;
+    }
+    if (!calendarConfig) return false;
     try {
       await cancelCalendarEvent(tenantId, calendarConfig, appointment.eventId);
       await clearAppointmentForPhone(tenantId, phone);
@@ -709,9 +718,41 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });
 
     const tenantId = tenantOf(req);
-    const updated = await setPaymentVerification(tenantId, req.params.phone, status, operatorId);
+    const phone = req.params.phone;
+    const before = await getAppointmentForPhone(tenantId, phone);
+    if (!before) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
+
+    // Issue #289 (18/08/2026): uma reserva feita pela IA fica SEM evento
+    // real no Calendar até aqui — o operador aprovando o comprovante é o
+    // gatilho real pra criar o evento de verdade, nunca antes. Reconsulta
+    // disponibilidade agora porque o horário pode ter sido ocupado por
+    // outra coisa nesse meio-tempo (ex: um agendamento manual do próprio
+    // operador, ou outra reserva que virou evento primeiro).
+    if (status === 'verified' && !before.eventId) {
+      if (!calendarConfig) {
+        return res.status(503).json({ error: 'Google Calendar não configurado neste servidor — não é possível criar o evento real.' });
+      }
+      let disponivel: boolean;
+      try {
+        disponivel = await checkFreeBusy(tenantId, calendarConfig, before.startIso, before.endIso, BUSINESS_TIMEZONE);
+      } catch (err: any) {
+        return res.status(502).json({ error: `Falha ao verificar disponibilidade na agenda: ${err.message}` });
+      }
+      if (!disponivel) {
+        return res.status(409).json({ error: `O horário reservado (${before.startIso}) ficou ocupado enquanto o pagamento era analisado — combine um novo horário com o cliente antes de aprovar.` });
+      }
+      let eventId: string;
+      try {
+        eventId = await createCalendarEvent(tenantId, calendarConfig, before.summary, 'Confirmado pelo agente após aprovação do comprovante de pagamento.', before.startIso, before.endIso, BUSINESS_TIMEZONE);
+      } catch (err: any) {
+        return res.status(502).json({ error: `Falha ao criar o evento na agenda: ${err.message}` });
+      }
+      await attachCalendarEventToHold(tenantId, phone, eventId);
+    }
+
+    const updated = await setPaymentVerification(tenantId, phone, status, operatorId);
     if (!updated) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
-    const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, req.params.phone, updated) : false;
+    const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, updated) : false;
     res.json({ success: true, appointment: updated, calendarReleased });
   }));
 

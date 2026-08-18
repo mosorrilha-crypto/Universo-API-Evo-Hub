@@ -1413,7 +1413,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // (dica gerada pelo Gemini a partir da imagem, ver paymentReceiptAnalysis.ts)
   // continua exibida aqui, só como informação extra pro operador decidir
   // mais rápido lá no card.
-  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string; paymentReceiptHint?: string } | null>(null);
+  const [paymentAppointment, setPaymentAppointment] = useState<{ summary: string; startIso: string; paymentStatus?: string; paymentReceiptHint?: string; heldUntil?: string } | null>(null);
 
   // Issue #182 — antes disso, um agendamento fechado fora da IA (WhatsApp
   // pessoal, telefone, presencial) era invisível pro sistema inteiro: sem
@@ -2592,6 +2592,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Detectado em {new Date((selectedLead as any).geoRestriction.detectedAt).toLocaleString('pt-BR')}.
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Issue #289 (18/08/2026) — horário reservado pela IA, mas ainda SEM
+          evento real na agenda: o evento só é criado quando o comprovante é
+          aprovado. Só informativo (nada pra decidir ainda — o card de
+          escalonamento só aparece quando um comprovante chega de verdade). */}
+      {paymentAppointment?.paymentStatus === 'awaiting_payment' && (
+        <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-200 text-xs flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5" />
+          <span>
+            <span className="font-bold">Horário reservado, aguardando comprovante: </span>
+            {paymentAppointment.summary} em {new Date(paymentAppointment.startIso).toLocaleString('pt-BR')}.
+            {paymentAppointment.heldUntil && ` Reserva expira às ${new Date(paymentAppointment.heldUntil).toLocaleString('pt-BR')} se o comprovante não chegar — o evento real na agenda só é criado depois de aprovado.`}
+          </span>
         </div>
       )}
 

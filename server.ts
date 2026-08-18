@@ -26,6 +26,7 @@ import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
+import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
 import { initWebPush } from './server/services/webPush';
 import { notifySystemError } from './server/services/systemErrorAlertService';
 
@@ -200,6 +201,13 @@ async function startServer() {
   // canal de alerta (push + WhatsApp) do escalonamento normal. Ver
   // server/services/paymentPendingAlertJob.ts.
   startPaymentPendingAlertJob();
+
+  // Job em background que libera sozinho o horário de uma reserva feita por
+  // criar_agendamento que nunca teve o comprovante aprovado a tempo (issue
+  // #289) — sem evento real no Calendar até a aprovação, então esse horário
+  // precisa reaparecer como livre pra outro cliente depois do prazo (2h).
+  // Ver server/services/heldAppointmentExpiryJob.ts.
+  startHeldAppointmentExpiryJob();
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
   if (!config.isProduction) {
