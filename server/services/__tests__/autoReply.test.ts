@@ -745,6 +745,75 @@ describe('generateAutoReplyForText — headline do anúncio nomeando serviço do
   });
 });
 
+describe('generateAutoReplyForText — mensagens de rajada priorizam a mais recente (18/08/2026)', () => {
+  function makeFakeAiTriagem(specialistReply: { phase: string; bubbles: string[]; needsHumanConfirmation: boolean }) {
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.contents[0].text?.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify(specialistReply) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return { ai, calls };
+  }
+
+  it('mensagem única (sem rajada) mantém o formato de contents de sempre ([{ text }], sem role/parts)', async () => {
+    const { ai, calls } = makeFakeAiTriagem({ phase: 'informacao', bubbles: ['Gs 550.000.'], needsHumanConfirmation: false });
+    await generateAutoReplyForText('tenant-a', ai, 'Solo cejas precio', 'Cliente', undefined, []);
+    const specialistCall = calls[1];
+    expect(specialistCall.contents).toHaveLength(1);
+    expect(specialistCall.contents[0].role).toBeUndefined();
+    expect(typeof specialistCall.contents[0].text).toBe('string');
+    expect(specialistCall.contents[0].text).toContain('Solo cejas precio');
+  });
+
+  it('mensagens agrupadas pelo buffer de rajada (texto com \\n) viram turnos separados, com a última marcada como mais recente', async () => {
+    const { ai, calls } = makeFakeAiTriagem({ phase: 'informacao', bubbles: ['Gs 550.000.'], needsHumanConfirmation: false });
+    await generateAutoReplyForText('tenant-a', ai, 'Me gustaría reservar el combo cejas y labios\nSolo cejas precio', 'Cliente', undefined, []);
+    const specialistCall = calls[1];
+    // Duas mensagens de rajada -> dois turnos "user" separados em contents, sem resposta do agente entre eles.
+    expect(specialistCall.contents).toHaveLength(2);
+    expect(specialistCall.contents[0].role).toBe('user');
+    expect(specialistCall.contents[0].parts[0].text).toContain('Me gustaría reservar el combo cejas y labios');
+    expect(specialistCall.contents[1].role).toBe('user');
+    expect(specialistCall.contents[1].parts[0].text).toContain('Solo cejas precio');
+    expect(specialistCall.contents[1].parts[0].text).toContain('mais recente');
+  });
+
+  it('mensagem ÚNICA com quebra de linha interna (colar texto, Shift+Enter) NÃO é tratada como rajada quando messageCount=1 é informado', async () => {
+    const { ai, calls } = makeFakeAiTriagem({ phase: 'informacao', bubbles: ['Gs 550.000.'], needsHumanConfirmation: false });
+    // Uma única mensagem real do WhatsApp com quebra de linha interna —
+    // messageBuffer.ts só entra em jogo (e produz mais de uma linha em
+    // `texts.join('\n')`) quando há de fato mais de uma mensagem separada;
+    // aqui simulamos o chamador informando messageCount=1 (o real, vindo do
+    // buffer) pra essa mesma forma de texto não ser confundida com rajada.
+    await generateAutoReplyForText(
+      'tenant-a',
+      ai,
+      'Hola, buenas tardes\nQueria consultar por el precio de cejas',
+      'Cliente',
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1
+    );
+    const specialistCall = calls[1];
+    expect(specialistCall.contents).toHaveLength(1);
+    expect(specialistCall.contents[0].role).toBeUndefined();
+    expect(specialistCall.contents[0].text).toContain('Hola, buenas tardes\nQueria consultar por el precio de cejas');
+  });
+});
+
 describe('generateAutoReplyForText — gate de confirmação prematura de agendamento (16/08/2026, Opção A)', () => {
   function makeFakeAiAgendamentoConfirming(confirmationText: string) {
     const ai = {

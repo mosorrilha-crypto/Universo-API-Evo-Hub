@@ -1,5 +1,10 @@
 # Revisão do projeto Universo (WhatsSaaS Pro / Evo Hub) e plano de reestruturação
 
+> ⚠️ **HISTÓRICO — descreve um estado do código que não existe mais** (três backends não
+> integrados, login sem senha real, build quebrado, zero testes automatizados). Todos esses
+> pontos já foram corrigidos. **Para o estado atual real, leia `docs/GUIA-DO-PROJETO.md`
+> primeiro.** Este arquivo fica só como registro de onde o projeto começou.
+
 Este documento resume a revisão feita no repositório (originado no Google AI Studio),
 os erros concretos que já foram corrigidos nesta revisão, e um plano de reestruturação
 para quem for assumir o projeto de forma sustentável.
