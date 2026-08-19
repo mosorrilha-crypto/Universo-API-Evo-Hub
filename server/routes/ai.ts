@@ -3,6 +3,7 @@ import type { ServerConfig } from '../config';
 import { getGeminiClient, withGeminiRetry } from '../gemini';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { callGroqJsonCompletion } from '../services/groqClient';
+import { formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 
 /**
  * Achado real em produção (18/08/2026): os quatro endpoints deste arquivo
@@ -32,6 +33,26 @@ import { callGroqJsonCompletion } from '../services/groqClient';
  * Sem GROQ_API_KEY configurada, o comportamento é 100% o de antes (só
  * Gemini).
  */
+
+/**
+ * Achado real (19/08/2026): o 413 "Request Entity Too Large" do Groq batia
+ * até na 1ª mensagem de uma conversa NOVA, sem histórico grande nenhum —
+ * a causa não era o tamanho da conversa, era `mediaBase64` (imagem/áudio
+ * do lead embutido inteiro em base64 dentro de `messages`, ver ChatMessage
+ * em src/types.ts) sendo mandado cru no JSON.stringify do prompt. Nenhum
+ * dos 3 endpoints aqui pede imagem pro Groq (só texto, response_format
+ * json_object) — o base64 nunca era usado, só inflava o payload. Mesmo
+ * princípio já aplicado à Base de Conhecimento (formatKnowledgeBaseForPrompt
+ * em vez de JSON.stringify cru): manda só o que o texto precisa.
+ */
+function stripMediaBase64ForPrompt(messages: any): any {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((m) => {
+    if (!m || typeof m !== 'object' || !m.mediaBase64) return m;
+    const { mediaBase64, ...rest } = m;
+    return rest;
+  });
+}
 
 interface AiRouterDeps {
   config: ServerConfig;
@@ -104,8 +125,8 @@ Analise o histórico da conversa a seguir e a base de conhecimento do agente e r
 }
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
-Histórico de Mensagens: ${JSON.stringify(messages)}
-Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
+Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
+Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)}
 `;
 
       if (groqApiKey) {
@@ -217,8 +238,8 @@ Responda estritamente em formato JSON:
 }
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
-Histórico de Mensagens: ${JSON.stringify(messages)}
-Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
+Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
+Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)}
 `;
 
       if (groqApiKey) {
@@ -282,7 +303,7 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
 O operador pode perguntar sobre a conversa com o lead abaixo (ex: "esse cliente já falou de orçamento?", "resume o que falta pra fechar") OU fazer uma pergunta geral sem relação nenhuma com essa conversa (ex: traduções, datas, cálculos, feriados) — responda da forma mais direta e útil possível, em Português, a menos que a pergunta peça outro idioma.
 
 Dados do Lead (contexto, use se for relevante pra pergunta): ${JSON.stringify(leadInfo || {})}
-Histórico da Conversa (contexto, use se for relevante pra pergunta): ${JSON.stringify(messages || [])}
+Histórico da Conversa (contexto, use se for relevante pra pergunta): ${JSON.stringify(stripMediaBase64ForPrompt(messages || []))}
 
 Pergunta do operador: "${question.trim()}"
 
