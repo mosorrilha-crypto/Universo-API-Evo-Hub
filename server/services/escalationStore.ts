@@ -11,7 +11,7 @@ import { getDb } from './db';
 import { inferCountryFromPhone } from './conversationStore';
 import { notifyEscalationCreated } from './escalationAlertService';
 
-export type EscalationKind = 'general' | 'payment_proof';
+export type EscalationKind = 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
 
 export interface Escalation {
   id: string;
