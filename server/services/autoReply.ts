@@ -23,6 +23,7 @@ import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
 import { callGroqJsonCompletion } from './groqClient';
+import { withStructuredLog } from './structuredLog';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -243,37 +244,39 @@ async function classifyAgent(
   const historyText = buildHistoryText(history);
   const prompt = buildRouterPrompt(text, historyText, isBurst);
 
-  if (groqApiKey) {
-    try {
-      const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
-      if (!ROUTER_VALID_AGENTS.includes(parsed?.agent)) {
-        throw new Error(`Groq retornou "agent" fora do enum esperado: ${JSON.stringify(parsed?.agent)}`);
+  return withStructuredLog({ tenantId, area: 'autoReply', op: 'router' }, async () => {
+    if (groqApiKey) {
+      try {
+        const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
+        if (!ROUTER_VALID_AGENTS.includes(parsed?.agent)) {
+          throw new Error(`Groq retornou "agent" fora do enum esperado: ${JSON.stringify(parsed?.agent)}`);
+        }
+        const agent = parsed.agent as AgentType;
+        recordGeminiUsage(tenantId, 'router', usage, 'groq').catch(() => {});
+        logRouterDecision(tenantId, phone, 'groq', agent, parsed?.confidence, parsed?.reasoning);
+        return agent;
+      } catch (err) {
+        console.warn(`⚠️  [Router] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
       }
-      const agent = parsed.agent as AgentType;
-      recordGeminiUsage(tenantId, 'router', usage, 'groq').catch(() => {});
-      logRouterDecision(tenantId, phone, 'groq', agent, parsed?.confidence, parsed?.reasoning);
-      return agent;
-    } catch (err) {
-      console.warn(`⚠️  [Router] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
     }
-  }
 
-  const response = await withGeminiRetryAndUsage(
-    tenantId,
-    'router',
-    () =>
-      ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ text: prompt }],
-        config: { responseMimeType: 'application/json' },
-      }),
-    GEMINI_TIMEOUT_MS
-  );
+    const response = await withGeminiRetryAndUsage(
+      tenantId,
+      'router',
+      () =>
+        ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: [{ text: prompt }],
+          config: { responseMimeType: 'application/json' },
+        }),
+      GEMINI_TIMEOUT_MS
+    );
 
-  const parsed = JSON.parse(response.text || '{}') as { agent?: string; confidence?: number; reasoning?: string };
-  const agent = ROUTER_VALID_AGENTS.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
-  logRouterDecision(tenantId, phone, 'gemini', agent, parsed.confidence, parsed.reasoning);
-  return agent;
+    const parsed = JSON.parse(response.text || '{}') as { agent?: string; confidence?: number; reasoning?: string };
+    const agent = ROUTER_VALID_AGENTS.includes(parsed.agent as AgentType) ? (parsed.agent as AgentType) : 'triagem';
+    logRouterDecision(tenantId, phone, 'gemini', agent, parsed.confidence, parsed.reasoning);
+    return agent;
+  });
 }
 
 const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
@@ -497,20 +500,21 @@ async function generateSpecialistReply(
       GEMINI_TIMEOUT_MS
     );
 
-  let response;
-  try {
-    response = await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
-  } catch (err) {
-    // Rede de segurança extra: se a chamada com cachedContent falhar mesmo
-    // depois do retry padrão (ex: cache expirou entre criar e usar, corrida
-    // rara já que o TTL é de 55min), tenta UMA vez a mais sem cache antes de
-    // desistir — a resposta ao cliente nunca pode depender do cache de
-    // contexto dar certo.
-    if (!cachedContentName) throw err;
-    console.warn('⚠️  [Gemini Cache] chamada com cachedContent falhou mesmo após retry — tentando de novo sem cache:', (err as Error)?.message || err);
-    invalidateAllSystemInstructionCaches();
-    response = await callSpecialist({ systemInstruction });
-  }
+  const response = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}` }, async () => {
+    try {
+      return await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
+    } catch (err) {
+      // Rede de segurança extra: se a chamada com cachedContent falhar mesmo
+      // depois do retry padrão (ex: cache expirou entre criar e usar, corrida
+      // rara já que o TTL é de 55min), tenta UMA vez a mais sem cache antes de
+      // desistir — a resposta ao cliente nunca pode depender do cache de
+      // contexto dar certo.
+      if (!cachedContentName) throw err;
+      console.warn('⚠️  [Gemini Cache] chamada com cachedContent falhou mesmo após retry — tentando de novo sem cache:', (err as Error)?.message || err);
+      invalidateAllSystemInstructionCaches();
+      return await callSpecialist({ systemInstruction });
+    }
+  });
 
   const parsed = JSON.parse(response.text || '{}') as {
     phase?: string;
