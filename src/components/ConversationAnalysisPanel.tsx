@@ -121,6 +121,12 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   const [questionDraft, setQuestionDraft] = React.useState('');
   const [isAsking, setIsAsking] = React.useState(false);
   const [askResult, setAskResult] = React.useState<AskAiResult | null>(null);
+  // Seções recolhíveis (pedido real, 19/08/2026: painel ficava com muita coisa
+  // sempre aberta na tela) — fechadas por padrão, mesmo padrão visual do botão
+  // "Gerar nova resposta com orientação" (seta + clique no cabeçalho expande).
+  const [showCapiSection, setShowCapiSection] = React.useState(false);
+  const [showReadyReply, setShowReadyReply] = React.useState(false);
+  const [showAskAiSection, setShowAskAiSection] = React.useState(false);
 
   const handleAsk = async () => {
     if (!questionDraft.trim() || !onAskAi) return;
@@ -349,54 +355,67 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
             </p>
           </div>
 
-          {/* Meta CAPI Quick Actions */}
-          {onSendCAPIEvent && (
-            <div className="p-3 rounded-xl bg-slate-950 border border-blue-500/30 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 flex items-center">
-                  <Send className="w-3.5 h-3.5 mr-1" /> Disparar Evento Meta CAPI
-                </span>
-                <span className="text-[9px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">
-                  Otimizar Pixel
-                </span>
-              </div>
+        </>
+      )}
 
-              <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                <button
-                  onClick={() => onSendCAPIEvent('QualifiedLead')}
-                  className="px-2.5 py-1.5 bg-blue-950/80 hover:bg-blue-900 text-blue-200 border border-blue-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between"
-                >
-                  <span>Qualificado</span>
-                  <span className="text-[9px] text-blue-400 font-bold">CAPI</span>
-                </button>
+      {/* Meta CAPI Quick Actions — pedido real (19/08/2026): não depende de
+          nenhum dado da análise (só dispara os eventos), então fica fora do
+          bloco condicionado a `analysis` — disponível mesmo antes de rodar
+          "Analisar Conversa Completa". Recolhida por padrão. */}
+      {onSendCAPIEvent && (
+        <div className="rounded-xl bg-slate-950 border border-blue-500/30 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowCapiSection((v) => !v)}
+            className="w-full p-3 flex items-center justify-between cursor-pointer"
+          >
+            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 flex items-center">
+              <Send className="w-3.5 h-3.5 mr-1" /> Disparar Evento Meta CAPI
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="text-[9px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">
+                Otimizar Pixel
+              </span>
+              {showCapiSection ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
+            </span>
+          </button>
 
-                <button
-                  onClick={() => onSendCAPIEvent('Schedule')}
-                  className="px-2.5 py-1.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-200 border border-emerald-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between"
-                >
-                  <span>Agendamento</span>
-                  <span className="text-[9px] text-emerald-400 font-bold">CAPI</span>
-                </button>
+          {showCapiSection && (
+            <div className="grid grid-cols-2 gap-1.5 px-3 pb-3">
+              <button
+                onClick={() => onSendCAPIEvent('QualifiedLead')}
+                className="px-2.5 py-1.5 bg-blue-950/80 hover:bg-blue-900 text-blue-200 border border-blue-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between cursor-pointer"
+              >
+                <span>Qualificado</span>
+                <span className="text-[9px] text-blue-400 font-bold">CAPI</span>
+              </button>
 
-                <button
-                  onClick={() => onSendCAPIEvent('PurchaseIntention')}
-                  className="px-2.5 py-1.5 bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between"
-                >
-                  <span>Orçamento</span>
-                  <span className="text-[9px] text-purple-400 font-bold">CAPI</span>
-                </button>
+              <button
+                onClick={() => onSendCAPIEvent('Schedule')}
+                className="px-2.5 py-1.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-200 border border-emerald-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between cursor-pointer"
+              >
+                <span>Agendamento</span>
+                <span className="text-[9px] text-emerald-400 font-bold">CAPI</span>
+              </button>
 
-                <button
-                  onClick={() => onSendCAPIEvent('Purchase')}
-                  className="px-2.5 py-1.5 bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between"
-                >
-                  <span>Venda Fechada</span>
-                  <span className="text-[9px] text-amber-400 font-bold">CAPI</span>
-                </button>
-              </div>
+              <button
+                onClick={() => onSendCAPIEvent('PurchaseIntention')}
+                className="px-2.5 py-1.5 bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between cursor-pointer"
+              >
+                <span>Orçamento</span>
+                <span className="text-[9px] text-purple-400 font-bold">CAPI</span>
+              </button>
+
+              <button
+                onClick={() => onSendCAPIEvent('Purchase')}
+                className="px-2.5 py-1.5 bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-800 rounded-lg text-[11px] font-medium transition-all text-left flex items-center justify-between cursor-pointer"
+              >
+                <span>Venda Fechada</span>
+                <span className="text-[9px] text-amber-400 font-bold">CAPI</span>
+              </button>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {/* PRÓXIMA AÇÃO — bloco consolidado (proposta UX 18/08/2026): resposta sugerida pela análise (quando existe)
@@ -404,20 +423,28 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
           o mesmo composer de hint. Disponível mesmo sem análise (POST /api/ai/reply-from-hint é independente). */}
       {showNextActionBlock && (
         <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
+          <div
+            className={`flex items-center justify-between ${hasReadySuggestedReply ? 'cursor-pointer' : ''}`}
+            {...(hasReadySuggestedReply ? { onClick: () => setShowReadyReply((v) => !v), role: 'button', tabIndex: 0 } : {})}
+          >
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center">
               <ArrowRight className="w-3.5 h-3.5 mr-1 text-emerald-400" /> Próxima Ação
             </span>
-            {analysis?.detectedLanguage && (
-              <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[10px] font-bold border border-blue-500/30 flex items-center gap-1">
-                <Globe className="w-3 h-3" />
-                {analysis.detectedLanguage}
-              </span>
-            )}
+            <span className="flex items-center gap-1.5">
+              {analysis?.detectedLanguage && (
+                <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[10px] font-bold border border-blue-500/30 flex items-center gap-1">
+                  <Globe className="w-3 h-3" />
+                  {analysis.detectedLanguage}
+                </span>
+              )}
+              {hasReadySuggestedReply && (
+                showReadyReply ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              )}
+            </span>
           </div>
 
-          {/* Resposta recomendada pela IA (vinda da análise) */}
-          {hasReadySuggestedReply && (
+          {/* Resposta recomendada pela IA (vinda da análise) — recolhida por padrão. */}
+          {hasReadySuggestedReply && showReadyReply && (
             <>
               {analysis!.suggestedSmartReplyTranslation && (
                 <div className="p-3 rounded-lg bg-blue-950/40 border border-blue-500/30 space-y-1">
@@ -571,36 +598,48 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
       {/* PERGUNTAR À IA — assistente exploratório, deliberadamente secundário ao bloco de ação acima.
           Independente da análise (POST /api/ai/ask), disponível mesmo sem "Analisar Conversa Completa". */}
       {onAskAi && (
-        <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/60 space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 flex items-center">
-            <Bot className="w-3.5 h-3.5 mr-1 text-slate-500" /> Assistente IA
-          </span>
-          <AutoResizeTextarea
-            value={questionDraft}
-            onChange={(e) => setQuestionDraft(e.target.value)}
-            placeholder='Sobre esta conversa ("esse cliente já falou de orçamento?") ou qualquer pergunta geral ("traduza esta frase", "quais feriados tem este mês")'
-            minRows={2}
-            className="w-full bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-300 placeholder-slate-500 focus:outline-none focus:border-slate-600"
-          />
+        <div className="rounded-xl bg-slate-950/60 border border-slate-800/60 overflow-hidden">
           <button
-            onClick={handleAsk}
-            disabled={!questionDraft.trim() || isAsking}
-            className="w-full py-1.5 px-3 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+            type="button"
+            onClick={() => setShowAskAiSection((v) => !v)}
+            className="w-full p-3 flex items-center justify-between cursor-pointer"
           >
-            {isAsking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
-            <span>{isAsking ? 'Perguntando...' : 'Perguntar'}</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 flex items-center">
+              <Bot className="w-3.5 h-3.5 mr-1 text-slate-500" /> Assistente IA
+            </span>
+            {showAskAiSection ? <ChevronUp className="w-3.5 h-3.5 text-slate-500" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-500" />}
           </button>
 
-          {askResult?.error && (
-            <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs">
-              {askResult.error}
-            </div>
-          )}
+          {showAskAiSection && (
+            <div className="px-3 pb-3 space-y-2">
+              <AutoResizeTextarea
+                value={questionDraft}
+                onChange={(e) => setQuestionDraft(e.target.value)}
+                placeholder='Sobre esta conversa ("esse cliente já falou de orçamento?") ou qualquer pergunta geral ("traduza esta frase", "quais feriados tem este mês")'
+                minRows={2}
+                className="w-full bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-300 placeholder-slate-500 focus:outline-none focus:border-slate-600"
+              />
+              <button
+                onClick={handleAsk}
+                disabled={!questionDraft.trim() || isAsking}
+                className="w-full py-1.5 px-3 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isAsking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
+                <span>{isAsking ? 'Perguntando...' : 'Perguntar'}</span>
+              </button>
 
-          {askResult?.answer && (
-            <p className="text-xs text-slate-100 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed whitespace-pre-wrap">
-              {askResult.answer}
-            </p>
+              {askResult?.error && (
+                <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs">
+                  {askResult.error}
+                </div>
+              )}
+
+              {askResult?.answer && (
+                <p className="text-xs text-slate-100 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed whitespace-pre-wrap">
+                  {askResult.answer}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}
