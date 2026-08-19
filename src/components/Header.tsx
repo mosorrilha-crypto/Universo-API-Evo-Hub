@@ -161,6 +161,21 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
 
+            {/* Painel Multi-Tenant saiu da faixa de abas (pedido direto,
+                19/08/2026: Atendimento é a página principal) — vira um botão
+                próprio, só pra quem já enxergava a aba (saas_admin). */}
+            {canSeeSaasMaster && (
+              <Button
+                active={activeTab === 'saas'}
+                size="md"
+                onClick={() => { setActiveTab('saas'); setIsMobileMenuOpen(false); }}
+                className="w-full justify-center"
+              >
+                <Layers className="w-4 h-4" />
+                <span>Painel Multi-Tenant</span>
+              </Button>
+            )}
+
             {currentUser ? (
               <div className="flex items-center justify-between bg-slate-800/90 border border-slate-700/80 p-2 rounded-panel text-slate-200">
                 <div className="flex items-center gap-2 min-w-0">
@@ -274,6 +289,21 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
 
+            {/* Painel Multi-Tenant saiu da faixa de abas (pedido direto,
+                19/08/2026: Atendimento é a página principal) — vira um botão
+                próprio, só pra quem já enxergava a aba (saas_admin). */}
+            {canSeeSaasMaster && (
+              <Button
+                active={activeTab === 'saas'}
+                size="sm"
+                onClick={() => setActiveTab('saas')}
+                title="Painel Multi-Tenant"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Painel</span>
+              </Button>
+            )}
+
             {/* User Profile */}
             {currentUser ? (
               <div className="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 p-1.5 pl-2.5 rounded-panel text-slate-200">
@@ -321,23 +351,11 @@ export const Header: React.FC<HeaderProps> = ({
             ref={tabsRef}
             className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto pb-2 pt-0.5 custom-scrollbar scroll-smooth w-full"
           >
-            {canSeeSaasMaster && (
-              <button
-                id="tab-saas-admin"
-                onClick={() => setActiveTab('saas')}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                  activeTab === 'saas'
-                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
-                    : 'text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-800/40'
-                }`}
-              >
-                <Layers className="w-4 h-4 text-purple-300" />
-                <span>Painel</span>
-                <span className="ml-1 px-1.5 py-0.5 rounded-pill text-[10px] bg-purple-500/30 text-purple-200 font-bold">
-                  Multi-Tenant
-                </span>
-              </button>
-            )}
+            {/* Painel Multi-Tenant saiu da faixa de abas (pedido direto,
+                19/08/2026) — agora é um botão próprio no cabeçalho (ver
+                acima, junto do seletor de empresa), não mais uma aba aqui.
+                Atendimento (WhatsApp, abaixo) passa a ser a página
+                principal. */}
 
             <button
               id="tab-whatsapp-sim"
