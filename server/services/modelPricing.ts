@@ -23,6 +23,18 @@
  * Se o modelo usado em `autoReply.ts`/`groqClient.ts` mudar, este arquivo
  * precisa ser atualizado junto — o preço aqui é específico do modelo, não
  * do provedor em geral.
+ *
+ * Limitação conhecida (18/08/2026): `server/routes/ai.ts` (análise
+ * contextual, gerar resposta a partir de sugestão, perguntar à IA,
+ * relatório estratégico) passou a usar gemini-3.5-flash-lite — mais barato
+ * e com cota própria, pra não competir pela mesma cota de 2M tokens/minuto
+ * do gemini-3.6-flash que o autoReply.ts (resposta automática real ao
+ * cliente) usa. `tokenUsageStore.ts` só rastreia por PROVEDOR ('gemini'/
+ * 'groq'), não por modelo específico, então o custo estimado dessas
+ * chamadas de ai.ts fica hoje superestimado (calculado no preço do
+ * 3.6-flash, mais caro) até esse rastreamento ganhar granularidade por
+ * modelo — não é um custo real cobrado a mais, só uma imprecisão da
+ * telemetria de custo.
  */
 import type { LlmProvider } from './tokenUsageStore';
 

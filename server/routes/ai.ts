@@ -3,6 +3,22 @@ import type { ServerConfig } from '../config';
 import { getGeminiClient, withGeminiRetry } from '../gemini';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 
+/**
+ * Achado real em produção (18/08/2026): os quatro endpoints deste arquivo
+ * (análise contextual, gerar resposta a partir de sugestão, perguntar à
+ * IA, relatório estratégico) vinham falhando com 429 RESOURCE_EXHAUSTED —
+ * o projeto estourava o teto de 2M tokens/minuto do gemini-3.6-flash
+ * (Nível 1), cota compartilhada com o pipeline principal do agente
+ * (autoReply.ts, que decide e envia a resposta automática de verdade pro
+ * cliente no WhatsApp). Pedido direto do dono do produto: são recursos
+ * AUXILIARES da ficha de atendimento (o operador decide se usa, nunca
+ * determinam sozinhos o que é enviado ao cliente), então trocados pra
+ * gemini-3.5-flash-lite — cota separada de 4M tokens/minuto (o dobro,
+ * praticamente sem uso hoje) e ~5x mais barato. autoReply.ts continua em
+ * gemini-3.6-flash de propósito — ali sim é a resposta automática real,
+ * não vale o mesmo trade-off de qualidade por confiabilidade.
+ */
+
 interface AiRouterDeps {
   config: ServerConfig;
   authenticateToken: RequestHandler;
@@ -85,7 +101,7 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
           // tentativa — mesma causa raiz já corrigida em autoReply.ts (#84),
           // helper compartilhado agora em server/gemini.ts.
           const response = await withGeminiRetry(() => ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.5-flash-lite',
             contents: prompt,
             config: {
               responseMimeType: 'application/json',
@@ -181,7 +197,7 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
 `;
 
           const response = await withGeminiRetry(() => ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.5-flash-lite',
             contents: prompt,
             config: { responseMimeType: 'application/json' },
           }));
@@ -236,7 +252,7 @@ Pergunta do operador: "${question.trim()}"
 Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
 
           const response = await withGeminiRetry(() => ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.5-flash-lite',
             contents: prompt,
             config: { responseMimeType: 'application/json' },
           }));
@@ -278,7 +294,7 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
         try {
           // Mesmo achado do endpoint /api/analyze-conversation acima (issue #94).
           const response = await withGeminiRetry(() => ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.5-flash-lite',
             contents: `Atue como Especialista em Atribuição Meta Ads e Growth Hacking.
 Analise os dados dos leads a seguir e gere um relatório de inteligência estratégica conciso em português (3 parágrafos) destacando ROAS, Canais de Alta Conversão, CAPI Match Quality Score e sugestões de otimização:
 Leads: ${JSON.stringify(leads || [])}`,
