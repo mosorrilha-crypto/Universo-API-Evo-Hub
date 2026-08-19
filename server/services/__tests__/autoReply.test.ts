@@ -886,11 +886,12 @@ describe('generateAutoReplyForText — gate de confirmação prematura de agenda
     expect(result?.bubbles).toEqual(['¡Listo! Tu turno ya está confirmado para el jueves a las 10.']);
   });
 
-  it('não mexe na resposta quando não há nenhum agendamento rastreado pra este telefone (paymentStatus indefinido)', async () => {
+  it('corrige quando não há nenhum agendamento rastreado pra este telefone (achado real, 19/08/2026, Mabel: criar_agendamento falhou/não rodou e o modelo mesmo assim confirmou em texto — sem appointment nenhum, o comprovante que chegou depois nunca gerou escalação pro operador)', async () => {
     getAppointmentForPhone.mockResolvedValue(undefined);
     const ai = makeFakeAiAgendamentoConfirming('¡Listo! Tu turno ya está confirmado para el jueves a las 10.');
     const result = await generateAutoReplyForText('tenant-a', ai, 'hola', 'Cliente', undefined, undefined, PHONE);
-    expect(result?.bubbles).toEqual(['¡Listo! Tu turno ya está confirmado para el jueves a las 10.']);
+    expect(result?.bubbles).not.toContain('¡Listo! Tu turno ya está confirmado para el jueves a las 10.');
+    expect(result?.bubbles.join(' ')).not.toMatch(/confirmad/i);
   });
 
   it('não mexe quando o texto não afirma confirmação nenhuma, mesmo com pagamento pending_verification', async () => {

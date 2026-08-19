@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LeadInfo } from '../../types';
-import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3 } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil } from 'lucide-react';
 
 export interface UpcomingEvent {
   id: string;
@@ -31,6 +31,8 @@ interface UpcomingEventsPanelProps {
   onNextMonth: () => void;
   /** Marca/desmarca um atendimento como concluído — some da lista ativa e vai pra seção "Concluídos" (colapsada por padrão, mesmo padrão de "Arquivadas" no Atendimento WhatsApp). */
   onToggleCompleted: (eventId: string, completed: boolean) => void;
+  /** Corrige o título (serviço) de um evento já criado — pedido real (19/08/2026): não existia nenhum jeito de editar isso depois de criado. */
+  onEditSummary: (eventId: string, newSummary: string) => Promise<void>;
 }
 
 /** "Hoje" / "Amanhã" / dia da semana curto + data — só pra exibição, não precisa da mesma precisão de fuso do backend (que já resolve tudo antes de mandar o horário). */
@@ -58,9 +60,70 @@ function dateKey(d: Date): string {
 
 const WEEKDAY_HEADER = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
+/**
+ * Título do evento, com edição inline (lápis → campo de texto → salvar) —
+ * pedido real (19/08/2026): não existia nenhum jeito de corrigir o nome do
+ * serviço depois de um agendamento criado (só criar/remarcar horário/
+ * cancelar/marcar concluído). Componente próprio pra não duplicar essa
+ * lógica nas 3 listagens (lista, calendário ativo, calendário concluído).
+ */
+const EditableSummary: React.FC<{ event: UpcomingEvent; onEditSummary: (eventId: string, newSummary: string) => Promise<void> }> = ({ event, onEditSummary }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(event.summary);
+  const [isSaving, setIsSaving] = useState(false);
+
+  if (isEditing) {
+    return (
+      <form
+        className="flex-1 min-w-0 flex items-center gap-1"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!draft.trim() || draft.trim() === event.summary) { setIsEditing(false); return; }
+          setIsSaving(true);
+          try {
+            await onEditSummary(event.id, draft.trim());
+            setIsEditing(false);
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+      >
+        <input
+          autoFocus
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          disabled={isSaving}
+          className="flex-1 min-w-0 px-1.5 py-0.5 bg-slate-900 border border-emerald-600 rounded text-xs text-white focus:outline-none disabled:opacity-50"
+        />
+        <button type="submit" disabled={isSaving} title="Salvar" className="flex-shrink-0 text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer">
+          {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+        </button>
+        <button type="button" disabled={isSaving} onClick={() => { setDraft(event.summary); setIsEditing(false); }} title="Cancelar" className="flex-shrink-0 text-slate-500 hover:text-white disabled:opacity-50 cursor-pointer">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <span className="flex-1 min-w-0 flex items-center gap-1.5 group/summary">
+      <span className="text-xs text-slate-300 truncate">{event.summary}</span>
+      <button
+        type="button"
+        onClick={() => { setDraft(event.summary); setIsEditing(true); }}
+        title="Editar serviço"
+        className="flex-shrink-0 text-slate-600 hover:text-emerald-400 opacity-0 group-hover/summary:opacity-100 transition-opacity cursor-pointer"
+      >
+        <Pencil className="w-3 h-3" />
+      </button>
+    </span>
+  );
+};
+
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
-  monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted,
+  monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary,
 }) => {
   const [isPickingLead, setIsPickingLead] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -372,7 +435,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                               className="flex-shrink-0 w-4 h-4 mt-0.5 rounded border border-slate-600 hover:border-emerald-500 hover:bg-emerald-500/10 cursor-pointer transition-colors"
                             />
                             <span className="text-xs font-bold text-white flex-shrink-0 w-11">{timeLabel(event.startIso)}</span>
-                            <span className="text-xs text-slate-300 truncate">{event.summary}</span>
+                            <EditableSummary event={event} onEditSummary={onEditSummary} />
                           </div>
                         ))}
                         {selectedDayCompleted.map((event) => (
@@ -412,7 +475,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                               className="flex-shrink-0 w-4 h-4 mt-0.5 rounded border border-slate-600 hover:border-emerald-500 hover:bg-emerald-500/10 cursor-pointer transition-colors"
                             />
                             <span className="text-xs font-bold text-white flex-shrink-0 w-11">{timeLabel(event.startIso)}</span>
-                            <span className="text-xs text-slate-300 truncate">{event.summary}</span>
+                            <EditableSummary event={event} onEditSummary={onEditSummary} />
                           </div>
                         ))}
                       </div>

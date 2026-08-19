@@ -129,6 +129,23 @@ export async function setAppointmentForPhone(
   if (error) throw error;
 }
 
+/**
+ * Corrige o nome do serviço de um agendamento já existente — pedido real
+ * (19/08/2026): não existia NENHUM jeito de editar um evento depois de
+ * criado (só criar/remarcar horário/cancelar/marcar concluído), então um
+ * agendamento manual com o serviço errado (ex: registrado como "Cejas
+ * Microshading" numa conversa que era sobre pestañas) ficava errado pra
+ * sempre no painel, mesmo depois de corrigir o evento real no Google
+ * Calendar. Busca por `event_id` (não por telefone) porque quem chama já
+ * corrigiu o evento real e só tem o eventId em mãos — melhor esforço:
+ * sem linha correspondente (ex: evento criado direto no Google, fora do
+ * app), não é erro, só não tem nada pra sincronizar aqui.
+ */
+export async function updateAppointmentSummaryByEventId(tenantId: string, eventId: string, summary: string): Promise<void> {
+  const db = getDb();
+  await db.from('appointments').update({ summary }).eq('tenant_id', tenantId).eq('event_id', eventId);
+}
+
 export async function clearAppointmentForPhone(tenantId: string, phone: string): Promise<void> {
   const db = getDb();
   await db.from('appointments').delete().eq('tenant_id', tenantId).eq('phone', phone);

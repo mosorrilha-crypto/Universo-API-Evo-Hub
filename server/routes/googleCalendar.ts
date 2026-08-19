@@ -7,8 +7,10 @@ import {
   signOAuthState,
   verifyOAuthState,
   listUpcomingEvents,
+  updateCalendarEventSummary,
   type CalendarConfig,
 } from '../services/googleCalendar';
+import { updateAppointmentSummaryByEventId } from '../services/appointmentStore';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from '../services/calendarEventCompletionStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -144,6 +146,30 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     }
     if (completed) await markEventCompleted(tenantId, req.params.eventId);
     else await markEventNotCompleted(tenantId, req.params.eventId);
+    res.json({ success: true });
+  }));
+
+  // Corrige só o título (summary) de um evento já criado — pedido real
+  // (19/08/2026): não existia nenhum jeito de editar isso depois de criado.
+  // Atualiza o evento real no Google Calendar e, melhor esforço, a linha
+  // espelhada em `appointments` (se o eventId bater com uma) pra não ficar
+  // com o nome errado grudado no painel mesmo depois da correção real.
+  router.patch('/api/google-calendar/events/:eventId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { summary } = req.body || {};
+    if (typeof summary !== 'string' || !summary.trim()) {
+      return res.status(400).json({ error: 'Campo "summary" é obrigatório.' });
+    }
+    if (!googleRedirectUri) {
+      return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+    const cfg: CalendarConfig = { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri };
+    try {
+      await updateCalendarEventSummary(tenantId, cfg, req.params.eventId, summary.trim());
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao atualizar o evento na agenda: ${err.message}` });
+    }
+    await updateAppointmentSummaryByEventId(tenantId, req.params.eventId, summary.trim());
     res.json({ success: true });
   }));
 

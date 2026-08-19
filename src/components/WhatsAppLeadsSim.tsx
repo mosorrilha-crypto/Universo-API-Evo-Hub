@@ -836,6 +836,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  /**
+   * Corrige o título (serviço) de um evento já criado — pedido real
+   * (19/08/2026): não existia nenhum jeito de editar isso depois de
+   * criado. Atualiza o evento real no Google Calendar (via backend) e,
+   * se der erro, propaga pro EditableSummary decidir o que mostrar (fica
+   * em modo de edição, o operador tenta de novo).
+   */
+  const handleEditEventSummary = async (eventId: string, newSummary: string) => {
+    try {
+      const res = await apiFetch(`/api/google-calendar/events/${encodeURIComponent(eventId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summary: newSummary }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setUpcomingEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, summary: newSummary } : e)));
+    } catch (err: any) {
+      console.error('Falha ao editar o título do evento:', err);
+      setUpcomingEventsError(err.message || 'Não foi possível corrigir o evento agora — tente de novo.');
+      throw err;
+    }
+  };
+
   // Escolher um lead a partir do widget de agenda (sem conversa aberta
   // ainda) reaproveita 100% o fluxo já existente de agendamento manual —
   // só seleciona a conversa e abre o mesmo modal que já é aberto de dentro
@@ -3959,6 +3983,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onPrevMonth={() => changeCalendarMonth(-1)}
         onNextMonth={() => changeCalendarMonth(1)}
         onToggleCompleted={handleToggleEventCompleted}
+        onEditSummary={handleEditEventSummary}
       />
     </div>
   );
