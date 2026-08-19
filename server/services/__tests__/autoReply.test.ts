@@ -492,6 +492,40 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     // nenhuma chamada ao Gemini deveria ter usado function-calling de foto
     expect(calls.every((c) => !c.config?.tools)).toBe(true);
   });
+
+  // Achado real em produção (Monique, 19/08/2026): esses dois blocos eram
+  // um if/else-if mutuamente exclusivos por `agent`. Uma mensagem
+  // classificada como "agendamento" (comum no meio de uma conversa já
+  // falando de preço/horário) fazia runMidiaTool NUNCA rodar, mesmo quando
+  // a cliente pediu foto explicitamente e o produto tinha foto cadastrada.
+  it('ainda envia a foto quando o roteador classifica a mensagem como "agendamento"', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    recordOutgoingMessage.mockClear();
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.config?.tools) {
+            return { functionCalls: [{ name: 'enviar_foto_exemplo', args: { nome_produto: 'Microlips' } }] } as any;
+          }
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Manda ver a foto!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    const result = await generateAutoReplyForText(
+      // sem calendarConfig -> runAgendamentoTools nem roda, só o roteador classificou como agendamento
+      'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(result).not.toBeNull();
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
+  });
 });
 
 describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade com Epic 4.5.2)', () => {

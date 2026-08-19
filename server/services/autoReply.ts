@@ -1554,9 +1554,18 @@ export async function generateAutoReplyForText(
     // alternativa" que nunca foi checada de verdade contra a agenda real.
     let agendamentoToolsRan = false;
 
+    // Achado real em produção (Monique, 19/08/2026): esses dois blocos eram
+    // um if/else-if mutuamente exclusivos por `agent`. Assim que o roteador
+    // classificava a mensagem como "agendamento" (comum no meio de uma
+    // conversa já falando de preço/horário), runMidiaTool nunca rodava —
+    // mesmo quando a cliente literalmente pediu foto ("Tiene fotos?") e o
+    // produto TINHA foto cadastrada. O especialista, sem nenhum resultado de
+    // ferramenta, respondia de improviso que não tinha fotos disponíveis.
+    // Os dois agora rodam de forma independente sempre que fizerem sentido.
+    const contextParts: string[] = [];
+
     if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
       const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId);
-      const contextParts: string[] = [];
       if (result.actionsSummary.length) {
         contextParts.push(result.actionsSummary.map((s) => `- ${s}`).join('\n'));
       }
@@ -1569,17 +1578,20 @@ export async function generateAutoReplyForText(
       if (result.businessHoursStatus) {
         contextParts.push(result.businessHoursStatus);
       }
-      if (contextParts.length) {
-        extraContext = contextParts.join('\n');
-      }
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
       agendamentoToolsRan = result.actionsSummary.length > 0;
-    } else if (agent !== 'agendamento' && phone && hasMediaSendConfig(mediaConfig)) {
+    }
+
+    if (phone && hasMediaSendConfig(mediaConfig)) {
       const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history, groqApiKey);
       if (actionsSummary.length) {
-        extraContext = actionsSummary.map((s) => `- ${s}`).join('\n');
+        contextParts.push(actionsSummary.map((s) => `- ${s}`).join('\n'));
       }
+    }
+
+    if (contextParts.length) {
+      extraContext = contextParts.join('\n');
     }
 
     // Só faz sentido mencionar o anúncio na saudação inicial (histórico
