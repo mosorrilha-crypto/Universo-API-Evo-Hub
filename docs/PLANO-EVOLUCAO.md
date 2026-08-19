@@ -1,5 +1,12 @@
 # Plano de Evolução — Transcritor WhatsApp Leads / Universo.ai
 
+> ⚠️ **DESATUALIZADO desde ~2026-08-06.** Este documento descreve "Fase 2 — Multi-tenant real"
+> como pendente; uma auditoria linha a linha do código em 2026-08-19 confirmou que a maior
+> parte já está implementada (schema, RLS parcial, os 8 serviços migrados, roteamento de
+> webhook, Calendar por tenant, auth/RBAC, onboarding). **Para o estado atual real, leia
+> `docs/GUIA-DO-PROJETO.md` primeiro** — este arquivo fica só como registro histórico de como
+> as decisões de arquitetura foram tomadas, não como fonte do que falta fazer.
+>
 > Documento vivo. Última revisão: 2026-08-06.
 > Objetivo: sair de canvas/demo (~25% produção) para SaaS operacional em fases incrementais.
 >

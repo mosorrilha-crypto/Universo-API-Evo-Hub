@@ -6,10 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Universo is a multi-tenant WhatsApp AI-agent SaaS: Express + TypeScript backend (Postgres/Supabase), React + Vite frontend, Gemini-powered conversational agent. Tenants get an AI agent that answers WhatsApp leads, books real Google Calendar appointments, and tracks payment/CRM state. **The platform is live in production** with a real paying tenant (a beauty studio) receiving real customer messages — treat anything touching the message/booking/payment path with the care that implies.
 
-Four living docs carry architecture decisions and roadmap state; read them before large changes:
-- `docs/AGENTE-VERTICAL-ARQUITETURA.md` — the layered-prompt agent architecture and its rollout plan.
-- `docs/PLANO-EVOLUCAO.md` — evolution roadmap and known pending items.
-- `docs/REVISAO_E_REESTRUTURACAO.md` — structural review/restructuring notes.
+**Read `docs/GUIA-DO-PROJETO.md` first, always** — it's the single source of truth for what's actually done vs. pending, audited against the real code (not just docs). It exists specifically because sessions restart often and the docs below drift out of sync with reality; when they conflict, `GUIA-DO-PROJETO.md` wins. Keep it updated in the same PR whenever you complete a phase, close a known gap, or discover a new one — don't defer that to a future "docs session".
+
+Other docs carry deeper/historical context — read them for detail, not for current status:
+- `docs/AGENTE-VERTICAL-ARQUITETURA.md` — the layered-prompt agent architecture and its rollout plan. Stays consistent with current code.
+- `docs/PLANO-EVOLUCAO.md` — evolution roadmap; **stale since ~2026-08-06**, describes multi-tenant work as pending that is now mostly done. Historical record of decisions, not a status source.
+- `docs/REVISAO_E_REESTRUTURACAO.md` — structural review from an even earlier snapshot (pre-refactor); the issues it describes have been fixed. Historical only.
 - `docs/AGENTE-PROMPT-MONIQUE-CAMPOS.md` — field-by-field snapshot of the real Layer 1 (universal, code) and Layer 3 (tenant Knowledge Base) prompt content for Monique, plus known open gaps (e.g. the payment gate). It's a snapshot of editable KB content, not a live source — re-check Supabase for the current value before relying on it operationally.
 
 **Before picking up any task from the backlog, read `.github/WORKFLOW.md`** — how to find work, branch/PR/merge rules (including which areas never self-merge), and status-reporting conventions. GitHub (issues + PRs) is the official work-tracking channel; a prior Trello board was migrated out of use on 2026-08-09.
