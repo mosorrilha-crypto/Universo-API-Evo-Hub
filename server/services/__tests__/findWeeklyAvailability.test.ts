@@ -20,6 +20,7 @@ vi.mock('googleapis', () => ({
       // isso com `new google.auth.OAuth2(...)`.
       OAuth2: vi.fn().mockImplementation(function OAuth2Mock(this: any) {
         this.setCredentials = setCredentials;
+        this.on = vi.fn();
       }),
     },
     calendar: vi.fn(() => ({ freebusy: { query: freebusyQuery } })),

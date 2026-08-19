@@ -114,7 +114,19 @@ export async function disconnectGoogleCalendar(tenantId: string): Promise<void> 
   await db.from('tenant_calendar_tokens').delete().eq('tenant_id', tenantId);
 }
 
-/** Cliente OAuth autenticado, pronto pra chamar a Calendar API — renova o access token sozinho a partir do refresh token. */
+/**
+ * Cliente OAuth autenticado, pronto pra chamar a Calendar API — renova o
+ * access token sozinho a partir do refresh token.
+ *
+ * Achado real em produção (19/08/2026, tenant Monique): o Google às vezes
+ * rotaciona o refresh_token numa renovação de access token — emite um
+ * refresh_token NOVO junto com o access_token, e o antigo para de funcionar.
+ * Sem escutar o evento `tokens` da lib `googleapis` e persistir esse valor
+ * novo, toda chamada seguinte recriava o client com o refresh_token antigo
+ * (já invalidado) direto do banco — explicava um padrão real observado:
+ * funcionava uma vez logo após reconectar no painel, e voltava a falhar com
+ * `invalid_grant` minutos depois, repetidamente.
+ */
 async function getAuthorizedClient(tenantId: string, clientId?: string, clientSecret?: string, redirectUri?: string): Promise<OAuth2Client> {
   const refreshToken = await loadRefreshToken(tenantId);
   if (!refreshToken) {
@@ -122,6 +134,13 @@ async function getAuthorizedClient(tenantId: string, clientId?: string, clientSe
   }
   const client = createOAuthClient(clientId, clientSecret, redirectUri);
   client.setCredentials({ refresh_token: refreshToken });
+  client.on('tokens', (tokens) => {
+    if (tokens.refresh_token && tokens.refresh_token !== refreshToken) {
+      saveRefreshToken(tenantId, tokens.refresh_token).catch((err) =>
+        console.warn(`⚠️  [GoogleCalendar] Falha ao persistir refresh_token rotacionado (tenant=${tenantId}):`, (err as Error).message)
+      );
+    }
+  });
   return client;
 }
 
