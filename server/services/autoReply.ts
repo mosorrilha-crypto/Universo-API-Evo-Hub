@@ -617,7 +617,7 @@ const HOLD_EXPIRY_MS = 2 * 60 * 60 * 1000;
 const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
   {
     name: 'consultar_disponibilidade_semana',
-    description: 'Descobre TODOS os horários realmente livres nos próximos 7 dias, respeitando o horário de atendimento do negócio e a agenda real do Google Calendar — use isso ANTES de oferecer um horário específico ao cliente, em vez de verificar_disponibilidade um horário por vez adivinhado. Se não vier nenhum dia na resposta, é porque não há disponibilidade configurada ou livre nessa semana — nunca invente um horário fora do que essa ferramenta retornou.',
+    description: 'Descobre horários realmente livres nos próximos 7 dias (uma AMOSTRA de poucos por dia, não a lista completa), respeitando o horário de atendimento do negócio e a agenda real do Google Calendar — use isso ANTES de oferecer um horário específico ao cliente, em vez de verificar_disponibilidade um horário por vez adivinhado. Se não vier nenhum dia na resposta, é porque não há disponibilidade configurada ou livre nessa semana — nunca invente um horário fora do que essa ferramenta retornou. NUNCA liste todos os horários recebidos numa mensagem — escolha no máximo 2-3 pra oferecer.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -840,8 +840,31 @@ async function executeCalendarTool(
         const durationMinutes = (args.servico && findProductDurationMinutes(kb, args.servico)) || DEFAULT_SLOT_DURATION_MINUTES;
         const days = await findWeeklyAvailability(tenantId, cfg, durationMinutes, BUSINESS_TIMEZONE);
         const allTimes = days.flatMap((d) => d.slots.map((s) => s.start));
+        // Achado real em produção (19/08/2026, tenant Monique/Mabel): com a
+        // agenda vazia, findWeeklyAvailability devolve TODO slot de 30min
+        // possível pros 7 dias (pode passar de 100 horários) — o modelo
+        // recebia essa lista inteira como resultado da ferramenta e, numa
+        // resposta real, ecoou tudo junto num só balão gigante ("08:30 o
+        // 09:00 o 09:30 o ... o 19:00"), péssima experiência pra cliente
+        // real. Cortar pra poucos horários por dia ANTES de devolver pro
+        // modelo garante que ele fisicamente não consegue despejar a lista
+        // inteira, em vez de confiar só em instrução de prompt pra ele se
+        // resumir sozinho. `confirmedTimesHHmm` (usado pelo gate
+        // anti-alucinação depois) continua com a lista COMPLETA — um
+        // horário real fora da amostra cortada ainda deve validar certo se
+        // o cliente pedir um horário específico que não estava nos poucos
+        // exemplos mostrados.
+        const MAX_SLOTS_PER_DAY_FOR_MODEL = 4;
+        const daysForModel = days.map((d) => ({
+          date: d.date,
+          slots: d.slots.slice(0, MAX_SLOTS_PER_DAY_FOR_MODEL),
+          total_horarios_livres_no_dia: d.slots.length,
+        }));
         return {
-          response: { dias_disponiveis: days },
+          response: {
+            dias_disponiveis: daysForModel,
+            aviso: 'Cada dia mostra só uma AMOSTRA de até 4 horários (ver total_horarios_livres_no_dia pra saber quantos existem de verdade) — NUNCA liste todos, escolha no máximo 2-3 opções pra oferecer e pergunte a preferência do cliente.',
+          },
           summary: days.length
             ? `Consultou disponibilidade da semana (duração ${durationMinutes}min): ${days.map((d) => `${d.date} (${d.slots.length} horário(s))`).join(', ')}.`
             : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum horário livre encontrado.`,
@@ -1189,6 +1212,7 @@ Regras:
 - Sempre passe datas/horas no formato "YYYY-MM-DDTHH:mm:ss" (hora local, SEM offset), fuso ${BUSINESS_TIMEZONE}.
 - Se faltar informação essencial pra agir (dia/horário desejado), NÃO chame nenhuma ferramenta.
 - Antes de criar um agendamento novo, verifique disponibilidade primeiro; só crie se estiver livre.
+- NUNCA liste mais de 2-3 horários numa única mensagem, mesmo que a ferramenta devolva mais opções — resuma por dia/período (ex: "de manhã" ou "à tarde") e pergunte a preferência do cliente antes de detalhar mais.
 - Se a cliente se comprometer com uma data específica pra transferir a seña mas ainda não pagou, chame criar_pre_reserva — isso NUNCA substitui criar_agendamento, é só um registro de follow-up.
 - Pra remarcar/cancelar, você NÃO precisa saber o ID do evento — as ferramentas já resolvem isso sozinhas a partir deste contato.`;
 
