@@ -495,6 +495,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [showComposerEmojiPicker, setShowComposerEmojiPicker] = useState(false);
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
   // na conversa") — antes o botão só disparava speechSynthesis lendo o
   // texto/transcrição da mensagem, nunca tocava o áudio de verdade. Cache
@@ -1987,6 +1988,37 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     );
   };
 
+  /**
+   * "Tentar novamente" na transcrição de um áudio que falhou (pedido real,
+   * 19/08/2026): a causa mais comum não é falta de crédito, é uma
+   * instabilidade passageira do Gemini (timeout de 20s) — tentar de novo
+   * minutos depois costuma resolver. O áudio original já fica salvo no
+   * backend (mesmo bucket da imagem recebida), então não precisa reenviar
+   * nada daqui, só disparar o reprocessamento. `updateMessageText` no
+   * backend já emite o SSE de conversas — o texto atualiza sozinho no
+   * painel quando o evento chegar, sem precisar mexer no estado local aqui.
+   */
+  const handleRetryTranscription = async (msg: ChatMessage) => {
+    if (!selectedLead || !(selectedLead as any).isReal) return;
+    setRetryingTranscriptionId(msg.id);
+    try {
+      const res = await apiFetch(
+        `/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(msg.id)}/retry-transcription`,
+        { method: 'POST' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      if (!data.success) {
+        setErrorMsg('Ainda não foi possível transcrever este áudio — tente de novo em alguns instantes.');
+      }
+    } catch (err) {
+      console.error('Falha ao tentar transcrever o áudio de novo:', err);
+      setErrorMsg('Não foi possível tentar transcrever de novo. Tente mais tarde.');
+    } finally {
+      setRetryingTranscriptionId(null);
+    }
+  };
+
   // Apply Smart Reply suggested by AI directly into the chat
   const handleApplySuggestedReply = (replyText: string) => {
     if (!selectedLead) return;
@@ -3375,6 +3407,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 "{msg.text}"
                                 {timeFooter}
                               </p>
+                              {msg.text?.includes('Não foi possível transcrever') && (selectedLead as any)?.isReal && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRetryTranscription(msg)}
+                                  disabled={retryingTranscriptionId === msg.id}
+                                  className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-300 hover:text-amber-200 disabled:opacity-50 cursor-pointer"
+                                >
+                                  <RefreshCw className={`w-3 h-3 ${retryingTranscriptionId === msg.id ? 'animate-spin' : ''}`} />
+                                  {retryingTranscriptionId === msg.id ? 'Tentando transcrever...' : 'Tentar transcrever de novo'}
+                                </button>
+                              )}
                             </div>
                           )}
 

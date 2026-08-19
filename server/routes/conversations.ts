@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import {
   listConversations,
   getConversation,
+  updateMessageText,
   recordOutgoingMessage,
   clearConversationHistory,
   deleteConversation,
@@ -19,7 +20,7 @@ import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage,
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
-import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds } from '../services/knowledgeBaseStore';
+import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -31,6 +32,7 @@ import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer }
 import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
+import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
@@ -168,6 +170,41 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!media) return res.status(404).json({ error: 'Imagem não encontrada.' });
     res.setHeader('Content-Type', media.contentType);
     res.send(media.buffer);
+  }));
+
+  /**
+   * Refaz a transcrição de um áudio já recebido — pedido real (19/08/2026):
+   * a falha original quase sempre é uma instabilidade passageira do Gemini
+   * (timeout de 20s, "high demand"), não falta de crédito, então tentar de
+   * novo minutos depois costuma funcionar. O áudio original já fica salvo
+   * (mesmo bucket/rota da imagem, ver saveMediaImage em
+   * transcriptionQueue.ts) — reusa esses bytes em vez de pedir de novo pro
+   * WhatsApp. `updateMessageText` já dispara o SSE de conversas
+   * (emitConversationUpdated), então o painel atualiza sozinho sem precisar
+   * de nenhum estado extra aqui.
+   */
+  router.post('/api/conversations/:phone/messages/:messageId/retry-transcription', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { phone, messageId } = req.params;
+
+    const conv = await getConversation(tenantId, phone);
+    const message = conv?.messages.find((m) => m.id === messageId);
+    if (!message) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    if (message.type !== 'audio') return res.status(400).json({ error: 'Esta mensagem não é um áudio.' });
+
+    const media = await getMediaImage(supabaseUrl, supabaseKey, messageId);
+    if (!media) {
+      return res.status(404).json({ error: 'Áudio original não está mais disponível pra reprocessar (não foi salvo ou expirou).' });
+    }
+
+    const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType, {
+      leadName: conv?.name,
+      customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+    });
+
+    await updateMessageText(tenantId, phone, messageId, outcome.result.transcription);
+
+    res.json({ success: outcome.source === 'gemini', source: outcome.source, transcription: outcome.result.transcription });
   }));
 
   router.get('/api/conversations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
