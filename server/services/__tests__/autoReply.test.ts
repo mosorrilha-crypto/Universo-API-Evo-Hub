@@ -741,6 +741,36 @@ describe('generateAutoReplyForText — mensagens de rajada priorizam a mais rece
     expect(specialistCall.contents[1].parts[0].text).toContain('Solo cejas precio');
     expect(specialistCall.contents[1].parts[0].text).toContain('mais recente');
   });
+
+  it('mensagem ÚNICA com quebra de linha interna (colar texto, Shift+Enter) NÃO é tratada como rajada quando messageCount=1 é informado', async () => {
+    const { ai, calls } = makeFakeAiTriagem({ phase: 'informacao', bubbles: ['Gs 550.000.'], needsHumanConfirmation: false });
+    // Uma única mensagem real do WhatsApp com quebra de linha interna —
+    // messageBuffer.ts só entra em jogo (e produz mais de uma linha em
+    // `texts.join('\n')`) quando há de fato mais de uma mensagem separada;
+    // aqui simulamos o chamador informando messageCount=1 (o real, vindo do
+    // buffer) pra essa mesma forma de texto não ser confundida com rajada.
+    await generateAutoReplyForText(
+      'tenant-a',
+      ai,
+      'Hola, buenas tardes\nQueria consultar por el precio de cejas',
+      'Cliente',
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1
+    );
+    const specialistCall = calls[1];
+    expect(specialistCall.contents).toHaveLength(1);
+    expect(specialistCall.contents[0].role).toBeUndefined();
+    expect(specialistCall.contents[0].text).toContain('Hola, buenas tardes\nQueria consultar por el precio de cejas');
+  });
 });
 
 describe('generateAutoReplyForText — gate de confirmação prematura de agendamento (16/08/2026, Opção A)', () => {

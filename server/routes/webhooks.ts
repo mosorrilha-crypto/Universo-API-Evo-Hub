@@ -140,7 +140,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
         // janela — ver operatorFollowUpService.ts). Esta é a mensagem que
         // reabre.
         const pendingGuidance = await getPendingOperatorGuidance(tenantId, phone);
-        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey);
+        const result = await generateAutoReplyForText(tenantId, getAi!(), text, contactName, kbContext, history, phone, calendarConfig, segment, mediaConfig, messageId, conversation?.adHeadline, pendingGuidance?.operatorReply, groqApiKey, historyExclude);
         if (!result) {
           // Achado real em produção (issue #82, item 4; revisado depois de
           // uma auditoria de conversas reais): mesmo com retry

@@ -159,24 +159,32 @@ const ROUTER_VALID_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'recl
  * linha, numera e marca explicitamente a última como a prioritária — uma
  * linha só (o caso comum) fica exatamente como antes, sem numeração.
  */
-function formatClientMessageForPrompt(text: string): string {
+function formatClientMessageForPrompt(text: string, isBurst?: boolean): string {
   const lines = text
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-  if (lines.length <= 1) return text;
+  // `isBurst` vem do messageCount real do buffer (messageBuffer.ts) quando
+  // disponível. Só contar linhas é ambíguo: uma ÚNICA mensagem do WhatsApp
+  // pode legitimamente ter quebras de linha internas (colar um texto,
+  // Shift+Enter) e não pode ser tratada como rajada de mensagens separadas
+  // por engano. Sem o sinal real (chamadores que não passam messageCount,
+  // ex: transcrição de áudio, que nunca é bufferizada), cai no heurístico
+  // de contar linhas de antes.
+  const treatAsBurst = (isBurst !== undefined ? isBurst : lines.length > 1) && lines.length > 1;
+  if (!treatAsBurst) return text;
   const numbered = lines.map((line, i) => `${i + 1}. "${line}"${i === lines.length - 1 ? ' ← mensagem mais recente, priorize responder a esta' : ''}`).join('\n');
   return `o cliente mandou estas mensagens em sequência rápida (numeradas da mais antiga pra mais recente):\n${numbered}`;
 }
 
-function buildRouterPrompt(text: string, historyText: string): string {
+function buildRouterPrompt(text: string, historyText: string, isBurst?: boolean): string {
   return `Classifique a intenção principal desta mensagem de WhatsApp em UMA categoria:
 - "triagem": primeiro contato, saudação, dúvida geral ainda sem foco claro, ou o cliente só está explorando.
 - "faq": pergunta específica sobre preço, procedimento, horário de funcionamento, endereço/localização do negócio, ou política de pagamento/cancelamento — mesmo que a conversa esteja no meio de um agendamento, uma pergunta factual como essa é sempre "faq", nunca "agendamento".
 - "agendamento": o cliente quer marcar, confirmar, remarcar ou cancelar um horário específico — não classifique como agendamento uma pergunta que só busca informação (ex: onde fica, que horas abre), mesmo que relacionada a uma visita já combinada.
 - "reclamacao": o cliente está insatisfeito ou reclamando de um serviço JÁ REALIZADO (resultado, dor, alergia, reação), ou claramente irritado/chateado com o negócio.
 ${historyText ? `Histórico recente:\n${historyText}\n` : ''}
-Mensagem: ${formatClientMessageForPrompt(text)}
+Mensagem: ${formatClientMessageForPrompt(text, isBurst)}
 Classifique com base na mensagem mais recente do cliente — se houver mais de uma mensagem em sequência, uma pergunta anterior já superada pela última não deve mudar a categoria.
 Responda ESTRITAMENTE em JSON: {"agent": "triagem|faq|agendamento|reclamacao", "confidence": 0 a 1 (o quão confiante você está nessa classificação), "reasoning": "explicação breve de 1 frase do motivo da escolha"}`;
 }
@@ -215,10 +223,11 @@ async function classifyAgent(
   text: string,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   phone?: string,
-  groqApiKey?: string
+  groqApiKey?: string,
+  isBurst?: boolean
 ): Promise<AgentType> {
   const historyText = buildHistoryText(history);
-  const prompt = buildRouterPrompt(text, historyText);
+  const prompt = buildRouterPrompt(text, historyText, isBurst);
 
   if (groqApiKey) {
     try {
@@ -400,7 +409,8 @@ async function generateSpecialistReply(
   knowledgeBaseContext?: string,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   extraContext?: string,
-  adContext?: string
+  adContext?: string,
+  isBurst?: boolean
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
@@ -432,7 +442,16 @@ async function generateSpecialistReply(
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-  const burstMessages = burstLines.length ? burstLines : [text];
+  // `isBurst` vem do messageCount real do buffer de rajada (messageBuffer.ts)
+  // quando disponível. Contar linhas sozinho é ambíguo: uma ÚNICA mensagem
+  // do WhatsApp pode ter quebras de linha internas legítimas (texto colado,
+  // Shift+Enter) — sem o sinal real, essa mensagem seria fatiada por engano
+  // em vários turnos "role: user" separados, como se fosse rajada de
+  // mensagens distintas. Sem messageCount disponível (chamadores que não
+  // passam isBurst, ex: transcrição de áudio, nunca bufferizada), cai no
+  // heurístico de contar linhas de antes.
+  const treatAsBurst = (isBurst !== undefined ? isBurst : burstLines.length > 1) && burstLines.length > 1;
+  const burstMessages = treatAsBurst ? burstLines : [text];
   // Caso comum (uma única mensagem, sem rajada): mantém o formato de sempre
   // (`contents: [{ text }]`, sem role/parts) — inclusive pra não mudar o
   // formato de request que os testes/fakes de Gemini já assumem pra esse
@@ -1446,13 +1465,22 @@ export async function generateAutoReplyForText(
    */
   operatorGuidance?: string,
   /** Router fallback Groq (plano aprovado) — ver classifyAgent. Opcional: sem ela, o router usa só o Gemini como sempre. */
-  groqApiKey?: string
+  groqApiKey?: string,
+  /**
+   * Quantas mensagens do WhatsApp o buffer de rajada (messageBuffer.ts)
+   * agrupou em `text` (`texts.join('\n')`) — sinal real de "isto é rajada",
+   * em vez de inferir contando linhas de `text` (ambíguo: uma única
+   * mensagem pode ter quebra de linha interna legítima). Chamadores que não
+   * bufferizam (ex: transcrição de áudio) podem simplesmente omitir.
+   */
+  messageCount?: number
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
+  const isBurst = messageCount !== undefined ? messageCount > 1 : undefined;
 
   try {
     const routerStart = Date.now();
-    const agent = await classifyAgent(tenantId, ai, text, history, phone, groqApiKey);
+    const agent = await classifyAgent(tenantId, ai, text, history, phone, groqApiKey, isBurst);
     const routerElapsedMs = Date.now() - routerStart;
 
     let extraContext: string | undefined;
@@ -1528,7 +1556,7 @@ export async function generateAutoReplyForText(
     // divergir do valor real sem aviso nenhum.
     const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
     const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, adContext);
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, adContext, isBurst);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
