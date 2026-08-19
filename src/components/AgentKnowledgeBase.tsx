@@ -355,7 +355,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       setIsSavingHours(false);
     }
   };
-  const [activeSubSection, setActiveSubSection] = useState<'general' | 'products' | 'rules' | 'faqs' | 'docs' | 'firstContact'>('general');
 
   // Input states for adding new items
   const [newProductName, setNewProductName] = useState('');
@@ -1001,6 +1000,117 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }
   };
 
+  /**
+   * Baixa tudo que o operador vê nesta tela (Camada 1, se visível pro seu
+   * papel, + as 6 seções da Base de Conhecimento) num único .md — pra
+   * auditoria/edição fora do painel, sem precisar copiar campo por campo.
+   * Client-side só (Blob + link temporário), sem chamada ao backend.
+   */
+  const handleDownloadMarkdown = () => {
+    const lines: string[] = [];
+    const today = new Date().toISOString().slice(0, 10);
+    lines.push(`# Base de Conhecimento — ${formData.companyName || 'Sem nome'}`);
+    lines.push('');
+    lines.push(`_Exportado em ${today}_`);
+    lines.push('');
+
+    if (tenantPromptLayerVisible && tenantPromptLayer) {
+      lines.push('## Camada 1 — Regras Universais da Plataforma');
+      lines.push('');
+      lines.push(tenantPromptLayer.isCustomized ? '_Personalizada por esta empresa._' : '_Herdada da regra padrão da plataforma._');
+      lines.push('');
+      lines.push(tenantPromptLayer.content || '_(vazio)_');
+      lines.push('');
+    }
+
+    lines.push('## 1. Perfil & Objetivo');
+    lines.push('');
+    lines.push(`- **Nome da empresa:** ${formData.companyName || '_(vazio)_'}`);
+    lines.push(`- **Objetivo do agente:** ${formData.agentGoal || '_(vazio)_'}`);
+    lines.push(`- **Tom de voz:** ${formData.toneOfVoice || '_(vazio)_'}`);
+    lines.push(`- **Modelo de negócio:** ${formData.businessModel || '_(vazio)_'}`);
+    lines.push(`- **Preços & políticas (texto livre):** ${formData.pricingAndPolicies || '_(vazio)_'}`);
+    if (formData.locationMapsUrl) lines.push(`- **Link do Google Maps:** ${formData.locationMapsUrl}`);
+    lines.push('');
+
+    lines.push(`## 2. Regras de Negócio (${formData.businessRules.length})`);
+    lines.push('');
+    if (formData.businessRules.length) {
+      formData.businessRules.forEach((rule, i) => lines.push(`${i + 1}. ${rule}`));
+    } else {
+      lines.push('_Nenhuma regra cadastrada._');
+    }
+    lines.push('');
+
+    lines.push(`## 3. Preços & Produtos (${formData.products.length})`);
+    lines.push('');
+    if (formData.products.length) {
+      formData.products.forEach((p) => {
+        lines.push(`### ${p.name}`);
+        lines.push(`- **Preço:** ${p.price}${p.promoPrice ? ` (promo: ${p.promoPrice}${p.promoUntil ? ` até ${p.promoUntil}` : ''})` : ''}`);
+        if (p.durationMinutes) lines.push(`- **Duração:** ${p.durationMinutes} min`);
+        if (p.bookable === false) lines.push(`- **Agendável direto pela IA:** não`);
+        if (p.description) lines.push(`- **Descrição:** ${p.description}`);
+        if (p.variants?.length) {
+          lines.push(`- **Variações:**`);
+          p.variants.forEach((v) => lines.push(`  - ${v.code}${v.dimensions ? ` (${v.dimensions})` : ''}: ${v.price}`));
+        }
+        lines.push('');
+      });
+    } else {
+      lines.push('_Nenhum produto cadastrado._');
+      lines.push('');
+    }
+
+    lines.push(`## 4. FAQ e Dúvidas (${formData.faqs.length})`);
+    lines.push('');
+    if (formData.faqs.length) {
+      formData.faqs.forEach((f) => {
+        lines.push(`**P: ${f.question}**`);
+        lines.push(`R: ${f.answer}`);
+        lines.push('');
+      });
+    } else {
+      lines.push('_Nenhuma FAQ cadastrada._');
+      lines.push('');
+    }
+
+    lines.push(`## 5. Documentos Anexados (${formData.documents.length})`);
+    lines.push('');
+    if (formData.documents.length) {
+      formData.documents.forEach((d) => lines.push(`- ${d.fileName} (${d.fileSize}, ${d.status})`));
+    } else {
+      lines.push('_Nenhum documento anexado._');
+    }
+    lines.push('');
+
+    lines.push('## 6. Mensagem Inicial de Primeiro Contato');
+    lines.push('');
+    const blocks = formData.firstContactBlocks || [];
+    if (blocks.length) {
+      blocks.forEach((b, i) => {
+        if (b.type === 'text') lines.push(`${i + 1}. **Texto:** ${b.text || '_(vazio)_'}`);
+        else if (b.type === 'image') lines.push(`${i + 1}. **Imagem** (anexada no painel, não incluída neste export)`);
+        else if (b.type === 'video') lines.push(`${i + 1}. **Vídeo:** ${b.videoFileName || '(sem nome)'}${b.videoCaption ? ` — legenda: ${b.videoCaption}` : ''}`);
+        else if (b.type === 'file') lines.push(`${i + 1}. **Arquivo:** ${b.fileName || '(sem nome)'}`);
+      });
+    } else {
+      lines.push('_Nenhum bloco cadastrado — a IA responde a 1ª mensagem normalmente._');
+    }
+    lines.push('');
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeName = (formData.companyName || 'base-de-conhecimento').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    a.download = `base-conhecimento-${safeName}-${today}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const handleResetToDefault = () => {
     if (window.confirm('Tem certeza que deseja restaurar as configurações padrão da base de conhecimento?')) {
       setFormData(defaultKnowledgeBase);
@@ -1198,87 +1308,34 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       )}
 
-      {/* Sub-navigation Tabs inside Knowledge Base */}
-      <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto scrollbar-none text-xs">
+      {/* Visão unificada — antes era 6 abas separadas (uma só de cada vez);
+          agora tudo fica empilhado numa página só, pra facilitar auditoria e
+          edição sem ficar clicando entre abas. Cada campo continua editável
+          exatamente onde já estava, nada foi fundido. */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <span className="text-xs font-bold text-slate-400">
+          Todos os campos da Base de Conhecimento, numa página só
+        </span>
         <button
-          onClick={() => setActiveSubSection('general')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-            activeSubSection === 'general'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
+          type="button"
+          onClick={handleDownloadMarkdown}
+          className="px-3.5 py-2 rounded-xl font-bold text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer"
+          title="Baixa tudo (Camada 1, se visível, + as 6 seções abaixo) como um arquivo .md pra ler/editar/auditar fora do painel"
         >
-          <Target className="w-4 h-4" />
-          <span>1. Perfil & Objetivo</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubSection('rules')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-            activeSubSection === 'rules'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4 text-amber-400" />
-          <span>2. Regras de Negócio ({formData.businessRules.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubSection('products')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-            activeSubSection === 'products'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <DollarSign className="w-4 h-4 text-emerald-400" />
-          <span>3. Preços & Produtos ({formData.products.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubSection('faqs')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-            activeSubSection === 'faqs'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <HelpCircle className="w-4 h-4 text-blue-400" />
-          <span>4. FAQ e Dúvidas ({formData.faqs.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubSection('docs')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-            activeSubSection === 'docs'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <FileText className="w-4 h-4 text-purple-400" />
-          <span>5. Documentos Anexados ({formData.documents.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubSection('firstContact')}
-          className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-            activeSubSection === 'firstContact'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Send className="w-4 h-4 text-pink-400" />
-          <span>6. Mensagem Inicial</span>
+          <Download className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Baixar .md (auditoria)</span>
         </button>
       </div>
 
-      {/* Main Content Area depending on activeSubSection */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+      {/* Main Content Area — todas as seções sempre visíveis */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-10">
 
         {/* SECTION 1: General Profile & Goal */}
-        {activeSubSection === 'general' && (
-          <div className="space-y-5">
+        <div className="space-y-5">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
+            <Target className="w-3.5 h-3.5" />
+            <span>1. Perfil & Objetivo</span>
+          </div>
             <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1438,12 +1495,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
             </div>
           </div>
-        )}
 
         {/* SECTION 2: Business Rules & Constraints */}
-        {activeSubSection === 'rules' && (
-          <div className="space-y-5">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+        <div className="space-y-5">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wide">
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>2. Regras de Negócio ({formData.businessRules.length})</span>
+          </div>
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4 text-amber-400" />
@@ -1503,12 +1562,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               )}
             </div>
           </div>
-        )}
 
         {/* SECTION 3: Products & Pricing */}
-        {activeSubSection === 'products' && (
-          <div className="space-y-5">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+        <div className="space-y-5">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
+            <DollarSign className="w-3.5 h-3.5" />
+            <span>3. Preços & Produtos ({formData.products.length})</span>
+          </div>
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-emerald-400" />
@@ -1730,12 +1791,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               ))}
             </div>
           </div>
-        )}
 
         {/* SECTION 4: FAQs & Common Questions */}
-        {activeSubSection === 'faqs' && (
-          <div className="space-y-5">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+        <div className="space-y-5">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-400 uppercase tracking-wide">
+            <HelpCircle className="w-3.5 h-3.5" />
+            <span>4. FAQ e Dúvidas ({formData.faqs.length})</span>
+          </div>
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <HelpCircle className="w-4 h-4 text-blue-400" />
@@ -1792,12 +1855,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               ))}
             </div>
           </div>
-        )}
 
         {/* SECTION 5: Document Uploads */}
-        {activeSubSection === 'docs' && (
-          <div className="space-y-5">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+        <div className="space-y-5">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-purple-400 uppercase tracking-wide">
+            <FileText className="w-3.5 h-3.5" />
+            <span>5. Documentos Anexados ({formData.documents.length})</span>
+          </div>
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <FileText className="w-4 h-4 text-purple-400" />
@@ -1915,7 +1980,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               ))}
             </div>
           </div>
-        )}
 
         {/* SECTION 6: Mensagem Inicial de Primeiro Contato — pedido real
             (14-15/08/2026, Clic Piscinas): em vez da pergunta de triagem
@@ -1925,9 +1989,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             mensagem do cliente. Ver server/services/firstContactMessage.ts.
             Nenhum bloco = comportamento de sempre (a IA responde a 1ª
             mensagem normalmente), sem precisar de um toggle separado. */}
-        {activeSubSection === 'firstContact' && (
-          <div className="space-y-5">
-            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+        <div className="space-y-5">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-pink-400 uppercase tracking-wide">
+            <Send className="w-3.5 h-3.5" />
+            <span>6. Mensagem Inicial</span>
+          </div>
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Send className="w-4 h-4 text-pink-400" />
@@ -2196,7 +2263,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
             </div>
           </div>
-        )}
 
       </div>
 
