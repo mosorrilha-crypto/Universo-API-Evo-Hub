@@ -1660,8 +1660,19 @@ export async function generateAutoReplyForText(
       const invalidTimes = citedTimes.filter((t) => !confirmedTimes.includes(t));
       if (invalidTimes.length) {
         console.warn(`⚠️  [Anti-alucinação] tenant=${tenantId} modelo citou horário(s) não confirmado(s) (${invalidTimes.join(', ')}) — corrigindo resposta (ferramenta rodou nesta mensagem: ${agendamentoToolsRan}). Confirmados: ${confirmedTimes.join(', ') || '(nenhum)'}.`);
-        bubbles = confirmedTimes.length
-          ? [`Dejame confirmarte bien: el horario es ${confirmedTimes.join(' o ')}. ¿Te sirve así o preferís otro horario?`]
+        // Achado real em produção (19/08/2026, Mabel): consultar_disponibilidade_semana
+        // devolve o mesmo horário HH:mm repetido uma vez por dia livre (até
+        // 7x) — sem dedup nem corte aqui, esse fallback determinístico
+        // mandava um balão só com dezenas de horários repetidos separados
+        // por " o " (chegou a 988 caracteres numa conversa real). Dedup +
+        // corte a poucas opções antes de montar a frase — o cliente nunca
+        // precisa ver mais que um punhado de horários pra escolher.
+        const MAX_TIMES_IN_FALLBACK = 6;
+        const uniqueConfirmedTimes = [...new Set(confirmedTimes)].sort();
+        const timesToShow = uniqueConfirmedTimes.slice(0, MAX_TIMES_IN_FALLBACK);
+        const hasMore = uniqueConfirmedTimes.length > timesToShow.length;
+        bubbles = timesToShow.length
+          ? [`Dejame confirmarte bien: tengo libre ${timesToShow.join(', ')}${hasMore ? ', entre otros horarios' : ''}. ¿Cuál te sirve, o preferís que te pase más opciones de algún día en particular?`]
           : ['Dejame confirmar bien ese horario en la agenda antes de asegurarte algo — en un instante te aviso.'];
         // Só escala pra humano quando é o caso 1 real (nenhuma ferramenta
         // rodou nesta mensagem pra sustentar o horário citado) — o caso 2
@@ -1689,6 +1700,21 @@ export async function generateAutoReplyForText(
     // modelo (ou o histórico da conversa) tenha escrito uma frase de
     // confirmação. Desde a issue #289, 'awaiting_payment' significa que nem
     // existe evento real na agenda ainda — só uma reserva temporária.
+    //
+    // Achado real em produção (19/08/2026, Mabel/tenant Monique): criar_agendamento
+    // falhou/não rodou nesta mensagem (dados insuficientes ou erro real —
+    // mesmo escalonamento "Cliente tentando fechar agendamento" já disparava
+    // pro operador via needsHumanConfirmation), então NENHUMA linha em
+    // `appointments` chegou a existir — o gate acima nunca disparava porque
+    // exigia um currentAppointment já criado. O modelo mesmo assim escreveu
+    // "reservado"/"nos queda bien" como se tivesse fechado. Consequência
+    // grave: quando o comprovante chegou de verdade minutos depois, o
+    // handler de imagem (webhooks.ts) também exige um appointment existente
+    // pra logar a escalação de "possível comprovante" — sem ele, o operador
+    // NUNCA foi avisado do comprovante, e só descobriu fazendo o
+    // agendamento manual depois. Sem currentAppointment nenhum, não existe
+    // cenário legítimo de "confirmado"/"reservado" ser verdade — corrige
+    // sempre, não só quando o pagamento está pendente.
     if (agent === 'agendamento' && phone) {
       const currentAppointment = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
       const paymentUnresolved = currentAppointment && (
@@ -1696,7 +1722,10 @@ export async function generateAutoReplyForText(
         || currentAppointment.paymentStatus === 'pending_verification'
         || currentAppointment.paymentStatus === 'rejected'
       );
-      if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
+      if (!currentAppointment && containsPrematureBookingConfirmation(bubbles.join(' '))) {
+        console.warn(`⚠️  [Gate de agendamento inexistente] tenant=${tenantId} modelo confirmou/reservou o turno em texto mas nenhum agendamento real existe pra este contato — corrigindo resposta.`);
+        bubbles = ['Dejame confirmar bien la disponibilidad antes de asegurarte el turno — en un instante te aviso si quedó todo listo.'];
+      } else if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
         console.warn(`⚠️  [Gate de pagamento pendente] tenant=${tenantId} modelo confirmou o turno em texto mas o pagamento ainda está "${currentAppointment.paymentStatus}" — corrigindo resposta.`);
         bubbles = [currentAppointment.paymentStatus === 'awaiting_payment'
           ? 'Ese horario queda reservado para vos hasta que llegue tu comprobante y sea aprobado — todavía no está confirmado, así que enviálo cuanto antes para no perderlo.'
