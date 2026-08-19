@@ -13,6 +13,7 @@ import { google } from 'googleapis';
 import jwt from 'jsonwebtoken';
 import { getDb } from './db';
 import { getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
+import { withStructuredLog } from './structuredLog';
 
 // Evita importar o tipo OAuth2Client de 'google-auth-library' diretamente —
 // o pacote 'googleapis' reexporta uma cópia própria (via googleapis-common)
@@ -227,15 +228,17 @@ export async function checkFreeBusy(tenantId: string, cfg: CalendarConfig, start
   const hours = await getTenantBusinessHours(tenantId);
   if (!isWithinBusinessHours(hours, startIso, endIso)) return false;
 
-  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
-  const calendar = google.calendar({ version: 'v3', auth });
-  const timeMin = localNaiveToUtcIso(startIso, timezone);
-  const timeMax = localNaiveToUtcIso(endIso, timezone);
-  const res = await calendar.freebusy.query({
-    requestBody: { timeMin, timeMax, items: [{ id: 'primary' }] },
+  return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'checkFreeBusy' }, async () => {
+    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const calendar = google.calendar({ version: 'v3', auth });
+    const timeMin = localNaiveToUtcIso(startIso, timezone);
+    const timeMax = localNaiveToUtcIso(endIso, timezone);
+    const res = await calendar.freebusy.query({
+      requestBody: { timeMin, timeMax, items: [{ id: 'primary' }] },
+    });
+    const busy = res.data.calendars?.primary?.busy || [];
+    return busy.length === 0;
   });
-  const busy = res.data.calendars?.primary?.busy || [];
-  return busy.length === 0;
 }
 
 export interface WeeklyAvailabilitySlot {
@@ -302,16 +305,18 @@ export async function findWeeklyAvailability(
   const firstDate = dates[0];
   const lastDate = dates[dates.length - 1];
 
-  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
-  const calendar = google.calendar({ version: 'v3', auth });
-  const timeMin = localNaiveToUtcIso(`${firstDate}T00:00:00`, timezone);
-  const timeMax = localNaiveToUtcIso(`${lastDate}T23:59:59`, timezone);
-  const res = await calendar.freebusy.query({
-    requestBody: { timeMin, timeMax, items: [{ id: 'primary' }] },
+  const busy = await withStructuredLog({ tenantId, area: 'googleCalendar', op: 'findWeeklyAvailability' }, async () => {
+    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const calendar = google.calendar({ version: 'v3', auth });
+    const timeMin = localNaiveToUtcIso(`${firstDate}T00:00:00`, timezone);
+    const timeMax = localNaiveToUtcIso(`${lastDate}T23:59:59`, timezone);
+    const res = await calendar.freebusy.query({
+      requestBody: { timeMin, timeMax, items: [{ id: 'primary' }] },
+    });
+    return (res.data.calendars?.primary?.busy || [])
+      .filter((b) => b.start && b.end)
+      .map((b) => ({ startMs: new Date(b.start!).getTime(), endMs: new Date(b.end!).getTime() }));
   });
-  const busy = (res.data.calendars?.primary?.busy || [])
-    .filter((b) => b.start && b.end)
-    .map((b) => ({ startMs: new Date(b.start!).getTime(), endMs: new Date(b.end!).getTime() }));
 
   const result: WeeklyAvailabilityDay[] = [];
   for (const [date, candidates] of candidatesByDate) {
@@ -337,19 +342,21 @@ export async function createCalendarEvent(
   timezone = 'America/Asuncion'
 ): Promise<string> {
   await assertWithinBusinessHours(tenantId, startIso, endIso);
-  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
-  const calendar = google.calendar({ version: 'v3', auth });
-  const res = await calendar.events.insert({
-    calendarId: 'primary',
-    requestBody: {
-      summary,
-      description,
-      start: { dateTime: startIso, timeZone: timezone },
-      end: { dateTime: endIso, timeZone: timezone },
-    },
+  return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'createCalendarEvent' }, async () => {
+    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const calendar = google.calendar({ version: 'v3', auth });
+    const res = await calendar.events.insert({
+      calendarId: 'primary',
+      requestBody: {
+        summary,
+        description,
+        start: { dateTime: startIso, timeZone: timezone },
+        end: { dateTime: endIso, timeZone: timezone },
+      },
+    });
+    if (!res.data.id) throw new Error('Google não retornou o ID do evento criado.');
+    return res.data.id;
   });
-  if (!res.data.id) throw new Error('Google não retornou o ID do evento criado.');
-  return res.data.id;
 }
 
 export async function rescheduleCalendarEvent(
@@ -361,22 +368,26 @@ export async function rescheduleCalendarEvent(
   timezone = 'America/Asuncion'
 ): Promise<void> {
   await assertWithinBusinessHours(tenantId, newStartIso, newEndIso);
-  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
-  const calendar = google.calendar({ version: 'v3', auth });
-  await calendar.events.patch({
-    calendarId: 'primary',
-    eventId,
-    requestBody: {
-      start: { dateTime: newStartIso, timeZone: timezone },
-      end: { dateTime: newEndIso, timeZone: timezone },
-    },
+  return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'rescheduleCalendarEvent' }, async () => {
+    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const calendar = google.calendar({ version: 'v3', auth });
+    await calendar.events.patch({
+      calendarId: 'primary',
+      eventId,
+      requestBody: {
+        start: { dateTime: newStartIso, timeZone: timezone },
+        end: { dateTime: newEndIso, timeZone: timezone },
+      },
+    });
   });
 }
 
 export async function cancelCalendarEvent(tenantId: string, cfg: CalendarConfig, eventId: string): Promise<void> {
-  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
-  const calendar = google.calendar({ version: 'v3', auth });
-  await calendar.events.delete({ calendarId: 'primary', eventId });
+  return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'cancelCalendarEvent' }, async () => {
+    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const calendar = google.calendar({ version: 'v3', auth });
+    await calendar.events.delete({ calendarId: 'primary', eventId });
+  });
 }
 
 export interface UpcomingEvent {
@@ -388,16 +399,18 @@ export interface UpcomingEvent {
 
 /** Lista eventos entre duas datas — usado pelo job de lembretes automáticos. */
 export async function listUpcomingEvents(tenantId: string, cfg: CalendarConfig, timeMinIso: string, timeMaxIso: string): Promise<UpcomingEvent[]> {
-  const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
-  const calendar = google.calendar({ version: 'v3', auth });
-  const res = await calendar.events.list({
-    calendarId: 'primary',
-    timeMin: timeMinIso,
-    timeMax: timeMaxIso,
-    singleEvents: true,
-    orderBy: 'startTime',
+  return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'listUpcomingEvents' }, async () => {
+    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const calendar = google.calendar({ version: 'v3', auth });
+    const res = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: timeMinIso,
+      timeMax: timeMaxIso,
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+    return (res.data.items || [])
+      .filter((e) => e.id && e.summary && e.start?.dateTime)
+      .map((e) => ({ id: e.id!, summary: e.summary!, startIso: e.start!.dateTime!, description: e.description || undefined }));
   });
-  return (res.data.items || [])
-    .filter((e) => e.id && e.summary && e.start?.dateTime)
-    .map((e) => ({ id: e.id!, summary: e.summary!, startIso: e.start!.dateTime!, description: e.description || undefined }));
 }
