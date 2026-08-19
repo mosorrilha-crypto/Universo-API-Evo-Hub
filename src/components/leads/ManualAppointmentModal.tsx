@@ -1,5 +1,5 @@
 import React from 'react';
-import { CalendarPlus } from 'lucide-react';
+import { CalendarPlus, Sparkles } from 'lucide-react';
 import { AutoResizeTextarea } from '../AutoResizeTextarea';
 
 interface ManualAppointmentModalProps {
@@ -9,6 +9,11 @@ interface ManualAppointmentModalProps {
   products: Array<{ id: string; name: string }>;
   serviceName: string;
   onServiceNameChange: (value: string) => void;
+  /** Serviço avulso criado só pra este agendamento (nunca entra na Base de Conhecimento) — pedido real (19/08/2026): um horário/procedimento combinado especialmente com um cliente (ex: preço/serviço fora do catálogo padrão) precisava de um jeito de agendar sem sujar o catálogo geral que a IA usa com todo mundo. */
+  isCustomService: boolean;
+  onIsCustomServiceChange: (value: boolean) => void;
+  customDurationMinutes: string;
+  onCustomDurationMinutesChange: (value: string) => void;
   date: string;
   onDateChange: (value: string) => void;
   time: string;
@@ -24,7 +29,7 @@ interface ManualAppointmentModalProps {
 }
 
 export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
-  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, date, onDateChange, time, onTimeChange, notes, onNotesChange, paymentReceived, onPaymentReceivedChange, error, isCreating, onSubmit, onClose,
+  isOpen, leadName, leadPhone, products, serviceName, onServiceNameChange, isCustomService, onIsCustomServiceChange, customDurationMinutes, onCustomDurationMinutesChange, date, onDateChange, time, onTimeChange, notes, onNotesChange, paymentReceived, onPaymentReceivedChange, error, isCreating, onSubmit, onClose,
 }) => {
   if (!isOpen) return null;
   return (
@@ -61,18 +66,58 @@ export const ManualAppointmentModal: React.FC<ManualAppointmentModalProps> = ({
 
         <form onSubmit={onSubmit} className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-slate-300 block mb-1">Serviço *</label>
-            <select
-              required
-              value={serviceName}
-              onChange={(e) => onServiceNameChange(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
-            >
-              <option value="">Selecione...</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.name}>{p.name}</option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-300">Serviço *</label>
+              <button
+                type="button"
+                onClick={() => { onIsCustomServiceChange(!isCustomService); onServiceNameChange(''); }}
+                className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>{isCustomService ? 'Usar serviço do catálogo' : 'Serviço personalizado'}</span>
+              </button>
+            </div>
+
+            {isCustomService ? (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="Ex: Pacote personalizado combinado com a cliente"
+                  value={serviceName}
+                  onChange={(e) => onServiceNameChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">Duração (minutos) *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    placeholder="Ex: 90"
+                    value={customDurationMinutes}
+                    onChange={(e) => onCustomDurationMinutesChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Criado só pra este agendamento — não entra na Base de Conhecimento nem fica disponível pra IA oferecer a outros clientes.
+                </p>
+              </div>
+            ) : (
+              <select
+                required
+                value={serviceName}
+                onChange={(e) => onServiceNameChange(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="">Selecione...</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

@@ -1449,6 +1449,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [isManualAppointmentModalOpen, setIsManualAppointmentModalOpen] = useState(false);
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
   const [manualServiceName, setManualServiceName] = useState('');
+  const [isManualServiceCustom, setIsManualServiceCustom] = useState(false);
+  const [manualCustomDurationMinutes, setManualCustomDurationMinutes] = useState('');
   const [manualDate, setManualDate] = useState('');
   const [manualTime, setManualTime] = useState('');
   const [manualNotes, setManualNotes] = useState('');
@@ -1460,10 +1462,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const handleCreateManualAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLead?.phone || !manualServiceName || !manualDate || !manualTime) return;
+    // Serviço personalizado (só pra este agendamento, nunca entra na Base
+    // de Conhecimento) exige a duração digitada na hora — não tem entrada
+    // no catálogo pra puxar; sem número válido, não dá pra calcular o fim
+    // do evento real na agenda.
+    if (isManualServiceCustom && !(Number(manualCustomDurationMinutes) > 0)) {
+      setManualAppointmentError('Informe a duração (minutos) do serviço personalizado.');
+      return;
+    }
     setIsCreatingManualAppointment(true);
     setManualAppointmentError(null);
     try {
-      const durationMinutes = knowledgeBase.products.find((p) => p.name === manualServiceName)?.durationMinutes || 90;
+      const durationMinutes = isManualServiceCustom
+        ? Number(manualCustomDurationMinutes)
+        : knowledgeBase.products.find((p) => p.name === manualServiceName)?.durationMinutes || 90;
       const startIso = `${manualDate}T${manualTime}:00`;
       const endDate = new Date(`${manualDate}T${manualTime}:00`);
       endDate.setMinutes(endDate.getMinutes() + durationMinutes);
@@ -1479,6 +1491,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setPaymentAppointment(data.appointment);
       setIsManualAppointmentModalOpen(false);
       setManualServiceName('');
+      setIsManualServiceCustom(false);
+      setManualCustomDurationMinutes('');
       setManualDate('');
       setManualTime('');
       setManualNotes('');
@@ -3885,6 +3899,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         products={knowledgeBase.products}
         serviceName={manualServiceName}
         onServiceNameChange={setManualServiceName}
+        isCustomService={isManualServiceCustom}
+        onIsCustomServiceChange={setIsManualServiceCustom}
+        customDurationMinutes={manualCustomDurationMinutes}
+        onCustomDurationMinutesChange={setManualCustomDurationMinutes}
         date={manualDate}
         onDateChange={setManualDate}
         time={manualTime}
@@ -3896,7 +3914,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         error={manualAppointmentError}
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
-        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); }}
+        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); setIsManualServiceCustom(false); setManualCustomDurationMinutes(''); }}
       />
 
       <ContractModal
