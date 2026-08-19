@@ -40,18 +40,6 @@ const GUEST_USER: UserProfile = {
   department: '',
 };
 
-/** Lê o papel salvo sem depender do state de currentUser — precisa estar
- * disponível já no cálculo inicial (lazy initializer) de activeTab, que
- * roda antes/independente da inicialização de currentUser abaixo. */
-function readSavedUserRole(): UserProfile['role'] | undefined {
-  try {
-    const saved = localStorage.getItem('saas_current_user');
-    return saved ? (JSON.parse(saved).role as UserProfile['role']) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Bug real em produção (12/08/2026): `localStorage.setItem` sem try/catch
  * pra cachear o estado do painel — assim que a base de conhecimento real (com
@@ -101,13 +89,11 @@ const transactionsCacheKey = (tenantId: string) => `saas_transactions_${tenantId
 
 export const App: React.FC = () => {
   // Navigation & View State
-  // Aberto pelo ícone instalado (PWA do atendente, issue #159), ou papel
-  // abaixo de saas_admin: entra direto em Atendimento, não no Painel SaaS
-  // Master (que passa a ficar reservado pra quem realmente pode vê-lo — ver
-  // Header.tsx, que também restringe as abas visíveis).
-  const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
-    !isStandalonePwa() && hasRoleAtLeast(readSavedUserRole(), 'saas_admin') ? 'saas' : 'whatsapp'
-  );
+  // Atendimento (WhatsApp) é a página principal pra qualquer papel, inclusive
+  // saas_admin (pedido direto, 19/08/2026) — o Painel Multi-Tenant saiu da
+  // faixa de abas e virou um botão próprio no cabeçalho (ver Header.tsx),
+  // acessado sob demanda em vez de ser a tela de entrada.
+  const [activeTab, setActiveTab] = useState<ActiveTab>('whatsapp');
   // Lead a abrir automaticamente ao entrar na aba WhatsApp — usado pelo
   // botão "Voltar pra conversa" do card de Escalonamento. requestId muda a
   // cada clique (mesmo pro mesmo telefone), pra garantir que clicar de novo
