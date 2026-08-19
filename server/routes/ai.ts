@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import type { ServerConfig } from '../config';
 import { getGeminiClient, withGeminiRetry } from '../gemini';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
+import { callGroqJsonCompletion } from '../services/groqClient';
 
 /**
  * Achado real em produção (18/08/2026): os quatro endpoints deste arquivo
@@ -17,6 +18,19 @@ import { transcribeAudioWithGemini } from '../services/geminiTranscription';
  * praticamente sem uso hoje) e ~5x mais barato. autoReply.ts continua em
  * gemini-3.6-flash de propósito — ali sim é a resposta automática real,
  * não vale o mesmo trade-off de qualidade por confiabilidade.
+ *
+ * Achado real (19/08/2026): mesmo em modelos/cotas diferentes do
+ * autoReply.ts, a GEMINI_API_KEY é ÚNICA pro projeto inteiro — a cota de
+ * tokens/minuto do gemini-3.5-flash-lite é compartilhada entre TODOS os
+ * tenants e TODAS as chamadas que usam esse modelo (Ficha IA de qualquer
+ * tenant + relatório de analytics), não é isolada por tenant nem por
+ * feature. Pedido direto do dono do produto: mesmo padrão Groq→Gemini já
+ * usado no router do autoReply.ts (classifyAgent, ver autoReply.ts),
+ * aplicado aqui — Groq é a PRIMEIRA tentativa (mais barata/rápida, cota
+ * própria e totalmente separada da conta Gemini), e só cai pro Gemini se o
+ * Groq falhar (rede, timeout, JSON malformado, campo esperado ausente).
+ * Sem GROQ_API_KEY configurada, o comportamento é 100% o de antes (só
+ * Gemini).
  */
 
 interface AiRouterDeps {
@@ -28,6 +42,7 @@ interface AiRouterDeps {
 export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRouterDeps): Router {
   const router = Router();
   const ai = getGeminiClient(config);
+  const groqApiKey = config.groqApiKey;
 
   // ✅ Endpoint de teste do Gemini
   router.get('/api/test-gemini', authenticateToken, rateLimiter, async (req, res) => {
@@ -65,9 +80,7 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
     try {
       const { leadInfo, messages, agentKnowledgeBase } = req.body || {};
 
-      if (ai) {
-        try {
-          const prompt = `Você é um analista de Vendas e CRM inteligente para um sistema SaaS no WhatsApp em Português.
+      const prompt = `Você é um analista de Vendas e CRM inteligente para um sistema SaaS no WhatsApp em Português.
 Analise o histórico da conversa a seguir e a base de conhecimento do agente e responda estritamente em formato JSON com a seguinte estrutura:
 {
   "leadStage": "novo" | "contato" | "proposta" | "negociacao" | "ganho" | "perdido",
@@ -95,6 +108,20 @@ Histórico de Mensagens: ${JSON.stringify(messages)}
 Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
 `;
 
+      if (groqApiKey) {
+        try {
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          if (!parsed || typeof parsed.leadStage !== 'string') {
+            throw new Error(`Groq retornou análise sem "leadStage" válido: ${JSON.stringify(parsed)?.slice(0, 200)}`);
+          }
+          return res.json({ success: true, source: 'groq', analysis: parsed });
+        } catch (groqError) {
+          console.warn('⚠️  [Ficha IA] Groq falhou (analyze-conversation), caindo pro Gemini:', (groqError as Error)?.message || groqError);
+        }
+      }
+
+      if (ai) {
+        try {
           // Issue #94 — confirmado nos logs do Render: essa chamada não tinha
           // nenhuma tentativa extra, então uma falha transitória do Gemini
           // (503 "high demand", timeout) caía direto no fallback na 1ª
@@ -176,9 +203,7 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
         return res.status(400).json({ success: false, error: 'Campo "hint" (sua sugestão) é obrigatório.' });
       }
 
-      if (ai) {
-        try {
-          const prompt = `Você é um atendente de vendas humano respondendo no WhatsApp em nome de um negócio real.
+      const prompt = `Você é um atendente de vendas humano respondendo no WhatsApp em nome de um negócio real.
 Um operador humano te deu a seguinte instrução sobre o que responder ao lead a seguir — ela é a fonte principal do que escrever, não uma sugestão opcional:
 INSTRUÇÃO DO OPERADOR: "${hint.trim()}"
 
@@ -196,6 +221,20 @@ Histórico de Mensagens: ${JSON.stringify(messages)}
 Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
 `;
 
+      if (groqApiKey) {
+        try {
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          if (!parsed || typeof parsed.reply !== 'string' || !parsed.reply.trim()) {
+            throw new Error(`Groq retornou "reply" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);
+          }
+          return res.json({ success: true, source: 'groq', ...parsed });
+        } catch (groqError) {
+          console.warn('⚠️  [Ficha IA] Groq falhou (reply-from-hint), caindo pro Gemini:', (groqError as Error)?.message || groqError);
+        }
+      }
+
+      if (ai) {
+        try {
           const response = await withGeminiRetry(() => ai.models.generateContent({
             model: 'gemini-3.5-flash-lite',
             contents: prompt,
@@ -239,9 +278,7 @@ Base de Conhecimento: ${JSON.stringify(agentKnowledgeBase || {})}
         return res.status(400).json({ success: false, error: 'Campo "question" é obrigatório.' });
       }
 
-      if (ai) {
-        try {
-          const prompt = `Você é um assistente de IA dentro do painel de atendimento de um operador de WhatsApp Business.
+      const prompt = `Você é um assistente de IA dentro do painel de atendimento de um operador de WhatsApp Business.
 O operador pode perguntar sobre a conversa com o lead abaixo (ex: "esse cliente já falou de orçamento?", "resume o que falta pra fechar") OU fazer uma pergunta geral sem relação nenhuma com essa conversa (ex: traduções, datas, cálculos, feriados) — responda da forma mais direta e útil possível, em Português, a menos que a pergunta peça outro idioma.
 
 Dados do Lead (contexto, use se for relevante pra pergunta): ${JSON.stringify(leadInfo || {})}
@@ -251,6 +288,20 @@ Pergunta do operador: "${question.trim()}"
 
 Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
 
+      if (groqApiKey) {
+        try {
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          if (!parsed || typeof parsed.answer !== 'string' || !parsed.answer.trim()) {
+            throw new Error(`Groq retornou "answer" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);
+          }
+          return res.json({ success: true, source: 'groq', answer: parsed.answer });
+        } catch (groqError) {
+          console.warn('⚠️  [Ficha IA] Groq falhou (ask), caindo pro Gemini:', (groqError as Error)?.message || groqError);
+        }
+      }
+
+      if (ai) {
+        try {
           const response = await withGeminiRetry(() => ai.models.generateContent({
             model: 'gemini-3.5-flash-lite',
             contents: prompt,
@@ -290,14 +341,31 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
   router.post('/api/analytics/ai-report', authenticateToken, rateLimiter, async (req, res) => {
     try {
       const { leads } = req.body || {};
+      const reportInstructions = `Atue como Especialista em Atribuição Meta Ads e Growth Hacking.
+Analise os dados dos leads a seguir e gere um relatório de inteligência estratégica conciso em português (3 parágrafos) destacando ROAS, Canais de Alta Conversão, CAPI Match Quality Score e sugestões de otimização:
+Leads: ${JSON.stringify(leads || [])}`;
+
+      if (groqApiKey) {
+        try {
+          const { parsed } = await callGroqJsonCompletion(
+            groqApiKey,
+            `${reportInstructions}\n\nResponda estritamente em formato JSON: { "report": "o relatório completo em texto" }`
+          );
+          if (!parsed || typeof parsed.report !== 'string' || !parsed.report.trim()) {
+            throw new Error(`Groq retornou "report" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);
+          }
+          return res.json({ success: true, source: 'groq', report: parsed.report });
+        } catch (groqError) {
+          console.warn('⚠️  [Ficha IA] Groq falhou (ai-report), caindo pro Gemini:', (groqError as Error)?.message || groqError);
+        }
+      }
+
       if (ai) {
         try {
           // Mesmo achado do endpoint /api/analyze-conversation acima (issue #94).
           const response = await withGeminiRetry(() => ai.models.generateContent({
             model: 'gemini-3.5-flash-lite',
-            contents: `Atue como Especialista em Atribuição Meta Ads e Growth Hacking.
-Analise os dados dos leads a seguir e gere um relatório de inteligência estratégica conciso em português (3 parágrafos) destacando ROAS, Canais de Alta Conversão, CAPI Match Quality Score e sugestões de otimização:
-Leads: ${JSON.stringify(leads || [])}`,
+            contents: reportInstructions,
           }));
           return res.json({ success: true, source: 'gemini', report: response.text });
         } catch (err) {
