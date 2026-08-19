@@ -81,25 +81,31 @@ export const Header: React.FC<HeaderProps> = ({
   // mobile, tudo isso agora fica atrás de um botão de menu — no desktop
   // (md:) o layout original continua igual, sem essa condensação.
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
-  const tenantMenuRef = useRef<HTMLDivElement>(null);
+  // Achado direto do dono do produto (19/08/2026): o seletor de empresa
+  // (Building2 + dropdown próprio) e o menu do perfil (setinha ▼ + botão
+  // Sair) eram dois controles lado a lado fazendo coisas parecidas —
+  // confuso. Unificados num só: a setinha do perfil agora abre um dropdown
+  // que, só pra saas_admin, também lista as empresas pra alternar de
+  // verdade (backend já resolve isso via header X-Tenant-Id, ver
+  // resolveTenantId em server/middleware/rbac.ts — não é mais cosmético).
+  // Pra quem não é saas_admin, a setinha continua abrindo direto o modal de
+  // login (nada pra listar), sem esse dropdown extra.
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
 
-  // Achado numa auditoria pós-lançamento: o seletor de empresa abria só no
-  // hover (group-hover:block) — o gap entre o botão e o menu (mt-1.5) não
-  // faz parte da área "hoverável" de nenhum dos dois elementos, então mover
-  // o mouse na diagonal em direção ao menu passava por esse vão e fechava o
-  // menu antes de dar tempo de clicar numa empresa. Trocado pra clique, que
-  // não depende de trajetória do mouse e também funciona em touch.
+  // Mesmo raciocínio da versão antiga do seletor de empresa: fecha ao
+  // clicar fora, não só no hover (não depende de trajetória do mouse e
+  // também funciona em touch).
   useEffect(() => {
-    if (!isTenantMenuOpen) return;
+    if (!isProfileMenuOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
-      if (tenantMenuRef.current && !tenantMenuRef.current.contains(event.target as Node)) {
-        setIsTenantMenuOpen(false);
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isTenantMenuOpen]);
+  }, [isProfileMenuOpen]);
 
   const scrollTabs = (direction: 'left' | 'right') => {
     if (tabsRef.current) {
@@ -225,64 +231,11 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Tenant Switcher & User Auth */}
           <div className="flex items-center space-x-3 text-xs">
 
-            {/* Active Tenant Selector Dropdown — achado a pedido do dono do
-                tenant: essa troca é só cosmética hoje (toda rota real do
-                backend já resolve o tenant pelo tenantId do próprio JWT
-                autenticado, nunca por essa seleção da UI), mas mesmo assim
-                não faz sentido nenhum um operador comum (role admin/
-                operator/manager, sempre dono de UM tenant só) ver ou trocar
-                entre OUTRAS empresas — só confunde. "Alternar Cliente" fica
-                restrito a quem é saas_admin de verdade (o dono da
-                plataforma, gerenciando múltiplos clientes); qualquer outro
-                perfil só vê o nome da própria empresa, sem dropdown. */}
-            {currentUser?.role === 'saas_admin' ? (
-              <div className="relative" ref={tenantMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setIsTenantMenuOpen((open) => !open)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-control text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer transition-all"
-                  title={`Empresa ativa: ${activeTenant.name} — clique pra trocar`}
-                >
-                  <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                  <span className="font-semibold text-xs truncate max-w-[140px]">{activeTenant.name}</span>
-                  <ChevronDown className={`w-3 h-3 text-slate-500 flex-shrink-0 transition-transform ${isTenantMenuOpen ? 'rotate-180' : ''}`} />
-                </button>
-
-                {/* Dropdown menu — ancora pela esquerda no mobile (o botão fica perto
-                    da borda esquerda no layout empilhado) e pela direita no desktop
-                    (linha única, botão perto da borda direita) — evita vazar pra fora
-                    da tela nos dois casos. */}
-                {isTenantMenuOpen && (
-                  <div className="absolute left-0 md:left-auto md:right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-panel shadow-2xl p-2 z-50 origin-top-left md:origin-top-right animate-pop-in">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 border-b border-slate-800 mb-1">
-                      Alternar Cliente (Tenant)
-                    </div>
-                    <div className="space-y-1 max-h-56 overflow-y-auto">
-                      {tenants.map((t) => (
-                        <button
-                          key={t.id}
-                          onClick={() => {
-                            onSelectTenant(t);
-                            setIsTenantMenuOpen(false);
-                          }}
-                          className={`w-full text-left px-2.5 py-2 rounded-control text-xs font-medium flex items-center justify-between transition-all ${
-                            t.id === activeTenant.id
-                              ? 'bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50'
-                              : 'text-slate-300 hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="truncate pr-2">
-                            <div className="truncate">{t.name}</div>
-                            <div className="text-[9px] text-slate-500 font-normal">R$ {t.monthlyMRR}/mês • {t.plan}</div>
-                          </div>
-                          {t.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
+            {/* Empresa ativa — só texto informativo pra quem não é
+                saas_admin (sempre dono de UM tenant só, nada pra trocar).
+                Pra saas_admin, a troca de verdade agora mora no dropdown do
+                perfil (ver abaixo). */}
+            {currentUser?.role !== 'saas_admin' && (
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-300" title={activeTenant.name}>
                 <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
                 <span className="font-semibold text-xs truncate max-w-[140px]">{activeTenant.name}</span>
@@ -306,24 +259,76 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* User Profile */}
             {currentUser ? (
-              <div className="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 p-1.5 pl-2.5 rounded-panel text-slate-200">
-                <img
-                  src={currentUser.avatar}
-                  alt={currentUser.name}
-                  className="w-7 h-7 rounded-pill object-cover border border-emerald-500/50"
-                />
-                <div className="text-left hidden sm:block">
-                  <div className="font-bold text-white text-xs leading-none">{currentUser.name}</div>
-                  <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
+              <div className="relative" ref={profileMenuRef}>
+                <div className="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 p-1.5 pl-2.5 rounded-panel text-slate-200">
+                  <img
+                    src={currentUser.avatar}
+                    alt={currentUser.name}
+                    className="w-7 h-7 rounded-pill object-cover border border-emerald-500/50"
+                  />
+                  <div className="text-left hidden sm:block">
+                    <div className="font-bold text-white text-xs leading-none">{currentUser.name}</div>
+                    <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    iconOnly
+                    onClick={() => (currentUser.role === 'saas_admin' ? setIsProfileMenuOpen((open) => !open) : onOpenLoginModal())}
+                    title={currentUser.role === 'saas_admin' ? 'Alternar empresa / Trocar operador' : 'Trocar Operador / Perfil'}
+                  >
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
+                  </Button>
+
+                  <Button variant="danger" size="xs" iconOnly onClick={onLogout} title="Sair" className="ml-1">
+                    <LogOut className="w-4 h-4" />
+                  </Button>
                 </div>
 
-                <Button variant="ghost" size="xs" iconOnly onClick={onOpenLoginModal} title="Trocar Operador / Perfil">
-                  <ChevronDown className="w-4 h-4" />
-                </Button>
-
-                <Button variant="danger" size="xs" iconOnly onClick={onLogout} title="Sair" className="ml-1">
-                  <LogOut className="w-4 h-4" />
-                </Button>
+                {/* Dropdown só existe pra saas_admin (único papel com algo
+                    real pra listar aqui) — resto continua com o clique
+                    direto na setinha abrindo o modal de login, como sempre. */}
+                {currentUser.role === 'saas_admin' && isProfileMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-panel shadow-2xl p-2 z-50 origin-top-right animate-pop-in">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 border-b border-slate-800 mb-1">
+                      Alternar Cliente (Tenant)
+                    </div>
+                    <div className="space-y-1 max-h-56 overflow-y-auto">
+                      {tenants.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => {
+                            onSelectTenant(t);
+                            setIsProfileMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-control text-xs font-medium flex items-center justify-between transition-all ${
+                            t.id === activeTenant.id
+                              ? 'bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50'
+                              : 'text-slate-300 hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="truncate pr-2">
+                            <div className="truncate">{t.name}</div>
+                            <div className="text-[9px] text-slate-500 font-normal">R$ {t.monthlyMRR}/mês • {t.plan}</div>
+                          </div>
+                          {t.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="border-t border-slate-800 mt-2 pt-2">
+                      <button
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                          onOpenLoginModal();
+                        }}
+                        className="w-full text-left px-2.5 py-2 rounded-control text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-all"
+                      >
+                        Trocar Operador / Perfil
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <Button variant="primary" size="md" onClick={onOpenLoginModal}>
