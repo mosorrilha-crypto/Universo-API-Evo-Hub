@@ -57,7 +57,7 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 | Google Calendar por tenant | ✅ Feito | tokens OAuth em `tenant_calendar_tokens`, não mais env var global |
 | Auth real + RBAC | ✅ Feito | login via bcrypt+JWT contra `operators`; `requireRole` ativo em 7 arquivos de rota |
 | Onboarding de tenant | ✅ Feito (2 caminhos) | `POST /api/admin/tenants` (saas_admin) além do script CLI antigo |
-| Frontend saindo do localStorage | ⚠️ Parcial | `App.tsx` já faz ~21 chamadas reais de API; **mas `OperatorCRM.tsx` e `FinancialDashboard.tsx` continuam 100% mock em localStorage, zero chamada de API** — quem olha esses dois painéis vê dado falso sem aviso nenhum na tela |
+| Frontend saindo do localStorage | ⚠️ Parcial | `App.tsx` já faz ~21 chamadas reais de API; **`OperatorCRM.tsx` e `FinancialDashboard.tsx` continuam 100% mock em localStorage, zero chamada de API.** `FinancialDashboard.tsx` já tinha um selo "Dados de Exemplo" avisando isso; `OperatorCRM.tsx` não tinha nenhum aviso — corrigido em 19/08/2026 (banner de aviso adicionado). Nenhum dos dois está de fato ligado à API real ainda — o aviso só evita decisão em cima de dado falso sem saber, não resolve o gap de fundo. |
 | Idempotência de webhook | ✅ Feito | Postgres (`processed_webhook_messages`), sobrevive restart/multi-instância — **doc antigo dizia "em memória", isso está errado, já foi corrigido no código** |
 | Buffer de rajada de mensagens | ✅ Feito, com recovery | Map em memória é o caminho rápido, mas cada rajada é persistida (`pending_message_buffers`) e um sweeper recupera se a instância reiniciar no meio da janela |
 | SSE de conversas (`conversationEvents.ts`) | ❌ Gap real | `EventEmitter` em memória, single-instance, não sobrevive restart — só tem um poll de 90s como rede de segurança. Vira problema no dia que escalar horizontalmente. |
@@ -69,7 +69,7 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 ## Gaps conhecidos que valem engenharia (priorizados)
 
 1. **SSE single-instance** (`conversationEvents.ts`) — bloqueia escalar horizontalmente sem perder atualização em tempo real pra parte dos usuários. Fix: Postgres `LISTEN/NOTIFY` ou Redis pub/sub.
-2. **`OperatorCRM.tsx`/`FinancialDashboard.tsx` mockados sem aviso** — risco de decisão de negócio real em cima de dado falso. Fix mínimo: badge visível "dados de demonstração" até conectar API real; fix completo: ligar às APIs que já existem no backend.
+2. ~~`OperatorCRM.tsx`/`FinancialDashboard.tsx` mockados sem aviso~~ — **badge de aviso aplicado em 19/08/2026 nos dois** (`FinancialDashboard.tsx` já tinha, `OperatorCRM.tsx` não tinha e recebeu um). Continua pendente o fix completo: ligar os dois às APIs reais que já existem no backend (CRM/leads e transações).
 3. **Falta de error tracking** — hoje só se descobre incidente lendo log manualmente (como o esgotamento de billing do Gemini, que já aconteceu mais de uma vez em produção). Fix: alerta ativo (não só log) quando padrões de erro conhecidos aparecem.
 4. **RLS não é a barreira real de isolamento** — funciona hoje porque o código de serviço é disciplinado em exigir `tenantId`, mas é uma garantia de processo, não de banco de dados. Vale endurecer pra RLS ser a barreira de fato (não usar service key em queries tenant-scoped), ou aceitar conscientemente o risco documentado.
 5. **Pagamento sem provedor real** — bloqueia cobrar cliente novo de forma automática; decisão de produto (qual provedor, PYG/BRL/USD) mais que de engenharia pura.
