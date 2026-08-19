@@ -382,6 +382,25 @@ export async function rescheduleCalendarEvent(
   });
 }
 
+/**
+ * Corrige só o título (summary) de um evento já criado — nunca existia
+ * nenhuma forma de editar isso depois de criado (só criar/remarcar
+ * horário/cancelar). Achado real (19/08/2026): um agendamento manual
+ * registrado com o serviço errado ficava errado pra sempre, sem nenhum
+ * jeito de corrigir no painel.
+ */
+export async function updateCalendarEventSummary(tenantId: string, cfg: CalendarConfig, eventId: string, summary: string): Promise<void> {
+  return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'updateCalendarEventSummary' }, async () => {
+    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const calendar = google.calendar({ version: 'v3', auth });
+    await calendar.events.patch({
+      calendarId: 'primary',
+      eventId,
+      requestBody: { summary },
+    });
+  });
+}
+
 export async function cancelCalendarEvent(tenantId: string, cfg: CalendarConfig, eventId: string): Promise<void> {
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'cancelCalendarEvent' }, async () => {
     const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
