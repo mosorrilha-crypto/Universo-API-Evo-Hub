@@ -10,7 +10,7 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { getKnowledgeBase, resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { getKnowledgeBase, resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
@@ -1429,15 +1429,16 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
   // Achado real em produção: o Gemini nem sempre devolve o nome EXATO
   // (mesma caixa/espaçamento) do catálogo — comparação estrita (p.name ===
   // nomeProduto) já causou "produto não tem mídia cadastrada" pra um
-  // produto que TINHA vídeo cadastrado de verdade, silenciosamente. Mesma
-  // normalização já usada em isNonBookableProduct/findProductDurationMinutes
-  // (knowledgeBaseStore.ts) pra esse tipo de match vindo de texto livre da IA.
-  const normalizedNomeProduto = nomeProduto.trim().toLowerCase();
-  const findByName = <T extends { name: string }>(list: T[]): T | undefined =>
-    list.find((p) => p.name.trim().toLowerCase() === normalizedNomeProduto);
+  // produto que TINHA vídeo cadastrado de verdade, silenciosamente.
+  // findProductMatch (knowledgeBaseStore.ts) é a mesma resolução usada nos
+  // outros 6 pontos que buscam produto por nome vindo de texto livre da IA
+  // (duração, bookable, financeiro, Meta CAPI) — inclusive resolve pelo
+  // código de uma VARIANTE dentro de uma família (mídia sempre mora no
+  // produto pai, nunca na variante).
+  const matchedProduct = findProductMatch(kb, nomeProduto)?.product;
 
   if (call.name === 'enviar_video_exemplo') {
-    const product = findByName(productsWithVideo);
+    const product = matchedProduct?.exampleVideoId ? matchedProduct : undefined;
     if (!product?.exampleVideoId) {
       console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: "${nomeProduto}" não bateu com nenhum produto com vídeo cadastrado (tenant=${tenantId}). Catálogo com vídeo: [${productsWithVideo.map((p) => p.name).join(', ')}]`);
       // Achado real em produção (Monique, 20/08/2026): cliente pediu foto/vídeo
@@ -1489,11 +1490,19 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       }, 'ai', undefined, undefined, videoMessageId);
       return { actionsSummary: [`Enviou o vídeo de exemplo real de "${product.name}" pro cliente agora.`] };
     } catch (err: any) {
+      // Achado real em produção (20/08/2026): esse catch nunca logava nada —
+      // uma falha real de envio (upload rejeitado pela Meta, timeout, mídia
+      // corrompida) ficava 100% invisível nos logs do servidor, só virava um
+      // texto genérico pro modelo escrever pro cliente. Zero "Enviou a foto"
+      // e zero "não bateu com nenhum produto" nos logs de 7 dias, mesmo com
+      // clientes reais pedindo foto de serviços que TINHAM foto cadastrada,
+      // só fazia sentido por uma falha exatamente aqui, nunca logada.
+      console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: falha ao enviar vídeo de "${product.name}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
       return { actionsSummary: [`Tentou enviar o vídeo de "${product.name}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };
     }
   }
 
-  const product = findByName(productsWithPhoto);
+  const product = matchedProduct?.exampleImageBase64 ? matchedProduct : undefined;
   if (!product?.exampleImageBase64) {
     console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: "${nomeProduto}" não bateu com nenhum produto com foto cadastrada (tenant=${tenantId}). Catálogo com foto: [${productsWithPhoto.map((p) => p.name).join(', ')}]`);
     // Mesmo achado do bloco de vídeo acima — nome_produto pode ser uma
@@ -1531,6 +1540,11 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     }, 'ai');
     return { actionsSummary: [`Enviou a foto de exemplo real de "${product.name}" pro cliente agora.`] };
   } catch (err: any) {
+    // Mesmo achado do catch de vídeo acima — nunca logava nada, então uma
+    // falha real de upload/envio (a foto real da Monique pode passar de
+    // 3MB em base64 — perto do limite de mídia da própria Meta) ficava
+    // invisível pra sempre, só virava um texto genérico pro cliente.
+    console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: falha ao enviar foto de "${product.name}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
     return { actionsSummary: [`Tentou enviar a foto de "${product.name}" mas falhou (${err.message}) — não prometa que a foto foi enviada.`] };
   }
 }

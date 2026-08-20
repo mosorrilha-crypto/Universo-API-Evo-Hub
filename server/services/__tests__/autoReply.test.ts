@@ -29,7 +29,12 @@ const getAppointmentForPhone = vi.fn(async (..._args: any[]) => undefined as any
 vi.mock('../metaSend', () => ({ uploadWhatsAppMedia, sendWhatsAppMediaMessage }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionMediaMessage }));
 vi.mock('../conversationStore', () => ({ recordOutgoingMessage }));
-vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined) }));
+const findProductMatch = vi.fn((kb: { products: { name: string }[] } | null, name: string) => {
+  const normalized = name.trim().toLowerCase();
+  const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
+  return product ? { product } : undefined;
+});
+vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined), findProductMatch }));
 vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone,
   setAppointmentForPhone: vi.fn(async () => undefined),
