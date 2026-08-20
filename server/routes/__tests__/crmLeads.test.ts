@@ -117,6 +117,49 @@ describe('PATCH /api/crm/leads/:phone', () => {
   });
 });
 
+describe('PATCH /api/crm/leads/:phone — ponte com o Financeiro quando o negócio fecha', () => {
+  it('marcar um lead como "ganho" com valor negociado gera uma cobrança pendente automaticamente', async () => {
+    const res = await fetch(`${baseUrl}/api/crm/leads/595981111111`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: 'ganho', dealValue: 300000 }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = (supabase as any).__tables.financial_transactions;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tenant_id: TENANT_A,
+      lead_phone: '595981111111',
+      amount: 300000,
+      status: 'pendente',
+      source_ref: 'crm-won:595981111111',
+    });
+  });
+
+  it('não gera cobrança quando o lead ainda não tem valor negociado', async () => {
+    const res = await fetch(`${baseUrl}/api/crm/leads/595981111111`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: 'ganho' }),
+    });
+    expect(res.status).toBe(200);
+    const rows = (supabase as any).__tables.financial_transactions || [];
+    expect(rows).toHaveLength(0);
+  });
+
+  it('mover pra qualquer outro estágio nunca gera cobrança automática', async () => {
+    const res = await fetch(`${baseUrl}/api/crm/leads/595981111111`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage: 'negociacao', dealValue: 300000 }),
+    });
+    expect(res.status).toBe(200);
+    const rows = (supabase as any).__tables.financial_transactions || [];
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe('DELETE /api/crm/leads/:phone', () => {
   it('remove o estado de CRM (a conversa em si não é afetada)', async () => {
     const res = await fetch(`${baseUrl}/api/crm/leads/595982222222`, { method: 'DELETE' });

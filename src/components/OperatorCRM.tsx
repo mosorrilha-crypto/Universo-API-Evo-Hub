@@ -16,7 +16,6 @@ import {
   Plus,
   CheckCircle2,
   Clock,
-  AlertTriangle,
   ArrowUpRight,
   Send,
   Tag,
@@ -29,6 +28,8 @@ import {
   Building2,
   UserPlus
 } from 'lucide-react';
+// AlertTriangle removido daqui: era só pro banner "não conectado ao backend real",
+// que ficou desatualizado (o CRM já persiste de verdade, ver server/routes/crm.ts).
 
 interface OperatorCRMProps {
   leads?: LeadInfo[];
@@ -259,16 +260,6 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Aviso de dados de demonstração — esta tela ainda não está ligada ao backend
-          (ver docs/GUIA-DO-PROJETO.md, gap #2): tudo aqui é localStorage local deste
-          navegador, não reflete o CRM real de nenhum tenant. */}
-      <div className="bg-amber-950/40 border border-amber-800 rounded-xl px-4 py-3 flex items-center gap-2.5 text-amber-200">
-        <AlertTriangle className="w-4 h-4 shrink-0" />
-        <p className="text-xs font-medium">
-          Dados de demonstração — esta tela ainda não está conectada ao backend real, o que você vê aqui fica só neste navegador.
-        </p>
-      </div>
-
       {/* Header Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
@@ -510,35 +501,27 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                             )}
                           </div>
 
-                          {/* Quick Stage Change buttons */}
-                          <div className="mt-2 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-                            <span>Mover para:</span>
-                            <div className="flex space-x-1">
-                              {stage.id !== 'ganho' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStageChange(lead, 'ganho');
-                                  }}
-                                  className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 hover:bg-emerald-800 border border-emerald-700/60"
-                                >
-                                  Ganho
-                                </button>
-                              )}
-                              {stage.id !== 'proposta' && stage.id !== 'ganho' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStageChange(lead, 'proposta');
-                                  }}
-                                  className="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 hover:bg-purple-800 border border-purple-700/60"
-                                >
-                                  Proposta
-                                </button>
-                              )}
-                            </div>
+                          {/* Mover estágio direto no card — antes só tinha 2 botões
+                              (Ganho/Proposta) escondendo os outros 4 estágios (incluindo
+                              Perdido) atrás da aba lateral, obrigando abrir o drawer só
+                              pra marcar um lead como perdido. Select cobre todos os 6. */}
+                          <div className="mt-2 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400 gap-1.5">
+                            <span className="shrink-0">Mover para:</span>
+                            <select
+                              value={stage.id}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                handleStageChange(lead, e.target.value as CRMStage);
+                              }}
+                              className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[10px] text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                            >
+                              {STAGES.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                         </div>
                       );

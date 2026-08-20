@@ -1,6 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import { listConversations } from '../services/conversationStore';
 import { listCrmLeadStates, upsertCrmLeadState, deleteCrmLeadState, type CrmLeadState } from '../services/crmStore';
+import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId } from '../middleware/rbac';
@@ -20,6 +21,38 @@ function tenantOf(req: AuthenticatedRequest): string {
  * nunca apareciam lá, a menos que um operador cadastrasse cada um na mão. Ver
  * supabase/migrations/0013_crm_lead_state.sql pro design completo.
  */
+/**
+ * Fecha a ponte CRM → Financeiro: quando um lead vira "ganho" no funil, gera
+ * uma cobrança `pendente` (nunca `pago` — isso exige confirmação real, ver
+ * conversations.ts recordFinancialTransactionForVerifiedPayment) pra que o
+ * negócio fechado apareça no FinancialDashboard sem o operador ter que
+ * recadastrar tudo na mão. `sourceRef` (`crm-won:<phone>`) é único por
+ * tenant (migration 0037) — reenviar o mesmo PATCH (retry, ou marcar "ganho"
+ * de novo) nunca duplica a cobrança, só é engolido em silêncio.
+ */
+async function recordFinancialTransactionForWonDeal(tenantId: string, state: CrmLeadState): Promise<void> {
+  if (state.dealValue === undefined || state.dealValue === null) return; // sem valor negociado, nada a cobrar ainda
+  try {
+    await createFinancialTransaction(tenantId, {
+      id: crypto.randomUUID(),
+      leadId: state.phone,
+      leadName: state.name || state.phone,
+      leadPhone: state.phone,
+      productName: 'Negócio fechado (CRM)',
+      amount: state.dealValue,
+      paymentMethod: 'Transferência Bancária',
+      status: 'pendente',
+      date: new Date().toISOString(),
+      operatorName: state.assignedOperator,
+      channel: 'CRM',
+      sourceRef: `crm-won:${state.phone}`,
+    });
+  } catch (err) {
+    if (isDuplicateSourceRefError(err)) return; // já gerada antes (retry, ou "ganho" marcado de novo)
+    console.warn(`⚠️  [CRM] Falha ao gerar cobrança automática pro negócio fechado (tenant=${tenantId}, phone=${state.phone}):`, (err as Error)?.message || err);
+  }
+}
+
 export function createCrmRouter({ authenticateToken }: CrmRouterDeps): Router {
   const router = Router();
 
@@ -78,7 +111,13 @@ export function createCrmRouter({ authenticateToken }: CrmRouterDeps): Router {
     if (Array.isArray(notes)) patch.notes = notes;
     if (Array.isArray(tasks)) patch.tasks = tasks;
 
-    const state = await upsertCrmLeadState(tenantOf(req), req.params.phone, patch);
+    const tenantId = tenantOf(req);
+    const state = await upsertCrmLeadState(tenantId, req.params.phone, patch);
+
+    if (patch.stage === 'ganho') {
+      await recordFinancialTransactionForWonDeal(tenantId, state);
+    }
+
     res.json({ leadState: state });
   }));
 
