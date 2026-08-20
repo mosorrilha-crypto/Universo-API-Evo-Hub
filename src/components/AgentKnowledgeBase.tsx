@@ -603,20 +603,52 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  // Espelha parsePriceToNumber em server/services/knowledgeBaseStore.ts —
+  // mesmo heurístico (extrai só os dígitos do texto), pra manter o valor
+  // numérico sincronizado com o texto editável sem depender de um
+  // segundo campo manual. Sem dígitos reconhecíveis, devolve 0 (nunca
+  // inventa um valor).
+  const parsePriceToNumber = (priceText: string): number => parseInt(priceText.replace(/\D/g, ''), 10) || 0;
+
+  // Achado real auditando o catálogo da Monique (20/08/2026): editar o
+  // preço promocional (texto) aqui nunca atualizava `promoPriceAmount` — o
+  // valor numérico usado de verdade no financeiro/Meta CAPI
+  // (resolveProductPriceAmount, knowledgeBaseStore.ts) ficava desatualizado
+  // sempre que alguém corrigia/reajustava um preço promocional só pelo
+  // texto. Recalcula `promoPriceAmount` junto sempre que `promoPrice` muda.
   const handlePromoChange = (id: string, field: 'promoPrice' | 'promoUntil', value: string) => {
     setFormData((prev) => ({
       ...prev,
-      products: prev.products.map((p) => (p.id === id ? { ...p, [field]: value || undefined } : p)),
+      products: prev.products.map((p) => {
+        if (p.id !== id) return p;
+        const updated = { ...p, [field]: value || undefined };
+        if (field === 'promoPrice') updated.promoPriceAmount = value.trim() ? parsePriceToNumber(value) : undefined;
+        return updated;
+      }),
     }));
   };
 
   // Edita nome/preço/descrição de um produto já cadastrado direto no card —
   // sem isso, a única forma de corrigir algo era apagar e recriar do zero
   // (perdendo foto de exemplo, promoção etc. já configurados).
+  //
+  // Achado real (20/08/2026, auditoria do catálogo da Monique): editar só o
+  // `price` (texto mostrado ao cliente) nunca atualizava `priceAmount` (o
+  // número usado de verdade no registro financeiro/Meta CAPI,
+  // resolveProductPriceAmount em knowledgeBaseStore.ts) — 5 produtos da
+  // Monique ficaram com os dois valores divergentes depois de reajustes de
+  // preço só pelo painel (um combo chegou a mostrar um preço ao cliente
+  // MAIOR que a soma dos itens separados). Recalcula `priceAmount` junto
+  // sempre que `price` muda, igual já era feito pra `promoPrice` acima.
   const handleProductFieldChange = (id: string, field: 'name' | 'price' | 'description' | 'category', value: string) => {
     setFormData((prev) => ({
       ...prev,
-      products: prev.products.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
+      products: prev.products.map((p) => {
+        if (p.id !== id) return p;
+        const updated = { ...p, [field]: value };
+        if (field === 'price') updated.priceAmount = parsePriceToNumber(value);
+        return updated;
+      }),
     }));
   };
 
@@ -678,6 +710,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  // Mesmo achado do handleProductFieldChange acima, mas pra variantes: o
+  // card só tem um input de texto pro preço da variante (nunca existiu
+  // input próprio pra `priceAmount` numérico), então editar o preço de uma
+  // variante sem isso deixava `priceAmount` congelado no valor de quando a
+  // variante foi criada.
   const handleVariantFieldChange = (
     productId: string,
     index: number,
@@ -693,6 +730,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           if (field === 'litros' || field === 'priceAmount' || field === 'durationMinutes') {
             const numeric = value.trim() === '' ? undefined : Number(value);
             return { ...v, [field]: numeric === undefined || Number.isNaN(numeric) ? undefined : numeric };
+          }
+          if (field === 'price') {
+            return { ...v, price: value, priceAmount: parsePriceToNumber(value) };
           }
           return { ...v, [field]: value };
         });
