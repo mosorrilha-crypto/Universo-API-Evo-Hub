@@ -54,14 +54,21 @@ interface ConversationAnalysisPanelProps {
   onAskAi?: (question: string) => Promise<AskAiResult>;
 }
 
-/** Sugestões rápidas de orientação — atalhos pra não precisar digitar do zero (proposta UX 18/08/2026). */
-const HINT_SUGGESTIONS = [
-  'Mais comercial',
-  'Mais curta',
-  'Mais persuasiva',
-  'Responder sobre preço',
-  'Responder sobre prazo',
-  'Responder sobre instalação',
+/** Sugestões rápidas de orientação — atalhos pra não precisar digitar do zero (proposta UX 18/08/2026).
+ * Trocadas por instruções de vendas mais estratégicas (pedido real, 20/08/2026): os rótulos genéricos
+ * originais ("Mais curta", "Responder sobre instalação"...) eram um placeholder fixo, igual pra todo
+ * tenant, e nem faziam sentido pra um estúdio de beleza. Cada item tem um `label` curto pro botão e um
+ * `hint` completo — a instrução de verdade que vai pro campo de texto e é enviada à IA — porque um
+ * rótulo de 2 palavras vira uma orientação fraca quando mandado cru como prompt. */
+const HINT_SUGGESTIONS: Array<{ label: string; hint: string }> = [
+  { label: 'CTA de fechamento', hint: 'Termine a mensagem com uma chamada clara pra fechar: convide a cliente a confirmar o horário/agendamento agora.' },
+  { label: 'Follow-up (sumiu)', hint: 'A cliente parou de responder — manda um follow-up educado e leve perguntando se ainda tem interesse, sem soar cobrança.' },
+  { label: 'Reaquecer lead frio', hint: 'Esse lead esfriou — reaqueça a conversa trazendo algo de valor (novidade, benefício, disponibilidade) sem parecer insistente.' },
+  { label: 'Quebrar objeção de preço', hint: 'A cliente demonstrou objeção de preço — responda reforçando o valor/benefício do serviço, sem ficar na defensiva.' },
+  { label: 'Criar urgência real', hint: 'Crie um senso de urgência genuíno (ex: poucos horários disponíveis) sem soar como pressão artificial.' },
+  { label: 'Confirmar próximo passo', hint: 'Feche a mensagem deixando muito claro qual é o próximo passo combinado (o que a cliente precisa fazer/responder agora).' },
+  { label: 'Mais persuasiva', hint: 'Reescreva de forma mais persuasiva, destacando benefícios e criando desejo, sem exagerar.' },
+  { label: 'Mais curta', hint: 'Reescreva de forma bem mais curta e direta, mantendo o essencial.' },
 ];
 
 export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps> = ({
@@ -113,8 +120,8 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
     }
   };
 
-  const applyHintSuggestion = (label: string) => {
-    setHintDraft(label);
+  const applyHintSuggestion = (hint: string) => {
+    setHintDraft(hint);
   };
 
   // Perguntar à IA — assistente de perguntas livres (sobre a conversa ou gerais). Independente da análise.
@@ -517,10 +524,11 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
                 </span>
               )}
               <div className="flex flex-wrap gap-1.5">
-                {HINT_SUGGESTIONS.map((label) => (
+                {HINT_SUGGESTIONS.map(({ label, hint }) => (
                   <button
                     key={label}
-                    onClick={() => applyHintSuggestion(label)}
+                    onClick={() => applyHintSuggestion(hint)}
+                    title={hint}
                     className="px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-violet-300 border border-violet-500/30 text-[10px] font-medium transition-all cursor-pointer"
                   >
                     {label}

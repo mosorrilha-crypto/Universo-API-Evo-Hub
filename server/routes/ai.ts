@@ -120,7 +120,7 @@ Analise o histórico da conversa a seguir e a base de conhecimento do agente e r
   "keyTopicsDiscussed": ["tópicos relevantes"],
   "multiModalInsights": ["insights multimídia/áudios"],
   "recommendedNextAction": "próxima ação recomendada para o operador humanizado",
-  "suggestedSmartReply": "resposta inteligente pronta e persuasiva para o operador enviar, escrita no MESMO idioma do lead (detectedLanguage)",
+  "suggestedSmartReply": "resposta inteligente pronta e persuasiva para o operador enviar, escrita no MESMO idioma do lead (detectedLanguage) — DEVE executar literalmente o que foi descrito em recommendedNextAction (não é uma resposta independente/genérica, é a implementação em texto daquela ação)",
   "suggestedSmartReplyTranslation": "tradução literal de suggestedSmartReply para o Português, SOMENTE se detectedLanguage não for português — se já for português, use string vazia"
 }
 
