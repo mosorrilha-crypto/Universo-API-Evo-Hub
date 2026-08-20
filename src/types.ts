@@ -194,6 +194,8 @@ export interface AgentProduct {
   durationMinutes?: number;
   /** false = não é um serviço agendável por si só (ex: Retoque). Default true (undefined = agendável). */
   bookable?: boolean;
+  /** false = item pausado/descontinuado — some do catálogo que vai pro prompt do agente (nunca ofertado/cotado/agendado). Default true (undefined = ativo). */
+  active?: boolean;
 }
 
 export type FirstContactBlockType = 'text' | 'image' | 'video' | 'file';

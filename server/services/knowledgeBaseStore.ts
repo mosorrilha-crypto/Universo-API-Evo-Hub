@@ -97,6 +97,16 @@ export interface AgentProduct {
    * catálogos existentes sem esse campo.
    */
   bookable?: boolean;
+  /**
+   * false = item pausado/descontinuado — nunca aparece no catálogo que vai
+   * pro prompt do Gemini (ver formatKnowledgeBaseForPrompt) nem pode ser
+   * oferecido/agendado pelo agente. Default true (undefined = ativo), pra
+   * não quebrar catálogos existentes sem esse campo. Diferente de
+   * `bookable`: um item pode estar ativo (visível/cotável) mas não
+   * agendável por si só (ex: Retoque); `active: false` some do prompt
+   * inteiro, não só do agendamento.
+   */
+  active?: boolean;
 }
 
 /** Resolve o preço vigente de um produto — promocional se dentro da validade, regular caso contrário. */
@@ -164,6 +174,10 @@ export function findProductMatch(kb: AgentKnowledgeBase | null, productName: str
 export function isNonBookableProduct(kb: AgentKnowledgeBase | null, productName: string): boolean {
   const match = findProductMatch(kb, productName);
   if (!match) return false;
+  // Item pausado (active:false) nunca é agendável, mesmo que bookable não
+  // diga o contrário — defesa extra caso o nome ainda apareça no histórico
+  // da conversa depois de a empresa desativar o item.
+  if (match.product.active === false) return true;
   const bookable = match.variant?.bookable ?? match.product.bookable;
   return bookable === false;
 }
@@ -357,7 +371,12 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
   if (kb.locationMapsUrl) parts.push(`Link de localização (Google Maps) — mande esse link exatamente como está, sem alterar, sempre que o cliente pedir o endereço/localização: ${kb.locationMapsUrl}`);
   if (kb.pricingAndPolicies) parts.push(`Políticas de preço/pagamento: ${kb.pricingAndPolicies}`);
   if (kb.businessRules?.length) parts.push(`Regras de negócio:\n- ${kb.businessRules.join('\n- ')}`);
-  if (kb.products?.length) {
+  // Item com active:false é pausado/descontinuado — nunca entra no prompt,
+  // então o agente nunca pode ofertar/cotar/agendar algo que a empresa
+  // marcou como fora do ar (mesma lógica de nunca fabricar dado de negócio
+  // documentada acima pro businessModel, aplicada aqui pra visibilidade).
+  const visibleProducts = kb.products?.filter((p) => p.active !== false) || [];
+  if (visibleProducts.length) {
     const line = (p: AgentProduct) => {
       const variantsLine = p.variants?.length
         ? `\n  Tamanhos/modelos disponíveis (cote SEMPRE o preço do tamanho específico escolhido pelo cliente, nunca o preço genérico do produto):\n${p.variants
@@ -366,15 +385,15 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
         : '';
       return `- ${p.name}: ${resolveProductPrice(p)}${p.description ? ` — ${p.description}` : ''}${variantsLine}`;
     };
-    const categories = [...new Set(kb.products.map((p) => p.category).filter((c): c is string => !!c))];
+    const categories = [...new Set(visibleProducts.map((p) => p.category).filter((c): c is string => !!c))];
     if (categories.length) {
-      const uncategorized = kb.products.filter((p) => !p.category);
+      const uncategorized = visibleProducts.filter((p) => !p.category);
       const grouped = categories
-        .map((cat) => `${cat}:\n${kb.products!.filter((p) => p.category === cat).map(line).join('\n')}`)
+        .map((cat) => `${cat}:\n${visibleProducts.filter((p) => p.category === cat).map(line).join('\n')}`)
         .concat(uncategorized.length ? [`Outros:\n${uncategorized.map(line).join('\n')}`] : []);
       parts.push(`Catálogo de produtos/serviços:\n${grouped.join('\n\n')}`);
     } else {
-      parts.push(`Catálogo de produtos/serviços:\n${kb.products.map(line).join('\n')}`);
+      parts.push(`Catálogo de produtos/serviços:\n${visibleProducts.map(line).join('\n')}`);
     }
   }
   if (kb.faqs?.length) {

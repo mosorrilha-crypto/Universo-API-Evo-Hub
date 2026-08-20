@@ -686,6 +686,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  // Status/visibilidade — item pausado (active:false) some do prompt real do
+  // agente (ver formatKnowledgeBaseForPrompt no backend), não é só um filtro
+  // visual aqui no painel. Default ativo (undefined tratado como true).
+  const handleToggleProductActive = (id: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === id ? { ...p, active: p.active === false ? true : false } : p)),
+    }));
+  };
+
   const handleProductImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -1849,6 +1859,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                         className="w-full bg-transparent text-xs text-slate-300 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       />
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleProductActive(prod.id)}
+                      title="Item inativo nunca aparece no catálogo que o agente usa pra responder — não é oferecido, cotado nem agendado."
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                        prod.active === false
+                          ? 'bg-slate-800 text-slate-500 hover:text-slate-300'
+                          : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${prod.active === false ? 'bg-slate-600' : 'bg-emerald-400'}`} />
+                      {prod.active === false ? 'Inativo' : 'Ativo'}
+                    </button>
                     <AutoResizeTextarea
                       minRows={2}
                       value={prod.description}

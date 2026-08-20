@@ -120,6 +120,48 @@ describe('isNonBookableProduct', () => {
     const kb: AgentKnowledgeBase = { products: [{ name: 'Microlips', price: 'Gs 500.000' }] };
     expect(isNonBookableProduct(kb, 'Serviço Inexistente')).toBe(false);
   });
+
+  it('true quando o produto está marcado active:false, mesmo sem bookable:false', () => {
+    const kb: AgentKnowledgeBase = { products: [{ name: 'Efecto Foxy', price: 'Gs 200.000', active: false }] };
+    expect(isNonBookableProduct(kb, 'Efecto Foxy')).toBe(true);
+  });
+});
+
+describe('formatKnowledgeBaseForPrompt — status/visibilidade (active)', () => {
+  it('omite produto marcado active:false do catálogo do prompt', () => {
+    const kb: AgentKnowledgeBase = {
+      companyName: 'Estúdio Teste',
+      products: [
+        { name: 'Microlips', price: 'Gs 500.000', active: false },
+        { name: 'Lash Lift', price: 'Gs 140.000' },
+      ],
+    };
+    const text = formatKnowledgeBaseForPrompt(kb);
+    expect(text).not.toContain('Microlips');
+    expect(text).toContain('Lash Lift');
+  });
+
+  it('inclui produto sem active definido (ativo por padrão)', () => {
+    const kb: AgentKnowledgeBase = { products: [{ name: 'Microlips', price: 'Gs 500.000' }] };
+    expect(formatKnowledgeBaseForPrompt(kb)).toContain('Microlips');
+  });
+
+  it('omite produto inativo também dentro de uma categoria agrupada', () => {
+    const kb: AgentKnowledgeBase = {
+      products: [
+        { name: 'Microlips', price: 'Gs 500.000', category: 'Labios', active: false },
+        { name: 'Neutralización', price: 'Gs 450.000', category: 'Labios' },
+      ],
+    };
+    const text = formatKnowledgeBaseForPrompt(kb);
+    expect(text).not.toContain('Microlips');
+    expect(text).toContain('Neutralización');
+  });
+
+  it('não lista o catálogo quando todos os produtos estão inativos', () => {
+    const kb: AgentKnowledgeBase = { products: [{ name: 'Microlips', price: 'Gs 500.000', active: false }] };
+    expect(formatKnowledgeBaseForPrompt(kb)).not.toContain('Catálogo de produtos/serviços');
+  });
 });
 
 describe('findProductDurationMinutes', () => {
