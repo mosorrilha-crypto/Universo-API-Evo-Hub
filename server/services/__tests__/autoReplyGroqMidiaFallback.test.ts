@@ -23,6 +23,11 @@ vi.mock('../knowledgeBaseStore', () => ({
   resolveProductPriceAmount: vi.fn(() => 0),
   isNonBookableProduct: vi.fn(() => false),
   findProductDurationMinutes: vi.fn(() => undefined),
+  findProductMatch: vi.fn((kb: { products: { name: string }[] } | null, name: string) => {
+    const normalized = name.trim().toLowerCase();
+    const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
+    return product ? { product } : undefined;
+  }),
 }));
 
 const { generateAutoReplyForText } = await import('../autoReply');
