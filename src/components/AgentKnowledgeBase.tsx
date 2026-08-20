@@ -727,6 +727,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  // `priceAmount` é a fonte de verdade numérica usada por resolveProductPriceAmount()
+  // (valor cobrado no agendamento, lançamento financeiro automático) — até aqui só dava
+  // pra definir uma vez no assistente de criação, sem campo pra corrigir depois. Achado
+  // real: um produto criado com desconto ficava com esse valor travado pra sempre, mesmo
+  // editando o preço em texto (que é só o que aparece pro cliente, não afeta esse cálculo).
+  const handleProductPriceAmountChange = (id: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === id ? { ...p, priceAmount: value.trim() ? Number(value) : undefined } : p)),
+    }));
+  };
+
   const handleProductImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -1832,8 +1844,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       value={prod.price}
                       onChange={(e) => handleProductFieldChange(prod.id, 'price', e.target.value)}
                       className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded py-0.5"
-                      title="Editar preço"
+                      title="Editar preço (texto — o que aparece pro cliente)"
                     />
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] text-slate-500 shrink-0">Gs</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={prod.priceAmount ?? ''}
+                        onChange={(e) => handleProductPriceAmountChange(prod.id, e.target.value)}
+                        placeholder="Valor numérico (cálculo real)"
+                        title="Valor numérico usado de verdade pro cálculo do agendamento e do lançamento financeiro — diferente do preço em texto acima, que é só o que aparece pro cliente. Vazio = calcula a partir do texto do preço."
+                        className="w-full bg-transparent text-[11px] text-emerald-300 placeholder-slate-600 focus:outline-none focus:bg-slate-900 rounded py-0.5"
+                      />
+                    </div>
                     <input
                       type="text"
                       value={prod.category || ''}
