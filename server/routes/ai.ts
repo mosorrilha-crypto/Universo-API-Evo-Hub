@@ -124,6 +124,8 @@ Analise o histórico da conversa a seguir e a base de conhecimento do agente e r
   "suggestedSmartReplyTranslation": "tradução literal de suggestedSmartReply para o Português, SOMENTE se detectedLanguage não for português — se já for português, use string vazia"
 }
 
+IMPORTANTE: se o lead mandou mais de uma mensagem seguida antes de qualquer resposta do operador/agente (rajada), trate todas como uma única pergunta composta — recommendedNextAction e suggestedSmartReply DEVEM responder a TODAS as perguntas/tópicos dessa rajada, não só à primeira ou à mais relevante para a venda. Nunca ignore uma pergunta direta do lead (ex: sobre a empresa, localização, quem está atendendo) só porque outra pergunta na mesma rajada parece comercialmente mais importante.
+
 Dados do Lead: ${JSON.stringify(leadInfo)}
 Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
 Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)}
