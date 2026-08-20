@@ -65,7 +65,8 @@ import {
   Settings,
   Video,
   Copy,
-  QrCode
+  QrCode,
+  Megaphone
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -1184,7 +1185,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations?archived=true');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; unreadCount: number }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adGreetingMatchedAt?: string; unreadCount: number }[] = data.conversations || [];
 
         // Ids que ganharam mensagem nova de CLIENTE nesta rodada (não conta
         // mensagem enviada pelo próprio operador/IA, nem a primeira carga —
@@ -1255,6 +1256,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               muted: !!conv.muted,
               manuallyUnread: !!conv.manuallyUnread,
               aiBlockedAt: conv.aiBlockedAt,
+              adGreetingMatchedAt: conv.adGreetingMatchedAt,
               unreadCount: conv.unreadCount ?? 0,
             } as any);
           }
@@ -1668,7 +1670,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
   // atualizam o estado local.
-  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean }) => {
+  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true }) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
 
@@ -1689,6 +1691,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           muted: !!data.conversation?.muted,
           manuallyUnread: !!data.conversation?.manuallyUnread,
           aiBlockedAt: data.conversation?.aiBlockedAt,
+          adGreetingMatchedAt: data.conversation?.adGreetingMatchedAt,
         } : l)));
         setErrorMsg(null);
         setErrorRetryAction(undefined);
@@ -3067,6 +3070,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       const isManuallyUnread = !!(selectedLead as any).manuallyUnread;
                       const isMuted = !!(selectedLead as any).muted;
                       const isArchived = !!(selectedLead as any).archivedAt;
+                      const isAdLead = !!(selectedLead as any).adGreetingMatchedAt;
                       return (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsHeaderMenuOpen(false)} />
@@ -3079,6 +3083,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Ban className="w-3.5 h-3.5" />
                               <span>{isAiBlocked ? 'Reativar IA pra esse lead' : 'Bloquear IA pra esse lead'}</span>
                             </button>
+                            {!isAdLead && (
+                              <button
+                                onClick={() => { handleUpdateConversationState(selectedLead.id, { adLead: true }); setIsHeaderMenuOpen(false); }}
+                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                title='Pedido real (20/08/2026): no modo "Só Anúncios" (botão no topo), a IA só responde automaticamente contatos identificados como vindos de anúncio (clique real ou texto batendo com um gatilho configurado) — um lead de anúncio de verdade que chegou sem esse sinal fica calado até o operador assumir. Use aqui pra sinalizar manualmente e liberar a resposta automática pra essa conversa.'
+                              >
+                                <Megaphone className="w-3.5 h-3.5" />
+                                <span>Marcar como lead de anúncio</span>
+                              </button>
+                            )}
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"

@@ -59,6 +59,8 @@ export interface StoredConversation {
   manuallyUnread?: boolean;
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver attachAdReferralIfMissing) — undefined se a conversa não veio de um anúncio. */
   adHeadline?: string;
+  /** Conversa identificada como vinda de anúncio — automaticamente (ctwa_clid real ou texto batendo com um gatilho configurado, ver markAdGreetingMatched) ou manualmente pelo operador (ver updateConversationState, campo adLead). Só importa no modo "Só Anúncios" (agentStatus.isAdsOnlyMode): libera a resposta automática pra essa conversa mesmo sem referral real. */
+  adGreetingMatchedAt?: string;
   /** IA para de responder automaticamente só pra esse número — ligado manualmente pelo operador (lead não qualificado/insistente) OU automaticamente pelo próprio autoReply.ts (alucinação de agenda sem ferramenta pra sustentar, ver stopAutoReply em autoReply.ts). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
   aiBlockedAt?: string;
   /** Quantidade de mensagens do lead recebidas depois da última vez que o operador abriu esta conversa (ver markConversationRead). Não confundir com manuallyUnread (override manual do operador) — o painel trata a conversa como não lida quando qualquer um dos dois é verdadeiro. */
@@ -86,6 +88,7 @@ type ConversationRow = {
   manually_unread: boolean | null;
   ad_headline: string | null;
   ai_blocked_at: string | null;
+  ad_greeting_matched_at: string | null;
   last_read_at: string;
   messages?: MessageRow[];
 };
@@ -119,6 +122,7 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     manuallyUnread: !!row.manually_unread,
     adHeadline: row.ad_headline || undefined,
     aiBlockedAt: row.ai_blocked_at || undefined,
+    adGreetingMatchedAt: row.ad_greeting_matched_at || undefined,
     unreadCount: countUnreadMessages(row.messages || [], row.last_read_at),
     messages: (row.messages || [])
       .slice()
@@ -511,6 +515,8 @@ export interface ConversationStatePatch {
   name?: string;
   /** true pausa a IA só pra esse número (agentStatus.ts continua controlando o resto do tenant normalmente). O operador pode responder manualmente à vontade; só a resposta automática para. Origem: ação explícita do operador (lead não qualificado/insistente) OU automática, disparada por autoReply.ts (stopAutoReply) quando a IA aluciona um agendamento sem nenhuma ferramenta pra sustentar — evita repetir o mesmo erro mensagem após mensagem até um humano assumir. */
   aiBlocked?: boolean;
+  /** Pedido real (20/08/2026): no modo "Só Anúncios", um lead real de anúncio às vezes chega sem ctwa_clid e sem bater em nenhum gatilho de texto configurado — a IA fica calada e o operador precisa assumir manualmente (ex: Olga Ayala, conversa iniciada por "Buenas precio??" sem referral nenhum). Deixa o operador sinalizar manualmente "esse lead é de anúncio, pode liberar a IA" sem precisar configurar um gatilho novo — mesmo efeito de markAdGreetingMatched, só que via ação humana em vez do texto batendo automaticamente. Sempre true (não existe "desmarcar" — mesma semântica idempotente/nunca-sobrescreve do resto do fluxo de ad referral). */
+  adLead?: true;
 }
 
 /**
@@ -534,6 +540,7 @@ export async function updateConversationState(tenantId: string, phone: string, p
   if (patch.unread !== undefined) update.manually_unread = patch.unread;
   if (patch.name !== undefined) update.name = patch.name;
   if (patch.aiBlocked !== undefined) update.ai_blocked_at = patch.aiBlocked ? new Date().toISOString() : null;
+  if (patch.adLead) await markAdGreetingMatched(tenantId, phone);
 
   if (Object.keys(update).length > 0) {
     const { error } = await db.from('conversations').update(update).eq('id', existing.id);

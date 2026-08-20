@@ -14,6 +14,7 @@ import {
   attachAdReferralIfMissing,
   shouldBlockForAdsOnlyMode,
   getConversationAdGreetingMatched,
+  updateConversationState,
 } from '../conversationStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
@@ -61,6 +62,17 @@ describe('shouldBlockForAdsOnlyMode', () => {
 
     await recordIncomingMessage(TENANT_A, PHONE, undefined, { type: 'text', text: 'Sí, para el sábado a las 15h', timestamp: '10:05' });
     expect(await shouldBlockForAdsOnlyMode(TENANT_A, PHONE, 'Sí, para el sábado a las 15h')).toBe(false);
+  });
+
+  it('operador pode sinalizar manualmente um lead como vindo de anúncio (updateConversationState adLead), liberando a resposta automática sem precisar de ctwa_clid nem gatilho de texto', async () => {
+    await setAdsOnlyMode(TENANT_A, true);
+    await recordIncomingMessage(TENANT_A, PHONE, undefined, { type: 'text', text: 'Buenas precio??', timestamp: '10:00' });
+    expect(await shouldBlockForAdsOnlyMode(TENANT_A, PHONE, 'Buenas precio??')).toBe(true);
+
+    const updated = await updateConversationState(TENANT_A, PHONE, { adLead: true });
+    expect(updated?.adGreetingMatchedAt).toBeTruthy();
+    expect(await getConversationAdGreetingMatched(TENANT_A, PHONE)).toBe(true);
+    expect(await shouldBlockForAdsOnlyMode(TENANT_A, PHONE, 'Buenas precio??')).toBe(false);
   });
 
   it('outro tenant com o mesmo gatilho configurado não vaza pro tenant que não tem', async () => {
