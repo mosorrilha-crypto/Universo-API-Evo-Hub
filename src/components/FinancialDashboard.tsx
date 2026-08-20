@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   FinancialTransaction,
   LeadInfo,
@@ -6,115 +6,93 @@ import {
   PaymentStatus,
   UserProfile
 } from '../types';
-import { INITIAL_TRANSACTIONS } from '../data/mockTransactions';
 import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import {
   DollarSign,
   TrendingUp,
   CreditCard,
   QrCode,
+  Landmark,
   Clock,
   CheckCircle2,
   AlertCircle,
   Plus,
   Search,
-  Filter,
   Send,
-  MessageSquare,
-  Copy,
-  Download,
   Building2,
-  UserCheck,
-  Calendar,
   X,
-  Sparkles,
   ArrowUpRight,
   PieChart as PieChartIcon,
   Trash2,
-  Settings,
-  Key,
-  FlaskConical
+  Sparkles
 } from 'lucide-react';
 import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   Tooltip,
   CartesianGrid,
   PieChart,
   Pie,
-  Cell,
-  Legend
+  Cell
 } from 'recharts';
 
 interface FinancialDashboardProps {
   transactions?: FinancialTransaction[];
-  onAddTransaction?: (newTx: FinancialTransaction) => void;
+  /** Devolve true quando persistiu de verdade no servidor — o modal só mostra a tela de sucesso nesse caso (nunca assume sucesso sem confirmação real). */
+  onAddTransaction?: (newTx: FinancialTransaction) => Promise<boolean>;
   onUpdateTransactionStatus?: (id: string, newStatus: PaymentStatus) => void;
   onDeleteTransaction?: (txId: string) => void;
   onClearAllTransactions?: () => void;
   leads?: LeadInfo[];
   currentUser?: UserProfile | any;
   initialSelectedLead?: LeadInfo | null;
+  /** Moeda real do tenant (Tenant.currency, ex: "PYG") — default PYG (moeda principal do negócio, ver CLAUDE.md) quando ainda não carregou de GET /api/tenant. */
+  currency?: string;
+  locale?: string;
 }
 
-const INITIAL_REVENUE_CHART_DATA = [
-  { day: '01/Ago', receita: 4200, custoAds: 850 },
-  { day: '02/Ago', receita: 6800, custoAds: 1200 },
-  { day: '03/Ago', receita: 9500, custoAds: 1400 },
-  { day: '04/Ago', receita: 12400, custoAds: 1800 },
-  { day: '05/Ago', receita: 8900, custoAds: 1300 },
-  { day: '06/Ago', receita: 15600, custoAds: 2100 },
-  { day: '07/Ago', receita: 18200, custoAds: 2400 },
-  { day: '08/Ago', receita: 22100, custoAds: 2900 },
-];
+const DONUT_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
 
-const CHANNEL_BREAKDOWN = [
-  { name: 'Meta Ads (Facebook & IG)', value: 84500, color: '#10b981' },
-  { name: 'Google Ads Search', value: 32100, color: '#3b82f6' },
-  { name: 'WhatsApp Direto', value: 18900, color: '#8b5cf6' },
-  { name: 'Orgânico / Recomendação', value: 13000, color: '#f59e0b' },
-];
-
-const PAYMENT_METHOD_BREAKDOWN = [
-  { method: 'PIX (Instântaneo)', count: 28, valor: 98400, fill: '#10b981' },
-  { method: 'Cartão de Crédito', count: 12, valor: 38200, fill: '#3b82f6' },
-  { method: 'Boleto Bancário', count: 6, valor: 11900, fill: '#f59e0b' },
-];
+const PAYMENT_METHOD_ICON: Record<PaymentMethod, React.ReactNode> = {
+  'PIX': <QrCode className="w-3.5 h-3.5 mr-1 text-emerald-400" />,
+  'Transferência Bancária': <Landmark className="w-3.5 h-3.5 mr-1 text-blue-400" />,
+  'Cartão de Crédito': <CreditCard className="w-3.5 h-3.5 mr-1 text-blue-400" />,
+  'Boleto Bancário': <DollarSign className="w-3.5 h-3.5 mr-1 text-amber-400" />,
+  'Link WhatsApp': <Send className="w-3.5 h-3.5 mr-1 text-emerald-400" />,
+};
 
 export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
-  transactions: propTransactions,
+  transactions = [],
   onAddTransaction,
   onUpdateTransactionStatus,
   onDeleteTransaction,
   onClearAllTransactions,
   leads: propLeads,
   currentUser: propCurrentUser,
-  initialSelectedLead
+  initialSelectedLead,
+  currency = 'PYG',
+  locale = 'es-PY',
 }) => {
-  const transactions = propTransactions || INITIAL_TRANSACTIONS;
   const leads = propLeads || INITIAL_MOCK_LEADS;
   const currentUser = propCurrentUser || { name: 'Operador Admin', id: 'op_1' };
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isModalOpen, setIsModalOpen] = useState(!!initialSelectedLead);
 
-  // Custom Company PIX Key state
-  const [pixKey, setPixKey] = useState<string>(() => {
-    return localStorage.getItem('metaleads_official_pix_key') || 'financeiro@empresa.com.br';
-  });
-  const [isPixKeyModalOpen, setIsPixKeyModalOpen] = useState(false);
-
   // New Transaction Form State
   const [selectedLeadId, setSelectedLeadId] = useState<string>(initialSelectedLead?.id || (leads[0]?.id || ''));
-  const [productName, setProductName] = useState('Plano Premium Implementação IA & WhatsApp');
-  const [amount, setAmount] = useState<number>(3500);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('PIX');
-  const [createdPayment, setCreatedPayment] = useState<FinancialTransaction | null>(null);
+  const [productName, setProductName] = useState('');
+  const [amount, setAmount] = useState<number | ''>('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Transferência Bancária');
+  const [status, setStatus] = useState<PaymentStatus>('pago');
+  const [justCreated, setJustCreated] = useState<FinancialTransaction | null>(null);
+
+  /** Formata na moeda real do tenant — nunca R$/pt-BR fixo (achado real: negócio roda em PYG, não BRL). Intl já cuida de casas decimais certas por moeda (PYG não usa centavos, por exemplo). */
+  const formatMoney = (value: number) =>
+    new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value);
 
   const filteredTransactions = transactions.filter((t) => {
     const matchesSearch =
@@ -126,45 +104,103 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     return matchesSearch && matchesStatus;
   });
 
-  // KPI Calculations
-  const totalPaidRevenue = transactions
-    .filter((t) => t.status === 'pago')
-    .reduce((acc, t) => acc + t.amount, 0);
-
-  const totalPendingRevenue = transactions
-    .filter((t) => t.status === 'pendente' || t.status === 'atrasado')
-    .reduce((acc, t) => acc + t.amount, 0);
-
+  // KPI Calculations — todos derivados de dado real (`transactions`), nunca
+  // um número fixo/inventado. Achado real (19/08/2026): a versão anterior
+  // deste painel mostrava "ROI do Meta Ads 4.8x" e "+18,4% vs mês anterior"
+  // como strings fixas no JSX, sem nenhuma fonte de dado real por trás —
+  // removidos, não substituídos por outra invenção.
+  const totalPaidRevenue = transactions.filter((t) => t.status === 'pago').reduce((acc, t) => acc + t.amount, 0);
+  const totalPendingRevenue = transactions.filter((t) => t.status === 'pendente' || t.status === 'atrasado').reduce((acc, t) => acc + t.amount, 0);
   const paidCount = transactions.filter((t) => t.status === 'pago').length;
   const ticketMedio = paidCount > 0 ? totalPaidRevenue / paidCount : 0;
 
-  const handleCreatePaymentLink = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!amount || amount <= 0) return;
-    const lead = leads.find((l) => l.id === selectedLeadId) || leads[0];
+  const now = new Date();
+  const paidThisMonthCount = transactions.filter((t) => {
+    if (t.status !== 'pago') return false;
+    const d = new Date(t.date);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).length;
 
-    const newTx: FinancialTransaction = {
-      id: `fat_${Date.now().toString().slice(-6)}`,
-      leadId: lead?.id || 'ld_gen',
-      leadName: lead?.name || 'Cliente WhatsApp',
-      leadPhone: lead?.phone || '5511999999999',
-      productName,
-      amount,
-      paymentMethod,
-      status: 'pendente',
-      date: new Date().toLocaleDateString('pt-BR'),
-      operatorName: currentUser.name,
-      channel: lead?.attribution?.channelLabel || 'Meta Ads',
-      pixQrCode: '00020126580014BR.GOV.BCB.PIX0136123e4567-e89b-12d3-a456-426614174000520400005303986540',
-      paymentLinkUrl: `https://pay.metaleads.com.br/fat_${Date.now().toString().slice(-6)}`,
-    };
+  // Gráfico de faturamento diário — receita real dos últimos 14 dias, só
+  // transações pagas. Sem nenhum "custo de ads" (não existe fonte real
+  // dessa informação hoje, ver plano do Financeiro).
+  const revenueByDay = useMemo(() => {
+    const days: { key: string; day: string; receita: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days.push({ key, day: d.toLocaleDateString(locale, { day: '2-digit', month: 'short' }), receita: 0 });
+    }
+    const byKey = new Map(days.map((d) => [d.key, d]));
+    for (const t of transactions) {
+      if (t.status !== 'pago') continue;
+      const key = new Date(t.date).toISOString().slice(0, 10);
+      const bucket = byKey.get(key);
+      if (bucket) bucket.receita += t.amount;
+    }
+    return days;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions]);
 
-    onAddTransaction(newTx);
-    setCreatedPayment(newTx);
+  // Breakdown real por forma de pagamento — o dado que mais importa pro
+  // pedido de "controle de transferências bancárias manuais": quanto entrou
+  // via transferência vs PIX vs outros métodos.
+  const paymentMethodBreakdown = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const t of transactions) {
+      if (t.status !== 'pago') continue;
+      totals.set(t.paymentMethod, (totals.get(t.paymentMethod) || 0) + t.amount);
+    }
+    return Array.from(totals.entries())
+      .map(([name, value], i) => ({ name, value, color: DONUT_COLORS[i % DONUT_COLORS.length] }))
+      .sort((a, b) => b.value - a.value);
+  }, [transactions]);
+
+  const resetForm = () => {
+    setProductName('');
+    setAmount('');
+    setPaymentMethod('Transferência Bancária');
+    setStatus('pago');
+    setSelectedLeadId(initialSelectedLead?.id || (leads[0]?.id || ''));
   };
 
-  const getStatusBadge = (status: PaymentStatus) => {
-    switch (status) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const handleRegisterTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onAddTransaction || !amount || amount <= 0 || !productName.trim()) return;
+    const lead = leads.find((l) => l.id === selectedLeadId);
+
+    const newTx: FinancialTransaction = {
+      id: crypto.randomUUID(),
+      leadId: lead?.id || 'manual',
+      leadName: lead?.name || 'Cliente sem cadastro',
+      leadPhone: lead?.phone || '',
+      productName: productName.trim(),
+      amount,
+      paymentMethod,
+      status,
+      date: new Date().toISOString(),
+      operatorName: currentUser.name,
+      channel: 'Registro manual',
+    };
+
+    setSubmitError(null);
+    setIsSubmitting(true);
+    const saved = await onAddTransaction(newTx);
+    setIsSubmitting(false);
+    if (!saved) {
+      setSubmitError('Não foi possível registrar no servidor. Tente de novo.');
+      return;
+    }
+    setJustCreated(newTx);
+    resetForm();
+  };
+
+  const getStatusBadge = (s: PaymentStatus) => {
+    switch (s) {
       case 'pago':
         return (
           <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1 w-max">
@@ -200,62 +236,45 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
           <div className="flex items-center space-x-2">
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
               <DollarSign className="w-5 h-5 text-emerald-400" />
-              Gestão Financeira & Faturamento de Vendas
+              Gestão Financeira do Negócio
             </h1>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
               CFO / Operador
             </span>
-            <span
-              className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-950/80 text-amber-300 border border-amber-700/60 inline-flex items-center gap-1"
-              title="Este painel ainda não tem integração de pagamento real conectada — todos os valores aqui (receita, gráficos, transações) são fictícios e ficam salvos só no navegador."
-            >
-              <FlaskConical className="w-3 h-3" />
-              Dados de Exemplo
-            </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Controle de fluxo de caixa, acompanhamento de pagamentos em tempo real, links de cobrança e ROI do Meta Ads.
+            Controle de faturamento e registro de transferências bancárias/comprovantes conferidos — dado real, salvo por empresa.
           </p>
         </div>
 
         <div className="flex items-center space-x-2 flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setIsPixKeyModalOpen(true)}
-            className="py-2.5 px-3 bg-slate-950 border border-slate-800 hover:border-emerald-500/50 text-slate-300 hover:text-white font-semibold text-xs rounded-xl flex items-center space-x-1.5 transition-all"
-            title="Configurar a Chave PIX Oficial da Empresa"
-          >
-            <Key className="w-4 h-4 text-emerald-400" />
-            <span className="hidden sm:inline">Chave PIX:</span>
-            <span className="font-mono text-emerald-400">{pixKey.length > 18 ? pixKey.slice(0, 15) + '...' : pixKey}</span>
-          </button>
-
           {onClearAllTransactions && transactions.length > 0 && (
             <button
               type="button"
               onClick={() => {
-                if (window.confirm(`Tem certeza que deseja apagar TODAS as ${transactions.length} transações? Isso não pode ser desfeito.`)) {
+                if (window.confirm(`Tem certeza que deseja apagar TODOS os ${transactions.length} registros? Isso não pode ser desfeito.`)) {
                   onClearAllTransactions();
                 }
               }}
               className="py-2.5 px-3 bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-800/60 font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
-              title="Limpar faturas fictícias"
+              title="Apagar todos os registros"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Limpar Faturas</span>
+              <span className="hidden sm:inline">Limpar Tudo</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={() => {
-              setCreatedPayment(null);
+              setJustCreated(null);
+              resetForm();
               setIsModalOpen(true);
             }}
             className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 flex items-center space-x-2 transition-all"
           >
             <Plus className="w-4 h-4" />
-            <span>Gerar Nova Cobrança / PIX</span>
+            <span>Registrar Transferência / Venda</span>
           </button>
         </div>
       </div>
@@ -269,13 +288,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-emerald-400">
-            R$ {totalPaidRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </div>
-          <div className="flex items-center text-[10px] text-emerald-300 mt-2 font-medium">
-            <ArrowUpRight className="w-3.5 h-3.5 mr-1" />
-            +18.4% em relação ao mês anterior
-          </div>
+          <div className="text-2xl font-black text-emerald-400">{formatMoney(totalPaidRevenue)}</div>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
@@ -285,10 +298,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-amber-400">
-            R$ {totalPendingRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </div>
-          <p className="text-[10px] text-slate-500 mt-2">{transactions.filter((t) => t.status === 'pendente').length} faturas a receber</p>
+          <div className="text-2xl font-black text-amber-400">{formatMoney(totalPendingRevenue)}</div>
+          <p className="text-[10px] text-slate-500 mt-2">{transactions.filter((t) => t.status === 'pendente').length} a receber</p>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
@@ -298,111 +309,106 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white">
-            R$ {ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </div>
-          <p className="text-[10px] text-slate-500 mt-2">Média por cliente fechado</p>
+          <div className="text-2xl font-black text-white">{formatMoney(ticketMedio)}</div>
+          <p className="text-[10px] text-slate-500 mt-2">Média por venda confirmada</p>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>ROI do Meta Ads</span>
+            <span>Vendas Confirmadas no Mês</span>
             <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
-              <Sparkles className="w-4 h-4" />
+              <ArrowUpRight className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-purple-300">4.8x</div>
-          <p className="text-[10px] text-emerald-400 mt-2 font-medium">CAC Médio: R$ 84,20 / lead</p>
+          <div className="text-2xl font-black text-purple-300">{paidThisMonthCount}</div>
+          <p className="text-[10px] text-slate-500 mt-2">Transações pagas neste mês</p>
         </div>
       </div>
 
       {/* RECHARTS GRAPHS SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Area Chart: Revenue vs Ad Spend */}
+        {/* Main Area Chart: Real Daily Revenue */}
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                Evolução de Faturamento Diário vs Investimento em Ads
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Comparativo em tempo real de receita gerada por anúncios Meta & Google
-              </p>
-            </div>
+          <div>
+            <h2 className="text-sm font-bold text-white">Evolução de Faturamento Diário</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Receita confirmada nos últimos 14 dias</p>
           </div>
 
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={INITIAL_REVENUE_CHART_DATA}>
-                <defs>
-                  <linearGradient id="colorReceita" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-                  </linearGradient>
-                  <linearGradient id="colorCusto" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
-                <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => `R$${v / 1000}k`} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
-                  formatter={(val: any) => [`R$ ${Number(val).toLocaleString('pt-BR')}`, '']}
-                />
-                <Area type="monotone" dataKey="receita" name="Receita (R$)" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorReceita)" />
-                <Area type="monotone" dataKey="custoAds" name="Custo Ads (R$)" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorCusto)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {totalPaidRevenue === 0 ? (
+            <div className="h-64 w-full flex flex-col items-center justify-center text-center text-slate-500 gap-2">
+              <TrendingUp className="w-8 h-8 text-slate-700" />
+              <p className="text-xs">Nenhuma venda confirmada ainda — o gráfico aparece assim que a primeira entrar.</p>
+            </div>
+          ) : (
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={revenueByDay}>
+                  <defs>
+                    <linearGradient id="colorReceita" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
+                  <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} />
+                  <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => formatMoney(v)} width={80} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
+                    formatter={(val: any) => [formatMoney(Number(val)), 'Receita']}
+                  />
+                  <Area type="monotone" dataKey="receita" name="Receita" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorReceita)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
-        {/* Donut Chart: Revenue by Acquisition Channel */}
+        {/* Donut Chart: Real breakdown by payment method */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div>
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <PieChartIcon className="w-4 h-4 text-emerald-400" />
-              Receita por Canal de Origem
+              Receita por Forma de Pagamento
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">Origem das vendas convertidas no WhatsApp</p>
+            <p className="text-xs text-slate-400 mt-0.5">Vendas confirmadas, por método</p>
           </div>
 
-          <div className="h-56 w-full flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={CHANNEL_BREAKDOWN}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  {CHANNEL_BREAKDOWN.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
-                  formatter={(val: any) => [`R$ ${Number(val).toLocaleString('pt-BR')}`, '']}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="space-y-1.5 text-xs">
-            {CHANNEL_BREAKDOWN.map((item) => (
-              <div key={item.name} className="flex items-center justify-between text-slate-300">
-                <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="truncate max-w-[150px]">{item.name}</span>
-                </div>
-                <span className="font-bold text-white">R$ {item.value.toLocaleString('pt-BR')}</span>
+          {paymentMethodBreakdown.length === 0 ? (
+            <div className="h-56 w-full flex flex-col items-center justify-center text-center text-slate-500 gap-2">
+              <Sparkles className="w-8 h-8 text-slate-700" />
+              <p className="text-xs">Sem vendas pagas ainda.</p>
+            </div>
+          ) : (
+            <>
+              <div className="h-56 w-full flex items-center justify-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={paymentMethodBreakdown} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value">
+                      {paymentMethodBreakdown.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
+                      formatter={(val: any) => [formatMoney(Number(val)), '']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-            ))}
-          </div>
+
+              <div className="space-y-1.5 text-xs">
+                {paymentMethodBreakdown.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between text-slate-300">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="truncate max-w-[150px]">{item.name}</span>
+                    </div>
+                    <span className="font-bold text-white">{formatMoney(item.value)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -410,8 +416,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-bold text-white">Histórico de Transações e Cobranças</h2>
-            <p className="text-xs text-slate-400">Todas as faturas geradas pelos operadores via WhatsApp</p>
+            <h2 className="text-base font-bold text-white">Histórico de Transações</h2>
+            <p className="text-xs text-slate-400">Vendas confirmadas pelo WhatsApp (automático) + registros manuais</p>
           </div>
 
           <div className="flex items-center space-x-2 w-full sm:w-auto">
@@ -444,22 +450,30 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
               <tr>
-                <th className="p-3.5">Cód. / Data</th>
+                <th className="p-3.5">Data</th>
                 <th className="p-3.5">Cliente / Lead</th>
                 <th className="p-3.5">Produto / Serviço</th>
-                <th className="p-3.5">Valor (R$)</th>
+                <th className="p-3.5">Valor</th>
                 <th className="p-3.5">Método</th>
                 <th className="p-3.5">Status</th>
-                <th className="p-3.5">Operador</th>
+                <th className="p-3.5">Origem</th>
                 <th className="p-3.5 text-right">Ação</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">
+              {filteredTransactions.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-slate-500">
+                    {transactions.length === 0
+                      ? 'Nenhum registro ainda — vendas confirmadas por comprovante no WhatsApp entram aqui automaticamente, ou registre uma manualmente.'
+                      : 'Nenhum registro bate com o filtro/busca.'}
+                  </td>
+                </tr>
+              )}
               {filteredTransactions.map((tx) => (
                 <tr key={tx.id} className="hover:bg-slate-800/50 transition-colors">
-                  <td className="p-3.5">
-                    <span className="font-mono text-emerald-400 font-bold">{tx.id}</span>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{tx.date}</p>
+                  <td className="p-3.5 text-slate-400">
+                    {new Date(tx.date).toLocaleDateString(locale)}
                   </td>
 
                   <td className="p-3.5">
@@ -472,20 +486,29 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                   </td>
 
                   <td className="p-3.5 font-bold text-white text-sm">
-                    R$ {tx.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    {formatMoney(tx.amount)}
                   </td>
 
                   <td className="p-3.5">
                     <span className="inline-flex items-center text-slate-300">
-                      {tx.paymentMethod === 'PIX' && <QrCode className="w-3.5 h-3.5 mr-1 text-emerald-400" />}
-                      {tx.paymentMethod === 'Cartão de Crédito' && <CreditCard className="w-3.5 h-3.5 mr-1 text-blue-400" />}
+                      {PAYMENT_METHOD_ICON[tx.paymentMethod]}
                       {tx.paymentMethod}
                     </span>
                   </td>
 
                   <td className="p-3.5">{getStatusBadge(tx.status)}</td>
 
-                  <td className="p-3.5 text-slate-400">{tx.operatorName}</td>
+                  <td className="p-3.5">
+                    {tx.sourceRef ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-950 text-blue-300 border border-blue-800" title="Criado automaticamente quando o comprovante foi aprovado no WhatsApp">
+                        Automático
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                        Manual{tx.operatorName ? ` · ${tx.operatorName}` : ''}
+                      </span>
+                    )}
+                  </td>
 
                   <td className="p-3.5 text-right space-x-1">
                     {tx.status === 'pendente' && (
@@ -497,26 +520,16 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                         Confirmar Pgto
                       </button>
                     )}
-                    <a
-                      href={`https://wa.me/${tx.leadPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                        `Olá ${tx.leadName}! Segue o link de cobrança do seu pedido (${tx.productName}): ${tx.paymentLinkUrl}`
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[10px] font-medium inline-flex items-center gap-1"
-                    >
-                      <Send className="w-3 h-3 text-emerald-400" /> Enviar Whats
-                    </a>
                     {onDeleteTransaction && (
                       <button
                         type="button"
                         onClick={() => {
-                          if (window.confirm(`Excluir a fatura ${tx.id}?`)) {
+                          if (window.confirm(`Excluir este registro (${tx.productName})?`)) {
                             onDeleteTransaction(tx.id);
                           }
                         }}
                         className="p-1 bg-slate-900 hover:bg-rose-900/50 text-slate-400 hover:text-rose-300 border border-slate-800 rounded-lg"
-                        title="Excluir fatura"
+                        title="Excluir registro"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -529,7 +542,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         </div>
       </div>
 
-      {/* NEW PAYMENT GENERATION MODAL */}
+      {/* REGISTER TRANSACTION MODAL — achado real (19/08/2026): a versão
+          anterior deste modal gerava um "QR Code PIX" e um link de pagamento
+          totalmente fictícios (nenhum gateway real integrado ainda). Vira só
+          o que é de verdade: um registro manual de venda/transferência já
+          recebida (ou a receber), conferida por comprovante fora do sistema. */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-5">
@@ -542,23 +559,24 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
             <div className="flex items-center space-x-3 pb-3 border-b border-slate-800">
               <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                <QrCode className="w-6 h-6" />
+                <Landmark className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">Gerador de Cobrança Instantânea PIX / WhatsApp</h2>
-                <p className="text-xs text-slate-400">Emita um link e QR Code de pagamento para envio direto ao lead</p>
+                <h2 className="text-base font-bold text-white">Registrar Transferência / Venda</h2>
+                <p className="text-xs text-slate-400">Lance uma venda já confirmada (ex: comprovante de transferência conferido fora do WhatsApp)</p>
               </div>
             </div>
 
-            {!createdPayment ? (
-              <form onSubmit={handleCreatePaymentLink} className="space-y-4">
+            {!justCreated ? (
+              <form onSubmit={handleRegisterTransaction} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Lead / Cliente WhatsApp</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Lead / Cliente</label>
                   <select
                     value={selectedLeadId}
                     onChange={(e) => setSelectedLeadId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
                   >
+                    <option value="">Cliente sem cadastro no CRM</option>
                     {leads.map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.name} ({l.phone})
@@ -573,7 +591,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     type="text"
                     value={productName}
                     onChange={(e) => setProductName(e.target.value)}
-                    placeholder="Ex: Plano Anual de Treinamento Comercial"
+                    placeholder="Ex: Corte + Escova"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
                     required
                   />
@@ -581,13 +599,13 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">Valor da Cobrança (R$)</label>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">Valor ({currency})</label>
                     <input
                       type="number"
                       min="0.01"
                       step="0.01"
                       value={amount}
-                      onChange={(e) => setAmount(Number(e.target.value))}
+                      onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
                       required
                     />
@@ -600,135 +618,70 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                       onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
                     >
-                      <option value="PIX">PIX Instântaneo</option>
+                      <option value="Transferência Bancária">Transferência Bancária</option>
+                      <option value="PIX">PIX</option>
                       <option value="Cartão de Crédito">Cartão de Crédito</option>
                       <option value="Boleto Bancário">Boleto Bancário</option>
                     </select>
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Status</label>
+                  <select
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value as PaymentStatus)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="pago">Pago (comprovante já conferido)</option>
+                    <option value="pendente">Pendente (ainda a receber)</option>
+                  </select>
+                </div>
+
+                {submitError && (
+                  <p className="text-[11px] text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{submitError}</p>
+                )}
+
                 <button
                   type="submit"
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg flex items-center justify-center space-x-2 transition-all"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg flex items-center justify-center space-x-2 transition-all"
                 >
-                  <QrCode className="w-4 h-4" />
-                  <span>Gerar QR Code PIX & Link WhatsApp</span>
+                  <Building2 className="w-4 h-4" />
+                  <span>{isSubmitting ? 'Registrando...' : 'Registrar'}</span>
                 </button>
               </form>
             ) : (
               <div className="space-y-4 animate-fade-in">
-                <div className="p-4 bg-slate-950 border border-emerald-500/40 rounded-xl space-y-3 text-center">
-                  <div className="inline-flex p-3 bg-white rounded-xl shadow-lg my-1">
-                    {/* Simulated QR Code Visual */}
-                    <div className="w-32 h-32 bg-slate-900 border-2 border-slate-950 p-2 text-emerald-400 font-mono text-[9px] flex flex-col justify-between items-center text-center">
-                      <QrCode className="w-16 h-16 text-emerald-400" />
-                      <span>PIX QR CODE</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-bold text-white">{createdPayment.productName}</h3>
-                    <p className="text-lg font-black text-emerald-400 mt-0.5">
-                      R$ {createdPayment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </p>
-                    <p className="text-xs text-slate-400">Cliente: {createdPayment.leadName}</p>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg text-left text-[11px] font-mono text-slate-300 flex items-center justify-between">
-                    <span className="truncate mr-2">{createdPayment.paymentLinkUrl}</span>
-                    <button
-                      onClick={() => navigator.clipboard.writeText(createdPayment.paymentLinkUrl || '')}
-                      className="p-1 text-emerald-400 hover:text-emerald-300"
-                      title="Copiar Link"
-                    >
-                      <Copy className="w-4 h-4" />
-                    </button>
-                  </div>
+                <div className="p-4 bg-slate-950 border border-emerald-500/40 rounded-xl space-y-2 text-center">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+                  <h3 className="text-sm font-bold text-white">{justCreated.productName}</h3>
+                  <p className="text-lg font-black text-emerald-400">{formatMoney(justCreated.amount)}</p>
+                  <p className="text-xs text-slate-400">Cliente: {justCreated.leadName}</p>
+                  <p className="text-[11px] text-slate-500">Registrado com sucesso.</p>
                 </div>
 
                 <div className="flex gap-2">
-                  <a
-                    href={`https://wa.me/${createdPayment.leadPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                      `Olá ${createdPayment.leadName}! Segue o link de pagamento PIX para finalizar seu pedido de ${createdPayment.productName} (R$ ${createdPayment.amount}): ${createdPayment.paymentLinkUrl}`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center space-x-2"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>Enviar para WhatsApp do Lead</span>
-                  </a>
-
                   <button
-                    onClick={() => setCreatedPayment(null)}
+                    type="button"
+                    onClick={() => setJustCreated(null)}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl"
+                  >
+                    Registrar Outra
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJustCreated(null);
+                      setIsModalOpen(false);
+                    }}
                     className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl"
                   >
-                    Gerar Outro
+                    Fechar
                   </button>
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* OFFICIAL COMPANY PIX KEY CONFIGURATION MODAL */}
-      {isPixKeyModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center space-x-2">
-                <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                  <Key className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Chave PIX Oficial da Empresa</h3>
-                  <p className="text-[11px] text-slate-400">Usada para emissão de faturas e QR Code PIX</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsPixKeyModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">Informe a Chave PIX da Conta Jurídica / Empresa *</label>
-                <input
-                  type="text"
-                  placeholder="CNPJ, E-mail, Telefone ou Chave Aleatória"
-                  value={pixKey}
-                  onChange={(e) => setPixKey(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 font-mono text-xs focus:outline-none focus:border-emerald-500"
-                />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Esta chave será inserida automaticamente na mensagem de cobrança enviada ao WhatsApp do cliente.
-                </p>
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsPixKeyModalOpen(false)}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    localStorage.setItem('metaleads_official_pix_key', pixKey);
-                    setIsPixKeyModalOpen(false);
-                  }}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl shadow"
-                >
-                  Salvar Chave PIX
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { Router, type RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import {
   listConversations,
   getConversation,
@@ -20,7 +21,8 @@ import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage,
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
-import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, resolveProductPriceAmount } from '../services/knowledgeBaseStore';
+import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -732,12 +734,67 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // havia como marcar isso no painel, e o agendamento ficava indistinguível
     // de um sem pagamento nenhum ainda verificado.
     if (paymentReceived === true) {
-      await setPaymentVerification(tenantId, phone, 'verified', req.user!.id);
+      const verified = await setPaymentVerification(tenantId, phone, 'verified', req.user!.id);
+      if (verified) await recordFinancialTransactionForVerifiedPayment(tenantId, phone, verified);
     }
 
     const appointment = await getAppointmentForPhone(tenantId, phone);
     res.status(201).json({ appointment });
   }));
+
+  /**
+   * Achado real em produção (19/08/2026, pedido direto do dono do produto):
+   * o fluxo real de venda (WhatsApp → agendamento → comprovante aprovado) e
+   * o Financeiro eram dois sistemas paralelos — confirmar um pagamento aqui
+   * só atualizava o agendamento, nunca virava um registro financeiro. A
+   * única forma de uma venda real aparecer no Financeiro era o operador
+   * digitar tudo de novo manualmente. Cria a transação automaticamente
+   * quando o comprovante é aprovado, usando o preço real da Base de
+   * Conhecimento pelo nome do serviço (nunca inventa valor — 0 quando o
+   * nome não bate com nenhum produto do catálogo, ex: agendamento manual
+   * com descrição livre).
+   *
+   * `sourceRef` (o eventId do Calendar, único por definição) faz a
+   * constraint única (tenant_id, source_ref) da migration 0037 proteger
+   * contra duplicar numa reentrega/retry deste endpoint — o erro de
+   * duplicidade é engolido em silêncio (isDuplicateSourceRefError);
+   * qualquer outro erro só loga, nunca derruba a resposta de verify-payment
+   * (que já é a ação principal que o operador pediu — o registro financeiro
+   * é um efeito colateral, não pode bloquear o fluxo real de pagamento).
+   */
+  async function recordFinancialTransactionForVerifiedPayment(
+    tenantId: string,
+    phone: string,
+    appointment: TrackedAppointment
+  ): Promise<void> {
+    if (!appointment.eventId) return; // sem evento real, sem referência estável pra deduplicar
+    try {
+      const [kb, conversation] = await Promise.all([
+        getKnowledgeBase(tenantId),
+        getConversation(tenantId, phone),
+      ]);
+      const normalized = appointment.summary.trim().toLowerCase();
+      const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
+      const amount = product ? resolveProductPriceAmount(product) : 0;
+      await createFinancialTransaction(tenantId, {
+        id: crypto.randomUUID(),
+        leadId: phone,
+        leadName: conversation?.name || phone,
+        leadPhone: phone,
+        productName: appointment.summary,
+        amount,
+        paymentMethod: 'Transferência Bancária',
+        status: 'pago',
+        date: new Date().toISOString(),
+        operatorName: 'Automático (comprovante aprovado)',
+        channel: appointment.source === 'manual' ? 'Agendamento manual' : 'WhatsApp',
+        sourceRef: `apt:${appointment.eventId}`,
+      });
+    } catch (err) {
+      if (isDuplicateSourceRefError(err)) return; // já registrado antes (retry/reentrega) — nada a fazer
+      console.warn(`⚠️  [Financeiro] Falha ao registrar transação automática pro agendamento verificado (tenant=${tenantId}, phone=${phone}):`, (err as Error)?.message || err);
+    }
+  }
 
   // Etapa 8 (fluxo de verificação de pagamento) — o operador marca aqui o
   // comprovante que chegou (webhooks.ts já grava pending_verification
@@ -790,6 +847,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const updated = await setPaymentVerification(tenantId, phone, status, operatorId);
     if (!updated) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
     const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, updated) : false;
+    if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, updated);
     res.json({ success: true, appointment: updated, calendarReleased });
   }));
 
@@ -912,7 +970,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // mock. Mesmo padrão de autenticação/tenant-escopo das rotas acima, sem
   // exigir nenhuma role (qualquer operador pode ver o nome do próprio tenant).
   router.get('/api/tenant', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { data, error } = await getDb().from('tenants').select('id, name').eq('id', tenantOf(req)).maybeSingle();
+    // currency/locale entraram aqui (19/08/2026) pro Financeiro conseguir
+    // formatar valores na moeda real do tenant (PYG por padrão) em vez de
+    // R$/pt-BR fixo — antes esses campos existiam na tabela `tenants` desde
+    // sempre mas nunca chegavam ao frontend por nenhuma rota que qualquer
+    // operador comum pudesse chamar (só /api/admin/tenants, restrita a
+    // saas_admin, devolvia isso).
+    const { data, error } = await getDb().from('tenants').select('id, name, currency, locale').eq('id', tenantOf(req)).maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     if (!data) return res.status(404).json({ error: 'Tenant não encontrado.' });
     res.json({ tenant: data });
@@ -1187,6 +1251,14 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const appointment = await setPaymentVerification(tenantId, phone, status, operatorId);
     if (!appointment) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
     const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, appointment) : false;
+    // Mesmo registro automático do Financeiro do verify-payment acima —
+    // esse card de escalonamento é só outro caminho pra aprovar o mesmo
+    // comprovante (issue real, 12/08/2026: existiam dois lugares
+    // desconectados pra confirmar o mesmo pagamento). Se o evento real ainda
+    // não existe no Calendar nesse ponto (não roda a criação como
+    // verify-payment acima), a função só não registra nada — sem evento
+    // não há `sourceRef` estável pra deduplicar.
+    if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, appointment);
 
     const trimmedReply: string = (reply || '').trim();
     if (!trimmedReply) {
