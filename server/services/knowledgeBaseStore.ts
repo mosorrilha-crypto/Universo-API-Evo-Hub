@@ -15,7 +15,7 @@ import { getDb } from './db';
  * vender de acordo com a especificação escolhida pelo cliente.
  */
 export interface ProductVariant {
-  /** Código do modelo no catálogo do fabricante (ex: "AC F400"). */
+  /** Código/nome do modelo (ex: "AC F400" num catálogo de piscinas, ou "Lash Lift" numa família de serviços) — o que o agente cita pro cliente e usa pra bater com o nome do serviço pedido, ver findProductMatch. */
   code: string;
   /** Medidas em texto livre (ex: "4,10x2,30m"), opcional. */
   dimensions?: string;
@@ -24,6 +24,18 @@ export interface ProductVariant {
   price: string;
   /** Valor numérico do preço da variante — mesmo papel de AgentProduct.priceAmount, mas por tamanho. */
   priceAmount?: number;
+  /**
+   * Duração real desta variante em minutos — quando ausente, cai pro
+   * durationMinutes do produto pai (ver findProductMatch/
+   * findProductDurationMinutes abaixo). Necessário quando variantes da mesma
+   * família têm durações diferentes (achado real, 20/08/2026: agrupar os
+   * serviços de pestañas da Monique numa família só "Pestañas" sem isso
+   * faria TODO agendamento usar a mesma duração do produto pai, errando o
+   * fim do evento no Calendar pra variantes mais curtas/longas).
+   */
+  durationMinutes?: number;
+  /** false = esta variante específica não é agendável sozinha, mesmo que o produto pai seja. Quando ausente, cai pro bookable do produto pai. */
+  bookable?: boolean;
 }
 
 export interface AgentProduct {
@@ -115,17 +127,69 @@ export function parsePriceToNumber(priceText: string | undefined): number {
   return parseInt(priceText.replace(/\D/g, ''), 10) || 0;
 }
 
-/** true quando o nome bate com um produto do catálogo marcado como não-agendável (ex: Retoque) — usado pra recusar `criar_agendamento` nesse serviço e orientar pra avaliação humana em vez de deixar o cliente marcar um turno por conta própria. */
-export function isNonBookableProduct(kb: AgentKnowledgeBase | null, productName: string): boolean {
-  const normalized = productName.trim().toLowerCase();
-  const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
-  return product?.bookable === false;
+export interface ProductNameMatch {
+  /** O produto pai (nível superior) — carrega foto/vídeo/descrição, sempre compartilhados pela família inteira mesmo quando o nome buscado bate numa variante específica. */
+  product: AgentProduct;
+  /** A variante que bateu com o nome buscado, se o nome não bateu direto no produto pai. */
+  variant?: ProductVariant;
 }
 
-/** Duração real (minutos) de um produto do catálogo pelo nome exato — usada pra calcular o fim do evento no Google Calendar em vez do fallback fixo de 90min pra qualquer serviço. */
-export function findProductDurationMinutes(kb: AgentKnowledgeBase | null, productName: string): number | undefined {
+/**
+ * Acha um produto do catálogo pelo nome exato (comparação normalizada:
+ * trim + minúsculas) — procura primeiro no nível do produto, depois dentro
+ * de `variants` de cada família. Fonte única usada por toda checagem de
+ * duração/bookable/preço/mídia por nome de serviço (ver
+ * isNonBookableProduct/findProductDurationMinutes/resolveProductAmountByName
+ * abaixo, e os pontos em conversations.ts/autoReply.ts que mandam foto,
+ * vídeo, registram a transação financeira e disparam o Meta CAPI).
+ *
+ * Achado real (20/08/2026): antes cada um desses 6 pontos reimplementava o
+ * próprio `kb.products.find(p => p.name === nome)`, que nunca soube procurar
+ * dentro de `variants` — agrupar produtos de uma família (ex: "Pestañas"
+ * cobrindo "Lash Lift", "Efecto Delineado" etc.) quebraria silenciosamente
+ * duração de agendamento, valor do registro financeiro e envio de foto/vídeo
+ * assim que um serviço deixasse de ser um produto de topo.
+ */
+export function findProductMatch(kb: AgentKnowledgeBase | null, productName: string): ProductNameMatch | undefined {
   const normalized = productName.trim().toLowerCase();
-  return kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized)?.durationMinutes;
+  for (const product of kb?.products || []) {
+    if (product.name.trim().toLowerCase() === normalized) return { product };
+    const variant = product.variants?.find((v) => v.code.trim().toLowerCase() === normalized);
+    if (variant) return { product, variant };
+  }
+  return undefined;
+}
+
+/** true quando o nome bate com um produto (ou variante) do catálogo marcado como não-agendável (ex: Retoque) — usado pra recusar `criar_agendamento` nesse serviço e orientar pra avaliação humana em vez de deixar o cliente marcar um turno por conta própria. */
+export function isNonBookableProduct(kb: AgentKnowledgeBase | null, productName: string): boolean {
+  const match = findProductMatch(kb, productName);
+  if (!match) return false;
+  const bookable = match.variant?.bookable ?? match.product.bookable;
+  return bookable === false;
+}
+
+/** Duração real (minutos) de um produto (ou variante) do catálogo pelo nome exato — usada pra calcular o fim do evento no Google Calendar em vez do fallback fixo de 90min pra qualquer serviço. Variante sem duração própria cai pra do produto pai. */
+export function findProductDurationMinutes(kb: AgentKnowledgeBase | null, productName: string): number | undefined {
+  const match = findProductMatch(kb, productName);
+  return match?.variant?.durationMinutes ?? match?.product.durationMinutes;
+}
+
+/**
+ * Valor numérico do preço vigente de um produto (ou variante) pelo nome
+ * exato — usado pro registro financeiro automático e pro Meta CAPI, onde só
+ * se tem o nome do serviço (título do evento do Calendar), nunca o objeto
+ * do produto direto. Variante usa o preço/promoção próprios quando
+ * presentes; sem variante batendo, cai pro resolveProductPriceAmount normal
+ * do produto pai. undefined quando o nome não bate com nada no catálogo
+ * (nunca inventa um valor).
+ */
+export function resolveProductAmountByName(kb: AgentKnowledgeBase | null, productName: string, timezone = 'America/Asuncion'): number | undefined {
+  const match = findProductMatch(kb, productName);
+  if (!match) return undefined;
+  if (match.variant) {
+    return match.variant.priceAmount != null ? match.variant.priceAmount : parsePriceToNumber(match.variant.price);
+  }
+  return resolveProductPriceAmount(match.product, timezone);
 }
 
 /**

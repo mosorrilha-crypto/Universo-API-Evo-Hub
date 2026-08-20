@@ -27,7 +27,10 @@ vi.mock('../../services/metaSend', async (importOriginal) => {
   return { ...actual, uploadWhatsAppMedia, sendWhatsAppMediaMessage };
 });
 vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveMediaImage }));
-vi.mock('../../services/knowledgeBaseStore', () => ({ getKnowledgeBase, setKnowledgeBase: vi.fn() }));
+vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/knowledgeBaseStore')>();
+  return { ...actual, getKnowledgeBase, setKnowledgeBase: vi.fn() };
+});
 
 const { createConversationsRouter } = await import('../conversations');
 

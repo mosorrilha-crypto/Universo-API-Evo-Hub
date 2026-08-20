@@ -35,6 +35,7 @@ vi.mock('../knowledgeBaseStore', () => ({
   resolveProductPrice: vi.fn(),
   parsePriceToNumber: vi.fn(() => 0),
   resolveProductPriceAmount: vi.fn(() => 0),
+  resolveProductAmountByName: vi.fn(() => undefined),
   isNonBookableProduct: vi.fn(() => false),
   findProductDurationMinutes: vi.fn(() => undefined),
 }));

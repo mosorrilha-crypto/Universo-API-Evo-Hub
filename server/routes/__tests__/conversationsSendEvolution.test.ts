@@ -35,7 +35,10 @@ vi.mock('../../services/metaSend', async (importOriginal) => {
 vi.mock('../../services/evolutionSend', () => ({ sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping: vi.fn() }));
 vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveMediaImage }));
 vi.mock('../../services/audioTranscode', () => ({ transcodeToWhatsAppVoiceNote }));
-vi.mock('../../services/knowledgeBaseStore', () => ({ getKnowledgeBase, setKnowledgeBase: vi.fn() }));
+vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/knowledgeBaseStore')>();
+  return { ...actual, getKnowledgeBase, setKnowledgeBase: vi.fn() };
+});
 
 const { createConversationsRouter } = await import('../conversations');
 

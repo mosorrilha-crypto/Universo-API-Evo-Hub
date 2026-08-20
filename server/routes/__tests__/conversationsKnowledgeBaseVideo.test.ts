@@ -35,7 +35,10 @@ vi.mock('../../services/knowledgeBaseVideoStore', async (importOriginal) => {
   return { ...actual, uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo };
 });
 vi.mock('../../services/videoTranscode', () => ({ transcodeToWhatsAppVideo }));
-vi.mock('../../services/knowledgeBaseStore', () => ({ getKnowledgeBase, setKnowledgeBase: vi.fn() }));
+vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/knowledgeBaseStore')>();
+  return { ...actual, getKnowledgeBase, setKnowledgeBase: vi.fn() };
+});
 
 const { createConversationsRouter } = await import('../conversations');
 
