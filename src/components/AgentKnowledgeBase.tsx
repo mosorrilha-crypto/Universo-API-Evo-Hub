@@ -364,18 +364,69 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }
   };
 
-  // Input states for adding new items
-  const [newProductName, setNewProductName] = useState('');
-  const [newProductPrice, setNewProductPrice] = useState('');
-  const [newProductDesc, setNewProductDesc] = useState('');
-  // Achado real (18/08/2026, Clic Piscinas): durationMinutes já existe no
-  // tipo do produto e já é usado pra calcular o fim real do evento no
-  // Calendar (ver criar_agendamento/consultar_disponibilidade_semana em
-  // autoReply.ts) — mas não existia campo nenhum no painel pra cadastrar
-  // isso, só vinha preenchido pro seed hardcoded da Monique. Sem duração
-  // configurada, todo produto caía no fallback conservador de 1h, errado
-  // pra serviços mais longos (ex: instalação de piscina).
-  const [newProductDuration, setNewProductDuration] = useState('');
+  // Novo fluxo de cadastro (wizard em modal, pedido real 20/08/2026) — o
+  // form antigo (1 linha só, nome/preço/descrição/duração) não tinha espaço
+  // pra crescer com os campos que o catálogo já suporta de verdade
+  // (priceAmount/moeda, agendável, status). 3 passos curtos em vez de 1
+  // formulário longo: Básico → Preço & Agendamento → Status. Reaproveita os
+  // mesmos campos de AgentProduct que o card já edita depois de criado —
+  // o wizard só cobre a CRIAÇÃO, edição continua inline no card (mudar isso
+  // exigiria refazer a edição inteira, fora do escopo deste pedido).
+  type ProductDraft = {
+    name: string;
+    category: string;
+    description: string;
+    price: string;
+    priceAmount: string;
+    currency: string;
+    durationMinutes: string;
+    bookable: boolean;
+    active: boolean;
+  };
+  const EMPTY_PRODUCT_DRAFT: ProductDraft = {
+    name: '',
+    category: '',
+    description: '',
+    price: '',
+    priceAmount: '',
+    currency: 'PYG',
+    durationMinutes: '',
+    bookable: true,
+    active: true,
+  };
+  const PRODUCT_WIZARD_STEPS = ['Básico', 'Preço & Agendamento', 'Status'] as const;
+  const [isProductWizardOpen, setIsProductWizardOpen] = useState(false);
+  const [productWizardStep, setProductWizardStep] = useState(0);
+  const [productDraft, setProductDraft] = useState<ProductDraft>(EMPTY_PRODUCT_DRAFT);
+
+  const handleOpenProductWizard = () => {
+    setProductDraft(EMPTY_PRODUCT_DRAFT);
+    setProductWizardStep(0);
+    setIsProductWizardOpen(true);
+  };
+
+  const handleCloseProductWizard = () => setIsProductWizardOpen(false);
+
+  const updateProductDraft = <K extends keyof ProductDraft>(field: K, value: ProductDraft[K]) =>
+    setProductDraft((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmitProductWizard = () => {
+    if (!productDraft.name.trim()) return;
+    const item: AgentProduct = {
+      id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: productDraft.name.trim(),
+      category: productDraft.category.trim() || undefined,
+      price: productDraft.price.trim() || 'Sob Consulta',
+      priceAmount: productDraft.priceAmount.trim() ? Number(productDraft.priceAmount) : undefined,
+      currency: productDraft.priceAmount.trim() ? productDraft.currency : undefined,
+      description: productDraft.description.trim() || 'Sem descrição cadastrada',
+      durationMinutes: productDraft.durationMinutes.trim() ? Number(productDraft.durationMinutes) : undefined,
+      bookable: productDraft.bookable ? undefined : false,
+      active: productDraft.active ? undefined : false,
+    };
+    setFormData((prev) => ({ ...prev, products: [...prev.products, item] }));
+    setIsProductWizardOpen(false);
+  };
 
   // Busca + filtro por categoria do catálogo (pedido real, 20/08/2026:
   // catálogos com muitos itens — 19+ serviços de um estúdio de beleza —
@@ -521,26 +572,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     } finally {
       setIsSavingTenantPromptLayer(false);
     }
-  };
-
-  const handleAddProduct = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProductName.trim()) return;
-    const item: AgentProduct = {
-      id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: newProductName.trim(),
-      price: newProductPrice.trim() || 'Sob Consulta',
-      description: newProductDesc.trim() || 'Sem descrição cadastrada',
-      durationMinutes: newProductDuration.trim() ? Number(newProductDuration) : undefined,
-    };
-    setFormData((prev) => ({
-      ...prev,
-      products: [...prev.products, item]
-    }));
-    setNewProductName('');
-    setNewProductPrice('');
-    setNewProductDesc('');
-    setNewProductDuration('');
   };
 
   // Duplica um item já cadastrado (novo id, "(cópia)" no nome) — cópia
@@ -1692,7 +1723,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           </button>
           {openSections.s3 && (
           <div className="space-y-5">
-          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-emerald-400" />
@@ -1702,51 +1733,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Permite ao Gemini consultar preços e especificações exatas durante o atendimento comercial. Foto e vídeo de exemplo (qualquer formato, inclusive .MOV do iPhone — convertido automaticamente; até {MAX_VIDEO_INPUT_SIZE_MB}MB, geralmente até ~1 minuto) o agente manda de verdade pro cliente quando perguntarem sobre o serviço.
                 </p>
               </div>
-            </div>
-
-            {/* Add New Product Form */}
-            <form onSubmit={handleAddProduct} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-              <span className="text-xs font-bold text-emerald-400 block">Cadastrar Novo Produto ou Serviço:</span>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <input
-                  type="text"
-                  value={newProductName}
-                  onChange={(e) => setNewProductName(e.target.value)}
-                  placeholder="Nome do Produto / Plano"
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                />
-                <input
-                  type="text"
-                  value={newProductPrice}
-                  onChange={(e) => setNewProductPrice(e.target.value)}
-                  placeholder="Preço (Ex: R$ 290/mês)"
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                />
-                <input
-                  type="text"
-                  value={newProductDesc}
-                  onChange={(e) => setNewProductDesc(e.target.value)}
-                  placeholder="Descrição resumida do item"
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={newProductDuration}
-                  onChange={(e) => setNewProductDuration(e.target.value)}
-                  placeholder="Duração (min)"
-                  title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                />
-              </div>
               <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer ml-auto"
+                type="button"
+                onClick={handleOpenProductWizard}
+                className="px-3.5 py-2 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
               >
-                <Plus className="w-4 h-4" />
-                <span>Salvar Produto</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>Criar item</span>
               </button>
-            </form>
+            </div>
 
             {/* Busca + filtro por categoria — client-side, só filtra o que
                 já está em formData.products antes do agrupamento visual
@@ -2519,6 +2514,213 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
       </div>
+
+      {/* Wizard de cadastro de produto/serviço — 3 passos curtos em modal em
+          vez do form flat de 1 linha só, pra caber os campos que o catálogo
+          já suporta de verdade (priceAmount/moeda, agendável, status) sem
+          virar um formulário gigante. Cobre só CRIAÇÃO — edição continua
+          inline em cada card, como já era. */}
+      {isProductWizardOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={handleCloseProductWizard}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-emerald-400" />
+                  Novo Produto ou Serviço
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Passo {productWizardStep + 1} de {PRODUCT_WIZARD_STEPS.length}: {PRODUCT_WIZARD_STEPS[productWizardStep]}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseProductWizard}
+                className="text-slate-500 hover:text-white p-1 cursor-pointer"
+                title="Cancelar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 pt-4 flex items-center gap-2">
+              {PRODUCT_WIZARD_STEPS.map((label, idx) => (
+                <div key={label} className="flex-1 flex items-center gap-2">
+                  <div
+                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                      idx <= productWizardStep ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {idx < productWizardStep ? <Check className="w-3 h-3" /> : idx + 1}
+                  </div>
+                  {idx < PRODUCT_WIZARD_STEPS.length - 1 && (
+                    <div className={`flex-1 h-0.5 ${idx < productWizardStep ? 'bg-emerald-500' : 'bg-slate-800'}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="p-5 space-y-3">
+              {productWizardStep === 0 && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Nome*</label>
+                    <input
+                      autoFocus
+                      value={productDraft.name}
+                      onChange={(e) => updateProductDraft('name', e.target.value)}
+                      placeholder="Ex: Lash Lift"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Categoria</label>
+                    <input
+                      value={productDraft.category}
+                      onChange={(e) => updateProductDraft('category', e.target.value)}
+                      placeholder="Ex: Pestañas, Cejas"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Descrição</label>
+                    <AutoResizeTextarea
+                      minRows={2}
+                      value={productDraft.description}
+                      onChange={(e) => updateProductDraft('description', e.target.value)}
+                      placeholder="Descrição resumida do item"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
+                    />
+                  </div>
+                </>
+              )}
+
+              {productWizardStep === 1 && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Preço (texto)</label>
+                      <input
+                        value={productDraft.price}
+                        onChange={(e) => updateProductDraft('price', e.target.value)}
+                        placeholder="Ex: Gs 140.000"
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Duração (min)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={productDraft.durationMinutes}
+                        onChange={(e) => updateProductDraft('durationMinutes', e.target.value)}
+                        placeholder="Ex: 90"
+                        title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Valor numérico (opcional)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={productDraft.priceAmount}
+                        onChange={(e) => updateProductDraft('priceAmount', e.target.value)}
+                        placeholder="Ex: 140000"
+                        title="Fonte de verdade pro cálculo financeiro/Meta CAPI — sem isso, o sistema tenta extrair o número do texto do preço."
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Moeda</label>
+                      <input
+                        value={productDraft.currency}
+                        onChange={(e) => updateProductDraft('currency', e.target.value)}
+                        placeholder="Ex: PYG, BRL"
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={productDraft.bookable}
+                      onChange={(e) => updateProductDraft('bookable', e.target.checked)}
+                      className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                    />
+                    Agendável diretamente pelo agente (desmarque pra itens como retoque, que só a operadora decide depois de avaliar)
+                  </label>
+                </>
+              )}
+
+              {productWizardStep === 2 && (
+                <>
+                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={productDraft.active}
+                      onChange={(e) => updateProductDraft('active', e.target.checked)}
+                      className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                    />
+                    Item ativo (visível pro agente — desmarque pra pausar/descontinuar sem apagar)
+                  </label>
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                    <p>
+                      <span className="text-slate-300 font-semibold">{productDraft.name || 'Sem nome'}</span>
+                      {productDraft.category ? ` · ${productDraft.category}` : ''}
+                    </p>
+                    <p>
+                      {productDraft.price || 'Sob Consulta'}
+                      {productDraft.durationMinutes ? ` · ${productDraft.durationMinutes} min` : ''}
+                    </p>
+                    <p>
+                      {productDraft.bookable ? 'Agendável' : 'Não agendável diretamente'} · {productDraft.active ? 'Ativo' : 'Inativo'}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={productWizardStep === 0 ? handleCloseProductWizard : () => setProductWizardStep((s) => s - 1)}
+                className="px-3.5 py-2 rounded-lg text-slate-400 hover:text-white text-xs font-semibold cursor-pointer"
+              >
+                {productWizardStep === 0 ? 'Cancelar' : 'Voltar'}
+              </button>
+              {productWizardStep < PRODUCT_WIZARD_STEPS.length - 1 ? (
+                <button
+                  type="button"
+                  disabled={!productDraft.name.trim()}
+                  onClick={() => setProductWizardStep((s) => s + 1)}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Próximo</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSubmitProductWizard}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Criar item</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Save Notification Toast / Banner */}
       {isSavedToast && (
