@@ -1667,12 +1667,18 @@ export async function generateAutoReplyForText(
         // por " o " (chegou a 988 caracteres numa conversa real). Dedup +
         // corte a poucas opções antes de montar a frase — o cliente nunca
         // precisa ver mais que um punhado de horários pra escolher.
-        const MAX_TIMES_IN_FALLBACK = 6;
+        // Achado real em produção (20/08/2026): mesmo cortado a 6 horários,
+        // uma lista crua de HH:mm separados por vírgula soa robótica e
+        // pesada pro cliente ler no WhatsApp — a instrução principal do
+        // agente (ver prompt, "NUNCA liste mais de 2-3 horários") já evita
+        // isso na resposta normal; o fallback determinístico precisa seguir
+        // a mesma regra em vez de despejar tudo que sobrou de confirmedTimes.
+        const MAX_TIMES_IN_FALLBACK = 3;
         const uniqueConfirmedTimes = [...new Set(confirmedTimes)].sort();
         const timesToShow = uniqueConfirmedTimes.slice(0, MAX_TIMES_IN_FALLBACK);
         const hasMore = uniqueConfirmedTimes.length > timesToShow.length;
         bubbles = timesToShow.length
-          ? [`Dejame confirmarte bien: tengo libre ${timesToShow.join(', ')}${hasMore ? ', entre otros horarios' : ''}. ¿Cuál te sirve, o preferís que te pase más opciones de algún día en particular?`]
+          ? [`Dejame confirmarte bien: tengo libre a las ${timesToShow.join(', ')}${hasMore ? ' (o te paso más opciones si preferís otro horario)' : ''}. ¿Cuál te queda mejor?`]
           : ['Dejame confirmar bien ese horario en la agenda antes de asegurarte algo — en un instante te aviso.'];
         // Só escala pra humano quando é o caso 1 real (nenhuma ferramenta
         // rodou nesta mensagem pra sustentar o horário citado) — o caso 2
