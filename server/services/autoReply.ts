@@ -1333,6 +1333,30 @@ async function decideMidiaActionViaGroq(
   return { name: action, args: { nome_produto: (parsed?.nome_produto as string) || '' } };
 }
 
+const PHOTO_VIDEO_KEYWORD_RE = /\bfotos?\b|\bimagens?\b|\bv[ií]deos?\b/i;
+
+/**
+ * Achado real em produção (20/08/2026, tenant Monique): cliente perguntou
+ * "Tiene fotos?" logo depois do agente oferecer 2 serviços sem ela ter
+ * escolhido nenhum ainda — a decisão de mídia corretamente decide não
+ * enviar nada (não dá pra saber qual produto mandar), mas o especialista,
+ * sem NENHUM contexto sobre essa decisão, respondia "no tengo ese material
+ * disponible" — uma negação falsa, já que o catálogo TEM fotos, só não
+ * dava pra saber de qual serviço. Só ativa quando o cliente realmente
+ * mencionou foto/vídeo nesta mensagem (nunca insere isso à toa numa
+ * mensagem sem relação, ex: "quanto custa?").
+ */
+function noMidiaActionResult(text: string, hasAnyMediaInCatalog: boolean): { actionsSummary: string[] } {
+  if (hasAnyMediaInCatalog && PHOTO_VIDEO_KEYWORD_RE.test(text)) {
+    return {
+      actionsSummary: [
+        'Cliente perguntou sobre foto/vídeo mas não ficou claro de qual serviço (ou esse serviço específico não tem mídia cadastrada) — o catálogo TEM fotos/vídeos reais de outros serviços; nunca diga que não tem nenhum material disponível, pergunte qual serviço ela quer ver ou diga que só aquele em particular ainda não tem exemplo.',
+      ],
+    };
+  }
+  return { actionsSummary: [] };
+}
+
 async function runMidiaTool(
   tenantId: string,
   ai: GoogleGenAI,
@@ -1360,7 +1384,7 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
   if (groqApiKey) {
     try {
       call = await decideMidiaActionViaGroq(tenantId, groqApiKey, prompt);
-      if (!call) return { actionsSummary: [] };
+      if (!call) return noMidiaActionResult(text, true);
     } catch (err) {
       console.warn(`⚠️  [Mídia] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
       call = undefined;
@@ -1384,7 +1408,7 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     );
 
     const geminiCall = response.functionCalls?.[0];
-    if (!geminiCall || (geminiCall.name !== 'enviar_foto_exemplo' && geminiCall.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
+    if (!geminiCall || (geminiCall.name !== 'enviar_foto_exemplo' && geminiCall.name !== 'enviar_video_exemplo')) return noMidiaActionResult(text, true);
     call = { name: geminiCall.name, args: { nome_produto: geminiCall.args?.nome_produto as string | undefined } };
   }
 
