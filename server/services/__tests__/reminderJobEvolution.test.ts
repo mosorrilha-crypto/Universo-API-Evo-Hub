@@ -22,7 +22,7 @@ const listAllAppointments = vi.fn(async (tenantId: string) => [
 ]);
 const wasReminderSent = vi.fn(async () => false);
 const markReminderSent = vi.fn(async () => undefined);
-const sendWhatsAppInteractiveButtons = vi.fn(async () => undefined);
+const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
 const sendEvolutionTextMessage = vi.fn(async () => undefined);
 
 vi.mock('../googleCalendar', async (importOriginal) => {

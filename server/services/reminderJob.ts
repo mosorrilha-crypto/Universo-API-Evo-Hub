@@ -166,6 +166,7 @@ async function checkAndSendRemindersForTenant(
       : { confirmar: '✅ Confirmar', remarcar: '🔄 Remarcar' };
 
     try {
+      let messageId: string | undefined;
       if (channel.provider === 'evolution') {
         // Botões interativos são um recurso da Meta Cloud API — a Evolution
         // API (Baileys) não tem o mesmo tipo de mensagem, então cai pro
@@ -176,13 +177,18 @@ async function checkAndSendRemindersForTenant(
         // dificuldade de remarcar fora do horário comercial — botões deixam o
         // cliente resolver isso num toque, sem precisar digitar (e sem
         // precisar esperar alguém abrir o WhatsApp comercial pra ler).
-        await sendWhatsAppInteractiveButtons(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message, [
+        const result = await sendWhatsAppInteractiveButtons(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message, [
           { id: 'lembrete_confirmar', title: buttonLabels.confirmar },
           { id: 'lembrete_remarcar', title: buttonLabels.remarcar },
         ]);
+        messageId = result?.messageId;
       }
       await markReminderSent(tenantId, event.id, type);
-      console.log(`⏰ [Lembretes] Enviado (${type}) pra ${appt.phone} — evento ${event.id}`);
+      // `messageId` (wamid) fica no log só pra poder cruzar depois com um
+      // eventual status "failed" que chega via webhook (webhooks.ts) —
+      // achado real (20/08/2026): sem isso não tinha como confirmar se um
+      // lembrete "enviado com sucesso" (200 da Meta) chegou de verdade.
+      console.log(`⏰ [Lembretes] Enviado (${type}) pra ${appt.phone} — evento ${event.id}${messageId ? ` — wamid=${messageId}` : ''}`);
     } catch (err) {
       console.warn(`⚠️  [Lembretes] Falha ao enviar pra ${appt.phone}:`, (err as Error).message);
     }

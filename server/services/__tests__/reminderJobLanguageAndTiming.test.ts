@@ -23,7 +23,7 @@ const wasReminderSent = vi.fn(async () => false);
 const markReminderSent = vi.fn(async () => undefined);
 vi.mock('../reminderStore', () => ({ wasReminderSent, markReminderSent }));
 
-const sendWhatsAppInteractiveButtons = vi.fn(async () => undefined);
+const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
 vi.mock('../metaSend', () => ({ sendWhatsAppInteractiveButtons }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage: vi.fn() }));
 vi.mock('../tenantResolver', () => ({

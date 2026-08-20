@@ -125,7 +125,7 @@ export async function sendWhatsAppInteractiveButtons(
   to: string,
   bodyText: string,
   buttons: { id: string; title: string }[]
-): Promise<void> {
+): Promise<{ messageId?: string }> {
   if (!phoneNumberId || !accessToken) {
     throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mensagem via Meta Cloud API.');
   }
@@ -156,6 +156,16 @@ export async function sendWhatsAppInteractiveButtons(
   if (!res.ok) {
     await throwMetaError(res, 'Falha ao enviar mensagem com botões via Meta Cloud API');
   }
+
+  // Achado real em produção (20/08/2026): a Meta aceitar o envio (200 OK)
+  // só confirma que entrou na fila, nunca que chegou de verdade — e não
+  // tinha como CORRELACIONAR o `wamid` retornado aqui com um eventual
+  // status "failed" que chega depois via webhook (ver webhooks.ts,
+  // `value.statuses[]`). Devolve o id pra quem chama logar e permitir essa
+  // correlação futura — sem isso, uma investigação real (ex: "os botões do
+  // lembrete não chegam") não tinha nenhum jeito de confirmar entrega.
+  const data = await res.json().catch(() => ({}));
+  return { messageId: data?.messages?.[0]?.id };
 }
 
 /**
