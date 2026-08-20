@@ -323,6 +323,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   }));
   const [isSavedToast, setIsSavedToast] = useState(false);
 
+  // Gavetas (accordion) das 6 seções da aba — pedido real (20/08/2026): a
+  // aba tinha ficado extensa demais com tudo sempre visível de uma vez
+  // (ver comentário "Visão unificada" abaixo, que já tinha abolido as
+  // antigas 6 abas separadas). Fechadas por padrão pra reduzir o scroll
+  // inicial; o estado não persiste entre sessões, é só de UI.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const toggleSection = (key: string) => setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
   // Recurso separado (tabela `tenants`, não a base de conhecimento) — save
   // próprio, não passa pelo handleSave/onSaveKnowledgeBase de cima.
   const [hoursForm, setHoursForm] = useState<BusinessHours>(() => businessHours);
@@ -356,18 +364,77 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }
   };
 
-  // Input states for adding new items
-  const [newProductName, setNewProductName] = useState('');
-  const [newProductPrice, setNewProductPrice] = useState('');
-  const [newProductDesc, setNewProductDesc] = useState('');
-  // Achado real (18/08/2026, Clic Piscinas): durationMinutes já existe no
-  // tipo do produto e já é usado pra calcular o fim real do evento no
-  // Calendar (ver criar_agendamento/consultar_disponibilidade_semana em
-  // autoReply.ts) — mas não existia campo nenhum no painel pra cadastrar
-  // isso, só vinha preenchido pro seed hardcoded da Monique. Sem duração
-  // configurada, todo produto caía no fallback conservador de 1h, errado
-  // pra serviços mais longos (ex: instalação de piscina).
-  const [newProductDuration, setNewProductDuration] = useState('');
+  // Novo fluxo de cadastro (wizard em modal, pedido real 20/08/2026) — o
+  // form antigo (1 linha só, nome/preço/descrição/duração) não tinha espaço
+  // pra crescer com os campos que o catálogo já suporta de verdade
+  // (priceAmount/moeda, agendável, status). 3 passos curtos em vez de 1
+  // formulário longo: Básico → Preço & Agendamento → Status. Reaproveita os
+  // mesmos campos de AgentProduct que o card já edita depois de criado —
+  // o wizard só cobre a CRIAÇÃO, edição continua inline no card (mudar isso
+  // exigiria refazer a edição inteira, fora do escopo deste pedido).
+  type ProductDraft = {
+    name: string;
+    category: string;
+    description: string;
+    price: string;
+    priceAmount: string;
+    currency: string;
+    durationMinutes: string;
+    bookable: boolean;
+    active: boolean;
+  };
+  const EMPTY_PRODUCT_DRAFT: ProductDraft = {
+    name: '',
+    category: '',
+    description: '',
+    price: '',
+    priceAmount: '',
+    currency: 'PYG',
+    durationMinutes: '',
+    bookable: true,
+    active: true,
+  };
+  const PRODUCT_WIZARD_STEPS = ['Básico', 'Preço & Agendamento', 'Status'] as const;
+  const [isProductWizardOpen, setIsProductWizardOpen] = useState(false);
+  const [productWizardStep, setProductWizardStep] = useState(0);
+  const [productDraft, setProductDraft] = useState<ProductDraft>(EMPTY_PRODUCT_DRAFT);
+
+  const handleOpenProductWizard = () => {
+    setProductDraft(EMPTY_PRODUCT_DRAFT);
+    setProductWizardStep(0);
+    setIsProductWizardOpen(true);
+  };
+
+  const handleCloseProductWizard = () => setIsProductWizardOpen(false);
+
+  const updateProductDraft = <K extends keyof ProductDraft>(field: K, value: ProductDraft[K]) =>
+    setProductDraft((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmitProductWizard = () => {
+    if (!productDraft.name.trim()) return;
+    const item: AgentProduct = {
+      id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: productDraft.name.trim(),
+      category: productDraft.category.trim() || undefined,
+      price: productDraft.price.trim() || 'Sob Consulta',
+      priceAmount: productDraft.priceAmount.trim() ? Number(productDraft.priceAmount) : undefined,
+      currency: productDraft.priceAmount.trim() ? productDraft.currency : undefined,
+      description: productDraft.description.trim() || 'Sem descrição cadastrada',
+      durationMinutes: productDraft.durationMinutes.trim() ? Number(productDraft.durationMinutes) : undefined,
+      bookable: productDraft.bookable ? undefined : false,
+      active: productDraft.active ? undefined : false,
+    };
+    setFormData((prev) => ({ ...prev, products: [...prev.products, item] }));
+    setIsProductWizardOpen(false);
+  };
+
+  // Busca + filtro por categoria do catálogo (pedido real, 20/08/2026:
+  // catálogos com muitos itens — 19+ serviços de um estúdio de beleza —
+  // ficavam difíceis de achar só rolando a tela). Client-side, sem tocar
+  // schema/backend: filtra formData.products antes de productGroups agrupar
+  // por categoria, então continua reaproveitando o mesmo agrupamento visual.
+  const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('');
 
   const [newRuleText, setNewRuleText] = useState('');
 
@@ -507,24 +574,26 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }
   };
 
-  const handleAddProduct = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProductName.trim()) return;
-    const item: AgentProduct = {
-      id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: newProductName.trim(),
-      price: newProductPrice.trim() || 'Sob Consulta',
-      description: newProductDesc.trim() || 'Sem descrição cadastrada',
-      durationMinutes: newProductDuration.trim() ? Number(newProductDuration) : undefined,
-    };
-    setFormData((prev) => ({
-      ...prev,
-      products: [...prev.products, item]
-    }));
-    setNewProductName('');
-    setNewProductPrice('');
-    setNewProductDesc('');
-    setNewProductDuration('');
+  // Duplica um item já cadastrado (novo id, "(cópia)" no nome) — cópia
+  // profunda de variants/promo pra não compartilhar array com o original.
+  // Só o essencial pra edição: foto/vídeo de exemplo continuam apontando
+  // pro mesmo arquivo original (nada é reenviado), então a duplicata some
+  // com a imagem/vídeo até alguém trocar por um novo.
+  const handleDuplicateProduct = (id: string) => {
+    setFormData((prev) => {
+      const original = prev.products.find((p) => p.id === id);
+      if (!original) return prev;
+      const copy: AgentProduct = {
+        ...original,
+        id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: `${original.name} (cópia)`,
+        variants: original.variants ? original.variants.map((v) => ({ ...v })) : undefined,
+      };
+      const idx = prev.products.findIndex((p) => p.id === id);
+      const products = [...prev.products];
+      products.splice(idx + 1, 0, copy);
+      return { ...prev, products };
+    });
   };
 
   const handleDeleteProduct = (id: string) => {
@@ -559,10 +628,31 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // agrupamento visual aqui — só dava pra setar direto no banco. Não muda a
   // ordem/array real de `formData.products` (todo handler de edição continua
   // operando por `prod.id`), só a forma de renderizar a lista.
+  // Categorias já cadastradas, pra alimentar o <select> de filtro sem
+  // depender de uma lista fixa em código.
+  const productCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of formData.products) {
+      const category = p.category?.trim();
+      if (category) set.add(category);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [formData.products]);
+
   const productGroups = useMemo(() => {
+    const search = productSearch.trim().toLowerCase();
+    const filtered = formData.products.filter((p) => {
+      if (productCategoryFilter && (p.category?.trim() || '') !== productCategoryFilter) return false;
+      if (!search) return true;
+      return (
+        p.name.toLowerCase().includes(search) ||
+        p.description.toLowerCase().includes(search) ||
+        (p.category || '').toLowerCase().includes(search)
+      );
+    });
     const byCategory = new Map<string, AgentProduct[]>();
     const uncategorized: AgentProduct[] = [];
-    for (const p of formData.products) {
+    for (const p of filtered) {
       const category = p.category?.trim();
       if (!category) {
         uncategorized.push(p);
@@ -572,7 +662,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       byCategory.get(category)!.push(p);
     }
     return { categorized: Array.from(byCategory.entries()), uncategorized };
-  }, [formData.products]);
+  }, [formData.products, productSearch, productCategoryFilter]);
 
   // Variantes de tamanho/modelo dentro de um produto unificado (ex: "Piscina Fapac
   // Maresias" cobrindo 4x2.20m/5x2.60m/6x2.80m/7x3m, cada tamanho com preço próprio) —
@@ -624,6 +714,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setFormData((prev) => ({
       ...prev,
       products: prev.products.map((p) => (p.id === id ? { ...p, durationMinutes: value.trim() ? Number(value) : undefined } : p)),
+    }));
+  };
+
+  // Status/visibilidade — item pausado (active:false) some do prompt real do
+  // agente (ver formatKnowledgeBaseForPrompt no backend), não é só um filtro
+  // visual aqui no painel. Default ativo (undefined tratado como true).
+  const handleToggleProductActive = (id: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((p) => (p.id === id ? { ...p, active: p.active === false ? true : false } : p)),
     }));
   };
 
@@ -1355,10 +1455,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
         {/* SECTION 1: General Profile & Goal */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
-            <Target className="w-3.5 h-3.5" />
-            <span>1. Perfil & Objetivo</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s1')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <Target className="w-3.5 h-3.5" />
+              <span>1. Perfil & Objetivo</span>
+            </span>
+            {openSections.s1 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s1 && (
+          <div className="space-y-5">
             <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1518,13 +1627,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 2: Business Rules & Constraints */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wide">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>2. Regras de Negócio ({formData.businessRules.length})</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s2')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>2. Regras de Negócio ({formData.businessRules.length})</span>
+            </span>
+            {openSections.s2 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s2 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1585,14 +1705,25 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               )}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 3: Products & Pricing */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
-            <DollarSign className="w-3.5 h-3.5" />
-            <span>3. Preços & Produtos ({formData.products.length})</span>
-          </div>
-          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => toggleSection('s3')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>3. Preços & Produtos ({formData.products.length})</span>
+            </span>
+            {openSections.s3 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s3 && (
+          <div className="space-y-5">
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-emerald-400" />
@@ -1602,57 +1733,53 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   Permite ao Gemini consultar preços e especificações exatas durante o atendimento comercial. Foto e vídeo de exemplo (qualquer formato, inclusive .MOV do iPhone — convertido automaticamente; até {MAX_VIDEO_INPUT_SIZE_MB}MB, geralmente até ~1 minuto) o agente manda de verdade pro cliente quando perguntarem sobre o serviço.
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={handleOpenProductWizard}
+                className="px-3.5 py-2 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Criar item</span>
+              </button>
             </div>
 
-            {/* Add New Product Form */}
-            <form onSubmit={handleAddProduct} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-              <span className="text-xs font-bold text-emerald-400 block">Cadastrar Novo Produto ou Serviço:</span>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            {/* Busca + filtro por categoria — client-side, só filtra o que
+                já está em formData.products antes do agrupamento visual
+                abaixo (productGroups já aplica os dois). */}
+            {formData.products.length > 0 && (
+              <div className="flex flex-wrap gap-2">
                 <input
                   type="text"
-                  value={newProductName}
-                  onChange={(e) => setNewProductName(e.target.value)}
-                  placeholder="Nome do Produto / Plano"
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Buscar por nome, descrição ou categoria..."
+                  className="flex-1 min-w-[180px] px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
                 />
-                <input
-                  type="text"
-                  value={newProductPrice}
-                  onChange={(e) => setNewProductPrice(e.target.value)}
-                  placeholder="Preço (Ex: R$ 290/mês)"
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                />
-                <input
-                  type="text"
-                  value={newProductDesc}
-                  onChange={(e) => setNewProductDesc(e.target.value)}
-                  placeholder="Descrição resumida do item"
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                />
-                <input
-                  type="number"
-                  min="0"
-                  value={newProductDuration}
-                  onChange={(e) => setNewProductDuration(e.target.value)}
-                  placeholder="Duração (min)"
-                  title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
-                  className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                />
+                {productCategories.length > 0 && (
+                  <select
+                    value={productCategoryFilter}
+                    onChange={(e) => setProductCategoryFilter(e.target.value)}
+                    className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="">Todas as categorias</option>
+                    {productCategories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                )}
               </div>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer ml-auto"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Salvar Produto</span>
-              </button>
-            </form>
+            )}
 
             {/* Product List — agrupada por categoria quando os produtos têm
                 (ver productGroups acima); "row" achata cabeçalho + produtos
                 num `.map()` só, pra não duplicar o corpo do card em dois
                 loops separados. */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {formData.products.length > 0 && productGroups.categorized.length === 0 && productGroups.uncategorized.length === 0 && (
+                <div className="col-span-full p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
+                  Nenhum produto encontrado com esse filtro.
+                </div>
+              )}
               {(() => {
                 const orderedRows: Array<{ type: 'header'; label: string } | { type: 'product'; product: AgentProduct }> = [];
                 for (const [category, items] of productGroups.categorized) {
@@ -1674,14 +1801,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   const prod = row.product;
                   return (
                 <div key={prod.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteProduct(prod.id)}
-                    className="absolute top-3 right-3 z-10 text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
-                    title="Excluir produto"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="absolute top-3 right-3 z-10 flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicateProduct(prod.id)}
+                      className="text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer p-1"
+                      title="Duplicar produto"
+                    >
+                      <FileCheck className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProduct(prod.id)}
+                      className="text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
+                      title="Excluir produto"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   <div className="space-y-1.5">
                     <input
                       type="text"
@@ -1717,6 +1854,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                         className="w-full bg-transparent text-xs text-slate-300 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       />
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleProductActive(prod.id)}
+                      title="Item inativo nunca aparece no catálogo que o agente usa pra responder — não é oferecido, cotado nem agendado."
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors ${
+                        prod.active === false
+                          ? 'bg-slate-800 text-slate-500 hover:text-slate-300'
+                          : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${prod.active === false ? 'bg-slate-600' : 'bg-emerald-400'}`} />
+                      {prod.active === false ? 'Inativo' : 'Ativo'}
+                    </button>
                     <AutoResizeTextarea
                       minRows={2}
                       value={prod.description}
@@ -1855,13 +2005,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               })()}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 4: FAQs & Common Questions */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-400 uppercase tracking-wide">
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>4. FAQ e Dúvidas ({formData.faqs.length})</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s4')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-blue-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>4. FAQ e Dúvidas ({formData.faqs.length})</span>
+            </span>
+            {openSections.s4 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s4 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1919,13 +2080,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               ))}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 5: Document Uploads */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-purple-400 uppercase tracking-wide">
-            <FileText className="w-3.5 h-3.5" />
-            <span>5. Documentos Anexados ({formData.documents.length})</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s5')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-purple-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />
+              <span>5. Documentos Anexados ({formData.documents.length})</span>
+            </span>
+            {openSections.s5 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s5 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -2044,6 +2216,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               ))}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 6: Mensagem Inicial de Primeiro Contato — pedido real
             (14-15/08/2026, Clic Piscinas): em vez da pergunta de triagem
@@ -2054,10 +2228,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             Nenhum bloco = comportamento de sempre (a IA responde a 1ª
             mensagem normalmente), sem precisar de um toggle separado. */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-pink-400 uppercase tracking-wide">
-            <Send className="w-3.5 h-3.5" />
-            <span>6. Mensagem Inicial</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s6')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-pink-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <Send className="w-3.5 h-3.5" />
+              <span>6. Mensagem Inicial</span>
+            </span>
+            {openSections.s6 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s6 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -2327,8 +2510,217 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
             </div>
           </div>
+          )}
+        </div>
 
       </div>
+
+      {/* Wizard de cadastro de produto/serviço — 3 passos curtos em modal em
+          vez do form flat de 1 linha só, pra caber os campos que o catálogo
+          já suporta de verdade (priceAmount/moeda, agendável, status) sem
+          virar um formulário gigante. Cobre só CRIAÇÃO — edição continua
+          inline em cada card, como já era. */}
+      {isProductWizardOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={handleCloseProductWizard}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-emerald-400" />
+                  Novo Produto ou Serviço
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Passo {productWizardStep + 1} de {PRODUCT_WIZARD_STEPS.length}: {PRODUCT_WIZARD_STEPS[productWizardStep]}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseProductWizard}
+                className="text-slate-500 hover:text-white p-1 cursor-pointer"
+                title="Cancelar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 pt-4 flex items-center gap-2">
+              {PRODUCT_WIZARD_STEPS.map((label, idx) => (
+                <div key={label} className="flex-1 flex items-center gap-2">
+                  <div
+                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                      idx <= productWizardStep ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {idx < productWizardStep ? <Check className="w-3 h-3" /> : idx + 1}
+                  </div>
+                  {idx < PRODUCT_WIZARD_STEPS.length - 1 && (
+                    <div className={`flex-1 h-0.5 ${idx < productWizardStep ? 'bg-emerald-500' : 'bg-slate-800'}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="p-5 space-y-3">
+              {productWizardStep === 0 && (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Nome*</label>
+                    <input
+                      autoFocus
+                      value={productDraft.name}
+                      onChange={(e) => updateProductDraft('name', e.target.value)}
+                      placeholder="Ex: Lash Lift"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Categoria</label>
+                    <input
+                      value={productDraft.category}
+                      onChange={(e) => updateProductDraft('category', e.target.value)}
+                      placeholder="Ex: Pestañas, Cejas"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Descrição</label>
+                    <AutoResizeTextarea
+                      minRows={2}
+                      value={productDraft.description}
+                      onChange={(e) => updateProductDraft('description', e.target.value)}
+                      placeholder="Descrição resumida do item"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
+                    />
+                  </div>
+                </>
+              )}
+
+              {productWizardStep === 1 && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Preço (texto)</label>
+                      <input
+                        value={productDraft.price}
+                        onChange={(e) => updateProductDraft('price', e.target.value)}
+                        placeholder="Ex: Gs 140.000"
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Duração (min)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={productDraft.durationMinutes}
+                        onChange={(e) => updateProductDraft('durationMinutes', e.target.value)}
+                        placeholder="Ex: 90"
+                        title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Valor numérico (opcional)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={productDraft.priceAmount}
+                        onChange={(e) => updateProductDraft('priceAmount', e.target.value)}
+                        placeholder="Ex: 140000"
+                        title="Fonte de verdade pro cálculo financeiro/Meta CAPI — sem isso, o sistema tenta extrair o número do texto do preço."
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Moeda</label>
+                      <input
+                        value={productDraft.currency}
+                        onChange={(e) => updateProductDraft('currency', e.target.value)}
+                        placeholder="Ex: PYG, BRL"
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={productDraft.bookable}
+                      onChange={(e) => updateProductDraft('bookable', e.target.checked)}
+                      className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                    />
+                    Agendável diretamente pelo agente (desmarque pra itens como retoque, que só a operadora decide depois de avaliar)
+                  </label>
+                </>
+              )}
+
+              {productWizardStep === 2 && (
+                <>
+                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={productDraft.active}
+                      onChange={(e) => updateProductDraft('active', e.target.checked)}
+                      className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                    />
+                    Item ativo (visível pro agente — desmarque pra pausar/descontinuar sem apagar)
+                  </label>
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                    <p>
+                      <span className="text-slate-300 font-semibold">{productDraft.name || 'Sem nome'}</span>
+                      {productDraft.category ? ` · ${productDraft.category}` : ''}
+                    </p>
+                    <p>
+                      {productDraft.price || 'Sob Consulta'}
+                      {productDraft.durationMinutes ? ` · ${productDraft.durationMinutes} min` : ''}
+                    </p>
+                    <p>
+                      {productDraft.bookable ? 'Agendável' : 'Não agendável diretamente'} · {productDraft.active ? 'Ativo' : 'Inativo'}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={productWizardStep === 0 ? handleCloseProductWizard : () => setProductWizardStep((s) => s - 1)}
+                className="px-3.5 py-2 rounded-lg text-slate-400 hover:text-white text-xs font-semibold cursor-pointer"
+              >
+                {productWizardStep === 0 ? 'Cancelar' : 'Voltar'}
+              </button>
+              {productWizardStep < PRODUCT_WIZARD_STEPS.length - 1 ? (
+                <button
+                  type="button"
+                  disabled={!productDraft.name.trim()}
+                  onClick={() => setProductWizardStep((s) => s + 1)}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Próximo</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSubmitProductWizard}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Criar item</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Save Notification Toast / Banner */}
       {isSavedToast && (
