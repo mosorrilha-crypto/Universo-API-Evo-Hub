@@ -524,20 +524,21 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // automática). Uma rota só pra tudo, em vez de vários endpoints quase
   // idênticos — cada campo do body é opcional, só atualiza o que veio.
   router.patch('/api/conversations/:phone/state', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { archived, pinned, muted, unread, name, aiBlocked } = req.body || {};
-    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean } = {};
+    const { archived, pinned, muted, unread, name, aiBlocked, adLead } = req.body || {};
+    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true } = {};
     if (typeof archived === 'boolean') patch.archived = archived;
     if (typeof pinned === 'boolean') patch.pinned = pinned;
     if (typeof muted === 'boolean') patch.muted = muted;
     if (typeof unread === 'boolean') patch.unread = unread;
     if (typeof aiBlocked === 'boolean') patch.aiBlocked = aiBlocked;
+    if (adLead === true) patch.adLead = true;
     if (typeof name === 'string') {
       const trimmed = name.trim();
       if (!trimmed) return res.status(400).json({ error: 'Campo "name" não pode ser vazio.' });
       patch.name = trimmed;
     }
     if (Object.keys(patch).length === 0) {
-      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread, name ou aiBlocked.' });
+      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread, name, aiBlocked ou adLead.' });
     }
     const conv = await updateConversationState(tenantOf(req), req.params.phone, patch);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
