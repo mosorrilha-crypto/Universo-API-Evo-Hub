@@ -526,6 +526,39 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
     expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
   });
+
+  // Achado real em produção (Monique, 20/08/2026): cliente perguntou "Tiene
+  // fotos?" logo depois do agente oferecer 2 serviços sem ela escolher
+  // nenhum ainda — a ferramenta corretamente decide não enviar nada (não dá
+  // pra saber qual produto mandar), mas o especialista, sem nenhum contexto
+  // sobre essa decisão, respondia "no tengo ese material disponible" — uma
+  // negação falsa, já que o catálogo TEM fotos. O especialista precisa
+  // receber essa informação pra nunca negar a existência do material.
+  it('avisa o especialista que o catálogo TEM fotos quando o cliente pergunta mas o produto fica ambíguo', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai, calls } = makeFakeAiWithPhotoTool(false); // modelo decide não chamar a ferramenta
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Tiene fotos?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('nunca diga que não tem nenhum material disponível');
+  });
+
+  it('não injeta nenhuma nota sobre foto quando a mensagem não menciona foto/vídeo', async () => {
+    const { ai, calls } = makeFakeAiWithPhotoTool(false);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'oi, td bem?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).not.toContain('material disponível');
+  });
 });
 
 describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade com Epic 4.5.2)', () => {
