@@ -151,8 +151,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    const unsubscribe = subscribeTenant(tenantId, (phone: string) => {
-      res.write(`data: ${JSON.stringify({ phone })}\n\n`);
+    const unsubscribe = subscribeTenant(tenantId, (phone: string, meta) => {
+      res.write(`data: ${JSON.stringify({ phone, ...meta })}\n\n`);
     });
 
     // Mantém a conexão viva atrás de proxies com idle timeout (ex: Render) —

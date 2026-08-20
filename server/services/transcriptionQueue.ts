@@ -2,6 +2,7 @@ import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia } from './mediaDownload';
 import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode } from './conversationStore';
+import { emitAiReplyStatus } from './conversationEvents';
 import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles, type OutboundChannel } from './sendBubbles';
 import { isGeoRestrictedError } from './metaSend';
@@ -175,6 +176,8 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
         const segment = await getTenantSegment(tenantId);
         const history = conversation?.messages.slice(0, -1);
+        // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
+        emitAiReplyStatus(tenantId, message.from, 'generating');
         try {
           const result = await generateAutoReplyForText(
             tenantId,
@@ -194,6 +197,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           );
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
+            emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
           if (result.agent === 'reclamacao') {
@@ -205,7 +209,9 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
             console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
           }, message.messageId, result.phase, result.routerElapsedMs);
+          emitAiReplyStatus(tenantId, message.from, 'sent');
         } catch (err: any) {
+          emitAiReplyStatus(tenantId, message.from, 'failed');
           if (isGeoRestrictedError(err)) {
             await markGeoRestricted(tenantId, message.from, err.message);
             await logEscalation(tenantId, message.from, message.contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', outcome.result.transcription);

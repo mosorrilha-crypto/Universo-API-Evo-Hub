@@ -27,8 +27,13 @@ function eventName(tenantId: string): string {
   return `conversation:${tenantId}`;
 }
 
+export interface ConversationEventMeta {
+  /** Status da resposta automática pra essa conversa — ver emitAiReplyStatus abaixo. Ausente em atualizações comuns (nova mensagem, arquivar, etc.). */
+  aiReplyStatus?: 'generating' | 'sent' | 'failed';
+}
+
 /** Assina atualizações de conversa de um tenant. Retorna a função de cancelar a assinatura. */
-export function subscribeTenant(tenantId: string, listener: (phone: string) => void): () => void {
+export function subscribeTenant(tenantId: string, listener: (phone: string, meta?: ConversationEventMeta) => void): () => void {
   emitter.on(eventName(tenantId), listener);
   return () => emitter.off(eventName(tenantId), listener);
 }
@@ -36,4 +41,18 @@ export function subscribeTenant(tenantId: string, listener: (phone: string) => v
 /** Avisa quem estiver assinando esse tenant de que a conversa desse telefone mudou. */
 export function emitConversationUpdated(tenantId: string, phone: string): void {
   emitter.emit(eventName(tenantId), phone);
+}
+
+/**
+ * Pedido real (20/08/2026): o operador via o "digitando..." só do lado do
+ * lead (WhatsApp), sem nenhum sinal no próprio painel de que a IA está
+ * processando a última mensagem — ficava sem saber se ia chegar resposta em
+ * instantes ou se precisava assumir. Avisa o painel em tempo real (mesmo
+ * canal SSE de emitConversationUpdated) quando a geração começa
+ * ('generating'), termina com sucesso ('sent') ou falha e escala pra um
+ * humano ('failed') — ver triggerAutoReply em webhooks.ts e o equivalente em
+ * transcriptionQueue.ts (caminho de áudio).
+ */
+export function emitAiReplyStatus(tenantId: string, phone: string, aiReplyStatus: ConversationEventMeta['aiReplyStatus']): void {
+  emitter.emit(eventName(tenantId), phone, { aiReplyStatus });
 }

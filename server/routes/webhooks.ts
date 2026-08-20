@@ -4,6 +4,7 @@ import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWe
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode } from '../services/conversationStore';
+import { emitAiReplyStatus } from '../services/conversationEvents';
 import { generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
 import { markPendingFollowUp, clearPendingFollowUp } from '../services/pendingFollowUpStore';
@@ -112,6 +113,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
       const kbContext = formatKnowledgeBaseForPrompt(kb);
       const segment = await getTenantSegment(tenantId);
       const history = conversation?.messages.slice(0, -historyExclude);
+      // Sinaliza pro painel (SSE) que a IA começou a processar a última
+      // mensagem — ver emitAiReplyStatus em conversationEvents.ts. Emitido só
+      // depois de todos os gates de silêncio acima (agente pausado, lead
+      // bloqueado, modo só-anúncios): a partir daqui alguma saída SEMPRE
+      // acontece (mensagem enviada ou escalonamento), então todo caminho do
+      // try/catch abaixo precisa terminar com 'sent' ou 'failed'.
+      emitAiReplyStatus(tenantId, phone, 'generating');
       try {
         // Ativa "digitando..." já durante a chamada ao Gemini (a espera mais
         // longa), não só na hora de enviar as bolhas.
@@ -147,6 +155,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
         // firstContactMessage mantém o comportamento de sempre.
         if (history?.length === 0 && hasFirstContactMessage(kb)) {
           await sendFirstContactMessage(tenantId, phone, kb!, mediaConfig);
+          emitAiReplyStatus(tenantId, phone, 'sent');
           return;
         }
 
@@ -167,6 +176,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
           // conversa. Escala silenciosamente: o operador vê no painel e
           // conduz a próxima resposta do zero, sem a IA ter dito nada antes.
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
+          emitAiReplyStatus(tenantId, phone, 'failed');
           return;
         }
         if (result.agent === 'reclamacao') {
@@ -216,7 +226,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
         if (result.awaitingCustomerChoice) {
           await markPendingFollowUp(tenantId, phone, contactName, 'customer_reply', result.awaitingCustomerChoice, new Date(Date.now() + CUSTOMER_REPLY_FOLLOWUP_MS).toISOString());
         }
+        emitAiReplyStatus(tenantId, phone, 'sent');
       } catch (err: any) {
+        emitAiReplyStatus(tenantId, phone, 'failed');
         if (isGeoRestrictedError(err)) {
           await markGeoRestricted(tenantId, phone, err.message);
           await logEscalation(tenantId, phone, contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', text);
