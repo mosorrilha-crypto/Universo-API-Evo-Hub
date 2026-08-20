@@ -426,6 +426,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     };
     setFormData((prev) => ({ ...prev, products: [...prev.products, item] }));
     setIsProductWizardOpen(false);
+    setSelectedProductId(item.id);
   };
 
   // Busca + filtro por categoria do catálogo (pedido real, 20/08/2026:
@@ -435,6 +436,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // por categoria, então continua reaproveitando o mesmo agrupamento visual.
   const [productSearch, setProductSearch] = useState('');
   const [productCategoryFilter, setProductCategoryFilter] = useState('');
+
+  // Página de catálogo lista + painel de detalhe (pedido real, 20/08/2026:
+  // grade de cards ficava difícil de escanear com muitos itens e não dava
+  // pra editar produto pai + variantes com espaço confortável). `null` =
+  // nenhum item selecionado, painel mostra um estado vazio orientando a
+  // clicar num item da lista.
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
   const [newRuleText, setNewRuleText] = useState('');
 
@@ -580,12 +588,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // pro mesmo arquivo original (nada é reenviado), então a duplicata some
   // com a imagem/vídeo até alguém trocar por um novo.
   const handleDuplicateProduct = (id: string) => {
+    let newId = '';
     setFormData((prev) => {
       const original = prev.products.find((p) => p.id === id);
       if (!original) return prev;
+      newId = `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const copy: AgentProduct = {
         ...original,
-        id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: newId,
         name: `${original.name} (cópia)`,
         variants: original.variants ? original.variants.map((v) => ({ ...v })) : undefined,
       };
@@ -594,9 +604,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       products.splice(idx + 1, 0, copy);
       return { ...prev, products };
     });
+    if (newId) setSelectedProductId(newId);
   };
 
   const handleDeleteProduct = (id: string) => {
+    setSelectedProductId((prev) => (prev === id ? null : prev));
     setFormData((prev) => ({
       ...prev,
       products: prev.products.filter((p) => p.id !== id)
@@ -1292,6 +1304,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }
   };
 
+  const selectedProduct = formData.products.find((p) => p.id === selectedProductId) || null;
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       
@@ -1822,37 +1836,111 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
             )}
 
-            {/* Product List — agrupada por categoria quando os produtos têm
-                (ver productGroups acima); "row" achata cabeçalho + produtos
-                num `.map()` só, pra não duplicar o corpo do card em dois
-                loops separados. */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {formData.products.length > 0 && productGroups.categorized.length === 0 && productGroups.uncategorized.length === 0 && (
-                <div className="col-span-full p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
-                  Nenhum produto encontrado com esse filtro.
-                </div>
-              )}
-              {(() => {
-                const orderedRows: Array<{ type: 'header'; label: string } | { type: 'product'; product: AgentProduct }> = [];
-                for (const [category, items] of productGroups.categorized) {
-                  orderedRows.push({ type: 'header', label: category });
-                  for (const p of items) orderedRows.push({ type: 'product', product: p });
-                }
-                if (productGroups.uncategorized.length) {
-                  if (productGroups.categorized.length) orderedRows.push({ type: 'header', label: 'Sem categoria' });
-                  for (const p of productGroups.uncategorized) orderedRows.push({ type: 'product', product: p });
-                }
-                return orderedRows.map((row, rowIdx) => {
-                  if (row.type === 'header') {
+            {/* Lista + painel de detalhe (pedido real, 20/08/2026): antes era
+                uma grade de cards — ficava apertado editar produto pai +
+                variantes + mídia dentro de 1/3 da largura, e difícil de
+                escanear com muitos itens. Lista compacta à esquerda (nome,
+                preço, duração, Nº de variantes), painel largo à direita pra
+                editar o item selecionado. */}
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-2 space-y-1 max-h-[70vh] overflow-y-auto pr-1">
+                {formData.products.length === 0 && (
+                  <div className="p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
+                    Nenhum produto cadastrado ainda. Use "Criar item" acima pra começar.
+                  </div>
+                )}
+                {formData.products.length > 0 && productGroups.categorized.length === 0 && productGroups.uncategorized.length === 0 && (
+                  <div className="p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
+                    Nenhum produto encontrado com esse filtro.
+                  </div>
+                )}
+                {(() => {
+                  const orderedRows: Array<{ type: 'header'; label: string } | { type: 'product'; product: AgentProduct }> = [];
+                  for (const [category, items] of productGroups.categorized) {
+                    orderedRows.push({ type: 'header', label: category });
+                    for (const p of items) orderedRows.push({ type: 'product', product: p });
+                  }
+                  if (productGroups.uncategorized.length) {
+                    if (productGroups.categorized.length) orderedRows.push({ type: 'header', label: 'Sem categoria' });
+                    for (const p of productGroups.uncategorized) orderedRows.push({ type: 'product', product: p });
+                  }
+                  return orderedRows.map((row, rowIdx) => {
+                    if (row.type === 'header') {
+                      return (
+                        <div key={`cat-${row.label}-${rowIdx}`} className="pt-2 first:pt-0">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400">{row.label}</span>
+                        </div>
+                      );
+                    }
+                    const prod = row.product;
+                    const isSelected = selectedProductId === prod.id;
                     return (
-                      <div key={`cat-${row.label}-${rowIdx}`} className="col-span-full pt-2 first:pt-0">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400">{row.label}</span>
+                      <div
+                        key={prod.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedProductId(prod.id)}
+                        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setSelectedProductId(prod.id)}
+                        className={`w-full text-left p-2.5 rounded-xl border cursor-pointer group transition-colors ${
+                          isSelected ? 'bg-emerald-500/10 border-emerald-500/50' : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-white truncate">{prod.name}</span>
+                              {prod.active === false && <span className="text-[9px] text-slate-500 shrink-0">inativo</span>}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 text-[10.5px] text-slate-400 flex-wrap">
+                              <span className="text-emerald-400 font-semibold">{prod.price}</span>
+                              {prod.durationMinutes != null && (
+                                <span className="flex items-center gap-0.5">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {prod.durationMinutes}min
+                                </span>
+                              )}
+                              {!!prod.variants?.length && <span className="text-cyan-400">{prod.variants.length} variantes</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDuplicateProduct(prod.id);
+                              }}
+                              className="text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer p-1"
+                              title="Duplicar produto"
+                            >
+                              <FileCheck className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteProduct(prod.id);
+                              }}
+                              className="text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
+                              title="Excluir produto"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     );
-                  }
-                  const prod = row.product;
-                  return (
-                <div key={prod.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
+                  });
+                })()}
+              </div>
+
+              <div className="lg:col-span-3">
+                {!selectedProduct ? (
+                  <div className="h-full min-h-[280px] flex items-center justify-center p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-dashed border-slate-800">
+                    Selecione um item na lista ao lado pra editar, ou crie um novo com "Criar item".
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
+                  {(() => { const prod = selectedProduct; return (<>
                   <div className="absolute top-3 right-3 z-10 flex items-center gap-0.5">
                     <button
                       type="button"
@@ -2063,10 +2151,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       </span>
                     )}
                   </div>
-                </div>
-                  );
-                });
-              })()}
+                  </>); })()}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           )}
