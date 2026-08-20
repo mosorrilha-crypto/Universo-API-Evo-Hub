@@ -510,35 +510,27 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                             )}
                           </div>
 
-                          {/* Quick Stage Change buttons */}
-                          <div className="mt-2 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-                            <span>Mover para:</span>
-                            <div className="flex space-x-1">
-                              {stage.id !== 'ganho' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStageChange(lead, 'ganho');
-                                  }}
-                                  className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 hover:bg-emerald-800 border border-emerald-700/60"
-                                >
-                                  Ganho
-                                </button>
-                              )}
-                              {stage.id !== 'proposta' && stage.id !== 'ganho' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStageChange(lead, 'proposta');
-                                  }}
-                                  className="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 hover:bg-purple-800 border border-purple-700/60"
-                                >
-                                  Proposta
-                                </button>
-                              )}
-                            </div>
+                          {/* Mover estágio direto no card — antes só tinha 2 botões
+                              (Ganho/Proposta) escondendo os outros 4 estágios (incluindo
+                              Perdido) atrás da aba lateral, obrigando abrir o drawer só
+                              pra marcar um lead como perdido. Select cobre todos os 6. */}
+                          <div className="mt-2 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400 gap-1.5">
+                            <span className="shrink-0">Mover para:</span>
+                            <select
+                              value={stage.id}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                handleStageChange(lead, e.target.value as CRMStage);
+                              }}
+                              className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[10px] text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                            >
+                              {STAGES.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.label}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                         </div>
                       );
