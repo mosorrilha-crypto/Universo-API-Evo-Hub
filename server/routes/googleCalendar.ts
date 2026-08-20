@@ -14,14 +14,31 @@ import {
   checkFreeBusy,
   type CalendarConfig,
 } from '../services/googleCalendar';
-import { updateAppointmentSummaryByEventId, updateAppointmentTimesByEventId, clearAppointmentByEventId } from '../services/appointmentStore';
+import { updateAppointmentSummaryByEventId, updateAppointmentTimesByEventId, clearAppointmentByEventId, getAppointmentByEventId } from '../services/appointmentStore';
 import { clearRemindersForEvent } from '../services/reminderStore';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from '../services/calendarEventCompletionStore';
+import { getConversation } from '../services/conversationStore';
+import {
+  createFinancialTransaction,
+  updateFinancialTransactionBySourceRef,
+  listFinancialTransactionsBySourceRefs,
+  isDuplicateSourceRefError,
+  type PaymentMethod,
+  type PaymentStatus,
+} from '../services/financialStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId } from '../middleware/rbac';
+
+const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
+const PAYMENT_STATUSES: PaymentStatus[] = ['pago', 'pendente', 'atrasado', 'cancelado'];
+
+/** Referência estável usada em `financial_transactions.source_ref` pra ligar uma transação a um evento da Agenda — mesmo padrão de `recordFinancialTransactionForVerifiedPayment` em conversations.ts. */
+function sourceRefForEvent(eventId: string): string {
+  return `apt:${eventId}`;
+}
 
 interface GoogleCalendarRouterDeps {
   authenticateToken: RequestHandler;
@@ -137,7 +154,95 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
 
     const events = await listUpcomingEvents(tenantId, cfg, timeMinIso, timeMaxIso);
     const completedIds = await getCompletedEventIds(tenantId, events.map((e) => e.id));
-    res.json({ events: events.map((e) => ({ ...e, completed: completedIds.has(e.id) })) });
+
+    // Status financeiro por evento (pedido real, 20/08/2026: "poder alterar e
+    // lançar pagamentos direto da agenda") — uma única consulta por
+    // `source_ref` em vez de N chamadas, uma por card renderizado.
+    const transactions = await listFinancialTransactionsBySourceRefs(tenantId, events.map((e) => sourceRefForEvent(e.id)));
+    const paymentByEventId = new Map(transactions.map((t) => [t.sourceRef!.slice('apt:'.length), t]));
+
+    res.json({
+      events: events.map((e) => {
+        const payment = paymentByEventId.get(e.id);
+        return {
+          ...e,
+          completed: completedIds.has(e.id),
+          payment: payment ? { amount: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status } : null,
+        };
+      }),
+    });
+  }));
+
+  // Registra/lança um pagamento direto de um agendamento da Agenda (pedido
+  // real, 20/08/2026: evitar sair da Agenda → abrir Financeiro → lançar de
+  // novo). Cria uma transação financeira ligada ao evento via `sourceRef`
+  // (mesmo mecanismo de recordFinancialTransactionForVerifiedPayment em
+  // conversations.ts) — não sobrescreve nada no Google Calendar. Só cria uma
+  // vez por evento (a constraint única de source_ref barra duplicata); editar
+  // um pagamento já lançado fica pra uma etapa seguinte.
+  router.post('/api/google-calendar/events/:eventId/payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { amount, paymentMethod, status } = req.body || {};
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
+      return res.status(400).json({ error: 'Campo "amount" precisa ser um número válido.' });
+    }
+    if (!PAYMENT_METHODS.includes(paymentMethod)) {
+      return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
+    }
+    const resolvedStatus: PaymentStatus = PAYMENT_STATUSES.includes(status) ? status : 'pago';
+
+    const eventId = req.params.eventId;
+    const appointment = await getAppointmentByEventId(tenantId, eventId);
+    if (!appointment) {
+      return res.status(404).json({ error: 'Nenhum agendamento encontrado pra esse evento.' });
+    }
+    const conversation = await getConversation(tenantId, appointment.phone);
+
+    try {
+      const transaction = await createFinancialTransaction(tenantId, {
+        id: crypto.randomUUID(),
+        leadId: appointment.phone,
+        leadName: conversation?.name || appointment.phone,
+        leadPhone: appointment.phone,
+        productName: appointment.summary,
+        amount,
+        paymentMethod,
+        status: resolvedStatus,
+        date: new Date().toISOString(),
+        operatorName: 'Painel (Agenda)',
+        channel: appointment.source === 'manual' ? 'Agendamento manual' : 'WhatsApp',
+        sourceRef: sourceRefForEvent(eventId),
+      });
+      res.json({ transaction });
+    } catch (err) {
+      if (isDuplicateSourceRefError(err)) {
+        return res.status(409).json({ error: 'Já existe um pagamento registrado para este agendamento.' });
+      }
+      throw err;
+    }
+  }));
+
+  // Edita um pagamento JÁ lançado a partir do card do agendamento (etapa 2 do
+  // pedido real 20/08/2026 — a etapa 1, criar o lançamento, é a rota POST
+  // acima). Nunca cria: se ainda não existe transação com esse `sourceRef`,
+  // 404 (o operador usa "Registrar pagamento" pra criar a primeira vez).
+  router.patch('/api/google-calendar/events/:eventId/payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { amount, paymentMethod, status } = req.body || {};
+    if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)) {
+      return res.status(400).json({ error: 'Campo "amount" precisa ser um número válido.' });
+    }
+    if (paymentMethod !== undefined && !PAYMENT_METHODS.includes(paymentMethod)) {
+      return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
+    }
+    if (status !== undefined && !PAYMENT_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status inválido — esperado um de: ${PAYMENT_STATUSES.join(', ')}.` });
+    }
+    const transaction = await updateFinancialTransactionBySourceRef(tenantId, sourceRefForEvent(req.params.eventId), { amount, paymentMethod, status });
+    if (!transaction) {
+      return res.status(404).json({ error: 'Nenhum pagamento registrado pra esse agendamento ainda.' });
+    }
+    res.json({ transaction });
   }));
 
   // Horários livres de uma data específica, pro cadastro manual mostrar só

@@ -912,6 +912,38 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  /**
+   * Registra um pagamento direto do card do agendamento na Agenda (pedido
+   * real, 20/08/2026) — cria a transação financeira ligada ao evento no
+   * backend e já atualiza o badge local, sem precisar sair pro Financeiro.
+   */
+  const handleRegisterEventPayment = async (eventId: string, amount: number, paymentMethod: string, status: string) => {
+    const res = await apiFetch(`/api/google-calendar/events/${encodeURIComponent(eventId)}/payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount, paymentMethod, status }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    setUpcomingEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, payment: { amount: data.transaction.amount, paymentMethod: data.transaction.paymentMethod, status: data.transaction.status } } : e))
+    );
+  };
+
+  /** Edita um pagamento já lançado (etapa 2 do mesmo pedido, 20/08/2026) — mesmo card, agora com PATCH em vez de POST. */
+  const handleEditEventPayment = async (eventId: string, amount: number, paymentMethod: string, status: string) => {
+    const res = await apiFetch(`/api/google-calendar/events/${encodeURIComponent(eventId)}/payment`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount, paymentMethod, status }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    setUpcomingEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, payment: { amount: data.transaction.amount, paymentMethod: data.transaction.paymentMethod, status: data.transaction.status } } : e))
+    );
+  };
+
   // Escolher um lead a partir do widget de agenda (sem conversa aberta
   // ainda) reaproveita 100% o fluxo já existente de agendamento manual —
   // só seleciona a conversa e abre o mesmo modal que já é aberto de dentro
@@ -4257,6 +4289,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onEditSummary={handleEditEventSummary}
         onReschedule={handleRescheduleEvent}
         onDelete={handleDeleteEvent}
+        onRegisterPayment={handleRegisterEventPayment}
+        onEditPayment={handleEditEventPayment}
       />
     </div>
   );
