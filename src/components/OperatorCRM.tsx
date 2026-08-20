@@ -16,7 +16,6 @@ import {
   Plus,
   CheckCircle2,
   Clock,
-  AlertTriangle,
   ArrowUpRight,
   Send,
   Tag,
@@ -29,6 +28,8 @@ import {
   Building2,
   UserPlus
 } from 'lucide-react';
+// AlertTriangle removido daqui: era só pro banner "não conectado ao backend real",
+// que ficou desatualizado (o CRM já persiste de verdade, ver server/routes/crm.ts).
 
 interface OperatorCRMProps {
   leads?: LeadInfo[];
@@ -259,16 +260,6 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Aviso de dados de demonstração — esta tela ainda não está ligada ao backend
-          (ver docs/GUIA-DO-PROJETO.md, gap #2): tudo aqui é localStorage local deste
-          navegador, não reflete o CRM real de nenhum tenant. */}
-      <div className="bg-amber-950/40 border border-amber-800 rounded-xl px-4 py-3 flex items-center gap-2.5 text-amber-200">
-        <AlertTriangle className="w-4 h-4 shrink-0" />
-        <p className="text-xs font-medium">
-          Dados de demonstração — esta tela ainda não está conectada ao backend real, o que você vê aqui fica só neste navegador.
-        </p>
-      </div>
-
       {/* Header Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
