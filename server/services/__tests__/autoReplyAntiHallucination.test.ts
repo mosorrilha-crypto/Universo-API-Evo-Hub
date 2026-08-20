@@ -115,8 +115,10 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
   });
 
   it('Etapa 6 — corrige quando o modelo cita um horário fora dos que consultar_disponibilidade_semana realmente devolveu', async () => {
+    // Horários padrão do estúdio (08:30/13:30/16:30/18:30) — consultar_disponibilidade_semana
+    // filtra a resposta bruta de findWeeklyAvailability pra só esses, ver executeCalendarTool.
     findWeeklyAvailability.mockResolvedValue([
-      { date: '2026-08-10', slots: [{ start: '09:00', end: '10:00' }, { start: '14:00', end: '15:00' }] },
+      { date: '2026-08-10', slots: [{ start: '08:30', end: '09:30' }, { start: '13:30', end: '14:30' }] },
     ]);
     let toolCallCount = 0;
     const ai = {
@@ -136,7 +138,7 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
             }
             return { functionCalls: [] } as any;
           }
-          // 11:00 nunca esteve na lista devolvida pela ferramenta (só 09:00 e 14:00) — alucinação.
+          // 11:00 nunca esteve na lista devolvida pela ferramenta (só 08:30 e 13:30) — alucinação.
           return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Temos as 11:00 livre essa semana!'], needsHumanConfirmation: false }) } as any;
         },
       },
@@ -150,12 +152,54 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
     expect(result).not.toBeNull();
     expect(result?.bubbles.join(' ')).not.toContain('11:00');
     // A correção deve oferecer um dos horários realmente confirmados.
-    expect(result?.bubbles.join(' ')).toMatch(/09:00|14:00/);
+    expect(result?.bubbles.join(' ')).toMatch(/08:30|13:30/);
+  });
+
+  it('pedido real (20/08/2026) — só oferece os horários PADRÃO (08:30/13:30/16:30/18:30), mesmo quando outros horários reais também estão livres', async () => {
+    // 09:00 e 11:00 estão livres de verdade (findWeeklyAvailability devolveria),
+    // mas não são horário padrão — consultar_disponibilidade_semana (executeCalendarTool)
+    // precisa filtrar pra só 08:30/13:30 antes de devolver pro modelo.
+    findWeeklyAvailability.mockResolvedValue([
+      { date: '2026-08-10', slots: [{ start: '08:30', end: '09:30' }, { start: '09:00', end: '10:00' }, { start: '11:00', end: '12:00' }, { start: '13:30', end: '14:30' }] },
+    ]);
+    let toolCallCount = 0;
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents?.[0]?.text?.includes('Classifique a intenção principal')) {
+            return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          }
+          if (req.config?.tools) {
+            toolCallCount++;
+            if (toolCallCount === 1) {
+              const call = { name: 'consultar_disponibilidade_semana', args: {} };
+              return {
+                functionCalls: [call],
+                candidates: [{ content: { role: 'model', parts: [{ functionCall: call }] } }],
+              } as any;
+            }
+            return { functionCalls: [] } as any;
+          }
+          // Modelo cita um horário livre de verdade, mas fora dos padrão — deve ser corrigido igual a uma alucinação.
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Temos as 09:00 livre!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'quais horários vocês têm essa semana?', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.bubbles.join(' ')).not.toContain('09:00');
+    expect(result?.bubbles.join(' ')).not.toContain('11:00');
+    expect(result?.bubbles.join(' ')).toMatch(/08:30|13:30/);
   });
 
   it('quando o fallback dispara com horários confirmados, também preenche quickReplyOptions com botões reais (pedido real, 20/08/2026)', async () => {
     findWeeklyAvailability.mockResolvedValue([
-      { date: '2026-08-10', slots: [{ start: '09:00', end: '10:00' }, { start: '14:00', end: '15:00' }] },
+      { date: '2026-08-10', slots: [{ start: '08:30', end: '09:30' }, { start: '13:30', end: '14:30' }] },
     ]);
     let toolCallCount = 0;
     const ai = {
@@ -188,8 +232,8 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
     expect(result).not.toBeNull();
     expect(result?.quickReplyOptions).toBeDefined();
     expect(result?.quickReplyOptions?.buttons).toEqual([
-      { id: 'horario_09:00', title: '09:00' },
-      { id: 'horario_14:00', title: '14:00' },
+      { id: 'horario_08:30', title: '08:30' },
+      { id: 'horario_13:30', title: '13:30' },
     ]);
     // Máximo de 3 botões (limite da própria Meta pra reply buttons).
     expect(result?.quickReplyOptions?.buttons.length).toBeLessThanOrEqual(3);

@@ -631,7 +631,7 @@ const HOLD_EXPIRY_MS = 2 * 60 * 60 * 1000;
 const AGENDAMENTO_TOOLS: FunctionDeclaration[] = [
   {
     name: 'consultar_disponibilidade_semana',
-    description: 'Descobre horários realmente livres nos próximos 7 dias (uma AMOSTRA de poucos por dia, não a lista completa), respeitando o horário de atendimento do negócio e a agenda real do Google Calendar — use isso ANTES de oferecer um horário específico ao cliente, em vez de verificar_disponibilidade um horário por vez adivinhado. Se não vier nenhum dia na resposta, é porque não há disponibilidade configurada ou livre nessa semana — nunca invente um horário fora do que essa ferramenta retornou. NUNCA liste todos os horários recebidos numa mensagem — escolha no máximo 2-3 pra oferecer.',
+    description: 'Descobre quais dos horários PADRÃO do estúdio (08:30, 13:30, 16:30 — e 18:30 só se o cliente pedir algo depois das 16:30) estão realmente livres nos próximos 7 dias, respeitando o horário de atendimento do negócio e a agenda real do Google Calendar — use isso ANTES de oferecer um horário específico ao cliente, em vez de verificar_disponibilidade um horário por vez adivinhado. Se não vier nenhum dia na resposta, nenhum dos horários padrão está livre essa semana — nunca invente um horário fora do que essa ferramenta retornou.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -852,35 +852,29 @@ async function executeCalendarTool(
         // maior inventado, que poderia esconder slots livres de verdade.
         const durationMinutes = (args.servico && findProductDurationMinutes(kb, args.servico)) || DEFAULT_SLOT_DURATION_MINUTES;
         const days = await findWeeklyAvailability(tenantId, cfg, durationMinutes, BUSINESS_TIMEZONE);
-        const allTimes = days.flatMap((d) => d.slots.map((s) => s.start));
-        // Achado real em produção (19/08/2026, tenant Monique/Mabel): com a
-        // agenda vazia, findWeeklyAvailability devolve TODO slot de 30min
-        // possível pros 7 dias (pode passar de 100 horários) — o modelo
-        // recebia essa lista inteira como resultado da ferramenta e, numa
-        // resposta real, ecoou tudo junto num só balão gigante ("08:30 o
-        // 09:00 o 09:30 o ... o 19:00"), péssima experiência pra cliente
-        // real. Cortar pra poucos horários por dia ANTES de devolver pro
-        // modelo garante que ele fisicamente não consegue despejar a lista
-        // inteira, em vez de confiar só em instrução de prompt pra ele se
-        // resumir sozinho. `confirmedTimesHHmm` (usado pelo gate
-        // anti-alucinação depois) continua com a lista COMPLETA — um
-        // horário real fora da amostra cortada ainda deve validar certo se
-        // o cliente pedir um horário específico que não estava nos poucos
-        // exemplos mostrados.
-        const MAX_SLOTS_PER_DAY_FOR_MODEL = 4;
-        const daysForModel = days.map((d) => ({
-          date: d.date,
-          slots: d.slots.slice(0, MAX_SLOTS_PER_DAY_FOR_MODEL),
-          total_horarios_livres_no_dia: d.slots.length,
-        }));
+        // Pedido real do dono do produto (20/08/2026) — depois de várias
+        // tentativas só de PROMPT (instruir "no máximo 2-3 horários") que o
+        // modelo às vezes ignorava numa resposta real, trava a ferramenta
+        // em si num "menu" fixo de horários padrão em vez de devolver TODO
+        // slot de 30min livre no expediente (que já chegou a passar de 100
+        // horários numa semana vazia). Isso é determinístico: o modelo
+        // fisicamente não recebe (nem pode citar) nenhum horário fora dessa
+        // lista — o gate anti-alucinação corrige sozinho se ele tentar. A
+        // ferramenta faz a checagem real de disponibilidade só desses
+        // horários padrão, e só devolve os que estiverem livres de verdade.
+        const STANDARD_OFFER_TIMES = ['08:30', '13:30', '16:30', '18:30'];
+        const curatedDays = days
+          .map((d) => ({ date: d.date, slots: d.slots.filter((s) => STANDARD_OFFER_TIMES.includes(s.start)) }))
+          .filter((d) => d.slots.length > 0);
+        const allTimes = curatedDays.flatMap((d) => d.slots.map((s) => s.start));
         return {
           response: {
-            dias_disponiveis: daysForModel,
-            aviso: 'Cada dia mostra só uma AMOSTRA de até 4 horários (ver total_horarios_livres_no_dia pra saber quantos existem de verdade) — NUNCA liste todos, escolha no máximo 2-3 opções pra oferecer e pergunte a preferência do cliente.',
+            dias_disponiveis: curatedDays,
+            aviso: 'Só oferece os 3 horários padrão do estúdio por dia: 08:30 (manhã), 13:30 ou 16:30 (tarde) — nessa ordem de preferência. NUNCA ofereça 18:30 de primeira; só mencione esse horário se o cliente pedir explicitamente algo depois das 16:30.',
           },
-          summary: days.length
-            ? `Consultou disponibilidade da semana (duração ${durationMinutes}min): ${days.map((d) => `${d.date} (${d.slots.length} horário(s))`).join(', ')}.`
-            : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum horário livre encontrado.`,
+          summary: curatedDays.length
+            ? `Consultou disponibilidade da semana (duração ${durationMinutes}min, horários padrão 08:30/13:30/16:30/18:30): ${curatedDays.map((d) => `${d.date} (${d.slots.map((s) => s.start).join(', ')})`).join('; ')}.`
+            : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum dos horários padrão (08:30/13:30/16:30/18:30) está livre essa semana.`,
           confirmedTimesHHmm: allTimes.length ? allTimes : undefined,
         };
       }
@@ -1225,7 +1219,7 @@ Regras:
 - Sempre passe datas/horas no formato "YYYY-MM-DDTHH:mm:ss" (hora local, SEM offset), fuso ${BUSINESS_TIMEZONE}.
 - Se faltar informação essencial pra agir (dia/horário desejado), NÃO chame nenhuma ferramenta.
 - Antes de criar um agendamento novo, verifique disponibilidade primeiro; só crie se estiver livre.
-- NUNCA liste mais de 2-3 horários numa única mensagem, mesmo que a ferramenta devolva mais opções — resuma por dia/período (ex: "de manhã" ou "à tarde") e pergunte a preferência do cliente antes de detalhar mais.
+- Horários padrão do estúdio pra oferecer: 08:30 (manhã), 13:30 ou 16:30 (tarde) — consultar_disponibilidade_semana já só devolve esses (checados contra a agenda real). NUNCA ofereça 18:30 de primeira; só mencione se o cliente pedir explicitamente algo depois das 16:30.
 - Se a cliente se comprometer com uma data específica pra transferir a seña mas ainda não pagou, chame criar_pre_reserva — isso NUNCA substitui criar_agendamento, é só um registro de follow-up.
 - Pra remarcar/cancelar, você NÃO precisa saber o ID do evento — as ferramentas já resolvem isso sozinhas a partir deste contato.`;
 
@@ -1732,10 +1726,13 @@ export async function generateAutoReplyForText(
         // precisa ver mais que um punhado de horários pra escolher.
         // Achado real em produção (20/08/2026): mesmo cortado a 6 horários,
         // uma lista crua de HH:mm separados por vírgula soa robótica e
-        // pesada pro cliente ler no WhatsApp — a instrução principal do
-        // agente (ver prompt, "NUNCA liste mais de 2-3 horários") já evita
-        // isso na resposta normal; o fallback determinístico precisa seguir
-        // a mesma regra em vez de despejar tudo que sobrou de confirmedTimes.
+        // pesada pro cliente ler no WhatsApp. Desde que
+        // consultar_disponibilidade_semana passou a devolver só os horários
+        // PADRÃO do estúdio (08:30/13:30/16:30/18:30, ver executeCalendarTool
+        // acima), confirmedTimes já vem restrito a essa lista — dedupe +
+        // corte a 3 aqui só garante que 18:30 (o "extra", só pra quando o
+        // cliente pede depois das 16:30) nunca aparece no fallback padrão,
+        // mesmo que esteja livre.
         const MAX_TIMES_IN_FALLBACK = 3;
         const uniqueConfirmedTimes = [...new Set(confirmedTimes)].sort();
         const timesToShow = uniqueConfirmedTimes.slice(0, MAX_TIMES_IN_FALLBACK);
