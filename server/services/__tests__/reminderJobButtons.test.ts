@@ -22,7 +22,7 @@ const wasReminderSent = vi.fn(async () => false);
 const markReminderSent = vi.fn(async () => undefined);
 vi.mock('../reminderStore', () => ({ wasReminderSent, markReminderSent }));
 
-const sendWhatsAppInteractiveButtons = vi.fn(async () => undefined);
+const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
 vi.mock('../metaSend', () => ({ sendWhatsAppInteractiveButtons }));
 
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage: vi.fn() }));
@@ -57,9 +57,11 @@ describe('reminderJob — lembrete com botões de Confirmar/Remarcar', () => {
     expect(to).toBe('595981111111');
     // 14:00 UTC vira 11:00 no fuso America/Asuncion — a conversão de fuso já é comportamento existente, não faz parte deste refinamento.
     expect(body).toContain('11:00');
+    // Tenant sem `reminder_language` configurado cai no default 'es'
+    // (migration 0038) — é o idioma real da única tenant em produção.
     expect(buttons).toEqual([
       { id: 'lembrete_confirmar', title: '✅ Confirmar' },
-      { id: 'lembrete_remarcar', title: '🔄 Remarcar' },
+      { id: 'lembrete_remarcar', title: '🔄 Reprogramar' },
     ]);
     expect(markReminderSent).toHaveBeenCalledWith('tenant-a', 'evt-1', 'mesmo_dia');
   });

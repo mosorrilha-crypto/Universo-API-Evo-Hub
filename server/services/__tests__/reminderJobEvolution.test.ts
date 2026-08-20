@@ -5,18 +5,24 @@
  * Cobre que um tenant com credencial Evolution cadastrada usa
  * evolutionSend.ts, nunca metaSend.ts, e vice-versa.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const listConnectedCalendarTenants = vi.fn(async () => ['tenant-evolution', 'tenant-meta']);
+// Horário fixo (não `new Date()` real) — evita teste instável dependendo da
+// hora real de quando o CI roda: reminderJob.ts (achado real, 20/08/2026)
+// agora só manda lembrete "mesmo_dia" depois do horário de abertura
+// configurado do tenant (ou 07:00 padrão sem configuração) — um evento
+// "agora" de verdade rodando de madrugada faria este teste falhar sem
+// nenhuma mudança de comportamento errada.
 const listUpcomingEvents = vi.fn(async () => [
-  { id: 'evt-1', summary: 'Corte', startIso: new Date().toISOString() },
+  { id: 'evt-1', summary: 'Corte', startIso: '2026-08-10T14:00:00.000Z' },
 ]);
 const listAllAppointments = vi.fn(async (tenantId: string) => [
   { eventId: 'evt-1', phone: tenantId === 'tenant-evolution' ? '595981111111' : '595982222222' },
 ]);
 const wasReminderSent = vi.fn(async () => false);
 const markReminderSent = vi.fn(async () => undefined);
-const sendWhatsAppInteractiveButtons = vi.fn(async () => undefined);
+const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
 const sendEvolutionTextMessage = vi.fn(async () => undefined);
 
 vi.mock('../googleCalendar', async (importOriginal) => {
@@ -46,6 +52,16 @@ beforeEach(() => {
       { tenant_id: 'tenant-evolution', instance_name: 'instancia-cliente', api_url: 'https://evo-cliente.example.com', api_key: 'tenant-evo-key' },
     ],
   }));
+
+  vi.useFakeTimers();
+  // 14:00 UTC = 11:00 em America/Asuncion — bem depois do horário de
+  // abertura padrão (07:00 fallback), então o gate de "mesmo_dia" do
+  // reminderJob.ts passa sem depender da hora real do CI.
+  vi.setSystemTime(new Date('2026-08-10T12:00:00Z'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('reminderJob — roteamento por provedor (Evolution vs Meta)', () => {

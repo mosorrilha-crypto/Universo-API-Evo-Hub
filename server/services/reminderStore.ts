@@ -26,3 +26,14 @@ export async function markReminderSent(tenantId: string, eventId: string, type: 
     .from('sent_reminders')
     .upsert({ tenant_id: tenantId, event_id: eventId, reminder_type: type }, { onConflict: 'tenant_id,event_id,reminder_type' });
 }
+
+/**
+ * Limpa o registro de lembretes já enviados pra um evento — necessário ao
+ * remarcar (pedido real, 20/08/2026): o dedup é chaveado por `event_id`
+ * (que não muda numa remarcação), então sem isto um lembrete já marcado
+ * como enviado pro dia ANTIGO nunca dispararia de novo pro dia NOVO.
+ */
+export async function clearRemindersForEvent(tenantId: string, eventId: string): Promise<void> {
+  const db = getDb();
+  await db.from('sent_reminders').delete().eq('tenant_id', tenantId).eq('event_id', eventId);
+}

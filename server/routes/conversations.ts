@@ -710,9 +710,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const { serviceName, startIso, endIso, notes, paymentReceived } = req.body || {};
+    const { serviceName, startIso, endIso, notes, paymentReceived, paymentAmountReceived } = req.body || {};
     if (!serviceName?.trim() || !startIso || !endIso) {
       return res.status(400).json({ error: 'Campos "serviceName", "startIso" e "endIso" são obrigatórios.' });
+    }
+    // Pedido real (20/08/2026): quando a cliente manda um valor diferente do
+    // combinado (ex: seña de Gs 50.000 mas ela transferiu outro valor), o
+    // financeiro precisa refletir o valor REAL recebido, não o preço do
+    // catálogo — nunca aceita um valor negativo/zero por engano.
+    if (paymentAmountReceived !== undefined && !(typeof paymentAmountReceived === 'number' && paymentAmountReceived > 0)) {
+      return res.status(400).json({ error: '"paymentAmountReceived", quando informado, precisa ser um número maior que zero.' });
     }
 
     // Mesmo bug real de produção corrigido em autoReply.ts/criar_agendamento
@@ -762,7 +769,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // de um sem pagamento nenhum ainda verificado.
     if (paymentReceived === true) {
       const verified = await setPaymentVerification(tenantId, phone, 'verified', req.user!.id);
-      if (verified) await recordFinancialTransactionForVerifiedPayment(tenantId, phone, verified);
+      if (verified) await recordFinancialTransactionForVerifiedPayment(tenantId, phone, verified, typeof paymentAmountReceived === 'number' ? paymentAmountReceived : undefined);
     }
 
     const appointment = await getAppointmentForPhone(tenantId, phone);
@@ -801,7 +808,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   async function recordFinancialTransactionForVerifiedPayment(
     tenantId: string,
     phone: string,
-    appointment: TrackedAppointment
+    appointment: TrackedAppointment,
+    /** Valor REAL recebido, quando difere do preço do catálogo (ex: seña combinada de Gs 50.000, mas a cliente transferiu outro valor) — pedido real (20/08/2026). undefined = usa o preço do catálogo, comportamento de sempre. */
+    overrideAmount?: number
   ): Promise<void> {
     if (!appointment.eventId) return; // sem evento real, sem referência estável pra deduplicar
     try {
@@ -809,7 +818,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         getKnowledgeBase(tenantId),
         getConversation(tenantId, phone),
       ]);
-      const amount = resolveProductAmountByName(kb, appointment.summary) ?? 0;
+      const amount = overrideAmount ?? (resolveProductAmountByName(kb, appointment.summary) ?? 0);
       await createFinancialTransaction(tenantId, {
         id: crypto.randomUUID(),
         leadId: phone,

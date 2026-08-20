@@ -208,7 +208,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           await sendBubbles(channel, message.from, result.bubbles, async (bubbleText) => {
             await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
             console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
-          }, message.messageId, result.phase, result.routerElapsedMs);
+          }, message.messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
           emitAiReplyStatus(tenantId, message.from, 'sent');
         } catch (err: any) {
           emitAiReplyStatus(tenantId, message.from, 'failed');

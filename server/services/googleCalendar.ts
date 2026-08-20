@@ -271,11 +271,19 @@ export interface WeeklyAvailabilityDay {
  * localmente. Evita estourar rate limit do Google numa semana com muitos
  * horários candidatos (granularidade de 30min).
  */
-export async function findWeeklyAvailability(
+/**
+ * Núcleo compartilhado por `findWeeklyAvailability` (próximos 7 dias, usado
+ * pelo agente de IA) e `findAvailabilityForDate` (uma data específica,
+ * escolhida pelo operador no cadastro manual — issue "mostrar só horários
+ * livres no cadastro manual") — mesma regra de negócio (expediente
+ * configurado + freebusy real), só varia a lista de datas candidatas.
+ */
+async function computeAvailabilityForDates(
   tenantId: string,
   cfg: CalendarConfig,
+  dates: string[],
   durationMinutes: number,
-  timezone = 'America/Asuncion'
+  timezone: string
 ): Promise<WeeklyAvailabilityDay[]> {
   const hours = await getTenantBusinessHours(tenantId);
   if (!hours) return [];
@@ -283,10 +291,7 @@ export async function findWeeklyAvailability(
   type Candidate = { startMin: number; endMin: number };
   const candidatesByDate = new Map<string, Candidate[]>();
   const SLOT_STEP_MINUTES = 30;
-  const now = new Date();
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
-    const dateStr = d.toISOString().slice(0, 10);
+  for (const dateStr of dates) {
     const weekday = new Date(`${dateStr}T12:00:00Z`).getUTCDay();
     const dayHours = hours[String(weekday)];
     if (!dayHours) continue; // tenant não atende nesse dia
@@ -301,11 +306,11 @@ export async function findWeeklyAvailability(
   }
   if (candidatesByDate.size === 0) return [];
 
-  const dates = Array.from(candidatesByDate.keys());
-  const firstDate = dates[0];
-  const lastDate = dates[dates.length - 1];
+  const sortedDates = Array.from(candidatesByDate.keys()).sort();
+  const firstDate = sortedDates[0];
+  const lastDate = sortedDates[sortedDates.length - 1];
 
-  const busy = await withStructuredLog({ tenantId, area: 'googleCalendar', op: 'findWeeklyAvailability' }, async () => {
+  const busy = await withStructuredLog({ tenantId, area: 'googleCalendar', op: 'computeAvailabilityForDates' }, async () => {
     const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const timeMin = localNaiveToUtcIso(`${firstDate}T00:00:00`, timezone);
@@ -319,7 +324,8 @@ export async function findWeeklyAvailability(
   });
 
   const result: WeeklyAvailabilityDay[] = [];
-  for (const [date, candidates] of candidatesByDate) {
+  for (const date of sortedDates) {
+    const candidates = candidatesByDate.get(date)!;
     const freeSlots: WeeklyAvailabilitySlot[] = [];
     for (const c of candidates) {
       const slotStartMs = new Date(localNaiveToUtcIso(`${date}T${minutesToTime(c.startMin)}:00`, timezone)).getTime();
@@ -330,6 +336,33 @@ export async function findWeeklyAvailability(
     if (freeSlots.length > 0) result.push({ date, slots: freeSlots });
   }
   return result;
+}
+
+export async function findWeeklyAvailability(
+  tenantId: string,
+  cfg: CalendarConfig,
+  durationMinutes: number,
+  timezone = 'America/Asuncion'
+): Promise<WeeklyAvailabilityDay[]> {
+  const now = new Date();
+  const dates = Array.from({ length: 7 }, (_, i) => new Date(now.getTime() + i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+  return computeAvailabilityForDates(tenantId, cfg, dates, durationMinutes, timezone);
+}
+
+/**
+ * Horários livres de UMA data específica (qualquer data, não só os próximos
+ * 7 dias) — pro cadastro manual do operador escolher visualmente em vez de
+ * digitar hora "no escuro" e só descobrir conflito depois de tentar salvar.
+ */
+export async function findAvailabilityForDate(
+  tenantId: string,
+  cfg: CalendarConfig,
+  dateStr: string,
+  durationMinutes: number,
+  timezone = 'America/Asuncion'
+): Promise<WeeklyAvailabilitySlot[]> {
+  const days = await computeAvailabilityForDates(tenantId, cfg, [dateStr], durationMinutes, timezone);
+  return days[0]?.slots || [];
 }
 
 export async function createCalendarEvent(
@@ -413,6 +446,8 @@ export interface UpcomingEvent {
   id: string;
   summary: string;
   startIso: string;
+  /** Pra calcular a duração real do agendamento na hora de remarcar (widget de agenda) — mesmo horário de fim que já existe no evento real. */
+  endIso?: string;
   description?: string;
 }
 
@@ -430,6 +465,6 @@ export async function listUpcomingEvents(tenantId: string, cfg: CalendarConfig, 
     });
     return (res.data.items || [])
       .filter((e) => e.id && e.summary && e.start?.dateTime)
-      .map((e) => ({ id: e.id!, summary: e.summary!, startIso: e.start!.dateTime!, description: e.description || undefined }));
+      .map((e) => ({ id: e.id!, summary: e.summary!, startIso: e.start!.dateTime!, endIso: e.end?.dateTime || undefined, description: e.description || undefined }));
   });
 }

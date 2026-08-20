@@ -153,6 +153,48 @@ describe('generateAutoReplyForText — anti-alucinação de horário (Epic 4.5.7
     expect(result?.bubbles.join(' ')).toMatch(/09:00|14:00/);
   });
 
+  it('quando o fallback dispara com horários confirmados, também preenche quickReplyOptions com botões reais (pedido real, 20/08/2026)', async () => {
+    findWeeklyAvailability.mockResolvedValue([
+      { date: '2026-08-10', slots: [{ start: '09:00', end: '10:00' }, { start: '14:00', end: '15:00' }] },
+    ]);
+    let toolCallCount = 0;
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents?.[0]?.text?.includes('Classifique a intenção principal')) {
+            return { text: JSON.stringify({ agent: 'agendamento' }) } as any;
+          }
+          if (req.config?.tools) {
+            toolCallCount++;
+            if (toolCallCount === 1) {
+              const call = { name: 'consultar_disponibilidade_semana', args: {} };
+              return {
+                functionCalls: [call],
+                candidates: [{ content: { role: 'model', parts: [{ functionCall: call }] } }],
+              } as any;
+            }
+            return { functionCalls: [] } as any;
+          }
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Temos as 11:00 livre essa semana!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'quais horários vocês têm essa semana?', 'Cliente', undefined, undefined,
+      '595981234567', CALENDAR_CONFIG
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.quickReplyOptions).toBeDefined();
+    expect(result?.quickReplyOptions?.buttons).toEqual([
+      { id: 'horario_09:00', title: '09:00' },
+      { id: 'horario_14:00', title: '14:00' },
+    ]);
+    // Máximo de 3 botões (limite da própria Meta pra reply buttons).
+    expect(result?.quickReplyOptions?.buttons.length).toBeLessThanOrEqual(3);
+  });
+
   it('NÃO apaga a resposta quando o cliente só reconfirma/pede a localização de um agendamento JÁ REAL, mesmo sem nenhuma ferramenta rodar nesta mensagem (achado real em produção: "Ok ok" / "la ubicación no me enviaste" apagava a resposta certa e virava uma frase genérica em português)', async () => {
     getAppointmentForPhone.mockResolvedValue({
       eventId: 'evt-real-1',
