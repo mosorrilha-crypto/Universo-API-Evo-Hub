@@ -150,11 +150,16 @@ export interface LeadAttribution {
 
 /** Uma variante de tamanho/modelo dentro de um produto unificado — ver AgentProduct.variants. */
 export interface ProductVariant {
+  /** Nome/código da variante — o que o agente cita pro cliente e usa pra bater com o nome do serviço pedido (ex: "AC F400" num catálogo de piscinas, ou "Lash Lift" numa família de serviços). */
   code: string;
   dimensions?: string;
   litros?: number;
   price: string;
   priceAmount?: number;
+  /** Duração real desta variante em minutos — quando ausente, cai pro durationMinutes do produto pai (ver findProductDurationMinutes em knowledgeBaseStore.ts). Necessário quando variantes da mesma família têm durações diferentes (ex: Lash Lift 90min vs Efecto Delineado 120min). */
+  durationMinutes?: number;
+  /** false = esta variante específica não é agendável sozinha, mesmo que o produto pai seja. Quando ausente, cai pro bookable do produto pai. */
+  bookable?: boolean;
 }
 
 export interface AgentProduct {
@@ -162,6 +167,8 @@ export interface AgentProduct {
   name: string;
   price: string;
   description: string;
+  /** Agrupamento pro prompt do agente e pra listagem do painel (ex: "Pestañas", "Cejas") — opcional, catálogos pequenos podem ficar sem (ver server/services/knowledgeBaseStore.ts formatKnowledgeBaseForPrompt). */
+  category?: string;
   /** Tamanhos/modelos dessa família, cada um com preço próprio (ver server/services/knowledgeBaseStore.ts). */
   variants?: ProductVariant[];
   exampleImageBase64?: string;

@@ -10,7 +10,7 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { getKnowledgeBase, resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
@@ -697,8 +697,7 @@ async function notifyMetaCapiEvent(tenantId: string, phone: string, eventName: s
   if (!ctwaClid) return;
 
   const kb = await getKnowledgeBase(tenantId);
-  const product = kb?.products?.find((p) => p.name === titulo);
-  const value = product ? resolveProductPriceAmount(product) : undefined;
+  const value = resolveProductAmountByName(kb, titulo);
 
   await fireMetaCapiEventForTenant(tenantId, {
     eventName,

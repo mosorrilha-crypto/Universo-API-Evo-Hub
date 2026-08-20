@@ -21,7 +21,7 @@ import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage,
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
-import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, resolveProductPriceAmount } from '../services/knowledgeBaseStore';
+import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, findProductMatch, resolveProductAmountByName } from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
@@ -577,7 +577,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     const kb = await getKnowledgeBase(tenantId);
-    const product = kb?.products?.find((p) => p.name === productName);
+    // findProductMatch acha o produto pai mesmo quando productName bate numa
+    // variante específica (ex: "Lash Lift" dentro da família "Pestañas") —
+    // foto/vídeo de exemplo são sempre da família inteira, nunca por variante.
+    const product = findProductMatch(kb, productName)?.product;
     if (!product?.exampleImageBase64) {
       return res.status(404).json({ error: 'Esse serviço não tem foto de exemplo cadastrada na Base de Conhecimento.' });
     }
@@ -639,7 +642,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     const kb = await getKnowledgeBase(tenantId);
-    const product = kb?.products?.find((p) => p.name === productName);
+    const product = findProductMatch(kb, productName)?.product;
     if (!product?.exampleVideoId) {
       return res.status(404).json({ error: 'Esse serviço não tem vídeo de exemplo cadastrado na Base de Conhecimento.' });
     }
@@ -806,9 +809,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         getKnowledgeBase(tenantId),
         getConversation(tenantId, phone),
       ]);
-      const normalized = appointment.summary.trim().toLowerCase();
-      const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
-      const amount = product ? resolveProductPriceAmount(product) : 0;
+      const amount = resolveProductAmountByName(kb, appointment.summary) ?? 0;
       await createFinancialTransaction(tenantId, {
         id: crypto.randomUUID(),
         leadId: phone,

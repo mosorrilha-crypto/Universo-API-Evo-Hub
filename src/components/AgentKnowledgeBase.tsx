@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AgentKnowledgeBase, AgentProduct, ProductVariant, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
@@ -544,12 +544,35 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // Edita nome/preço/descrição de um produto já cadastrado direto no card —
   // sem isso, a única forma de corrigir algo era apagar e recriar do zero
   // (perdendo foto de exemplo, promoção etc. já configurados).
-  const handleProductFieldChange = (id: string, field: 'name' | 'price' | 'description', value: string) => {
+  const handleProductFieldChange = (id: string, field: 'name' | 'price' | 'description' | 'category', value: string) => {
     setFormData((prev) => ({
       ...prev,
       products: prev.products.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
     }));
   };
+
+  // Agrupamento visual por categoria (pedido real, 20/08/2026: catálogo com
+  // muitos serviços de perto, ex: 19 itens de um estúdio de beleza, ficava
+  // difícil de escanear numa lista só). `category` já existia no modelo de
+  // dados e já era usado pra agrupar o texto do prompt do agente
+  // (formatKnowledgeBaseForPrompt), mas não tinha campo editável nem
+  // agrupamento visual aqui — só dava pra setar direto no banco. Não muda a
+  // ordem/array real de `formData.products` (todo handler de edição continua
+  // operando por `prod.id`), só a forma de renderizar a lista.
+  const productGroups = useMemo(() => {
+    const byCategory = new Map<string, AgentProduct[]>();
+    const uncategorized: AgentProduct[] = [];
+    for (const p of formData.products) {
+      const category = p.category?.trim();
+      if (!category) {
+        uncategorized.push(p);
+        continue;
+      }
+      if (!byCategory.has(category)) byCategory.set(category, []);
+      byCategory.get(category)!.push(p);
+    }
+    return { categorized: Array.from(byCategory.entries()), uncategorized };
+  }, [formData.products]);
 
   // Variantes de tamanho/modelo dentro de um produto unificado (ex: "Piscina Fapac
   // Maresias" cobrindo 4x2.20m/5x2.60m/6x2.80m/7x3m, cada tamanho com preço próprio) —
@@ -577,7 +600,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         if (p.id !== productId || !p.variants) return p;
         const variants = p.variants.map((v, i) => {
           if (i !== index) return v;
-          if (field === 'litros' || field === 'priceAmount') {
+          if (field === 'litros' || field === 'priceAmount' || field === 'durationMinutes') {
             const numeric = value.trim() === '' ? undefined : Number(value);
             return { ...v, [field]: numeric === undefined || Number.isNaN(numeric) ? undefined : numeric };
           }
@@ -1053,7 +1076,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         if (p.description) lines.push(`- **Descrição:** ${p.description}`);
         if (p.variants?.length) {
           lines.push(`- **Variações:**`);
-          p.variants.forEach((v) => lines.push(`  - ${v.code}${v.dimensions ? ` (${v.dimensions})` : ''}: ${v.price}`));
+          p.variants.forEach((v) => lines.push(`  - ${v.code}${v.dimensions ? ` (${v.dimensions})` : ''}: ${v.price}${v.durationMinutes ? ` — ${v.durationMinutes} min` : ''}${v.bookable === false ? ' (não agendável direto pela IA)' : ''}`));
         }
         lines.push('');
       });
@@ -1625,9 +1648,31 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </button>
             </form>
 
-            {/* Product List */}
+            {/* Product List — agrupada por categoria quando os produtos têm
+                (ver productGroups acima); "row" achata cabeçalho + produtos
+                num `.map()` só, pra não duplicar o corpo do card em dois
+                loops separados. */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {formData.products.map((prod) => (
+              {(() => {
+                const orderedRows: Array<{ type: 'header'; label: string } | { type: 'product'; product: AgentProduct }> = [];
+                for (const [category, items] of productGroups.categorized) {
+                  orderedRows.push({ type: 'header', label: category });
+                  for (const p of items) orderedRows.push({ type: 'product', product: p });
+                }
+                if (productGroups.uncategorized.length) {
+                  if (productGroups.categorized.length) orderedRows.push({ type: 'header', label: 'Sem categoria' });
+                  for (const p of productGroups.uncategorized) orderedRows.push({ type: 'product', product: p });
+                }
+                return orderedRows.map((row, rowIdx) => {
+                  if (row.type === 'header') {
+                    return (
+                      <div key={`cat-${row.label}-${rowIdx}`} className="col-span-full pt-2 first:pt-0">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400">{row.label}</span>
+                      </div>
+                    );
+                  }
+                  const prod = row.product;
+                  return (
                 <div key={prod.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
                   <button
                     type="button"
@@ -1652,6 +1697,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar preço"
                     />
+                    <input
+                      type="text"
+                      value={prod.category || ''}
+                      onChange={(e) => handleProductFieldChange(prod.id, 'category', e.target.value)}
+                      placeholder="Categoria (ex: Pestañas, Cejas)"
+                      title="Agrupa este item no prompt do agente e na lista abaixo — opcional, deixe vazio pra ficar fora de qualquer categoria."
+                      className="w-full bg-transparent text-[11px] text-cyan-300 placeholder-slate-600 focus:outline-none focus:bg-slate-900 rounded py-0.5"
+                    />
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-3 h-3 text-slate-500 shrink-0" />
                       <input
@@ -1674,7 +1727,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   </div>
                   <div className="border-t border-slate-800 pt-2 space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-cyan-400 font-semibold block">Variantes de tamanho (opcional):</span>
+                      <span className="text-[10px] text-cyan-400 font-semibold block">Variantes/serviços desta família (opcional):</span>
                       <button
                         type="button"
                         onClick={() => handleAddVariant(prod.id)}
@@ -1685,13 +1738,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       </button>
                     </div>
                     {(prod.variants || []).map((variant, vIndex) => (
-                      <div key={vIndex} className="flex gap-1 items-center">
+                      <div key={vIndex} className="flex gap-1 items-center flex-wrap">
                         <input
                           type="text"
-                          placeholder="Modelo (ex: MS F600)"
+                          placeholder="Nome/modelo (ex: Lash Lift, MS F600)"
                           value={variant.code}
                           onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'code', e.target.value)}
-                          className="w-24 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                          className="w-32 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
                         />
                         <input
                           type="text"
@@ -1706,6 +1759,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           value={variant.price}
                           onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'price', e.target.value)}
                           className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-emerald-400 font-semibold"
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          placeholder="Duração (min)"
+                          value={variant.durationMinutes ?? ''}
+                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'durationMinutes', e.target.value)}
+                          title="Duração real desta variante em minutos — quando vazio, o agente usa a duração cadastrada no produto (acima). Necessário quando as variantes desta família têm durações diferentes, senão o agendamento no Calendar sai com o horário de fim errado."
+                          className="w-24 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
                         />
                         <button
                           type="button"
@@ -1788,7 +1850,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     )}
                   </div>
                 </div>
-              ))}
+                  );
+                });
+              })()}
             </div>
           </div>
 
