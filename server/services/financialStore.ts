@@ -158,3 +158,38 @@ export async function deleteFinancialTransaction(tenantId: string, id: string): 
   const { error } = await db.from('financial_transactions').delete().eq('tenant_id', tenantId).eq('id', id);
   if (error) throw error;
 }
+
+/** Atualiza valor/forma/status de uma transação já lançada, pelo `sourceRef` (ex: "apt:<eventId>") — usado pra editar um pagamento direto do card da Agenda sem duplicar o lançamento. Só altera os campos passados. */
+export async function updateFinancialTransactionBySourceRef(
+  tenantId: string,
+  sourceRef: string,
+  updates: { amount?: number; paymentMethod?: PaymentMethod; status?: PaymentStatus }
+): Promise<FinancialTransactionRecord | null> {
+  const db = getDb();
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (updates.amount !== undefined) patch.amount = updates.amount;
+  if (updates.paymentMethod !== undefined) patch.payment_method = updates.paymentMethod;
+  if (updates.status !== undefined) patch.status = updates.status;
+  const { data, error } = await db
+    .from('financial_transactions')
+    .update(patch)
+    .eq('tenant_id', tenantId)
+    .eq('source_ref', sourceRef)
+    .select(FINANCIAL_TRANSACTION_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toFinancialTransactionRecord(data as FinancialTransactionRow) : null;
+}
+
+/** Transações cujo `sourceRef` bate com um dos valores dados — usado pra anexar o status financeiro (pago/pendente/valor) direto nos cards da Agenda, sem virar N requisições (uma por evento). */
+export async function listFinancialTransactionsBySourceRefs(tenantId: string, sourceRefs: string[]): Promise<FinancialTransactionRecord[]> {
+  if (sourceRefs.length === 0) return [];
+  const db = getDb();
+  const { data, error } = await db
+    .from('financial_transactions')
+    .select(FINANCIAL_TRANSACTION_COLUMNS)
+    .eq('tenant_id', tenantId)
+    .in('source_ref', sourceRefs);
+  if (error) throw error;
+  return (data as FinancialTransactionRow[]).map(toFinancialTransactionRecord);
+}

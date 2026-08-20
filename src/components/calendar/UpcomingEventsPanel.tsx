@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { LeadInfo } from '../../types';
-import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2, DollarSign } from 'lucide-react';
+
+const PAYMENT_METHODS = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'] as const;
 
 export interface UpcomingEvent {
   id: string;
@@ -11,7 +13,123 @@ export interface UpcomingEvent {
   description?: string;
   /** Marcado como concluído no painel (calendarEventCompletionStore.ts) — o evento do Google Calendar em si nunca muda. */
   completed?: boolean;
+  /** Pagamento já lançado pro Financeiro ligado a este agendamento (ver `sourceRef`, googleCalendar.ts) — `null`/undefined quando ainda não há nenhum lançamento. */
+  payment?: { amount: number; paymentMethod: string; status: string } | null;
 }
+
+function formatCurrency(amount: number): string {
+  return amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+/**
+ * Badge de status financeiro + ação "Registrar/editar pagamento" direto no
+ * card do agendamento — pedido real (20/08/2026): "poder alterar e lançar
+ * pagamentos direto da agenda", pra não ter que sair da Agenda → abrir
+ * Financeiro → lançar de novo. Sem lançamento ainda: botão "$" cria um. Já
+ * lançado: badge clicável reabre o mesmo formulário pra editar valor/forma/
+ * status (POST cria, PATCH edita — nunca duplica).
+ */
+const EventPaymentAction: React.FC<{
+  event: UpcomingEvent;
+  onRegisterPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
+  onEditPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
+}> = ({ event, onRegisterPayment, onEditPayment }) => {
+  const existing = event.payment;
+  const [isOpen, setIsOpen] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<string>(PAYMENT_METHODS[0]);
+  const [paid, setPaid] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const openForm = () => {
+    setAmount(existing ? String(existing.amount) : '');
+    setPaymentMethod(existing?.paymentMethod || PAYMENT_METHODS[0]);
+    setPaid(existing ? existing.status === 'pago' : true);
+    setError(null);
+    setIsOpen(true);
+  };
+
+  if (!isOpen) {
+    if (existing) {
+      const isPaid = existing.status === 'pago';
+      return (
+        <button
+          type="button"
+          onClick={openForm}
+          title={`${existing.paymentMethod} · ${isPaid ? 'Pago' : 'Pendente'} · clique pra editar`}
+          className={`flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded cursor-pointer hover:opacity-80 ${isPaid ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400'}`}
+        >
+          {isPaid ? '🟢' : '🟡'} {formatCurrency(existing.amount)}
+        </button>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={openForm}
+        title="Registrar pagamento"
+        className="flex-shrink-0 text-slate-600 hover:text-emerald-400 opacity-0 group-hover/eventrow:opacity-100 transition-opacity cursor-pointer"
+      >
+        <DollarSign className="w-3.5 h-3.5" />
+      </button>
+    );
+  }
+
+  return (
+    <form
+      className="w-full flex flex-wrap items-center gap-1.5 mt-1.5 pt-1.5 border-t border-slate-800"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const parsed = Number(amount.replace(',', '.'));
+        if (!Number.isFinite(parsed) || parsed < 0) { setError('Valor inválido.'); return; }
+        setIsSaving(true);
+        setError(null);
+        try {
+          const status = paid ? 'pago' : 'pendente';
+          if (existing) await onEditPayment(event.id, parsed, paymentMethod, status);
+          else await onRegisterPayment(event.id, parsed, paymentMethod, status);
+          setIsOpen(false);
+        } catch (err: any) {
+          setError(err.message || 'Não foi possível salvar o pagamento agora.');
+        } finally {
+          setIsSaving(false);
+        }
+      }}
+    >
+      <input
+        autoFocus
+        type="text"
+        inputMode="decimal"
+        required
+        placeholder="Valor"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        disabled={isSaving}
+        className="w-20 px-1.5 py-0.5 bg-slate-900 border border-emerald-600 rounded text-[11px] text-white focus:outline-none disabled:opacity-50"
+      />
+      <select
+        value={paymentMethod}
+        onChange={(e) => setPaymentMethod(e.target.value)}
+        disabled={isSaving}
+        className="px-1.5 py-0.5 bg-slate-900 border border-slate-700 rounded text-[11px] text-white focus:outline-none disabled:opacity-50"
+      >
+        {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
+      <label className="flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer">
+        <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} disabled={isSaving} />
+        Pago
+      </label>
+      <button type="submit" disabled={isSaving} title="Salvar pagamento" className="flex-shrink-0 text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer">
+        {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+      </button>
+      <button type="button" disabled={isSaving} onClick={() => setIsOpen(false)} title="Cancelar" className="flex-shrink-0 text-slate-500 hover:text-white disabled:opacity-50 cursor-pointer">
+        <X className="w-3.5 h-3.5" />
+      </button>
+      {error && <span className="text-[10px] text-red-400 w-full">{error}</span>}
+    </form>
+  );
+};
 
 interface UpcomingEventsPanelProps {
   isOpen: boolean;
@@ -40,6 +158,10 @@ interface UpcomingEventsPanelProps {
   onReschedule: (eventId: string, newStartIso: string, newEndIso: string) => Promise<void>;
   /** Cancela de verdade — remove o evento real do Google Calendar. */
   onDelete: (eventId: string) => Promise<void>;
+  /** Lança um pagamento vinculado a este agendamento no Financeiro — pedido real (20/08/2026). */
+  onRegisterPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
+  /** Edita um pagamento já lançado (etapa 2 do mesmo pedido). */
+  onEditPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
 }
 
 /** "Hoje" / "Amanhã" / dia da semana curto + data — só pra exibição, não precisa da mesma precisão de fuso do backend (que já resolve tudo antes de mandar o horário). */
@@ -247,7 +369,7 @@ const EventRowControls: React.FC<{
 
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
-  monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary, onReschedule, onDelete,
+  monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary, onReschedule, onDelete, onRegisterPayment, onEditPayment,
 }) => {
   const [isPickingLead, setIsPickingLead] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -565,7 +687,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                     ) : (
                       <>
                         {selectedDayActive.map((event) => (
-                          <div key={event.id} className="group/eventrow flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
+                          <div key={event.id} className="group/eventrow flex flex-wrap items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
                             <button
                               type="button"
                               onClick={() => onToggleCompleted(event.id, true)}
@@ -574,6 +696,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                             />
                             <span className="text-xs font-bold text-white flex-shrink-0 w-11">{timeLabel(event.startIso)}</span>
                             <EditableSummary event={event} onEditSummary={onEditSummary} />
+                            <EventPaymentAction event={event} onRegisterPayment={onRegisterPayment} onEditPayment={onEditPayment} />
                             <EventRowControls event={event} onReschedule={onReschedule} onDelete={onDelete} />
                           </div>
                         ))}
@@ -606,7 +729,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                       <h4 className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide mb-1.5">{group.label}</h4>
                       <div className="space-y-1.5">
                         {group.items.map((event) => (
-                          <div key={event.id} className="group/eventrow flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
+                          <div key={event.id} className="group/eventrow flex flex-wrap items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
                             <button
                               type="button"
                               onClick={() => onToggleCompleted(event.id, true)}
@@ -615,6 +738,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                             />
                             <span className="text-xs font-bold text-white flex-shrink-0 w-11">{timeLabel(event.startIso)}</span>
                             <EditableSummary event={event} onEditSummary={onEditSummary} />
+                            <EventPaymentAction event={event} onRegisterPayment={onRegisterPayment} onEditPayment={onEditPayment} />
                             <EventRowControls event={event} onReschedule={onReschedule} onDelete={onDelete} />
                           </div>
                         ))}
