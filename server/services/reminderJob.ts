@@ -15,6 +15,7 @@ import { wasReminderSent, markReminderSent, type ReminderType } from './reminder
 import { sendWhatsAppInteractiveButtons } from './metaSend';
 import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForTenant } from './tenantResolver';
+import { getTenantBusinessHours, getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -126,6 +127,21 @@ async function checkAndSendRemindersForTenant(
 
   const appointmentsByEventId = new Map((await listAllAppointments(tenantId)).map((a) => [a.eventId, a]));
 
+  // Achado real em produção (20/08/2026): o job roda a cada 15min o dia
+  // inteiro, e um lembrete "mesmo_dia" era disparado assim que a DATA batia
+  // com hoje — sem checar a HORA. Resultado: um agendamento marcado pra
+  // hoje disparava "Bom dia! Só confirmando..." no primeiro tick depois da
+  // meia-noite (ex: 00:30), horas antes de qualquer horário razoável.
+  // Usa o horário de abertura configurado do tenant pra hoje como corte —
+  // sem expediente configurado (ou falha ao buscar), cai num horário seguro
+  // fixo em vez de travar o lembrete pra sempre.
+  const FALLBACK_EARLIEST_HHMM = '07:00';
+  const businessHours = await getTenantBusinessHours(tenantId).catch(() => null);
+  const todayWeekday = new Date(`${todayKey}T12:00:00Z`).getUTCDay();
+  const earliestHHmm = businessHours?.[String(todayWeekday)]?.open || FALLBACK_EARLIEST_HHMM;
+  const { hora: nowHHmm } = dateAndTimeInTz(new Date());
+  const language: ReminderLanguage = await getTenantReminderLanguage(tenantId).catch(() => 'es' as ReminderLanguage);
+
   for (const event of events) {
     const appt = appointmentsByEventId.get(event.id);
     if (!appt) continue;
@@ -135,11 +151,19 @@ async function checkAndSendRemindersForTenant(
     if (eventDateKey === tomorrowKey) type = 'dia_anterior';
     else if (eventDateKey === todayKey) type = 'mesmo_dia';
     if (!type) continue;
+    if (nowHHmm < earliestHHmm) continue; // fora do horário razoável pra mandar — tenta de novo no próximo tick
     if (await wasReminderSent(tenantId, event.id, type)) continue;
 
-    const message = type === 'dia_anterior'
-      ? `Oi! Passando pra lembrar que seu horário é amanhã, às ${hora} 💛`
-      : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛`;
+    const message = language === 'es'
+      ? (type === 'dia_anterior'
+        ? `¡Hola! Pasando para recordarte que tu turno es mañana, a las ${hora} 💛`
+        : `¡Buen día! Solo confirmando: tu turno es hoy, a las ${hora} 💛`)
+      : (type === 'dia_anterior'
+        ? `Oi! Passando pra lembrar que seu horário é amanhã, às ${hora} 💛`
+        : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛`);
+    const buttonLabels = language === 'es'
+      ? { confirmar: '✅ Confirmar', remarcar: '🔄 Reprogramar' }
+      : { confirmar: '✅ Confirmar', remarcar: '🔄 Remarcar' };
 
     try {
       if (channel.provider === 'evolution') {
@@ -153,8 +177,8 @@ async function checkAndSendRemindersForTenant(
         // cliente resolver isso num toque, sem precisar digitar (e sem
         // precisar esperar alguém abrir o WhatsApp comercial pra ler).
         await sendWhatsAppInteractiveButtons(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message, [
-          { id: 'lembrete_confirmar', title: '✅ Confirmar' },
-          { id: 'lembrete_remarcar', title: '🔄 Remarcar' },
+          { id: 'lembrete_confirmar', title: buttonLabels.confirmar },
+          { id: 'lembrete_remarcar', title: buttonLabels.remarcar },
         ]);
       }
       await markReminderSent(tenantId, event.id, type);

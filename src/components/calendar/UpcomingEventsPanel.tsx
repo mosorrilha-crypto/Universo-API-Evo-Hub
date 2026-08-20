@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { LeadInfo } from '../../types';
-import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2 } from 'lucide-react';
 
 export interface UpcomingEvent {
   id: string;
   summary: string;
   startIso: string;
+  /** Pra calcular a duração real do atendimento na hora de remarcar (mantém a mesma duração, só desloca o horário). */
+  endIso?: string;
   description?: string;
   /** Marcado como concluído no painel (calendarEventCompletionStore.ts) — o evento do Google Calendar em si nunca muda. */
   completed?: boolean;
@@ -19,9 +21,10 @@ interface UpcomingEventsPanelProps {
   error: string | null;
   onRefresh: () => void;
   leads: LeadInfo[];
-  onPickLeadForNewAppointment: (lead: LeadInfo) => void;
+  /** `prefillDateKey` ("YYYY-MM-DD") vem preenchido quando o operador clicou em "+" num dia específico da grade, em vez do botão genérico "Novo agendamento" — pedido real (20/08/2026). */
+  onPickLeadForNewAppointment: (lead: LeadInfo, prefillDateKey?: string) => void;
   /** Contato que veio de outra fonte (indicação, telefone, presencial) e ainda não tem conversa/lead nenhum registrado aqui. */
-  onCreateAdHocContactForAppointment: (name: string, phone: string) => void;
+  onCreateAdHocContactForAppointment: (name: string, phone: string, prefillDateKey?: string) => void;
   /** Rótulo do mês em exibição (ex: "Agosto 2026") — pedido real (15/08/2026): a agenda só mostrava "os próximos dias a partir de agora", sem jeito de olhar um mês específico (nem o corrente inteiro). */
   monthLabel: string;
   /** Ano/mês(1-12) em exibição — pedido real (18/08/2026: "lista não está muito interessante, calendário mensal ficaria melhor") — precisa pra montar a grade de dias do mês, `monthLabel` sozinho não basta. */
@@ -33,6 +36,10 @@ interface UpcomingEventsPanelProps {
   onToggleCompleted: (eventId: string, completed: boolean) => void;
   /** Corrige o título (serviço) de um evento já criado — pedido real (19/08/2026): não existia nenhum jeito de editar isso depois de criado. */
   onEditSummary: (eventId: string, newSummary: string) => Promise<void>;
+  /** Remarca (mesma duração, novo início) — pedido real (20/08/2026): "hoje não consigo remarcar horário, editar ou excluir agendamento" pelo painel. Lança se o novo horário estiver ocupado (o botão trata o erro). */
+  onReschedule: (eventId: string, newStartIso: string, newEndIso: string) => Promise<void>;
+  /** Cancela de verdade — remove o evento real do Google Calendar. */
+  onDelete: (eventId: string) => Promise<void>;
 }
 
 /** "Hoje" / "Amanhã" / dia da semana curto + data — só pra exibição, não precisa da mesma precisão de fuso do backend (que já resolve tudo antes de mandar o horário). */
@@ -59,6 +66,20 @@ function dateKey(d: Date): string {
 }
 
 const WEEKDAY_HEADER = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+
+/**
+ * Cor do marcador de ocupação do dia na grade do calendário — pedido real
+ * (20/08/2026): "conseguir auditar visualmente" a agenda, não só ver que
+ * "tem algo marcado". Faixas simples por contagem de atendimentos ativos no
+ * dia (sem precisar buscar o expediente configurado do tenant pra calcular
+ * capacidade real — aproximação suficiente pra dar uma noção rápida de
+ * "tranquilo" vs "lotado" de relance).
+ */
+function occupancyDotClass(count: number): string {
+  if (count >= 5) return 'bg-rose-500';
+  if (count >= 3) return 'bg-amber-500';
+  return 'bg-emerald-500';
+}
 
 /**
  * Título do evento, com edição inline (lápis → campo de texto → salvar) —
@@ -121,9 +142,112 @@ const EditableSummary: React.FC<{ event: UpcomingEvent; onEditSummary: (eventId:
   );
 };
 
+/** "YYYY-MM-DDTHH:mm" local, pro valor de um `<input type="datetime-local">` — não usa toISOString (que converte pra UTC). */
+function toDatetimeLocalValue(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * Remarcar/excluir um evento já criado — pedido real (20/08/2026): "hoje não
+ * consigo remarcar horário, editar ou excluir agendamento" pelo painel (só
+ * dava pra editar o título do serviço ou marcar como concluído). Mantém a
+ * MESMA duração do evento original ao remarcar (só desloca o início) —
+ * evita duplicar a lógica de duração por serviço aqui, que já mora no
+ * catálogo. Exclusão pede confirmação (ação real no Google Calendar, sem
+ * desfazer).
+ */
+const EventRowControls: React.FC<{
+  event: UpcomingEvent;
+  onReschedule: (eventId: string, newStartIso: string, newEndIso: string) => Promise<void>;
+  onDelete: (eventId: string) => Promise<void>;
+}> = ({ event, onReschedule, onDelete }) => {
+  const [isRescheduling, setIsRescheduling] = useState(false);
+  const [draftStart, setDraftStart] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const durationMs = event.endIso ? new Date(event.endIso).getTime() - new Date(event.startIso).getTime() : 60 * 60 * 1000;
+
+  if (isRescheduling) {
+    return (
+      <form
+        className="flex items-center gap-1"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!draftStart) return;
+          setIsSaving(true);
+          setError(null);
+          try {
+            const newStart = new Date(draftStart);
+            const newEnd = new Date(newStart.getTime() + durationMs);
+            const pad = (n: number) => String(n).padStart(2, '0');
+            const toNaiveIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+            await onReschedule(event.id, toNaiveIso(newStart), toNaiveIso(newEnd));
+            setIsRescheduling(false);
+          } catch (err: any) {
+            setError(err.message || 'Não foi possível remarcar agora.');
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+      >
+        <input
+          autoFocus
+          type="datetime-local"
+          required
+          value={draftStart}
+          onChange={(e) => setDraftStart(e.target.value)}
+          disabled={isSaving}
+          className="px-1.5 py-0.5 bg-slate-900 border border-emerald-600 rounded text-[11px] text-white focus:outline-none disabled:opacity-50"
+        />
+        <button type="submit" disabled={isSaving} title="Salvar novo horário" className="flex-shrink-0 text-emerald-400 hover:text-emerald-300 disabled:opacity-50 cursor-pointer">
+          {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+        </button>
+        <button type="button" disabled={isSaving} onClick={() => { setIsRescheduling(false); setError(null); }} title="Cancelar" className="flex-shrink-0 text-slate-500 hover:text-white disabled:opacity-50 cursor-pointer">
+          <X className="w-3.5 h-3.5" />
+        </button>
+        {error && <span className="text-[10px] text-red-400 ml-1">{error}</span>}
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover/eventrow:opacity-100 transition-opacity">
+      <button
+        type="button"
+        onClick={() => { setDraftStart(toDatetimeLocalValue(event.startIso)); setIsRescheduling(true); }}
+        title="Remarcar"
+        className="text-slate-600 hover:text-emerald-400 cursor-pointer"
+      >
+        <Clock className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        disabled={isDeleting}
+        onClick={async () => {
+          if (!window.confirm(`Cancelar "${event.summary}"? Isso remove o evento real da agenda — não dá pra desfazer.`)) return;
+          setIsDeleting(true);
+          try {
+            await onDelete(event.id);
+          } finally {
+            setIsDeleting(false);
+          }
+        }}
+        title="Excluir agendamento"
+        className="text-slate-600 hover:text-red-400 disabled:opacity-50 cursor-pointer"
+      >
+        {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+};
+
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
-  monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary,
+  monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary, onReschedule, onDelete,
 }) => {
   const [isPickingLead, setIsPickingLead] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -137,6 +261,8 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   // dos MESMOS eventos já carregados, sem fetch novo nenhum.
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  /** Data pré-escolhida clicando no "+" de um dia da grade (ver botão "Novo agendamento neste dia" abaixo) — repassada ao criar o agendamento; `null` quando veio do botão genérico "Novo agendamento" no topo. */
+  const [pendingDateForNewAppointment, setPendingDateForNewAppointment] = useState<string | null>(null);
 
   const resetPicker = () => {
     setIsPickingLead(false);
@@ -144,6 +270,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
     setIsTypingNewContact(false);
     setNewContactName('');
     setNewContactPhone('');
+    setPendingDateForNewAppointment(null);
   };
 
   if (!isOpen) return null;
@@ -306,7 +433,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                 <button
                   type="button"
                   disabled={!newContactPhone.replace(/\D/g, '')}
-                  onClick={() => { onCreateAdHocContactForAppointment(newContactName, newContactPhone); resetPicker(); }}
+                  onClick={() => { onCreateAdHocContactForAppointment(newContactName, newContactPhone, pendingDateForNewAppointment || undefined); resetPicker(); }}
                   className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 cursor-pointer"
                 >
                   Continuar
@@ -334,7 +461,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                   <button
                     key={lead.id}
                     type="button"
-                    onClick={() => { onPickLeadForNewAppointment(lead); resetPicker(); }}
+                    onClick={() => { onPickLeadForNewAppointment(lead, pendingDateForNewAppointment || undefined); resetPicker(); }}
                     className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-800 text-left transition-colors cursor-pointer"
                   >
                     <div className="min-w-0">
@@ -396,6 +523,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                           key={key}
                           type="button"
                           disabled={!inMonth}
+                          title={dayActiveCount > 0 ? `${dayActiveCount} atendimento(s) neste dia` : undefined}
                           onClick={() => setSelectedDateKey((prev) => (prev === key ? null : key))}
                           className={`aspect-square rounded-lg flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${
                             !inMonth
@@ -409,7 +537,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                         >
                           <span>{date.getDate()}</span>
                           {dayActiveCount > 0 && (
-                            <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-emerald-500'}`} />
+                            <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : occupancyDotClass(dayActiveCount)}`} />
                           )}
                         </button>
                       );
@@ -419,15 +547,25 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
 
                 {selectedDateKey && (
                   <div className="border-t border-slate-800 pt-2 space-y-1.5">
-                    <h4 className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
-                      {new Date(selectedDateKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
-                    </h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
+                        {new Date(selectedDateKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => { setPendingDateForNewAppointment(selectedDateKey); setIsPickingLead(true); }}
+                        title="Novo agendamento neste dia"
+                        className="p-1 text-slate-500 hover:text-emerald-400 rounded cursor-pointer"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                     {selectedDayEvents.length === 0 ? (
                       <p className="text-xs text-slate-500 py-2">Nada agendado neste dia.</p>
                     ) : (
                       <>
                         {selectedDayActive.map((event) => (
-                          <div key={event.id} className="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
+                          <div key={event.id} className="group/eventrow flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
                             <button
                               type="button"
                               onClick={() => onToggleCompleted(event.id, true)}
@@ -436,6 +574,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                             />
                             <span className="text-xs font-bold text-white flex-shrink-0 w-11">{timeLabel(event.startIso)}</span>
                             <EditableSummary event={event} onEditSummary={onEditSummary} />
+                            <EventRowControls event={event} onReschedule={onReschedule} onDelete={onDelete} />
                           </div>
                         ))}
                         {selectedDayCompleted.map((event) => (
@@ -467,7 +606,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                       <h4 className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide mb-1.5">{group.label}</h4>
                       <div className="space-y-1.5">
                         {group.items.map((event) => (
-                          <div key={event.id} className="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
+                          <div key={event.id} className="group/eventrow flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800/80">
                             <button
                               type="button"
                               onClick={() => onToggleCompleted(event.id, true)}
@@ -476,6 +615,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                             />
                             <span className="text-xs font-bold text-white flex-shrink-0 w-11">{timeLabel(event.startIso)}</span>
                             <EditableSummary event={event} onEditSummary={onEditSummary} />
+                            <EventRowControls event={event} onReschedule={onReschedule} onDelete={onDelete} />
                           </div>
                         ))}
                       </div>

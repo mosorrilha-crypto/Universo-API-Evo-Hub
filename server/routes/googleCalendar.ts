@@ -8,9 +8,14 @@ import {
   verifyOAuthState,
   listUpcomingEvents,
   updateCalendarEventSummary,
+  findAvailabilityForDate,
+  rescheduleCalendarEvent,
+  cancelCalendarEvent,
+  checkFreeBusy,
   type CalendarConfig,
 } from '../services/googleCalendar';
-import { updateAppointmentSummaryByEventId } from '../services/appointmentStore';
+import { updateAppointmentSummaryByEventId, updateAppointmentTimesByEventId, clearAppointmentByEventId } from '../services/appointmentStore';
+import { clearRemindersForEvent } from '../services/reminderStore';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from '../services/calendarEventCompletionStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -133,6 +138,95 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     const events = await listUpcomingEvents(tenantId, cfg, timeMinIso, timeMaxIso);
     const completedIds = await getCompletedEventIds(tenantId, events.map((e) => e.id));
     res.json({ events: events.map((e) => ({ ...e, completed: completedIds.has(e.id) })) });
+  }));
+
+  // Horários livres de uma data específica, pro cadastro manual mostrar só
+  // opções reais em vez do operador digitar hora "no escuro" (pedido real,
+  // 20/08/2026: "consigo até auditar os horários que a IA tem disponível
+  // visualmente"). `durationMinutes` vem do serviço escolhido no modal.
+  router.get('/api/google-calendar/free-slots', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    if (!(await isGoogleCalendarConnected(tenantId))) {
+      return res.status(503).json({ error: 'Google Calendar não conectado pra este tenant.' });
+    }
+    if (!googleRedirectUri) {
+      return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+    const date = req.query.date as string | undefined;
+    const durationMinutes = Number(req.query.durationMinutes);
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'Parâmetro "date" (YYYY-MM-DD) é obrigatório.' });
+    }
+    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+      return res.status(400).json({ error: 'Parâmetro "durationMinutes" precisa ser um inteiro positivo.' });
+    }
+    const cfg: CalendarConfig = { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri };
+    const slots = await findAvailabilityForDate(tenantId, cfg, date, durationMinutes);
+    res.json({ slots });
+  }));
+
+  // Remarca um agendamento a partir do widget de agenda — pedido real
+  // (20/08/2026): "hoje não consigo remarcar horário, editar ou excluir
+  // agendamento" pelo painel (só dava pra editar o título do serviço).
+  // Reconsulta disponibilidade antes de mover (mesma garantia do
+  // remarcar_agendamento da IA, autoReply.ts) — nunca move em cima de outro
+  // horário já ocupado. `newEndIso` vem do frontend (mantém a MESMA duração
+  // do evento original, só desloca o início) em vez de recalculado aqui —
+  // evita duplicar a lógica de duração por serviço, que já mora no catálogo
+  // e é resolvida no cliente a partir do evento atual.
+  router.patch('/api/google-calendar/events/:eventId/reschedule', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { newStartIso, newEndIso } = req.body || {};
+    if (typeof newStartIso !== 'string' || typeof newEndIso !== 'string' || !newStartIso || !newEndIso) {
+      return res.status(400).json({ error: 'Campos "newStartIso" e "newEndIso" são obrigatórios.' });
+    }
+    if (!googleRedirectUri) {
+      return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+    const cfg: CalendarConfig = { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri };
+    const eventId = req.params.eventId;
+
+    let disponivel: boolean;
+    try {
+      disponivel = await checkFreeBusy(tenantId, cfg, newStartIso, newEndIso);
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao verificar disponibilidade na agenda: ${err.message}` });
+    }
+    if (!disponivel) {
+      return res.status(409).json({ error: 'Esse novo horário já está ocupado na agenda.' });
+    }
+
+    try {
+      await rescheduleCalendarEvent(tenantId, cfg, eventId, newStartIso, newEndIso);
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao remarcar o evento na agenda: ${err.message}` });
+    }
+    await updateAppointmentTimesByEventId(tenantId, eventId, newStartIso, newEndIso);
+    await clearRemindersForEvent(tenantId, eventId);
+    res.json({ success: true });
+  }));
+
+  // Cancela um agendamento a partir do widget de agenda — mesma lacuna real
+  // acima. Remove o evento real do Google Calendar e a linha espelhada em
+  // `appointments` (sem isso, o telefone continuaria "com agendamento
+  // ativo" pro resto do sistema — bloquearia um novo agendamento pro mesmo
+  // contato e o job de lembretes tentaria avisar de um evento que não existe
+  // mais).
+  router.delete('/api/google-calendar/events/:eventId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    if (!googleRedirectUri) {
+      return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+    const cfg: CalendarConfig = { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri };
+    const eventId = req.params.eventId;
+    try {
+      await cancelCalendarEvent(tenantId, cfg, eventId);
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao cancelar o evento na agenda: ${err.message}` });
+    }
+    await clearAppointmentByEventId(tenantId, eventId);
+    await clearRemindersForEvent(tenantId, eventId);
+    res.json({ success: true });
   }));
 
   // Marca/desmarca um evento como concluído (checkbox da Agenda) — só a

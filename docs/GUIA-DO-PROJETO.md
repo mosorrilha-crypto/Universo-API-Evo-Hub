@@ -74,6 +74,16 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 4. **RLS não é a barreira real de isolamento** — funciona hoje porque o código de serviço é disciplinado em exigir `tenantId`, mas é uma garantia de processo, não de banco de dados. Vale endurecer pra RLS ser a barreira de fato (não usar service key em queries tenant-scoped), ou aceitar conscientemente o risco documentado.
 5. **Pagamento sem provedor real** — bloqueia cobrar cliente novo de forma automática; decisão de produto (qual provedor, PYG/BRL/USD) mais que de engenharia pura.
 
+## Mudanças recentes relevantes (não é auditoria completa, só registro)
+
+**20/08/2026:**
+- Fallback determinístico anti-alucinação de horário (`autoReply.ts`) reduzido de 6 pra 3 horários e reformulado — o gate em si (Epic 4.5.7) não mudou, só a frase que ele usa quando dispara.
+- **Bug real corrigido:** `reminderJob.ts` mandava o lembrete de agendamento sempre em português, mesmo pra tenants/leads de língua espanhola (a única tenant real hoje é paraguaia) — novo campo `tenants.reminder_language` (migration 0038, default `'es'`) resolve o texto certo por tenant.
+- **Bug real corrigido:** `reminderJob.ts` disparava o lembrete "mesmo_dia" assim que a DATA batia com hoje, sem checar a HORA — um agendamento de hoje gerava "Bom dia!" às 00:30. Agora só manda depois do horário de abertura configurado do tenant (fallback 07:00 sem expediente configurado).
+- Widget de agenda (`UpcomingEventsPanel.tsx`) ganhou: cor do dia por ocupação (verde/âmbar/vermelho), atalho "+" pra criar agendamento já com a data do dia clicado pré-preenchida, e **remarcar/excluir agendamento direto no painel** — antes só dava pra editar o título do serviço ou marcar como concluído, não existia NENHUM jeito de remarcar horário ou cancelar pelo painel (só recriando/apagando manualmente no Google Calendar). Sem drag-and-drop (avaliado, mas maior risco/esforço pro ganho — ficou só o form inline com data/hora).
+- Cadastro manual de agendamento (`ManualAppointmentModal.tsx`) agora mostra só os horários REALMENTE livres (nova rota `GET /api/google-calendar/free-slots`, reaproveitando a mesma lógica de `findWeeklyAvailability`) em vez do operador digitar hora às cegas; e ganhou um campo opcional de "valor recebido" pra quando a cliente transfere um valor diferente do preço do catálogo (`paymentAmountReceived` em `POST .../manual-appointment`, propagado pro registro financeiro automático).
+- **Pendente, não implementado ainda:** substituir a lista de horários em texto livre por uma mensagem interativa real do WhatsApp (lista/botões) no fluxo de agendamento da IA — dono do produto sinalizou que ainda não confirmou se os botões de lembrete (já em produção) chegam de fato pro cliente, então segurar essa mudança maior até isso ser validado.
+
 ## Docs relacionados (contexto histórico/profundo, não confie neles pro status atual)
 
 - `CLAUDE.md` (raiz) — convenções de código, comandos, e as regras de arquitetura que não mudam com frequência (async error handling, idempotência, multi-tenancy). **Ainda é a referência viva pra "como escrever código aqui"**, só não pra "o que já foi feito".

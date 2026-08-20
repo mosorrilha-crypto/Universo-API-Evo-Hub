@@ -151,6 +151,32 @@ export async function clearAppointmentForPhone(tenantId: string, phone: string):
   await db.from('appointments').delete().eq('tenant_id', tenantId).eq('phone', phone);
 }
 
+/**
+ * Busca a linha por `event_id` (não por telefone) — mesmo raciocínio de
+ * `updateAppointmentSummaryByEventId`: o widget de agenda no painel
+ * (UpcomingEventsPanel) só enxerga o evento do Google Calendar em si, nunca
+ * o telefone do contato direto, então precisa desse caminho pra remarcar/
+ * excluir a partir dali (pedido real, 20/08/2026: "hoje não consigo
+ * remarcar horário, editar ou excluir agendamento" pelo painel).
+ */
+export async function getAppointmentByEventId(tenantId: string, eventId: string): Promise<({ phone: string } & TrackedAppointment) | undefined> {
+  const db = getDb();
+  const { data } = await db.from('appointments').select('*').eq('tenant_id', tenantId).eq('event_id', eventId).maybeSingle();
+  return data ? { phone: (data as AppointmentRow).phone, ...toTracked(data as AppointmentRow) } : undefined;
+}
+
+/** Atualiza só o horário (remarcação) — o evento real no Google Calendar é atualizado à parte, isto só sincroniza o espelho em `appointments`. */
+export async function updateAppointmentTimesByEventId(tenantId: string, eventId: string, startIso: string, endIso: string): Promise<void> {
+  const db = getDb();
+  await db.from('appointments').update({ start_iso: startIso, end_iso: endIso }).eq('tenant_id', tenantId).eq('event_id', eventId);
+}
+
+/** Remove a linha espelhada em `appointments` por `event_id` — usado ao cancelar um agendamento a partir do widget de agenda. */
+export async function clearAppointmentByEventId(tenantId: string, eventId: string): Promise<void> {
+  const db = getDb();
+  await db.from('appointments').delete().eq('tenant_id', tenantId).eq('event_id', eventId);
+}
+
 export interface CreateAppointmentHoldInput {
   summary: string;
   startIso: string;

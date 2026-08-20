@@ -24,6 +24,23 @@ export async function getTenantSegment(tenantId: string): Promise<string> {
   return (data?.segment as string | undefined) || DEFAULT_SEGMENT;
 }
 
+export type ReminderLanguage = 'es' | 'pt';
+
+/**
+ * Idioma do lembrete automático de agendamento (reminderJob.ts) — achado
+ * real em produção (20/08/2026): o texto do lembrete era fixo em português,
+ * mesmo pra tenants/leads de língua espanhola (o único tenant real hoje é
+ * paraguaio). reminderJob.ts é determinístico (não passa pelo Gemini), então
+ * não tem como "detectar" idioma ali — precisa desta configuração explícita.
+ * Default 'es' (migration 0038) — nunca 'pt' por acidente pra um tenant
+ * novo sem configurar nada.
+ */
+export async function getTenantReminderLanguage(tenantId: string): Promise<ReminderLanguage> {
+  const db = getDb();
+  const { data } = await db.from('tenants').select('reminder_language').eq('id', tenantId).maybeSingle();
+  return data?.reminder_language === 'pt' ? 'pt' : 'es';
+}
+
 /** "HH:mm" de abertura/fechamento de um dia específico. */
 export interface DayHours {
   open: string;

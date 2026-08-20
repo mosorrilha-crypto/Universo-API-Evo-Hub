@@ -27,7 +27,7 @@ vi.mock('googleapis', () => ({
   },
 }));
 
-const { findWeeklyAvailability, localNaiveToUtcIso } = await import('../googleCalendar');
+const { findWeeklyAvailability, findAvailabilityForDate, localNaiveToUtcIso } = await import('../googleCalendar');
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const CALENDAR_CONFIG = { clientId: 'id', clientSecret: 'secret', redirectUri: 'https://x/redirect' };
@@ -94,5 +94,28 @@ describe('findWeeklyAvailability', () => {
     expect(starts).not.toContain('09:30'); // 09:30-10:30 também colide (sobreposição parcial)
     expect(starts).toContain('08:00'); // termina antes do horário ocupado começar
     expect(starts).toContain('10:00'); // começa exatamente quando o ocupado termina — sem sobreposição
+  });
+});
+
+describe('findAvailabilityForDate', () => {
+  it('devolve os mesmos horários livres que findWeeklyAvailability calcularia pra aquela data específica', async () => {
+    seedDb(MONIQUE_HOURS);
+    const busyStart = localNaiveToUtcIso('2026-08-15T09:00:00', 'America/Asuncion');
+    const busyEnd = localNaiveToUtcIso('2026-08-15T10:00:00', 'America/Asuncion');
+    freebusyQuery.mockResolvedValue({ data: { calendars: { primary: { busy: [{ start: busyStart, end: busyEnd }] } } } });
+
+    const slots = await findAvailabilityForDate(TENANT_A, CALENDAR_CONFIG, '2026-08-15', 60);
+    const starts = slots.map((s) => s.start);
+
+    expect(starts).not.toContain('09:00');
+    expect(starts).toContain('08:00');
+    expect(starts).toContain('10:00');
+  });
+
+  it('dia sem expediente configurado devolve lista vazia', async () => {
+    seedDb(MONIQUE_HOURS);
+    // 2026-08-11 é terça — não está em MONIQUE_HOURS.
+    const slots = await findAvailabilityForDate(TENANT_A, CALENDAR_CONFIG, '2026-08-11', 60);
+    expect(slots).toEqual([]);
   });
 });

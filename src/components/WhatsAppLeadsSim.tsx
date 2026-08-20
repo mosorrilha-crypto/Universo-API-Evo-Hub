@@ -861,13 +861,49 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  /**
+   * Remarcar/excluir a partir do widget de agenda — pedido real (20/08/2026):
+   * "hoje não consigo remarcar horário, editar ou excluir agendamento" pelo
+   * painel. Ambos propagam o erro pro EventRowControls decidir o que mostrar
+   * (mesmo padrão de handleEditEventSummary acima) — ex: 409 quando o novo
+   * horário já está ocupado.
+   */
+  const handleRescheduleEvent = async (eventId: string, newStartIso: string, newEndIso: string) => {
+    try {
+      const res = await apiFetch(`/api/google-calendar/events/${encodeURIComponent(eventId)}/reschedule`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newStartIso, newEndIso }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setUpcomingEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, startIso: newStartIso, endIso: newEndIso } : e)));
+    } catch (err: any) {
+      console.error('Falha ao remarcar o evento:', err);
+      throw err;
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    try {
+      const res = await apiFetch(`/api/google-calendar/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setUpcomingEvents((prev) => prev.filter((e) => e.id !== eventId));
+    } catch (err: any) {
+      console.error('Falha ao cancelar o evento:', err);
+      setUpcomingEventsError(err.message || 'Não foi possível cancelar o agendamento agora — tente de novo.');
+    }
+  };
+
   // Escolher um lead a partir do widget de agenda (sem conversa aberta
   // ainda) reaproveita 100% o fluxo já existente de agendamento manual —
   // só seleciona a conversa e abre o mesmo modal que já é aberto de dentro
   // dela.
-  const handlePickLeadForNewAppointment = (lead: LeadInfo) => {
+  const handlePickLeadForNewAppointment = (lead: LeadInfo, prefillDateKey?: string) => {
     setIsUpcomingEventsPanelOpen(false);
     handleSelectLead(lead);
+    if (prefillDateKey) setManualDate(prefillDateKey);
     setIsManualAppointmentModalOpen(true);
   };
 
@@ -879,7 +915,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // pra dar um `phone` real pro fluxo de agendamento manual já existente —
   // o backend (POST .../manual-appointment) não exige que o telefone já
   // tenha conversa ou estado de CRM.
-  const handleCreateAdHocContactForAppointment = (name: string, phone: string) => {
+  const handleCreateAdHocContactForAppointment = (name: string, phone: string, prefillDateKey?: string) => {
     const cleanPhone = phone.replace(/\D/g, '');
     if (!cleanPhone) return;
     const adHocLead: LeadInfo = {
@@ -890,7 +926,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       status: 'transcribed',
     };
     setLeads((prev) => [adHocLead, ...prev]);
-    handlePickLeadForNewAppointment(adHocLead);
+    handlePickLeadForNewAppointment(adHocLead, prefillDateKey);
   };
 
   const handleChangeAgentStatus = async (status: 'active' | 'paused' | 'restricted') => {
@@ -1457,9 +1493,49 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [manualTime, setManualTime] = useState('');
   const [manualNotes, setManualNotes] = useState('');
   const [manualPaymentReceived, setManualPaymentReceived] = useState(false);
+  // Pedido real (20/08/2026): "a cliente enviar um valor diferente dos
+  // 50.000 guaranis" precisa atualizar o Financeiro com o valor REAL
+  // recebido, não sempre o preço do catálogo. Vazio = usa o preço do
+  // catálogo (comportamento de sempre).
+  const [manualPaymentAmountReceived, setManualPaymentAmountReceived] = useState('');
   const [isCreatingManualAppointment, setIsCreatingManualAppointment] = useState(false);
   const [manualAppointmentError, setManualAppointmentError] = useState<string | null>(null);
   const [manualAppointmentSuccess, setManualAppointmentSuccess] = useState(false);
+
+  // Pedido real (20/08/2026): o operador digitava a hora "no escuro" e só
+  // descobria conflito depois de tentar salvar. Busca os horários REALMENTE
+  // livres (mesma lógica que a IA usa, `findAvailabilityForDate`) assim que
+  // data + duração do serviço estão definidas, e mostra como botões — o
+  // input de hora livre continua existindo como fallback (Google
+  // desconectado, erro, ou o operador quer digitar um horário fora da
+  // amostra mesmo assim).
+  const [manualFreeSlots, setManualFreeSlots] = useState<string[]>([]);
+  const [isLoadingManualFreeSlots, setIsLoadingManualFreeSlots] = useState(false);
+  const [manualFreeSlotsError, setManualFreeSlotsError] = useState<string | null>(null);
+
+  const manualServiceDurationMinutes = isManualServiceCustom
+    ? Number(manualCustomDurationMinutes)
+    : knowledgeBase.products.find((p) => p.name === manualServiceName)?.durationMinutes || 90;
+
+  useEffect(() => {
+    if (!isManualAppointmentModalOpen || !manualDate || !(manualServiceDurationMinutes > 0)) {
+      setManualFreeSlots([]);
+      setManualFreeSlotsError(null);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingManualFreeSlots(true);
+    setManualFreeSlotsError(null);
+    apiFetch(`/api/google-calendar/free-slots?date=${manualDate}&durationMinutes=${manualServiceDurationMinutes}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => { if (!cancelled) setManualFreeSlots((data.slots || []).map((s: { start: string }) => s.start)); })
+      .catch((err) => { if (!cancelled) { setManualFreeSlots([]); setManualFreeSlotsError(err.message || 'Não foi possível carregar os horários livres.'); } })
+      .finally(() => { if (!cancelled) setIsLoadingManualFreeSlots(false); });
+    return () => { cancelled = true; };
+  }, [isManualAppointmentModalOpen, manualDate, manualServiceDurationMinutes]);
 
   const handleCreateManualAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1475,9 +1551,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setIsCreatingManualAppointment(true);
     setManualAppointmentError(null);
     try {
-      const durationMinutes = isManualServiceCustom
-        ? Number(manualCustomDurationMinutes)
-        : knowledgeBase.products.find((p) => p.name === manualServiceName)?.durationMinutes || 90;
+      const durationMinutes = manualServiceDurationMinutes;
       const startIso = `${manualDate}T${manualTime}:00`;
       const endDate = new Date(`${manualDate}T${manualTime}:00`);
       endDate.setMinutes(endDate.getMinutes() + durationMinutes);
@@ -1486,7 +1560,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/manual-appointment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serviceName: manualServiceName, startIso, endIso, notes: manualNotes.trim() || undefined, paymentReceived: manualPaymentReceived }),
+        body: JSON.stringify({
+          serviceName: manualServiceName,
+          startIso,
+          endIso,
+          notes: manualNotes.trim() || undefined,
+          paymentReceived: manualPaymentReceived,
+          paymentAmountReceived: manualPaymentReceived && manualPaymentAmountReceived.trim() ? Number(manualPaymentAmountReceived) : undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -1499,6 +1580,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setManualTime('');
       setManualNotes('');
       setManualPaymentReceived(false);
+      setManualPaymentAmountReceived('');
       setManualAppointmentSuccess(true);
       setTimeout(() => setManualAppointmentSuccess(false), 4000);
     } catch (err: any) {
@@ -3921,14 +4003,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onDateChange={setManualDate}
         time={manualTime}
         onTimeChange={setManualTime}
+        freeSlots={manualFreeSlots}
+        isLoadingFreeSlots={isLoadingManualFreeSlots}
+        freeSlotsError={manualFreeSlotsError}
         notes={manualNotes}
         onNotesChange={setManualNotes}
         paymentReceived={manualPaymentReceived}
         onPaymentReceivedChange={setManualPaymentReceived}
+        paymentAmountReceived={manualPaymentAmountReceived}
+        onPaymentAmountReceivedChange={setManualPaymentAmountReceived}
         error={manualAppointmentError}
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
-        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); setIsManualServiceCustom(false); setManualCustomDurationMinutes(''); }}
+        onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); setManualPaymentAmountReceived(''); setIsManualServiceCustom(false); setManualCustomDurationMinutes(''); }}
       />
 
       <ContractModal
@@ -4016,6 +4103,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onNextMonth={() => changeCalendarMonth(1)}
         onToggleCompleted={handleToggleEventCompleted}
         onEditSummary={handleEditEventSummary}
+        onReschedule={handleRescheduleEvent}
+        onDelete={handleDeleteEvent}
       />
     </div>
   );
