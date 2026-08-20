@@ -177,7 +177,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
         await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
           console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
-        }, messageId, result.phase, result.routerElapsedMs);
+        }, messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
         if (pendingGuidance) {
           await markOperatorGuidanceConsumed(tenantId, pendingGuidance.id);
           console.log(`🤝 [Retomada guiada] tenant=${tenantId} usou a orientação do operador pra responder ${phone} (fora da janela original, cliente reabriu agora).`);

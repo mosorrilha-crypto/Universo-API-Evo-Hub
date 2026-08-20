@@ -112,6 +112,20 @@ export interface AutoReplyResult {
    * cliente não responder em ~2h30 (ver pendingFollowUpJob.ts).
    */
   awaitingCustomerChoice?: string;
+  /**
+   * Pedido real (20/08/2026): a lista de horários em texto livre (mesmo
+   * corrigida/encurtada) ainda depende do cliente digitar um horário de
+   * volta — botões de resposta rápida reais do WhatsApp resolvem isso num
+   * toque. Só preenchido no gate anti-alucinação (fallback determinístico
+   * que já sabe exatamente quais horários confirmados oferecer, ver
+   * `confirmedTimes` abaixo) — não no caso geral de texto livre do modelo,
+   * que não é estruturado o bastante pra virar botão com segurança. Quem
+   * chama (webhooks.ts/sendBubbles.ts) decide: canal Meta manda como
+   * interactive/button de verdade; Evolution/Instagram não suportam esse
+   * tipo de mensagem, então usam só o texto normal em `bubbles` (mesmo
+   * conteúdo, sem o botão) como fallback automático.
+   */
+  quickReplyOptions?: { bodyText: string; buttons: { id: string; title: string }[] };
 }
 
 /**
@@ -1545,6 +1559,7 @@ export async function generateAutoReplyForText(
     let forcedHumanConfirmation = false;
     let stopAutoReply = false;
     let confirmedTimes: string[] = [];
+    let quickReplyOptions: AutoReplyResult['quickReplyOptions'];
     // Epic 4.5.7 — precisa ser "as ferramentas rodaram de verdade nesta
     // mensagem", não "confirmaram algum horário livre". Achado numa
     // auditoria pós-lançamento: gatear só por confirmedTimes.length deixava
@@ -1680,6 +1695,20 @@ export async function generateAutoReplyForText(
         bubbles = timesToShow.length
           ? [`Dejame confirmarte bien: tengo libre a las ${timesToShow.join(', ')}${hasMore ? ' (o te paso más opciones si preferís otro horario)' : ''}. ¿Cuál te queda mejor?`]
           : ['Dejame confirmar bien ese horario en la agenda antes de asegurarte algo — en un instante te aviso.'];
+        // Botões de resposta rápida reais (pedido real, 20/08/2026) — só faz
+        // sentido quando sobrou pelo menos 1 horário pra oferecer (o caso
+        // "nenhum horário confirmado" acima não tem o que virar botão). Cabe
+        // certinho no limite de 3 botões da própria Meta, já que
+        // MAX_TIMES_IN_FALLBACK também é 3. Título do botão = o horário
+        // "HH:mm" puro — quando o cliente toca, webhookParsers.ts já trata a
+        // resposta como se ele tivesse digitado esse texto, então o resto do
+        // fluxo de agendamento nem precisa saber que veio de um toque.
+        if (timesToShow.length) {
+          quickReplyOptions = {
+            bodyText: '¡Tengo estos horarios libres! ¿Cuál te queda mejor?',
+            buttons: timesToShow.map((t) => ({ id: `horario_${t}`, title: t })),
+          };
+        }
         // Só escala pra humano quando é o caso 1 real (nenhuma ferramenta
         // rodou nesta mensagem pra sustentar o horário citado) — o caso 2
         // (reconfirmando um agendamento já existente) não precisa de
@@ -1731,11 +1760,13 @@ export async function generateAutoReplyForText(
       if (!currentAppointment && containsPrematureBookingConfirmation(bubbles.join(' '))) {
         console.warn(`⚠️  [Gate de agendamento inexistente] tenant=${tenantId} modelo confirmou/reservou o turno em texto mas nenhum agendamento real existe pra este contato — corrigindo resposta.`);
         bubbles = ['Dejame confirmar bien la disponibilidad antes de asegurarte el turno — en un instante te aviso si quedó todo listo.'];
+        quickReplyOptions = undefined; // bubbles mudou — os botões do fallback anterior (se houver) não fazem mais sentido pra este texto novo
       } else if (paymentUnresolved && containsPrematureBookingConfirmation(bubbles.join(' '))) {
         console.warn(`⚠️  [Gate de pagamento pendente] tenant=${tenantId} modelo confirmou o turno em texto mas o pagamento ainda está "${currentAppointment.paymentStatus}" — corrigindo resposta.`);
         bubbles = [currentAppointment.paymentStatus === 'awaiting_payment'
           ? 'Ese horario queda reservado para vos hasta que llegue tu comprobante y sea aprobado — todavía no está confirmado, así que enviálo cuanto antes para no perderlo.'
           : 'Recibí tu comprobante, gracias — todavía está pendiente de revisión por parte del estudio. Apenas esté aprobado, te confirmo el turno.'];
+        quickReplyOptions = undefined;
       }
     }
 
@@ -1757,7 +1788,7 @@ export async function generateAutoReplyForText(
     // independente do que o modelo tenha marcado.
     const needsHumanConfirmation = agent === 'reclamacao' ? true : specialist.needsHumanConfirmation || forcedHumanConfirmation;
 
-    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs };
+    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;

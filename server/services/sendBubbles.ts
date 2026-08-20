@@ -1,4 +1,4 @@
-import { sendWhatsAppTextMessage, markAsReadAndShowTyping } from './metaSend';
+import { sendWhatsAppTextMessage, sendWhatsAppInteractiveButtons, markAsReadAndShowTyping } from './metaSend';
 import { sendEvolutionTextMessage, showEvolutionTyping } from './evolutionSend';
 import { sendInstagramTextMessage, showInstagramTyping } from './instagramSend';
 import type { ConversationPhase } from './autoReply';
@@ -57,12 +57,23 @@ export async function sendBubbles(
   incomingMessageId?: string,
   phase: ConversationPhase = 'informacao',
   /** ms já gastos antes de chegar aqui (ex: chamada de roteamento) — descontado só da 1ª bolha, pra não somar a latência do router ao tempo total de resposta. */
-  preElapsedMs = 0
+  preElapsedMs = 0,
+  /**
+   * Pedido real (20/08/2026): em vez do cliente ter que digitar de volta um
+   * horário oferecido em texto, manda como botões de resposta rápida reais
+   * do WhatsApp. Só suportado no canal Meta (interactive/button é recurso
+   * da Cloud API — Evolution/Instagram não têm equivalente) — nesses canais
+   * cai pro texto normal da ÚLTIMA bolha (mesmo conteúdo dos botões, só sem
+   * o toque). Substitui só a última bolha, nunca as anteriores (ex: uma
+   * bolha de contexto antes da pergunta de horário continua saindo como
+   * texto normal).
+   */
+  quickReplyOptions?: { bodyText: string; buttons: { id: string; title: string }[] }
 ): Promise<void> {
   const isEvolution = channel.provider === 'evolution';
   const isInstagram = channel.provider === 'instagram';
   let remainingCompensation = preElapsedMs;
-  for (const bubble of bubbles) {
+  for (const [index, bubble] of bubbles.entries()) {
     if (!bubble.trim()) continue;
     if (isEvolution) {
       await showEvolutionTyping(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey);
@@ -74,6 +85,12 @@ export async function sendBubbles(
     const delay = Math.max(0, calcularAtrasoDigitacao(bubble, phase) - remainingCompensation);
     remainingCompensation = 0; // só desconta da primeira bolha
     await new Promise((resolve) => setTimeout(resolve, delay));
+    const isLastBubble = index === bubbles.length - 1;
+    if (isLastBubble && quickReplyOptions && !isEvolution && !isInstagram) {
+      await sendWhatsAppInteractiveButtons(channel.phoneNumberId, channel.accessToken, to, quickReplyOptions.bodyText, quickReplyOptions.buttons);
+      await onBubbleSent(quickReplyOptions.bodyText);
+      continue;
+    }
     if (isEvolution) {
       await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, to, bubble);
     } else if (isInstagram) {

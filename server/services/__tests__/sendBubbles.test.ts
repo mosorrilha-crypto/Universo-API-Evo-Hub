@@ -7,11 +7,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sendWhatsAppTextMessage = vi.fn(async () => undefined);
+const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
 const markAsReadAndShowTyping = vi.fn(async () => undefined);
 const sendEvolutionTextMessage = vi.fn(async () => undefined);
 const showEvolutionTyping = vi.fn(async () => undefined);
 
-vi.mock('../metaSend', () => ({ sendWhatsAppTextMessage, markAsReadAndShowTyping }));
+vi.mock('../metaSend', () => ({ sendWhatsAppTextMessage, sendWhatsAppInteractiveButtons, markAsReadAndShowTyping }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage, showEvolutionTyping }));
 
 const { sendBubbles } = await import('../sendBubbles');
@@ -62,5 +63,61 @@ describe('sendBubbles — canal Meta vs Evolution (Epic 4.6)', () => {
     expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(2);
     expect(sendEvolutionTextMessage).toHaveBeenNthCalledWith(1, 'inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'Primeira');
     expect(sendEvolutionTextMessage).toHaveBeenNthCalledWith(2, 'inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'Segunda');
+  });
+});
+
+describe('sendBubbles — botões de resposta rápida (pedido real, 20/08/2026)', () => {
+  const QUICK_REPLY = {
+    bodyText: '¡Tengo estos horarios libres! ¿Cuál te queda mejor?',
+    buttons: [
+      { id: 'horario_08:00', title: '08:00' },
+      { id: 'horario_09:00', title: '09:00' },
+    ],
+  };
+
+  it('canal Meta: manda a ÚLTIMA bolha como botões interativos em vez de texto puro', async () => {
+    await runSendBubbles(
+      { phoneNumberId: 'pn-1', accessToken: 'tok-1' },
+      '595981234567',
+      ['Dejame confirmarte bien: tengo libre a las 08:00, 09:00. ¿Cuál te queda mejor?'],
+      async () => {},
+      undefined,
+      undefined,
+      undefined,
+      QUICK_REPLY
+    );
+    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', QUICK_REPLY.bodyText, QUICK_REPLY.buttons);
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('bolhas anteriores à última continuam saindo como texto normal, só a última vira botão', async () => {
+    await runSendBubbles(
+      { phoneNumberId: 'pn-1', accessToken: 'tok-1' },
+      '595981234567',
+      ['Perfecto!', 'Dejame confirmarte bien: tengo libre a las 08:00, 09:00. ¿Cuál te queda mejor?'],
+      async () => {},
+      undefined,
+      undefined,
+      undefined,
+      QUICK_REPLY
+    );
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'Perfecto!');
+    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
+  });
+
+  it('canal Evolution: ignora quickReplyOptions e manda a última bolha como texto normal (sem suporte a botão)', async () => {
+    await runSendBubbles(
+      { provider: 'evolution', evolutionInstanceName: 'inst-1', evolutionApiUrl: 'https://evo.example.com', evolutionApiKey: 'key-1' },
+      '595981234567',
+      ['Tengo libre a las 08:00, 09:00. ¿Cuál te queda mejor?'],
+      async () => {},
+      undefined,
+      undefined,
+      undefined,
+      QUICK_REPLY
+    );
+    expect(sendWhatsAppInteractiveButtons).not.toHaveBeenCalled();
+    expect(sendEvolutionTextMessage).toHaveBeenCalledWith('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'Tengo libre a las 08:00, 09:00. ¿Cuál te queda mejor?');
   });
 });
