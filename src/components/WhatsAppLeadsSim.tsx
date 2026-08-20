@@ -10,6 +10,7 @@ import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
 import { AddLeadModal } from './leads/AddLeadModal';
 import { ManualAppointmentModal } from './leads/ManualAppointmentModal';
+import { ManageLabelsModal, type LabelCatalogEntry } from './leads/ManageLabelsModal';
 import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
@@ -472,6 +473,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [tenantLabelSuggestions, setTenantLabelSuggestions] = useState<string[]>([]);
   const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
+  // Tela "Gerenciar etiquetas" (pedido real, 20/08/2026) — renomear/apagar
+  // uma etiqueta em todas as conversas do tenant de uma vez (ver
+  // ManageLabelsModal e as rotas PATCH/DELETE /api/conversation-labels/:label).
+  const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
+  const [labelCatalog, setLabelCatalog] = useState<LabelCatalogEntry[]>([]);
+  const [isLoadingLabelCatalog, setIsLoadingLabelCatalog] = useState(false);
 
   // Organização de conversas — arquivar, fixar, silenciar, não lida manual.
   // Metadados só do painel (ver server/services/conversationStore.ts).
@@ -1383,6 +1390,74 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   useEffect(() => {
     refreshLabelSuggestions();
   }, []);
+
+  const openLabelManager = async () => {
+    setIsLabelManagerOpen(true);
+    setIsLoadingLabelCatalog(true);
+    try {
+      const res = await apiFetch('/api/conversation-labels/catalog');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.labels)) setLabelCatalog(data.labels);
+      }
+    } finally {
+      setIsLoadingLabelCatalog(false);
+    }
+  };
+
+  // Renomear/apagar agem em TODAS as conversas do tenant de uma vez (ver
+  // renameLabelForTenant/deleteLabelForTenant em conversationLabelStore.ts).
+  // fetchRealConversations vive só dentro do useEffect de polling/SSE (não dá
+  // pra chamar daqui) — em vez de recarregar tudo do servidor, aplica a mesma
+  // transformação direto no estado local de `leads`, já sabendo exatamente
+  // qual etiqueta mudou.
+  const handleRenameLabelCatalog = async (oldLabel: string, newLabel: string) => {
+    const trimmedNew = newLabel.trim();
+    const res = await apiFetch(`/api/conversation-labels/${encodeURIComponent(oldLabel)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newLabel: trimmedNew }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    const oldKey = normalizeLabelText(oldLabel);
+    setLeads((prev) => prev.map((l) => {
+      const current = (l as any).conversationLabels as string[] | undefined;
+      if (!current?.some((x) => normalizeLabelText(x) === oldKey)) return l;
+      const alreadyHasNew = current.some((x) => normalizeLabelText(x) === normalizeLabelText(trimmedNew) && normalizeLabelText(x) !== oldKey);
+      const next = alreadyHasNew
+        ? current.filter((x) => normalizeLabelText(x) !== oldKey)
+        : current.map((x) => (normalizeLabelText(x) === oldKey ? trimmedNew : x));
+      return { ...l, conversationLabels: next } as any;
+    }));
+    setLabelCatalog((prev) => {
+      const withoutOld = prev.filter((entry) => normalizeLabelText(entry.label) !== oldKey);
+      const existingNew = prev.find((entry) => normalizeLabelText(entry.label) === normalizeLabelText(trimmedNew));
+      const oldEntry = prev.find((entry) => normalizeLabelText(entry.label) === oldKey);
+      const mergedCount = (existingNew?.usageCount || 0) + (oldEntry?.usageCount || 0);
+      return [...withoutOld.filter((entry) => normalizeLabelText(entry.label) !== normalizeLabelText(trimmedNew)), { label: trimmedNew, usageCount: mergedCount || 1 }]
+        .sort((a, b) => b.usageCount - a.usageCount);
+    });
+    refreshLabelSuggestions();
+  };
+
+  const handleDeleteLabelCatalog = async (label: string) => {
+    const res = await apiFetch(`/api/conversation-labels/${encodeURIComponent(label)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    const key = normalizeLabelText(label);
+    setLeads((prev) => prev.map((l) => {
+      const current = (l as any).conversationLabels as string[] | undefined;
+      if (!current?.some((x) => normalizeLabelText(x) === key)) return l;
+      return { ...l, conversationLabels: current.filter((x) => normalizeLabelText(x) !== key) } as any;
+    }));
+    setLabelCatalog((prev) => prev.filter((entry) => normalizeLabelText(entry.label) !== key));
+    refreshLabelSuggestions();
+  };
 
   const normalizeLabelText = (label: string) =>
     label.trim().normalize('NFD').replace(new RegExp(`[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`, 'g'), '').toLowerCase();
@@ -3264,6 +3339,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </div>
                         );
                       })()}
+
+                      <button
+                        type="button"
+                        onClick={() => { setIsLabelPickerOpen(false); openLabelManager(); }}
+                        className="w-full flex items-center justify-center gap-1.5 text-[10px] text-slate-400 hover:text-white pt-2 mt-1 border-t border-slate-700 cursor-pointer"
+                      >
+                        <Settings className="w-3 h-3" />
+                        Gerenciar etiquetas
+                      </button>
                     </div>
                   </>
                 )}
@@ -3988,6 +4072,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
         onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); setIsManualServiceCustom(false); setManualCustomDurationMinutes(''); }}
+      />
+
+      <ManageLabelsModal
+        isOpen={isLabelManagerOpen}
+        labels={labelCatalog}
+        isLoading={isLoadingLabelCatalog}
+        onRename={handleRenameLabelCatalog}
+        onDelete={handleDeleteLabelCatalog}
+        onClose={() => setIsLabelManagerOpen(false)}
       />
 
       <ContractModal

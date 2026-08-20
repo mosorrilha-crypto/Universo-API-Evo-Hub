@@ -16,7 +16,7 @@ import {
   updateConversationState,
   markConversationRead,
 } from '../services/conversationStore';
-import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversationLabelStore';
+import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
@@ -512,6 +512,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // "Interessada em Pestañas" como duas etiquetas por erro de digitação).
   router.get('/api/conversation-labels', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     res.json({ labels: await listAllTenantLabels(tenantOf(req)) });
+  }));
+
+  // Tela "Gerenciar etiquetas" (pedido real, 20/08/2026): etiqueta não tinha
+  // catálogo próprio, só existe como texto solto em cada conversation_labels
+  // — sem forma de corrigir um texto digitado errado ou tirar uma etiqueta
+  // obsoleta da lista de sugestões sem editar conversa por conversa. Rename e
+  // delete abaixo agem em TODAS as conversas do tenant de uma vez.
+  router.get('/api/conversation-labels/catalog', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ labels: await listAllTenantLabelsWithUsage(tenantOf(req)) });
+  }));
+
+  router.patch('/api/conversation-labels/:label', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { newLabel } = req.body || {};
+    if (!newLabel || typeof newLabel !== 'string' || !newLabel.trim()) {
+      return res.status(400).json({ error: 'Campo "newLabel" é obrigatório.' });
+    }
+    const result = await renameLabelForTenant(tenantOf(req), req.params.label, newLabel);
+    res.json({ success: true, ...result });
+  }));
+
+  router.delete('/api/conversation-labels/:label', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const result = await deleteLabelForTenant(tenantOf(req), req.params.label);
+    res.json({ success: true, ...result });
   }));
 
   // Organização da lista de conversas — arquivar, fixar no topo, silenciar
