@@ -10,6 +10,7 @@ import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
 import { AddLeadModal } from './leads/AddLeadModal';
 import { ManualAppointmentModal } from './leads/ManualAppointmentModal';
+import { ManageLabelsModal, type LabelCatalogEntry } from './leads/ManageLabelsModal';
 import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
@@ -472,6 +473,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [tenantLabelSuggestions, setTenantLabelSuggestions] = useState<string[]>([]);
   const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
+  // Tela "Gerenciar etiquetas" (pedido real, 20/08/2026) — renomear/apagar
+  // uma etiqueta em todas as conversas do tenant de uma vez (ver
+  // ManageLabelsModal e as rotas PATCH/DELETE /api/conversation-labels/:label).
+  const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
+  const [labelCatalog, setLabelCatalog] = useState<LabelCatalogEntry[]>([]);
+  const [isLoadingLabelCatalog, setIsLoadingLabelCatalog] = useState(false);
 
   // Organização de conversas — arquivar, fixar, silenciar, não lida manual.
   // Metadados só do painel (ver server/services/conversationStore.ts).
@@ -542,6 +549,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // acende um dos três pills depois que o GET realmente confirma o valor.
   const [agentStatus, setAgentStatusState] = useState<'active' | 'paused' | 'restricted' | null>(null);
   const [agentStatusLoadFailed, setAgentStatusLoadFailed] = useState(false);
+  // Pedido real (20/08/2026): o "digitando..." só aparecia pro lead
+  // (WhatsApp), sem nenhum sinal no próprio painel de que a IA está
+  // processando a última mensagem — o operador ficava sem saber se ia
+  // chegar resposta em instantes ou se precisava assumir. Vem pelo mesmo SSE
+  // de conversas (aiReplyStatus no payload, ver emitAiReplyStatus em
+  // conversationEvents.ts). Chave = telefone; 'failed' se auto-limpa depois
+  // de alguns segundos (o escalonamento real já fica registrado à parte).
+  const [aiReplyStatusByPhone, setAiReplyStatusByPhone] = useState<Record<string, 'generating' | 'failed'>>({});
+
   // Modo "somente anúncios" (pedido real, 14/08/2026): quando ativo, o
   // agente só responde automaticamente contatos com atribuição de anúncio
   // real (ctwa_clid) — nunca contatos pessoais. Útil quando o dono do
@@ -1338,10 +1354,42 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         ? `/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${encodeURIComponent(tenantOverride)}`
         : `/api/conversations/stream?token=${encodeURIComponent(token)}`;
       source = new EventSource(streamUrl);
-      // O evento só carrega o telefone que mudou — reaproveita o mesmo
-      // fetch da lista em vez de montar um merge separado por telefone,
-      // então cobre também o caso de conversa apagada.
-      source.onmessage = () => { fetchRealConversations(); };
+      // O evento carrega o telefone que mudou — reaproveita o mesmo fetch da
+      // lista em vez de montar um merge separado por telefone, então cobre
+      // também o caso de conversa apagada. `aiReplyStatus` (opcional) é um
+      // sinal à parte, não liga a nenhuma mudança de mensagem por si só —
+      // ver aiReplyStatusByPhone acima.
+      source.onmessage = (event) => {
+        fetchRealConversations();
+        try {
+          const payload = JSON.parse(event.data);
+          const phone: string | undefined = payload?.phone;
+          const status: 'generating' | 'sent' | 'failed' | undefined = payload?.aiReplyStatus;
+          if (!phone || !status) return;
+          if (status === 'generating') {
+            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'generating' }));
+          } else if (status === 'sent') {
+            setAiReplyStatusByPhone((prev) => {
+              if (!(phone in prev)) return prev;
+              const { [phone]: _removed, ...rest } = prev;
+              return rest;
+            });
+          } else if (status === 'failed') {
+            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'failed' }));
+            // Some sozinho depois de alguns segundos — o escalonamento real
+            // já fica registrado em Escalonamentos, este é só um aviso rápido.
+            setTimeout(() => {
+              setAiReplyStatusByPhone((prev) => {
+                if (prev[phone] !== 'failed') return prev;
+                const { [phone]: _removed, ...rest } = prev;
+                return rest;
+              });
+            }, 6000);
+          }
+        } catch {
+          // Heartbeat (": heartbeat\n\n") ou payload antigo sem JSON válido — ignora.
+        }
+      };
       // EventSource já reconecta sozinho no browser depois de erro/queda de
       // conexão — não precisa de lógica de retry manual aqui.
     }
@@ -1378,6 +1426,74 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   useEffect(() => {
     refreshLabelSuggestions();
   }, []);
+
+  const openLabelManager = async () => {
+    setIsLabelManagerOpen(true);
+    setIsLoadingLabelCatalog(true);
+    try {
+      const res = await apiFetch('/api/conversation-labels/catalog');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.labels)) setLabelCatalog(data.labels);
+      }
+    } finally {
+      setIsLoadingLabelCatalog(false);
+    }
+  };
+
+  // Renomear/apagar agem em TODAS as conversas do tenant de uma vez (ver
+  // renameLabelForTenant/deleteLabelForTenant em conversationLabelStore.ts).
+  // fetchRealConversations vive só dentro do useEffect de polling/SSE (não dá
+  // pra chamar daqui) — em vez de recarregar tudo do servidor, aplica a mesma
+  // transformação direto no estado local de `leads`, já sabendo exatamente
+  // qual etiqueta mudou.
+  const handleRenameLabelCatalog = async (oldLabel: string, newLabel: string) => {
+    const trimmedNew = newLabel.trim();
+    const res = await apiFetch(`/api/conversation-labels/${encodeURIComponent(oldLabel)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newLabel: trimmedNew }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    const oldKey = normalizeLabelText(oldLabel);
+    setLeads((prev) => prev.map((l) => {
+      const current = (l as any).conversationLabels as string[] | undefined;
+      if (!current?.some((x) => normalizeLabelText(x) === oldKey)) return l;
+      const alreadyHasNew = current.some((x) => normalizeLabelText(x) === normalizeLabelText(trimmedNew) && normalizeLabelText(x) !== oldKey);
+      const next = alreadyHasNew
+        ? current.filter((x) => normalizeLabelText(x) !== oldKey)
+        : current.map((x) => (normalizeLabelText(x) === oldKey ? trimmedNew : x));
+      return { ...l, conversationLabels: next } as any;
+    }));
+    setLabelCatalog((prev) => {
+      const withoutOld = prev.filter((entry) => normalizeLabelText(entry.label) !== oldKey);
+      const existingNew = prev.find((entry) => normalizeLabelText(entry.label) === normalizeLabelText(trimmedNew));
+      const oldEntry = prev.find((entry) => normalizeLabelText(entry.label) === oldKey);
+      const mergedCount = (existingNew?.usageCount || 0) + (oldEntry?.usageCount || 0);
+      return [...withoutOld.filter((entry) => normalizeLabelText(entry.label) !== normalizeLabelText(trimmedNew)), { label: trimmedNew, usageCount: mergedCount || 1 }]
+        .sort((a, b) => b.usageCount - a.usageCount);
+    });
+    refreshLabelSuggestions();
+  };
+
+  const handleDeleteLabelCatalog = async (label: string) => {
+    const res = await apiFetch(`/api/conversation-labels/${encodeURIComponent(label)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    const key = normalizeLabelText(label);
+    setLeads((prev) => prev.map((l) => {
+      const current = (l as any).conversationLabels as string[] | undefined;
+      if (!current?.some((x) => normalizeLabelText(x) === key)) return l;
+      return { ...l, conversationLabels: current.filter((x) => normalizeLabelText(x) !== key) } as any;
+    }));
+    setLabelCatalog((prev) => prev.filter((entry) => normalizeLabelText(entry.label) !== key));
+    refreshLabelSuggestions();
+  };
 
   const normalizeLabelText = (label: string) =>
     label.trim().normalize('NFD').replace(new RegExp(`[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`, 'g'), '').toLowerCase();
@@ -3305,6 +3421,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </div>
                         );
                       })()}
+
+                      <button
+                        type="button"
+                        onClick={() => { setIsLabelPickerOpen(false); openLabelManager(); }}
+                        className="w-full flex items-center justify-center gap-1.5 text-[10px] text-slate-400 hover:text-white pt-2 mt-1 border-t border-slate-700 cursor-pointer"
+                      >
+                        <Settings className="w-3 h-3" />
+                        Gerenciar etiquetas
+                      </button>
                     </div>
                   </>
                 )}
@@ -3810,6 +3935,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 </div>
 
+                {/* Aviso de resposta automática em andamento (pedido real, 20/08/2026):
+                    o "digitando..." do header só aparece pro lead no WhatsApp — aqui é o
+                    equivalente pro operador, pra saber que uma resposta está a caminho
+                    (ou que falhou e foi escalada) sem precisar adivinhar. Ver
+                    aiReplyStatusByPhone acima. */}
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'generating' && (
+                  <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-3 py-1.5 text-[11px] text-emerald-300">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                    <span>A IA está formulando uma resposta para {selectedLead.name}...</span>
+                  </div>
+                )}
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'failed' && (
+                  <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-1.5 text-[11px] text-rose-300">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>A IA não conseguiu gerar resposta — escalado, veja Escalonamentos ou responda manualmente.</span>
+                  </div>
+                )}
+
                 {/* Reply Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido acima do campo de texto */}
                 {replyingTo && (
                   <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-[#00a884] rounded-lg px-3 py-1.5">
@@ -4016,6 +4159,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         isCreating={isCreatingManualAppointment}
         onSubmit={handleCreateManualAppointment}
         onClose={() => { setIsManualAppointmentModalOpen(false); setManualAppointmentError(null); setManualNotes(''); setManualPaymentReceived(false); setManualPaymentAmountReceived(''); setIsManualServiceCustom(false); setManualCustomDurationMinutes(''); }}
+      />
+
+      <ManageLabelsModal
+        isOpen={isLabelManagerOpen}
+        labels={labelCatalog}
+        isLoading={isLoadingLabelCatalog}
+        onRename={handleRenameLabelCatalog}
+        onDelete={handleDeleteLabelCatalog}
+        onClose={() => setIsLabelManagerOpen(false)}
       />
 
       <ContractModal

@@ -8,8 +8,10 @@ import { describe, expect, it } from 'vitest';
 import {
   formatKnowledgeBaseForPrompt,
   resolveProductPriceAmount,
+  resolveProductAmountByName,
   isNonBookableProduct,
   findProductDurationMinutes,
+  findProductMatch,
   type AgentKnowledgeBase,
   type AgentProduct,
 } from '../knowledgeBaseStore';
@@ -129,5 +131,82 @@ describe('findProductDurationMinutes', () => {
   it('undefined quando o produto não tem duração cadastrada', () => {
     const kb: AgentKnowledgeBase = { products: [{ name: 'Microlips', price: 'Gs 500.000' }] };
     expect(findProductDurationMinutes(kb, 'Microlips')).toBeUndefined();
+  });
+});
+
+/**
+ * Pedido real (20/08/2026): agrupar os serviços de uma família (ex:
+ * "Pestañas" cobrindo "Lash Lift", "Efecto Delineado" etc., cada um com
+ * duração/preço/bookable próprios) sem findProductMatch soube procurar
+ * dentro de `variants` quebraria silenciosamente duração de agendamento,
+ * valor do registro financeiro e envio de foto/vídeo de exemplo assim que
+ * um serviço deixasse de ser um produto de topo.
+ */
+describe('findProductMatch (produto de topo ou variante dentro de uma família)', () => {
+  const familyKb: AgentKnowledgeBase = {
+    products: [
+      {
+        name: 'Pestañas',
+        price: 'Sob consulta',
+        exampleImageBase64: 'ZmFrZS1mb3RvLWZhbWlsaWE=',
+        variants: [
+          { code: 'Lash Lift', price: 'Gs 140.000', priceAmount: 140000, durationMinutes: 90 },
+          { code: 'Efecto Delineado', price: 'Gs 220.000', priceAmount: 220000, durationMinutes: 120, bookable: false },
+        ],
+      },
+    ],
+  };
+
+  it('acha o produto direto pelo nome quando não tem variantes envolvidas', () => {
+    const kb: AgentKnowledgeBase = { products: [{ name: 'Microlips', price: 'Gs 500.000' }] };
+    const match = findProductMatch(kb, 'Microlips');
+    expect(match?.product.name).toBe('Microlips');
+    expect(match?.variant).toBeUndefined();
+  });
+
+  it('acha o produto PAI e a variante batida quando o nome bate com uma variante dentro de uma família', () => {
+    const match = findProductMatch(familyKb, 'Lash Lift');
+    expect(match?.product.name).toBe('Pestañas');
+    expect(match?.variant?.code).toBe('Lash Lift');
+  });
+
+  it('undefined quando o nome não bate nem com produto nem com variante nenhuma', () => {
+    expect(findProductMatch(familyKb, 'Serviço Inexistente')).toBeUndefined();
+  });
+
+  it('findProductDurationMinutes usa a duração da variante, não a do produto pai (que nem tem)', () => {
+    expect(findProductDurationMinutes(familyKb, 'Lash Lift')).toBe(90);
+    expect(findProductDurationMinutes(familyKb, 'Efecto Delineado')).toBe(120);
+  });
+
+  it('findProductDurationMinutes cai pra duração do produto pai quando a variante não tem duração própria', () => {
+    const kb: AgentKnowledgeBase = {
+      products: [{
+        name: 'Cejas',
+        price: 'Sob consulta',
+        durationMinutes: 90,
+        variants: [{ code: 'Diseño con Henna', price: 'Gs 80.000' }],
+      }],
+    };
+    expect(findProductDurationMinutes(kb, 'Diseño con Henna')).toBe(90);
+  });
+
+  it('isNonBookableProduct usa o bookable da variante, não o do produto pai', () => {
+    expect(isNonBookableProduct(familyKb, 'Efecto Delineado')).toBe(true);
+    expect(isNonBookableProduct(familyKb, 'Lash Lift')).toBe(false);
+  });
+
+  it('resolveProductAmountByName usa o preço da variante batida, não o do produto pai (que não tem preço numérico)', () => {
+    expect(resolveProductAmountByName(familyKb, 'Lash Lift')).toBe(140000);
+    expect(resolveProductAmountByName(familyKb, 'Efecto Delineado')).toBe(220000);
+  });
+
+  it('resolveProductAmountByName cai pro resolveProductPriceAmount do produto pai quando o nome bate direto nele', () => {
+    const kb: AgentKnowledgeBase = { products: [{ name: 'Microlips', price: 'Gs 500.000', priceAmount: 500000 }] };
+    expect(resolveProductAmountByName(kb, 'Microlips')).toBe(500000);
+  });
+
+  it('resolveProductAmountByName undefined quando o nome não bate com nada (nunca inventa valor)', () => {
+    expect(resolveProductAmountByName(familyKb, 'Serviço Inexistente')).toBeUndefined();
   });
 });

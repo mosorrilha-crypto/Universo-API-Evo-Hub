@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
 import { recordIncomingMessage, updateConversationState, reactToMessage } from '../conversationStore';
-import { subscribeTenant, emitConversationUpdated } from '../conversationEvents';
+import { subscribeTenant, emitConversationUpdated, emitAiReplyStatus } from '../conversationEvents';
 
 let supabase: ReturnType<typeof createFakeSupabase>;
 
@@ -59,6 +59,14 @@ describe('conversationEvents (pub/sub em memória)', () => {
     const unsubscribe = subscribeTenant(TENANT_A, listener);
     await updateConversationState(TENANT_A, '595983333333', { archived: true });
     expect(listener).toHaveBeenCalledWith('595983333333');
+    unsubscribe();
+  });
+
+  it('emitAiReplyStatus manda o telefone e o status junto (pedido real, 20/08/2026: aviso de "IA formulando resposta" no painel)', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeTenant(TENANT_A, listener);
+    emitAiReplyStatus(TENANT_A, '595981111111', 'generating');
+    expect(listener).toHaveBeenCalledWith('595981111111', { aiReplyStatus: 'generating' });
     unsubscribe();
   });
 

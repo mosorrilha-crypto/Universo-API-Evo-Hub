@@ -10,7 +10,7 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { getKnowledgeBase, resolveProductPriceAmount, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { getKnowledgeBase, resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import { createPreReservation } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
@@ -711,8 +711,7 @@ async function notifyMetaCapiEvent(tenantId: string, phone: string, eventName: s
   if (!ctwaClid) return;
 
   const kb = await getKnowledgeBase(tenantId);
-  const product = kb?.products?.find((p) => p.name === titulo);
-  const value = product ? resolveProductPriceAmount(product) : undefined;
+  const value = resolveProductAmountByName(kb, titulo);
 
   await fireMetaCapiEventForTenant(tenantId, {
     eventName,
@@ -1347,6 +1346,30 @@ async function decideMidiaActionViaGroq(
   return { name: action, args: { nome_produto: (parsed?.nome_produto as string) || '' } };
 }
 
+const PHOTO_VIDEO_KEYWORD_RE = /\bfotos?\b|\bimagens?\b|\bv[ií]deos?\b/i;
+
+/**
+ * Achado real em produção (20/08/2026, tenant Monique): cliente perguntou
+ * "Tiene fotos?" logo depois do agente oferecer 2 serviços sem ela ter
+ * escolhido nenhum ainda — a decisão de mídia corretamente decide não
+ * enviar nada (não dá pra saber qual produto mandar), mas o especialista,
+ * sem NENHUM contexto sobre essa decisão, respondia "no tengo ese material
+ * disponible" — uma negação falsa, já que o catálogo TEM fotos, só não
+ * dava pra saber de qual serviço. Só ativa quando o cliente realmente
+ * mencionou foto/vídeo nesta mensagem (nunca insere isso à toa numa
+ * mensagem sem relação, ex: "quanto custa?").
+ */
+function noMidiaActionResult(text: string, hasAnyMediaInCatalog: boolean): { actionsSummary: string[] } {
+  if (hasAnyMediaInCatalog && PHOTO_VIDEO_KEYWORD_RE.test(text)) {
+    return {
+      actionsSummary: [
+        'Cliente perguntou sobre foto/vídeo mas não ficou claro de qual serviço (ou esse serviço específico não tem mídia cadastrada) — o catálogo TEM fotos/vídeos reais de outros serviços; nunca diga que não tem nenhum material disponível, pergunte qual serviço ela quer ver ou diga que só aquele em particular ainda não tem exemplo.',
+      ],
+    };
+  }
+  return { actionsSummary: [] };
+}
+
 async function runMidiaTool(
   tenantId: string,
   ai: GoogleGenAI,
@@ -1374,7 +1397,7 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
   if (groqApiKey) {
     try {
       call = await decideMidiaActionViaGroq(tenantId, groqApiKey, prompt);
-      if (!call) return { actionsSummary: [] };
+      if (!call) return noMidiaActionResult(text, true);
     } catch (err) {
       console.warn(`⚠️  [Mídia] Groq falhou (tenant=${tenantId}), caindo pro Gemini:`, (err as Error)?.message || err);
       call = undefined;
@@ -1398,7 +1421,7 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     );
 
     const geminiCall = response.functionCalls?.[0];
-    if (!geminiCall || (geminiCall.name !== 'enviar_foto_exemplo' && geminiCall.name !== 'enviar_video_exemplo')) return { actionsSummary: [] };
+    if (!geminiCall || (geminiCall.name !== 'enviar_foto_exemplo' && geminiCall.name !== 'enviar_video_exemplo')) return noMidiaActionResult(text, true);
     call = { name: geminiCall.name, args: { nome_produto: geminiCall.args?.nome_produto as string | undefined } };
   }
 
@@ -1417,7 +1440,14 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     const product = findByName(productsWithVideo);
     if (!product?.exampleVideoId) {
       console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: "${nomeProduto}" não bateu com nenhum produto com vídeo cadastrado (tenant=${tenantId}). Catálogo com vídeo: [${productsWithVideo.map((p) => p.name).join(', ')}]`);
-      return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse produto não tem vídeo de exemplo cadastrado.`] };
+      // Achado real em produção (Monique, 20/08/2026): cliente pediu foto/vídeo
+      // duma CATEGORIA genérica ("Pestañas", "cílios"), não do nome exato de um
+      // produto do catálogo — nome_produto vem errado da IA, cai aqui, e sem
+      // essa ressalva o especialista lia "esse produto não tem X cadastrado" e
+      // generalizava pra "não tenho NENHUM material", mesmo o catálogo tendo
+      // vídeo real de outros serviços da mesma categoria (ver mesmo achado no
+      // helper noMidiaActionResult acima).
+      return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com vídeo cadastrado — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem vídeo de exemplo. Serviços com vídeo real disponível: ${productsWithVideo.map((p) => p.name).join(', ')}.`] };
     }
     const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, product.exampleVideoId);
     if (!video) {
@@ -1466,7 +1496,11 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
   const product = findByName(productsWithPhoto);
   if (!product?.exampleImageBase64) {
     console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: "${nomeProduto}" não bateu com nenhum produto com foto cadastrada (tenant=${tenantId}). Catálogo com foto: [${productsWithPhoto.map((p) => p.name).join(', ')}]`);
-    return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse produto não tem foto de exemplo cadastrada.`] };
+    // Mesmo achado do bloco de vídeo acima — nome_produto pode ser uma
+    // categoria genérica ("Pestañas") em vez do nome exato de um produto do
+    // catálogo; sem a ressalva o especialista generalizava isso em "não
+    // tenho NENHUM material", mesmo com foto real de outros serviços.
+    return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com foto cadastrada — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem foto de exemplo. Serviços com foto real disponível: ${productsWithPhoto.map((p) => p.name).join(', ')}.`] };
   }
 
   try {

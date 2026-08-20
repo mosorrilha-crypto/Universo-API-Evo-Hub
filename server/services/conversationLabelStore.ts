@@ -83,6 +83,68 @@ export async function listAllTenantLabels(tenantId: string): Promise<string[]> {
   return Array.from(seen.values());
 }
 
+/**
+ * Renomeia uma etiqueta em TODAS as conversas do tenant de uma vez (pedido
+ * real, 20/08/2026: não existia forma de corrigir um texto digitado errado
+ * sem remover e recriar manualmente conversa por conversa — a etiqueta
+ * também não tinha catálogo próprio, só existe como texto solto em cada
+ * linha de conversation_labels). Quando a conversa já tem a etiqueta nova
+ * (ex: renomear "turno confirmado" pra "Turno confirmado" quando essa
+ * conversa já tinha as duas por engano), a linha antiga só é removida em vez
+ * de criar duplicata — mesma regra de normalização de addLabel.
+ */
+export async function renameLabelForTenant(tenantId: string, oldLabel: string, newLabel: string): Promise<{ renamedCount: number }> {
+  const trimmedNew = newLabel.trim();
+  if (!trimmedNew) throw new Error('Novo texto da etiqueta não pode ser vazio.');
+  const db = getDb();
+  const { data, error } = await db.from('conversation_labels').select('id, conversation_id, label').eq('tenant_id', tenantId);
+  if (error) throw error;
+  const rows = (data || []) as { id: string; conversation_id: string; label: string }[];
+  const oldKey = normalizeLabel(oldLabel);
+  const newKey = normalizeLabel(trimmedNew);
+  const matching = rows.filter((r) => normalizeLabel(r.label) === oldKey);
+  let renamedCount = 0;
+  for (const row of matching) {
+    const dup = rows.some((r) => r.id !== row.id && r.conversation_id === row.conversation_id && normalizeLabel(r.label) === newKey);
+    if (dup) {
+      await db.from('conversation_labels').delete().eq('id', row.id);
+    } else {
+      await db.from('conversation_labels').update({ label: trimmedNew }).eq('id', row.id);
+    }
+    renamedCount++;
+  }
+  return { renamedCount };
+}
+
+/** Remove uma etiqueta de TODAS as conversas do tenant de uma vez — pra tirar do catálogo de sugestões uma etiqueta obsoleta/digitada errado. */
+export async function deleteLabelForTenant(tenantId: string, label: string): Promise<{ deletedCount: number }> {
+  const db = getDb();
+  const { data, error } = await db.from('conversation_labels').select('id, label').eq('tenant_id', tenantId);
+  if (error) throw error;
+  const key = normalizeLabel(label);
+  const matching = (data || []) as { id: string; label: string }[];
+  const toDelete = matching.filter((r) => normalizeLabel(r.label) === key);
+  for (const row of toDelete) {
+    await db.from('conversation_labels').delete().eq('id', row.id);
+  }
+  return { deletedCount: toDelete.length };
+}
+
+/** Etiquetas distintas do tenant com quantas conversas usam cada uma — base da tela "Gerenciar etiquetas" (renomear/apagar do catálogo). */
+export async function listAllTenantLabelsWithUsage(tenantId: string): Promise<{ label: string; usageCount: number }[]> {
+  const db = getDb();
+  const { data, error } = await db.from('conversation_labels').select('label').eq('tenant_id', tenantId);
+  if (error) throw error;
+  const byKey = new Map<string, { label: string; usageCount: number }>();
+  for (const row of (data || []) as { label: string }[]) {
+    const key = normalizeLabel(row.label);
+    const entry = byKey.get(key);
+    if (entry) entry.usageCount++;
+    else byKey.set(key, { label: row.label, usageCount: 1 });
+  }
+  return Array.from(byKey.values()).sort((a, b) => b.usageCount - a.usageCount);
+}
+
 /** Etiquetas de todas as conversas de um tenant, agrupadas por conversation_id — evita N+1 query em listConversations. */
 export async function listLabelsByConversationId(tenantId: string): Promise<Map<string, string[]>> {
   const db = getDb();

@@ -16,12 +16,12 @@ import {
   updateConversationState,
   markConversationRead,
 } from '../services/conversationStore';
-import { addLabel, removeLabel, listAllTenantLabels } from '../services/conversationLabelStore';
+import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
-import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, resolveProductPriceAmount } from '../services/knowledgeBaseStore';
+import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, findProductMatch, resolveProductAmountByName } from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
@@ -151,8 +151,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    const unsubscribe = subscribeTenant(tenantId, (phone: string) => {
-      res.write(`data: ${JSON.stringify({ phone })}\n\n`);
+    const unsubscribe = subscribeTenant(tenantId, (phone: string, meta) => {
+      res.write(`data: ${JSON.stringify({ phone, ...meta })}\n\n`);
     });
 
     // Mantém a conexão viva atrás de proxies com idle timeout (ex: Render) —
@@ -514,6 +514,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ labels: await listAllTenantLabels(tenantOf(req)) });
   }));
 
+  // Tela "Gerenciar etiquetas" (pedido real, 20/08/2026): etiqueta não tinha
+  // catálogo próprio, só existe como texto solto em cada conversation_labels
+  // — sem forma de corrigir um texto digitado errado ou tirar uma etiqueta
+  // obsoleta da lista de sugestões sem editar conversa por conversa. Rename e
+  // delete abaixo agem em TODAS as conversas do tenant de uma vez.
+  router.get('/api/conversation-labels/catalog', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ labels: await listAllTenantLabelsWithUsage(tenantOf(req)) });
+  }));
+
+  router.patch('/api/conversation-labels/:label', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { newLabel } = req.body || {};
+    if (!newLabel || typeof newLabel !== 'string' || !newLabel.trim()) {
+      return res.status(400).json({ error: 'Campo "newLabel" é obrigatório.' });
+    }
+    const result = await renameLabelForTenant(tenantOf(req), req.params.label, newLabel);
+    res.json({ success: true, ...result });
+  }));
+
+  router.delete('/api/conversation-labels/:label', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const result = await deleteLabelForTenant(tenantOf(req), req.params.label);
+    res.json({ success: true, ...result });
+  }));
+
   // Organização da lista de conversas — arquivar, fixar no topo, silenciar
   // notificações, marcar como não lida manualmente, identificar o lead
   // trocando/adicionando o nome do contato, bloquear a IA pra um lead
@@ -554,7 +577,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     const kb = await getKnowledgeBase(tenantId);
-    const product = kb?.products?.find((p) => p.name === productName);
+    // findProductMatch acha o produto pai mesmo quando productName bate numa
+    // variante específica (ex: "Lash Lift" dentro da família "Pestañas") —
+    // foto/vídeo de exemplo são sempre da família inteira, nunca por variante.
+    const product = findProductMatch(kb, productName)?.product;
     if (!product?.exampleImageBase64) {
       return res.status(404).json({ error: 'Esse serviço não tem foto de exemplo cadastrada na Base de Conhecimento.' });
     }
@@ -616,7 +642,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     const kb = await getKnowledgeBase(tenantId);
-    const product = kb?.products?.find((p) => p.name === productName);
+    const product = findProductMatch(kb, productName)?.product;
     if (!product?.exampleVideoId) {
       return res.status(404).json({ error: 'Esse serviço não tem vídeo de exemplo cadastrado na Base de Conhecimento.' });
     }
@@ -753,22 +779,31 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   /**
    * Achado real em produção (19/08/2026, pedido direto do dono do produto):
    * o fluxo real de venda (WhatsApp → agendamento → comprovante aprovado) e
-   * o Financeiro eram dois sistemas paralelos — confirmar um pagamento aqui
-   * só atualizava o agendamento, nunca virava um registro financeiro. A
-   * única forma de uma venda real aparecer no Financeiro era o operador
-   * digitar tudo de novo manualmente. Cria a transação automaticamente
-   * quando o comprovante é aprovado, usando o preço real da Base de
-   * Conhecimento pelo nome do serviço (nunca inventa valor — 0 quando o
-   * nome não bate com nenhum produto do catálogo, ex: agendamento manual
-   * com descrição livre).
+   * o Financeiro eram dois sistemas paralelos — confirmar um pagamento
+   * (por qualquer um dos 3 caminhos abaixo) só atualizava o agendamento,
+   * nunca virava um registro financeiro. A única forma de uma venda real
+   * aparecer no Financeiro era o operador digitar tudo de novo
+   * manualmente. Cria a transação automaticamente quando o comprovante é
+   * aprovado, usando o preço real da Base de Conhecimento pelo nome do
+   * serviço (nunca inventa valor — 0 quando o nome não bate com nenhum
+   * produto do catálogo, ex: agendamento manual com descrição livre).
+   *
+   * Chamada pelos 3 pontos que hoje marcam um pagamento como 'verified':
+   * o card de Escalonamentos (POST /api/escalations/:id/resolve-payment —
+   * o caminho REAL, o único com botão no painel desde 12/08/2026, ver
+   * comentário acima de verify-payment abaixo), o cadastro manual de
+   * agendamento com "pagamento já recebido" marcado
+   * (POST /api/conversations/:phone/manual-appointment), e o próprio
+   * verify-payment abaixo (sem botão no painel hoje, mas mantido como
+   * caminho de API — não removido por precaução).
    *
    * `sourceRef` (o eventId do Calendar, único por definição) faz a
    * constraint única (tenant_id, source_ref) da migration 0037 proteger
-   * contra duplicar numa reentrega/retry deste endpoint — o erro de
-   * duplicidade é engolido em silêncio (isDuplicateSourceRefError);
-   * qualquer outro erro só loga, nunca derruba a resposta de verify-payment
-   * (que já é a ação principal que o operador pediu — o registro financeiro
-   * é um efeito colateral, não pode bloquear o fluxo real de pagamento).
+   * contra duplicar numa reentrega/retry — o erro de duplicidade é
+   * engolido em silêncio (isDuplicateSourceRefError); qualquer outro erro
+   * só loga, nunca derruba a resposta da ação principal que o operador
+   * pediu (o registro financeiro é um efeito colateral, não pode bloquear
+   * o fluxo real de pagamento).
    */
   async function recordFinancialTransactionForVerifiedPayment(
     tenantId: string,
@@ -783,9 +818,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         getKnowledgeBase(tenantId),
         getConversation(tenantId, phone),
       ]);
-      const normalized = appointment.summary.trim().toLowerCase();
-      const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
-      const amount = overrideAmount ?? (product ? resolveProductPriceAmount(product) : 0);
+      const amount = overrideAmount ?? (resolveProductAmountByName(kb, appointment.summary) ?? 0);
       await createFinancialTransaction(tenantId, {
         id: crypto.randomUUID(),
         leadId: phone,
@@ -806,13 +839,25 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
   }
 
-  // Etapa 8 (fluxo de verificação de pagamento) — o operador marca aqui o
-  // comprovante que chegou (webhooks.ts já grava pending_verification
-  // automaticamente quando uma imagem chega com agendamento ativo sem
-  // comprovante ainda) como verificado (bate com o valor/seña combinado) ou
-  // rejeitado. A IA nunca chama isso — só o operador humano decide, e o
-  // agente (autoReply.ts, runAgendamentoTools) lê o resultado no próximo
-  // turno pra saber se já pode confirmar o turno pro cliente.
+  // Etapa 8 (fluxo de verificação de pagamento) — marca o comprovante que
+  // chegou (webhooks.ts já grava pending_verification automaticamente
+  // quando uma imagem chega com agendamento ativo sem comprovante ainda)
+  // como verificado (bate com o valor/seña combinado) ou rejeitado. A IA
+  // nunca chama isso — só o operador humano decide, e o agente
+  // (autoReply.ts, runAgendamentoTools) lê o resultado no próximo turno pra
+  // saber se já pode confirmar o turno pro cliente.
+  //
+  // Achado real (pedido do dono do produto, 12/08/2026): o botão
+  // "Confirmar"/"Rejeitar" que chamava ESTE endpoint direto da conversa
+  // (WhatsAppLeadsSim.tsx) foi removido — virava um segundo lugar
+  // desconectado do escalonamento que webhooks.ts já cria automaticamente
+  // pro mesmo comprovante, e confirmar por ali não avisava o cliente do
+  // motivo. Unificado no card de Escalonamentos (kind: 'payment_proof' —
+  // EscalationsPanel.tsx, App.tsx handleResolvePaymentEscalation), que
+  // chama POST /api/escalations/:id/resolve-payment abaixo, não este.
+  // Hoje NENHUM botão do painel chama este endpoint diretamente — mantido
+  // como caminho de API (coberto por testes, ver
+  // conversationsVerifyPayment*.test.ts) por precaução, não removido.
   router.post('/api/conversations/:phone/verify-payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status } = req.body || {};
     if (status !== 'verified' && status !== 'rejected') {
