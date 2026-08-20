@@ -377,6 +377,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // pra serviços mais longos (ex: instalação de piscina).
   const [newProductDuration, setNewProductDuration] = useState('');
 
+  // Busca + filtro por categoria do catálogo (pedido real, 20/08/2026:
+  // catálogos com muitos itens — 19+ serviços de um estúdio de beleza —
+  // ficavam difíceis de achar só rolando a tela). Client-side, sem tocar
+  // schema/backend: filtra formData.products antes de productGroups agrupar
+  // por categoria, então continua reaproveitando o mesmo agrupamento visual.
+  const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('');
+
   const [newRuleText, setNewRuleText] = useState('');
 
   const [newFaqQuestion, setNewFaqQuestion] = useState('');
@@ -535,6 +543,28 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setNewProductDuration('');
   };
 
+  // Duplica um item já cadastrado (novo id, "(cópia)" no nome) — cópia
+  // profunda de variants/promo pra não compartilhar array com o original.
+  // Só o essencial pra edição: foto/vídeo de exemplo continuam apontando
+  // pro mesmo arquivo original (nada é reenviado), então a duplicata some
+  // com a imagem/vídeo até alguém trocar por um novo.
+  const handleDuplicateProduct = (id: string) => {
+    setFormData((prev) => {
+      const original = prev.products.find((p) => p.id === id);
+      if (!original) return prev;
+      const copy: AgentProduct = {
+        ...original,
+        id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: `${original.name} (cópia)`,
+        variants: original.variants ? original.variants.map((v) => ({ ...v })) : undefined,
+      };
+      const idx = prev.products.findIndex((p) => p.id === id);
+      const products = [...prev.products];
+      products.splice(idx + 1, 0, copy);
+      return { ...prev, products };
+    });
+  };
+
   const handleDeleteProduct = (id: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -567,10 +597,31 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // agrupamento visual aqui — só dava pra setar direto no banco. Não muda a
   // ordem/array real de `formData.products` (todo handler de edição continua
   // operando por `prod.id`), só a forma de renderizar a lista.
+  // Categorias já cadastradas, pra alimentar o <select> de filtro sem
+  // depender de uma lista fixa em código.
+  const productCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of formData.products) {
+      const category = p.category?.trim();
+      if (category) set.add(category);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [formData.products]);
+
   const productGroups = useMemo(() => {
+    const search = productSearch.trim().toLowerCase();
+    const filtered = formData.products.filter((p) => {
+      if (productCategoryFilter && (p.category?.trim() || '') !== productCategoryFilter) return false;
+      if (!search) return true;
+      return (
+        p.name.toLowerCase().includes(search) ||
+        p.description.toLowerCase().includes(search) ||
+        (p.category || '').toLowerCase().includes(search)
+      );
+    });
     const byCategory = new Map<string, AgentProduct[]>();
     const uncategorized: AgentProduct[] = [];
-    for (const p of formData.products) {
+    for (const p of filtered) {
       const category = p.category?.trim();
       if (!category) {
         uncategorized.push(p);
@@ -580,7 +631,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       byCategory.get(category)!.push(p);
     }
     return { categorized: Array.from(byCategory.entries()), uncategorized };
-  }, [formData.products]);
+  }, [formData.products, productSearch, productCategoryFilter]);
 
   // Variantes de tamanho/modelo dentro de um produto unificado (ex: "Piscina Fapac
   // Maresias" cobrindo 4x2.20m/5x2.60m/6x2.80m/7x3m, cada tamanho com preço próprio) —
@@ -1687,11 +1738,43 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </button>
             </form>
 
+            {/* Busca + filtro por categoria — client-side, só filtra o que
+                já está em formData.products antes do agrupamento visual
+                abaixo (productGroups já aplica os dois). */}
+            {formData.products.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Buscar por nome, descrição ou categoria..."
+                  className="flex-1 min-w-[180px] px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                />
+                {productCategories.length > 0 && (
+                  <select
+                    value={productCategoryFilter}
+                    onChange={(e) => setProductCategoryFilter(e.target.value)}
+                    className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="">Todas as categorias</option>
+                    {productCategories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+
             {/* Product List — agrupada por categoria quando os produtos têm
                 (ver productGroups acima); "row" achata cabeçalho + produtos
                 num `.map()` só, pra não duplicar o corpo do card em dois
                 loops separados. */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {formData.products.length > 0 && productGroups.categorized.length === 0 && productGroups.uncategorized.length === 0 && (
+                <div className="col-span-full p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-slate-800/60">
+                  Nenhum produto encontrado com esse filtro.
+                </div>
+              )}
               {(() => {
                 const orderedRows: Array<{ type: 'header'; label: string } | { type: 'product'; product: AgentProduct }> = [];
                 for (const [category, items] of productGroups.categorized) {
@@ -1713,14 +1796,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   const prod = row.product;
                   return (
                 <div key={prod.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteProduct(prod.id)}
-                    className="absolute top-3 right-3 z-10 text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
-                    title="Excluir produto"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="absolute top-3 right-3 z-10 flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicateProduct(prod.id)}
+                      className="text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer p-1"
+                      title="Duplicar produto"
+                    >
+                      <FileCheck className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProduct(prod.id)}
+                      className="text-slate-500 hover:text-red-400 transition-colors cursor-pointer p-1"
+                      title="Excluir produto"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   <div className="space-y-1.5">
                     <input
                       type="text"
