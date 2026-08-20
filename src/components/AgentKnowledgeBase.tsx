@@ -323,6 +323,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   }));
   const [isSavedToast, setIsSavedToast] = useState(false);
 
+  // Gavetas (accordion) das 6 seções da aba — pedido real (20/08/2026): a
+  // aba tinha ficado extensa demais com tudo sempre visível de uma vez
+  // (ver comentário "Visão unificada" abaixo, que já tinha abolido as
+  // antigas 6 abas separadas). Fechadas por padrão pra reduzir o scroll
+  // inicial; o estado não persiste entre sessões, é só de UI.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const toggleSection = (key: string) => setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
   // Recurso separado (tabela `tenants`, não a base de conhecimento) — save
   // próprio, não passa pelo handleSave/onSaveKnowledgeBase de cima.
   const [hoursForm, setHoursForm] = useState<BusinessHours>(() => businessHours);
@@ -1355,10 +1363,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
         {/* SECTION 1: General Profile & Goal */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
-            <Target className="w-3.5 h-3.5" />
-            <span>1. Perfil & Objetivo</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s1')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <Target className="w-3.5 h-3.5" />
+              <span>1. Perfil & Objetivo</span>
+            </span>
+            {openSections.s1 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s1 && (
+          <div className="space-y-5">
             <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1518,13 +1535,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 2: Business Rules & Constraints */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wide">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>2. Regras de Negócio ({formData.businessRules.length})</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s2')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>2. Regras de Negócio ({formData.businessRules.length})</span>
+            </span>
+            {openSections.s2 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s2 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1585,13 +1613,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               )}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 3: Products & Pricing */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
-            <DollarSign className="w-3.5 h-3.5" />
-            <span>3. Preços & Produtos ({formData.products.length})</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s3')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>3. Preços & Produtos ({formData.products.length})</span>
+            </span>
+            {openSections.s3 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s3 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1855,13 +1894,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               })()}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 4: FAQs & Common Questions */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-400 uppercase tracking-wide">
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>4. FAQ e Dúvidas ({formData.faqs.length})</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s4')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-blue-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>4. FAQ e Dúvidas ({formData.faqs.length})</span>
+            </span>
+            {openSections.s4 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s4 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1919,13 +1969,24 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               ))}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 5: Document Uploads */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-purple-400 uppercase tracking-wide">
-            <FileText className="w-3.5 h-3.5" />
-            <span>5. Documentos Anexados ({formData.documents.length})</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s5')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-purple-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />
+              <span>5. Documentos Anexados ({formData.documents.length})</span>
+            </span>
+            {openSections.s5 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s5 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -2044,6 +2105,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               ))}
             </div>
           </div>
+          )}
+        </div>
 
         {/* SECTION 6: Mensagem Inicial de Primeiro Contato — pedido real
             (14-15/08/2026, Clic Piscinas): em vez da pergunta de triagem
@@ -2054,10 +2117,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             Nenhum bloco = comportamento de sempre (a IA responde a 1ª
             mensagem normalmente), sem precisar de um toggle separado. */}
         <div className="space-y-5">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold text-pink-400 uppercase tracking-wide">
-            <Send className="w-3.5 h-3.5" />
-            <span>6. Mensagem Inicial</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => toggleSection('s6')}
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-pink-400 uppercase tracking-wide cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <Send className="w-3.5 h-3.5" />
+              <span>6. Mensagem Inicial</span>
+            </span>
+            {openSections.s6 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {openSections.s6 && (
+          <div className="space-y-5">
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -2327,6 +2399,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </div>
             </div>
           </div>
+          )}
+        </div>
 
       </div>
 
