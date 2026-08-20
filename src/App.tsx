@@ -202,7 +202,13 @@ export const App: React.FC = () => {
         // pra outro tenant.
         const savedOverrideId = currentUser.role === 'saas_admin' ? localStorage.getItem(ACTIVE_TENANT_OVERRIDE_KEY) : null;
         if (savedOverrideId && savedOverrideId !== data.tenant.id) return;
-        setActiveTenant((prev) => (prev.id === data.tenant.id && prev.name === data.tenant.name ? prev : { ...prev, id: data.tenant.id, name: data.tenant.name }));
+        // currency/locale entraram aqui (19/08/2026) pro Financeiro formatar
+        // valores na moeda real do tenant em vez de R$/pt-BR fixo.
+        setActiveTenant((prev) =>
+          prev.id === data.tenant.id && prev.name === data.tenant.name && prev.currency === data.tenant.currency && prev.locale === data.tenant.locale
+            ? prev
+            : { ...prev, id: data.tenant.id, name: data.tenant.name, currency: data.tenant.currency, locale: data.tenant.locale }
+        );
       })
       .catch(() => {});
 
@@ -727,10 +733,14 @@ export const App: React.FC = () => {
     }
   };
 
-  // Toda cobrança criada pelo botão "Gerar Nova Cobrança" do painel é uma
-  // ação real de operador — persiste no servidor sempre, mesmo padrão de
-  // handleUpdateLead: nunca aplica local antes de confirmar.
-  const handleAddTransaction = async (newTx: FinancialTransaction) => {
+  // Toda cobrança criada pelo botão "Registrar Transferência / Venda" do
+  // painel é uma ação real de operador — persiste no servidor sempre, mesmo
+  // padrão de handleUpdateLead: nunca aplica local antes de confirmar.
+  // Devolve true/false pro FinancialDashboard.tsx saber se deve mostrar a
+  // tela de sucesso — achado real testando: antes disso o modal mostrava
+  // "Registrado com sucesso" mesmo quando o POST falhava (ex: 401), porque
+  // a chamada era fire-and-forget e o componente nunca esperava o resultado.
+  const handleAddTransaction = async (newTx: FinancialTransaction): Promise<boolean> => {
     try {
       const res = await apiFetch('/api/financial/transactions', {
         method: 'POST',
@@ -755,10 +765,11 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Falha ao salvar cobrança no servidor:', err);
       showToast('Não foi possível salvar essa cobrança no servidor. Tente de novo.');
-      return;
+      return false;
     }
     setTransactions((prev) => [{ ...newTx, isReal: true }, ...prev]);
-    showToast('Nova fatura gerada com sucesso!');
+    showToast('Transação registrada com sucesso!');
+    return true;
   };
 
   const handleUpdateTransactionStatus = async (id: string, newStatus: any) => {
@@ -914,6 +925,8 @@ export const App: React.FC = () => {
             leads={leads}
             currentUser={currentUser || GUEST_USER}
             initialSelectedLead={financialPreselectedLead}
+            currency={activeTenant.currency}
+            locale={activeTenant.locale}
           />
         )}
 

@@ -20,7 +20,7 @@ function tenantOf(req: AuthenticatedRequest): string {
   return resolveTenantId(req);
 }
 
-const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
+const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['pago', 'pendente', 'atrasado', 'cancelado'];
 
 /**

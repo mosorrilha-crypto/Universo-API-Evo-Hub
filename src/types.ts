@@ -30,6 +30,10 @@ export interface Tenant {
   customGeminiKey?: string;
   metaPixelId?: string;
   webhookEndpoint: string;
+  /** Moeda real do negócio deste tenant (ex: "PYG") — vem de GET /api/tenant. Financeiro usa isso pra formatar valores em vez de R$/pt-BR fixo. Ausente até essa chamada resolver, então todo consumidor precisa de um fallback. */
+  currency?: string;
+  /** Locale pra Intl.NumberFormat junto de `currency` (ex: "es-PY"). */
+  locale?: string;
 }
 
 export interface UserProfile {
@@ -60,7 +64,7 @@ export interface CRMTask {
   assignedOperator: string;
 }
 
-export type PaymentMethod = 'PIX' | 'Cartão de Crédito' | 'Boleto Bancário' | 'Link WhatsApp';
+export type PaymentMethod = 'PIX' | 'Transferência Bancária' | 'Cartão de Crédito' | 'Boleto Bancário' | 'Link WhatsApp';
 export type PaymentStatus = 'pago' | 'pendente' | 'atrasado' | 'cancelado';
 
 export interface FinancialTransaction {
@@ -70,7 +74,8 @@ export interface FinancialTransaction {
   leadName: string;
   leadPhone: string;
   productName: string;
-  amount: number; // in BRL
+  /** Valor na moeda do tenant (Tenant.currency) — nunca assuma BRL, ver FinancialDashboard.tsx pra formatação. */
+  amount: number;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
   date: string;
@@ -80,6 +85,8 @@ export interface FinancialTransaction {
   paymentLinkUrl?: string;
   /** true quando veio de GET /api/financial/transactions (registro real persistido no servidor) — distingue de dado de demonstração local, mesmo papel que LeadInfo.isReal. */
   isReal?: boolean;
+  /** Referência estável da origem (ex: "apt:<eventId>") — só presente em transação criada automaticamente pelo backend quando um comprovante é aprovado. undefined em transação registrada manualmente. */
+  sourceRef?: string;
 }
 
 export type LeadSourceChannel = 'meta_ads' | 'instagram_ads' | 'google_ads' | 'instagram_organic' | 'google_organic' | 'whatsapp_direct';

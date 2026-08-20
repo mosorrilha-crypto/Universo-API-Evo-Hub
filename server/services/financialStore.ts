@@ -6,7 +6,7 @@
  */
 import { getDb } from './db';
 
-export type PaymentMethod = 'PIX' | 'Cartão de Crédito' | 'Boleto Bancário' | 'Link WhatsApp';
+export type PaymentMethod = 'PIX' | 'Transferência Bancária' | 'Cartão de Crédito' | 'Boleto Bancário' | 'Link WhatsApp';
 export type PaymentStatus = 'pago' | 'pendente' | 'atrasado' | 'cancelado';
 
 export interface FinancialTransactionRecord {
@@ -23,6 +23,8 @@ export interface FinancialTransactionRecord {
   channel?: string;
   pixQrCode?: string;
   paymentLinkUrl?: string;
+  /** Referência estável da origem (ex: "apt:<eventId do Google Calendar>") — só presente em transação criada automaticamente pelo verify-payment (ver conversations.ts). undefined pra qualquer transação registrada manualmente. Único por tenant (migration 0037) — garante que reenviar/reprocessar o mesmo verify-payment nunca duplica a transação. */
+  sourceRef?: string;
 }
 
 type FinancialTransactionRow = {
@@ -39,10 +41,11 @@ type FinancialTransactionRow = {
   channel: string | null;
   pix_qr_code: string | null;
   payment_link_url: string | null;
+  source_ref: string | null;
 };
 
 const FINANCIAL_TRANSACTION_COLUMNS =
-  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url';
+  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url, source_ref';
 
 function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTransactionRecord {
   return {
@@ -59,6 +62,7 @@ function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTr
     channel: row.channel ?? undefined,
     pixQrCode: row.pix_qr_code ?? undefined,
     paymentLinkUrl: row.payment_link_url ?? undefined,
+    sourceRef: row.source_ref ?? undefined,
   };
 }
 
@@ -88,6 +92,12 @@ export interface CreateFinancialTransactionInput {
   channel?: string;
   pixQrCode?: string;
   paymentLinkUrl?: string;
+  sourceRef?: string;
+}
+
+/** true quando o erro é a constraint única (tenant_id, source_ref) da migration 0037 — sinal de que essa transação já foi criada antes (reentrega/retry), nunca um erro real. Quem chama pra criação automática (ver conversations.ts verify-payment) deve tratar isso como sucesso silencioso, não propagar. */
+export function isDuplicateSourceRefError(err: unknown): boolean {
+  return (err as { code?: string })?.code === '23505';
 }
 
 /**
@@ -117,6 +127,7 @@ export async function createFinancialTransaction(
       channel: input.channel,
       pix_qr_code: input.pixQrCode,
       payment_link_url: input.paymentLinkUrl,
+      source_ref: input.sourceRef,
     })
     .select(FINANCIAL_TRANSACTION_COLUMNS)
     .single();
