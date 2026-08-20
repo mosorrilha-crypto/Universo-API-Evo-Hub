@@ -542,6 +542,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // acende um dos três pills depois que o GET realmente confirma o valor.
   const [agentStatus, setAgentStatusState] = useState<'active' | 'paused' | 'restricted' | null>(null);
   const [agentStatusLoadFailed, setAgentStatusLoadFailed] = useState(false);
+  // Pedido real (20/08/2026): o "digitando..." só aparecia pro lead
+  // (WhatsApp), sem nenhum sinal no próprio painel de que a IA está
+  // processando a última mensagem — o operador ficava sem saber se ia
+  // chegar resposta em instantes ou se precisava assumir. Vem pelo mesmo SSE
+  // de conversas (aiReplyStatus no payload, ver emitAiReplyStatus em
+  // conversationEvents.ts). Chave = telefone; 'failed' se auto-limpa depois
+  // de alguns segundos (o escalonamento real já fica registrado à parte).
+  const [aiReplyStatusByPhone, setAiReplyStatusByPhone] = useState<Record<string, 'generating' | 'failed'>>({});
+
   // Modo "somente anúncios" (pedido real, 14/08/2026): quando ativo, o
   // agente só responde automaticamente contatos com atribuição de anúncio
   // real (ctwa_clid) — nunca contatos pessoais. Útil quando o dono do
@@ -1302,10 +1311,42 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         ? `/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${encodeURIComponent(tenantOverride)}`
         : `/api/conversations/stream?token=${encodeURIComponent(token)}`;
       source = new EventSource(streamUrl);
-      // O evento só carrega o telefone que mudou — reaproveita o mesmo
-      // fetch da lista em vez de montar um merge separado por telefone,
-      // então cobre também o caso de conversa apagada.
-      source.onmessage = () => { fetchRealConversations(); };
+      // O evento carrega o telefone que mudou — reaproveita o mesmo fetch da
+      // lista em vez de montar um merge separado por telefone, então cobre
+      // também o caso de conversa apagada. `aiReplyStatus` (opcional) é um
+      // sinal à parte, não liga a nenhuma mudança de mensagem por si só —
+      // ver aiReplyStatusByPhone acima.
+      source.onmessage = (event) => {
+        fetchRealConversations();
+        try {
+          const payload = JSON.parse(event.data);
+          const phone: string | undefined = payload?.phone;
+          const status: 'generating' | 'sent' | 'failed' | undefined = payload?.aiReplyStatus;
+          if (!phone || !status) return;
+          if (status === 'generating') {
+            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'generating' }));
+          } else if (status === 'sent') {
+            setAiReplyStatusByPhone((prev) => {
+              if (!(phone in prev)) return prev;
+              const { [phone]: _removed, ...rest } = prev;
+              return rest;
+            });
+          } else if (status === 'failed') {
+            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'failed' }));
+            // Some sozinho depois de alguns segundos — o escalonamento real
+            // já fica registrado em Escalonamentos, este é só um aviso rápido.
+            setTimeout(() => {
+              setAiReplyStatusByPhone((prev) => {
+                if (prev[phone] !== 'failed') return prev;
+                const { [phone]: _removed, ...rest } = prev;
+                return rest;
+              });
+            }, 6000);
+          }
+        } catch {
+          // Heartbeat (": heartbeat\n\n") ou payload antigo sem JSON válido — ignora.
+        }
+      };
       // EventSource já reconecta sozinho no browser depois de erro/queda de
       // conexão — não precisa de lógica de retry manual aqui.
     }
@@ -3727,6 +3768,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* Aviso de resposta automática em andamento (pedido real, 20/08/2026):
+                    o "digitando..." do header só aparece pro lead no WhatsApp — aqui é o
+                    equivalente pro operador, pra saber que uma resposta está a caminho
+                    (ou que falhou e foi escalada) sem precisar adivinhar. Ver
+                    aiReplyStatusByPhone acima. */}
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'generating' && (
+                  <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-3 py-1.5 text-[11px] text-emerald-300">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                    <span>A IA está formulando uma resposta para {selectedLead.name}...</span>
+                  </div>
+                )}
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'failed' && (
+                  <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-1.5 text-[11px] text-rose-300">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>A IA não conseguiu gerar resposta — escalado, veja Escalonamentos ou responda manualmente.</span>
+                  </div>
+                )}
 
                 {/* Reply Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido acima do campo de texto */}
                 {replyingTo && (
