@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
 import { recordIncomingMessage } from '../conversationStore';
-import { addLabel, removeLabel, listLabels, listAllTenantLabels } from '../conversationLabelStore';
+import { addLabel, removeLabel, listLabels, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../conversationLabelStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const TENANT_B = '22222222-2222-2222-2222-222222222222';
@@ -74,5 +74,70 @@ describe('etiquetas livres por conversa', () => {
 
     const labelsA = await listAllTenantLabels(TENANT_A);
     expect(labelsA.sort()).toEqual(['Interesada en pestañas', 'Seña pendiente'].sort());
+  });
+
+  it('listAllTenantLabelsWithUsage conta quantas conversas usam cada etiqueta, ordenado do mais usado', async () => {
+    await recordIncomingMessage(TENANT_A, '595981111111', 'Cliente A1', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await recordIncomingMessage(TENANT_A, '595982222222', 'Cliente A2', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await addLabel(TENANT_A, '595981111111', 'Turno confirmado');
+    await addLabel(TENANT_A, '595982222222', 'Turno confirmado');
+    await addLabel(TENANT_A, '595982222222', 'Seña pendiente');
+
+    const withUsage = await listAllTenantLabelsWithUsage(TENANT_A);
+    expect(withUsage).toEqual([
+      { label: 'Turno confirmado', usageCount: 2 },
+      { label: 'Seña pendiente', usageCount: 1 },
+    ]);
+  });
+
+  it('renameLabelForTenant renomeia a etiqueta em todas as conversas do tenant de uma vez', async () => {
+    await recordIncomingMessage(TENANT_A, '595981111111', 'Cliente A1', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await recordIncomingMessage(TENANT_A, '595982222222', 'Cliente A2', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await addLabel(TENANT_A, '595981111111', 'turno confirmado');
+    await addLabel(TENANT_A, '595982222222', 'turno confirmado');
+
+    const result = await renameLabelForTenant(TENANT_A, 'turno confirmado', 'Turno confirmado');
+    expect(result.renamedCount).toBe(2);
+
+    expect(await listLabels(TENANT_A, '595981111111')).toEqual(['Turno confirmado']);
+    expect(await listLabels(TENANT_A, '595982222222')).toEqual(['Turno confirmado']);
+  });
+
+  it('renameLabelForTenant evita duplicar quando a conversa já tem a etiqueta nova', async () => {
+    await recordIncomingMessage(TENANT_A, '595981111111', 'Cliente A1', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await addLabel(TENANT_A, '595981111111', 'turno confirmado');
+    await addLabel(TENANT_A, '595981111111', 'Turno confirmado extra');
+    // Simula a conversa já tendo as duas variações por engano
+    await addLabel(TENANT_A, '595981111111', 'Confirmado');
+
+    const result = await renameLabelForTenant(TENANT_A, 'turno confirmado', 'Confirmado');
+    expect(result.renamedCount).toBe(1);
+    expect(await listLabels(TENANT_A, '595981111111')).toEqual(['Turno confirmado extra', 'Confirmado']);
+  });
+
+  it('renameLabelForTenant não vaza pro tenant errado', async () => {
+    await recordIncomingMessage(TENANT_A, '595981111111', 'Cliente A', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await recordIncomingMessage(TENANT_B, '595983333333', 'Cliente B', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await addLabel(TENANT_A, '595981111111', 'turno confirmado');
+    await addLabel(TENANT_B, '595983333333', 'turno confirmado');
+
+    await renameLabelForTenant(TENANT_A, 'turno confirmado', 'Turno confirmado');
+
+    expect(await listLabels(TENANT_A, '595981111111')).toEqual(['Turno confirmado']);
+    expect(await listLabels(TENANT_B, '595983333333')).toEqual(['turno confirmado']);
+  });
+
+  it('deleteLabelForTenant remove a etiqueta de todas as conversas do tenant', async () => {
+    await recordIncomingMessage(TENANT_A, '595981111111', 'Cliente A1', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await recordIncomingMessage(TENANT_A, '595982222222', 'Cliente A2', { type: 'text', text: 'oi', timestamp: '10:00' });
+    await addLabel(TENANT_A, '595981111111', 'Duda sobre dolor');
+    await addLabel(TENANT_A, '595982222222', 'Duda sobre dolor');
+    await addLabel(TENANT_A, '595982222222', 'Seña pendiente');
+
+    const result = await deleteLabelForTenant(TENANT_A, 'Duda sobre dolor');
+    expect(result.deletedCount).toBe(2);
+
+    expect(await listLabels(TENANT_A, '595981111111')).toEqual([]);
+    expect(await listLabels(TENANT_A, '595982222222')).toEqual(['Seña pendiente']);
   });
 });
