@@ -559,6 +559,42 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     const specialistContent: string = calls[calls.length - 1].contents[0].text;
     expect(specialistContent).not.toContain('material disponível');
   });
+
+  // Achado real em produção (Monique, 20/08/2026): cliente perguntou
+  // "Pestanas vc tem fotos?" — uma CATEGORIA genérica, não o nome exato de
+  // um produto do catálogo (que é "Microlips" neste fixture, ou "Lash
+  // Lift"/"Volume Brasileiro" no caso real). O modelo tentou chamar a
+  // ferramenta com nome_produto="Pestañas", que não bate com nenhum produto
+  // — cai no branch de "não bateu com nenhum produto", não no de "nenhuma
+  // ação" coberto pelo teste acima. Sem a ressalva nesse branch também, o
+  // especialista generalizava isso em "não tenho nenhum material", mesmo
+  // tendo foto real de outros serviços da mesma categoria.
+  it('avisa que o catálogo TEM foto de outros serviços quando nome_produto não bate com nenhum exato (categoria genérica)', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const calls: any[] = [];
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          calls.push(req);
+          if (req.config?.tools) {
+            return { functionCalls: [{ name: 'enviar_foto_exemplo', args: { nome_produto: 'Pestañas' } }] } as any;
+          }
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Ok!'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Pestanas vc tem fotos?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('NUNCA diga que não tem material nenhum disponível');
+    expect(specialistContent).toContain('Microlips');
+  });
 });
 
 describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade com Epic 4.5.2)', () => {

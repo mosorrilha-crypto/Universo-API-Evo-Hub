@@ -1427,7 +1427,14 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     const product = findByName(productsWithVideo);
     if (!product?.exampleVideoId) {
       console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: "${nomeProduto}" não bateu com nenhum produto com vídeo cadastrado (tenant=${tenantId}). Catálogo com vídeo: [${productsWithVideo.map((p) => p.name).join(', ')}]`);
-      return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse produto não tem vídeo de exemplo cadastrado.`] };
+      // Achado real em produção (Monique, 20/08/2026): cliente pediu foto/vídeo
+      // duma CATEGORIA genérica ("Pestañas", "cílios"), não do nome exato de um
+      // produto do catálogo — nome_produto vem errado da IA, cai aqui, e sem
+      // essa ressalva o especialista lia "esse produto não tem X cadastrado" e
+      // generalizava pra "não tenho NENHUM material", mesmo o catálogo tendo
+      // vídeo real de outros serviços da mesma categoria (ver mesmo achado no
+      // helper noMidiaActionResult acima).
+      return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com vídeo cadastrado — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem vídeo de exemplo. Serviços com vídeo real disponível: ${productsWithVideo.map((p) => p.name).join(', ')}.`] };
     }
     const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, product.exampleVideoId);
     if (!video) {
@@ -1476,7 +1483,11 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
   const product = findByName(productsWithPhoto);
   if (!product?.exampleImageBase64) {
     console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: "${nomeProduto}" não bateu com nenhum produto com foto cadastrada (tenant=${tenantId}). Catálogo com foto: [${productsWithPhoto.map((p) => p.name).join(', ')}]`);
-    return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse produto não tem foto de exemplo cadastrada.`] };
+    // Mesmo achado do bloco de vídeo acima — nome_produto pode ser uma
+    // categoria genérica ("Pestañas") em vez do nome exato de um produto do
+    // catálogo; sem a ressalva o especialista generalizava isso em "não
+    // tenho NENHUM material", mesmo com foto real de outros serviços.
+    return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com foto cadastrada — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem foto de exemplo. Serviços com foto real disponível: ${productsWithPhoto.map((p) => p.name).join(', ')}.`] };
   }
 
   try {
