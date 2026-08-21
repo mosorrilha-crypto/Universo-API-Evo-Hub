@@ -69,4 +69,29 @@ describe('classifyAgent — prompt do roteador orienta pergunta de endereço pra
     // Nunca deve cair no fallback genérico de anti-alucinação do fluxo de agendamento.
     expect(result?.bubbles.join(' ')).not.toMatch(/confirmar certinho esse horário/i);
   });
+
+  it('prioriza perguntas concretas de localização e preço antes de avançar para agenda', async () => {
+    let specialistInstruction = '';
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          const text = req.contents?.[0]?.text as string;
+          if (text?.includes('Classifique a intenção principal')) {
+            return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          }
+          specialistInstruction = req.config?.systemInstruction || '';
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['Estamos en Luque. El combo cuesta Gs 850.000.'], needsHumanConfirmation: false }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    const result = await generateAutoReplyForText(
+      'tenant-priority', ai, 'Dónde queda en Luque y cuánto está?', 'Cliente', 'Link de localização (Google Maps): https://maps.test', undefined,
+      '595981234567'
+    );
+
+    expect(specialistInstruction).toContain('PRIORIDADE ABSOLUTA');
+    expect(specialistInstruction).toContain('Quando pedir preço e localização juntos, responda ambos no mesmo turno');
+    expect(result?.bubbles.join(' ')).toContain('Gs 850.000');
+  });
 });

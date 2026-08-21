@@ -1900,9 +1900,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
   // atualizam o estado local.
-  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true }) => {
+  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true }): Promise<boolean> => {
     const lead = leads.find((l) => l.id === leadId);
-    if (!lead) return;
+    if (!lead) return false;
 
     if ((lead as any).isReal) {
       try {
@@ -1925,12 +1925,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         } : l)));
         setErrorMsg(null);
         setErrorRetryAction(undefined);
+        return true;
       } catch (err) {
         console.error('Falha ao atualizar organização da conversa no servidor:', err);
         setErrorMsg('Não foi possível salvar essa ação no servidor. Tente de novo.');
         setErrorRetryAction(() => () => handleUpdateConversationState(leadId, patch));
+        return false;
       }
-      return;
     }
 
     setLeads((prev) => prev.map((l) => {
@@ -1938,12 +1939,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       const updated: PanelLead = { ...l };
       if (patch.archived !== undefined) updated.archivedAt = patch.archived ? new Date().toISOString() : undefined;
       if (patch.pinned !== undefined) updated.pinnedAt = patch.pinned ? new Date().toISOString() : undefined;
-      if (patch.muted !== undefined) updated.muted = patch.muted;
       if (patch.unread !== undefined) updated.manuallyUnread = patch.unread;
       if (patch.name !== undefined) updated.name = patch.name;
       if (patch.aiBlocked !== undefined) updated.aiBlockedAt = patch.aiBlocked ? new Date().toISOString() : undefined;
       return updated;
     }));
+    return true;
   };
 
   // Identifica o lead — troca/adiciona o nome do contato. Achado real em
@@ -2022,7 +2023,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Full Conversation Analysis API call
   const handleAnalyzeConversation = async (
-    targetLead = selectedLead
+    targetLead = selectedLead,
+    options: { draftAfterAnalysis?: boolean } = {}
   ) => {
     if (!targetLead) return;
     setIsAnalyzingConversation(true);
@@ -2063,6 +2065,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setLeads((prev) =>
         prev.map((l) => (l.id === targetLead.id ? { ...l, fullAnalysis } : l))
       );
+
+      // Continuidade assistida: o operador pode acionar a IA numa conversa
+      // já existente sem esperar uma nova mensagem do lead. A análise usa o
+      // histórico real e leva a resposta sugerida APENAS ao compositor,
+      // mantendo revisão humana e envio explícito separados.
+      if (options.draftAfterAnalysis && fullAnalysis.suggestedSmartReply?.trim()) {
+        setInputMessage(fullAnalysis.suggestedSmartReply.trim());
+      }
     } catch (err: any) {
       console.error('Erro ao analisar conversa completa:', err);
       setErrorMsg(err.message || 'Falha ao analisar a conversa com o Gemini IA.');
@@ -3294,12 +3304,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             {!isAdLead && (
                               <button
-                                onClick={() => { handleUpdateConversationState(selectedLead.id, { adLead: true }); setIsHeaderMenuOpen(false); }}
+                                onClick={async () => {
+                                  setIsHeaderMenuOpen(false);
+                                  const activated = await handleUpdateConversationState(selectedLead.id, { adLead: true });
+                                  if (activated) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
+                                }}
                                 className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title='Pedido real (20/08/2026): no modo "Só Anúncios" (botão no topo), a IA só responde automaticamente contatos identificados como vindos de anúncio (clique real ou texto batendo com um gatilho configurado) — um lead de anúncio de verdade que chegou sem esse sinal fica calado até o operador assumir. Use aqui pra sinalizar manualmente e liberar a resposta automática pra essa conversa.'
+                                title='Libera a IA para as próximas mensagens deste lead e lê o histórico completo para preparar um rascunho contextual no compositor. O rascunho nunca é enviado sem revisão humana.'
                               >
                                 <Megaphone className="w-3.5 h-3.5" />
-                                <span>Marcar como lead de anúncio</span>
+                                <span>Ativar IA e preparar rascunho</span>
                               </button>
                             )}
                             <button

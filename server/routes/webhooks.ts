@@ -93,6 +93,22 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
       // Exclui as mensagens que acabaram de ser agrupadas pelo buffer (já
       // registradas individualmente antes do flush) — o resto é histórico real.
       const conversation = await getConversation(tenantId, phone);
+      // Conversas que o operador iniciou manualmente (por exemplo, com um
+      // fornecedor, parceiro ou contato pessoal) não são leads até que o
+      // operador as marque explicitamente como lead de anúncio. Sem este
+      // gate, qualquer resposta recebida nessa conversa era tratada como se
+      // viesse de uma cliente e a IA respondia em nome do estúdio de forma
+      // inadequada. O primeiro lead real ainda pode iniciar uma conversa
+      // normalmente porque a mensagem atual é registrada antes deste ponto e
+      // o histórico anterior permanece vazio.
+      const firstHistoricalMessage = conversation?.messages?.[0];
+      if (
+        firstHistoricalMessage?.sender === 'agent'
+        && firstHistoricalMessage.sentBy === 'operator'
+        && !conversation?.adGreetingMatchedAt
+      ) {
+        return;
+      }
       // Lead não qualificado/insistente que o operador bloqueou (menu ⋮ do
       // painel) — achado real em produção: um lead claramente fora do
       // público-alvo continuava recebendo resposta automática igual a
