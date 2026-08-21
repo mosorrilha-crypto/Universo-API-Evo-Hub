@@ -15,10 +15,14 @@
  * de erro de propósito: no volume atual (poucos tenants reais), "avisou
  * recentemente que algo está quebrado" já é suficiente pra não perder o
  * primeiro sinal.
+ *
+ * Canal 2 (WhatsApp) via adminAlertChannel.ts (issue #290, seção 1) — antes
+ * chamava resolveMetaCredentialsForTenant direto com `{}` de fallback,
+ * nunca alcançava a credencial Meta global nem tentava Evolution API pro
+ * tenant que atende de verdade por lá.
  */
 import { getDb } from './db';
-import { sendWhatsAppTemplateMessage } from './metaSend';
-import { resolveMetaCredentialsForTenant } from './tenantResolver';
+import { sendAdminAlert } from './adminAlertChannel';
 import { sendPushToTenant } from './webPush';
 
 /** Template aprovado no Meta Business Manager (categoria Utilitário) — corpo sugerido: "⚠️ Erro real no sistema {{1}}: {{2}}. Confira os logs do servidor." — {{1}} de onde veio o erro, {{2}} mensagem resumida, nessa ordem. */
@@ -58,11 +62,13 @@ async function alertTenant(row: TenantAlertRow, details: SystemErrorDetails): Pr
   }
 
   try {
-    const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(row.id, {});
-    await sendWhatsAppTemplateMessage(metaPhoneNumberId, metaAccessToken, adminPhone, TEMPLATE_NAME, TEMPLATE_LANGUAGE, [
-      details.source,
-      details.message.slice(0, 300),
-    ]);
+    const shortMessage = details.message.slice(0, 300);
+    await sendAdminAlert(row.id, adminPhone, {
+      templateName: TEMPLATE_NAME,
+      templateLanguage: TEMPLATE_LANGUAGE,
+      templateArgs: [details.source, shortMessage],
+      freeText: `⚠️ Erro real no sistema ${details.source}: ${shortMessage}. Confira os logs do servidor.`,
+    });
     console.log(`🔔 [Alerta de erro de sistema] tenant=${row.id} avisou ${adminPhone} — ${details.source}: ${details.message}`);
   } catch (err) {
     console.warn(`⚠️  [Alerta de erro de sistema] tenant=${row.id} falha ao mandar WhatsApp:`, (err as Error).message);

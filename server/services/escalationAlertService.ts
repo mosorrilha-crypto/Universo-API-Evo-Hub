@@ -14,19 +14,23 @@
  *
  * IMPORTANTE: precisa do template "escalonamento_alerta" aprovado no Meta
  * Business Manager antes de funcionar de verdade (mesmo processo já usado
- * pra "agente_pausado_alerta", ver agentPausedAlertJob.ts) — até lá, a
- * chamada falha e só loga um aviso, sem quebrar o fluxo real de
- * escalonamento (a escalação continua sendo registrada normalmente).
+ * pra "agente_pausado_alerta", ver agentPausedAlertJob.ts) — só quando o
+ * canal real do tenant é Meta; via Evolution API manda texto livre, sem
+ * depender de template aprovado.
  *
  * Sem debounce de propósito por enquanto: no volume atual (1 tenant real),
  * cada escalação é um cliente diferente que pode estar sendo perdido — vale
  * mais avisar demais do que perder um caso real. Se o volume crescer a
  * ponto de virar spam pro operador, revisitar com um limite por janela de
  * tempo.
+ *
+ * Canal 2 (WhatsApp) via adminAlertChannel.ts (issue #290, seção 1) — antes
+ * chamava resolveMetaCredentialsForTenant direto com `{}` de fallback,
+ * nunca alcançava a credencial Meta global nem tentava Evolution API pro
+ * tenant que atende de verdade por lá.
  */
 import { getDb } from './db';
-import { sendWhatsAppTemplateMessage } from './metaSend';
-import { resolveMetaCredentialsForTenant } from './tenantResolver';
+import { sendAdminAlert } from './adminAlertChannel';
 import { sendPushToTenant } from './webPush';
 
 const TEMPLATE_NAME = 'escalonamento_alerta';
@@ -68,11 +72,11 @@ export async function notifyEscalationCreated(tenantId: string, escalation: Esca
     return;
   }
 
-  const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(tenantId, {});
-  await sendWhatsAppTemplateMessage(metaPhoneNumberId, metaAccessToken, adminPhone, TEMPLATE_NAME, TEMPLATE_LANGUAGE, [
-    tenantName,
-    leadLabel,
-    escalation.reason,
-  ]);
+  await sendAdminAlert(tenantId, adminPhone, {
+    templateName: TEMPLATE_NAME,
+    templateLanguage: TEMPLATE_LANGUAGE,
+    templateArgs: [tenantName, leadLabel, escalation.reason],
+    freeText: `🚨 Nova escalação em ${tenantName}: ${leadLabel} — ${escalation.reason}. Confira no painel.`,
+  });
   console.log(`🔔 [Alerta de escalonamento] tenant=${tenantId} avisou ${adminPhone} — ${leadLabel}: ${escalation.reason}`);
 }

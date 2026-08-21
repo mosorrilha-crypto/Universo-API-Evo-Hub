@@ -13,8 +13,12 @@ import { checkPausedAgentsAndAlert } from '../agentPausedAlertJob';
 vi.mock('../metaSend', () => ({
   sendWhatsAppTemplateMessage: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('../evolutionSend', () => ({
+  sendEvolutionTextMessage: vi.fn().mockResolvedValue('wamid-evo'),
+}));
 
 import { sendWhatsAppTemplateMessage } from '../metaSend';
+import { sendEvolutionTextMessage } from '../evolutionSend';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const NOW = new Date('2026-08-09T20:00:00Z');
@@ -52,6 +56,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   vi.mocked(sendWhatsAppTemplateMessage).mockClear();
+  vi.mocked(sendEvolutionTextMessage).mockClear();
 });
 
 describe('agentPausedAlertJob', () => {
@@ -124,5 +129,28 @@ describe('agentPausedAlertJob', () => {
     await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid', pauseThresholdMs: 5 * 60 * 1000 });
 
     expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('tenant cujo canal real é Evolution API recebe o alerta por texto livre, não por template Meta (issue #290)', async () => {
+    await seedTenant({ adminAlertPhone: '5567998038466' });
+    await seedPausedSince(35);
+    await seedConversationWithLastMessage('lead', 20);
+    await getDb().from('tenant_evolution_credentials').insert({
+      tenant_id: TENANT_A,
+      instance_name: 'inst-monique',
+      api_url: 'https://evo.example.com',
+      api_key: 'evo-key',
+    });
+
+    await checkPausedAgentsAndAlert({ metaAccessToken: 'tok', metaPhoneNumberId: 'pnid' });
+
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(1);
+    const [instanceName, apiUrl, apiKey, to, text] = vi.mocked(sendEvolutionTextMessage).mock.calls[0] as any[];
+    expect(instanceName).toBe('inst-monique');
+    expect(apiUrl).toBe('https://evo.example.com');
+    expect(apiKey).toBe('evo-key');
+    expect(to).toBe('5567998038466');
+    expect(text).toContain('Monique');
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 });
