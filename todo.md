@@ -28,4 +28,10 @@
 - [x] Verificar e restaurar a configuração de preço promocional com data de expiração no cadastro de produtos e variações.
 - [x] Permitir configurar preço promocional e vencimento por variação, refletindo o valor vigente no agente e no financeiro.
 - [x] Remover a edição independente de valores numéricos e derivá-los sempre do preço regular ou promocional exibido ao cliente.
+- [x] Auditar inconsistências restantes nos fluxos de Base de Conhecimento e cadastro de produtos.
+- [x] Restringir os Modelos de Negócio Prontos ao perfil saas_admin e mantê-los recolhidos por padrão.
+- [x] Reduzir a altura do cabeçalho da Base de Conhecimento sem perder as ações essenciais.
+- [x] Exibir estado de salvamento, sucesso e falha de forma clara para a Base de Conhecimento.
+- [x] Adicionar ação flutuante de salvar durante a rolagem da Base de Conhecimento.
+- [x] Validar e publicar as melhorias de experiência da Base de Conhecimento.
 - [ ] Revisar a experiência visual e entregar a atualização no repositório Universo.

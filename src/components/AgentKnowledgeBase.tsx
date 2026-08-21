@@ -51,6 +51,8 @@ interface AgentKnowledgeBaseProps {
   copyableTenants?: Tenant[];
   /** Busca a Base de Conhecimento REAL de outro tenant (GET /api/admin/tenants/:id/knowledge-base) — null em caso de falha, o próprio App.tsx já mostra o toast de erro. */
   onFetchTenantKnowledgeBase?: (tenantId: string) => Promise<AgentKnowledgeBase | null>;
+  /** Modelos fixos são ferramenta de configuração inicial e só ficam disponíveis para saas_admin. */
+  canUseBusinessTemplates?: boolean;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -324,6 +326,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   onGoToWhatsAppSim,
   copyableTenants = [],
   onFetchTenantKnowledgeBase,
+  canUseBusinessTemplates = false,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -333,6 +336,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     firstContactBlocks: ensureUniqueIds(knowledgeBase.firstContactBlocks, 'fcblock'),
   }));
   const [isSavedToast, setIsSavedToast] = useState(false);
+  const [isSavingKnowledgeBase, setIsSavingKnowledgeBase] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isBusinessTemplatesOpen, setIsBusinessTemplatesOpen] = useState(false);
 
   // Gavetas (accordion) das 6 seções da aba — pedido real (20/08/2026): a
   // aba tinha ficado extensa demais com tudo sempre visível de uma vez
@@ -467,14 +473,27 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // respondendo com a base de conhecimento antiga. Agora só mostra sucesso
   // quando o salvamento no servidor de fato confirmou.
   const handleSave = async () => {
+    if (isSavingKnowledgeBase) return;
     const updated = {
       ...formData,
       lastSaved: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     };
-    const saved = await onSaveKnowledgeBase(updated);
-    if (saved) {
+    setIsSavingKnowledgeBase(true);
+    setSaveError(null);
+    setIsSavedToast(false);
+    try {
+      const saved = await onSaveKnowledgeBase(updated);
+      if (!saved) {
+        setSaveError('Não foi possível salvar no servidor. Revise sua conexão e tente novamente.');
+        return;
+      }
+      setFormData(updated);
       setIsSavedToast(true);
       setTimeout(() => setIsSavedToast(false), 4000);
+    } catch {
+      setSaveError('Não foi possível salvar no servidor. Revise sua conexão e tente novamente.');
+    } finally {
+      setIsSavingKnowledgeBase(false);
     }
   };
 
@@ -1329,29 +1348,29 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     <div className="space-y-6 max-w-7xl mx-auto">
       
       {/* Top Header Banner */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-lg shadow-emerald-950">
-            <Brain className="w-6 h-6 text-emerald-400 animate-pulse" />
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl flex items-center justify-between gap-3">
+        <div className="flex items-center space-x-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0">
+            <Brain className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h2 className="text-lg font-bold text-white tracking-tight">
+              <h2 className="text-base font-bold text-white tracking-tight truncate">
                 Base de Conhecimento & Regras do Agente
               </h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/40 flex items-center gap-1">
+              <span className="hidden sm:flex px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40 items-center gap-1">
                 <Sparkles className="w-3 h-3 text-emerald-400" />
                 Agente Gemini Treinado
               </span>
             </div>
-            <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
-              Defina o objetivo do cliente, insira as regras de negócio, tabelas de preços, FAQs e anexos de treinamento. O Agente Gemini usará estas diretrizes para analisar conversas e sugerir respostas personalizadas no WhatsApp.
+            <p className="text-[11px] text-slate-300 mt-0.5 max-w-2xl leading-relaxed line-clamp-2">
+              Configure contexto, regras, catálogo, FAQs e anexos que orientam o agente nos atendimentos.
             </p>
           </div>
         </div>
 
         {/* Primary Header Actions */}
-        <div className="flex items-center space-x-2.5 self-end md:self-auto flex-shrink-0">
+        <div className="flex items-center space-x-2 flex-shrink-0">
           <button
             onClick={handleResetToDefault}
             className="px-3 py-2 rounded-xl border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
@@ -1359,14 +1378,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Restaurar</span>
-          </button>
-
-          <button
-            onClick={handleSave}
-            className="px-4 py-2 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2 shadow-lg shadow-emerald-950/60 transition-all cursor-pointer"
-          >
-            <Save className="w-4 h-4" />
-            <span>Salvar Regras no Agente</span>
           </button>
         </div>
       </div>
@@ -1407,36 +1418,21 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         ) : <p className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3 text-xs text-emerald-200">A estrutura principal está completa para o agente usar dados reais desta empresa.</p>}
       </section>
 
-      {/* Preset Fast Template Buttons */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-md space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-            <Zap className="w-4 h-4 text-amber-400" />
-            Modelos de Negócio Prontos (Carregamento em 1-Clique)
-          </span>
-          <span className="text-[11px] text-slate-500">Selecione para preencher automaticamente</span>
+      {/* Modelos fixos servem apenas para configurar novos tenants e não ocupam a área operacional. */}
+      {canUseBusinessTemplates && (
+        <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl shadow-md overflow-hidden">
+          <button type="button" onClick={() => setIsBusinessTemplatesOpen((open) => !open)} className="w-full p-3.5 flex items-center justify-between gap-3 text-left hover:bg-slate-800/50 transition-colors">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5"><Zap className="w-4 h-4 text-amber-400" />Modelos de negócio para configurar um novo tenant</span>
+            <span className="text-[11px] text-slate-500 flex items-center gap-1.5">{isBusinessTemplatesOpen ? 'Ocultar' : 'Abrir'} {isBusinessTemplatesOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}</span>
+          </button>
+          {isBusinessTemplatesOpen && <div className="border-t border-slate-800 p-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+            {PRESET_TEMPLATES.map((tmpl, idx) => <button type="button" key={idx} onClick={() => handleApplyPreset(tmpl)} className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/80 hover:bg-slate-800/70 hover:border-emerald-500/40 transition-all text-left group">
+              <h4 className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors flex items-center justify-between"><span>{tmpl.name}</span><ArrowRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" /></h4>
+              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{tmpl.desc}</p>
+            </button>)}
+          </div>}
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {PRESET_TEMPLATES.map((tmpl, idx) => (
-            <div
-              key={idx}
-              onClick={() => handleApplyPreset(tmpl)}
-              className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/80 hover:bg-slate-800/70 hover:border-emerald-500/40 transition-all cursor-pointer group flex flex-col justify-between"
-            >
-              <div>
-                <h4 className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors flex items-center justify-between">
-                  <span>{tmpl.name}</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" />
-                </h4>
-                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                  {tmpl.desc}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* Copiar Base de Conhecimento real de outro tenant (só saas_admin) */}
       {copyableTenants.length > 0 && (
@@ -2951,9 +2947,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       )}
 
+      <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2">
+        {saveError && <div className="max-w-xs rounded-xl border border-rose-500/40 bg-rose-950 px-3 py-2 text-[11px] text-rose-100 shadow-xl">{saveError}</div>}
+        <button type="button" onClick={handleSave} disabled={isSavingKnowledgeBase} className="rounded-2xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white shadow-2xl shadow-emerald-950/80 transition-all hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-80 flex items-center gap-2">
+          {isSavingKnowledgeBase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          <span>{isSavingKnowledgeBase ? 'Salvando alterações…' : 'Salvar alterações'}</span>
+        </button>
+      </div>
+
       {/* Bottom Save Notification Toast / Banner */}
       {isSavedToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-900 border border-emerald-500 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center space-x-3 text-xs font-bold animate-bounce">
+        <div className="fixed bottom-20 right-5 z-50 bg-emerald-900 border border-emerald-500 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-xs font-bold">
           <CheckCircle2 className="w-5 h-5 text-emerald-300" />
           <div>
             <span>Base de Conhecimento Salva com Sucesso!</span>
