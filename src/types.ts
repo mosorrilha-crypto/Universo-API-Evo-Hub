@@ -165,6 +165,8 @@ export interface ProductVariant {
 export interface AgentProduct {
   id: string;
   name: string;
+  /** Nomes comerciais alternativos, usados para reconhecer campanhas e a forma como a cliente nomeia o serviço. */
+  aliases?: string[];
   price: string;
   description: string;
   /** Agrupamento pro prompt do agente e pra listagem do painel (ex: "Pestañas", "Cejas") — opcional, catálogos pequenos podem ficar sem (ver server/services/knowledgeBaseStore.ts formatKnowledgeBaseForPrompt). */

@@ -40,6 +40,8 @@ export interface ProductVariant {
 
 export interface AgentProduct {
   name: string;
+  /** Nomes comerciais alternativos usados em anúncios e conversas. Mantém o nome oficial do catálogo, mas permite reconhecer campanhas como "Combo Full Face". */
+  aliases?: string[];
   price: string;
   /** Agrupamento pro prompt (ex: "Pestañas", "Cejas") — opcional, catálogos pequenos podem ficar sem. */
   category?: string;
@@ -383,7 +385,8 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
             .map((v) => `    • ${v.code}${v.dimensions ? ` (${v.dimensions}${v.litros ? `, ${v.litros}L` : ''})` : ''}: ${v.price}`)
             .join('\n')}`
         : '';
-      return `- ${p.name}: ${resolveProductPrice(p)}${p.description ? ` — ${p.description}` : ''}${variantsLine}`;
+      const aliasesLine = p.aliases?.length ? ` — também conhecido como ${p.aliases.join(', ')}` : '';
+      return `- ${p.name}${aliasesLine}: ${resolveProductPrice(p)}${p.description ? ` — ${p.description}` : ''}${variantsLine}`;
     };
     const categories = [...new Set(visibleProducts.map((p) => p.category).filter((c): c is string => !!c))];
     if (categories.length) {

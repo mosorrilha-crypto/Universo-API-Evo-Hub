@@ -185,6 +185,39 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(specialistCall.contents[0].text).not.toContain('atendente humano');
   });
 
+  it('reconhece o nome comercial "Combo Full Face" no título do anúncio e entrega ao especialista a oferta oficial correspondente', async () => {
+    getKnowledgeBase.mockResolvedValueOnce({
+      products: [{
+        name: 'Combo Triple: Micro Cejas + Labios + Pestañas',
+        aliases: ['Combo Full Face', 'Full Face'],
+        price: 'Gs 1.200.000',
+        durationMinutes: 240,
+      }],
+    } as any);
+    const { ai, calls } = makeFakeAi();
+
+    await generateAutoReplyForText(
+      'tenant-a',
+      ai,
+      'Hola, quiero saber más',
+      undefined,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      'beauty_studio',
+      undefined,
+      undefined,
+      'Combo Full Face'
+    );
+
+    const specialistCall = calls[1];
+    const userContent: string = specialistCall.contents[0].text;
+    expect(userContent).toContain('Clique para WhatsApp');
+    expect(userContent).toContain('Combo Triple: Micro Cejas + Labios + Pestañas');
+    expect(userContent).toContain('Pule a pergunta genérica de qual serviço a cliente busca');
+  });
+
   it('reforça a regra anti-parênteses/dois-pontos na camada Global (achado real em produção)', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
