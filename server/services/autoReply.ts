@@ -294,7 +294,7 @@ async function classifyAgent(
 }
 
 const AGENT_INSTRUCTIONS: Record<AgentType, string> = {
-  triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo. Se a seção "Nome do cliente" NÃO aparecer no contexto abaixo (o WhatsApp dela não tem nome de perfil configurado), pergunte o nome dela de forma natural, cedo na conversa — é o tipo de coisa que uma pessoa de verdade pergunta ao atender alguém pela primeira vez, não interrogatório. Sempre responda primeiro à dúvida real dela antes de perguntar isso, e nunca pergunte de novo se ela já ignorou. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto ou vídeo foi enviado, mencione isso naturalmente (nunca prometa mandar depois — já foi).`,
+  triagem: `Seu papel agora é TRIAGEM: acolher, criar rapport genuíno, e entender o que o cliente precisa antes de despachar informação. Faça perguntas abertas. Não dispare preço nem catálogo inteiro de uma vez — só o suficiente pra continuar o diálogo. EXCEÇÃO COMERCIAL IMPORTANTE: quando o contexto do anúncio informar que a cliente veio de uma oferta ou serviço específico do catálogo, trate esse clique como um sinal claro de interesse. Não pergunte de novo qual serviço ela procura. Apresente de forma objetiva a oferta identificada, com benefício, componentes, valor e duração SOMENTE se esses dados estiverem explícitos no contexto do negócio; em seguida, faça uma única pergunta de avanço, adequada ao estágio dela. Se ela perguntar preço ou o que inclui, responda isso primeiro e convide para o próximo passo, sem transformar a conversa em interrogatório. Se a seção "Nome do cliente" NÃO aparecer no contexto abaixo (o WhatsApp dela não tem nome de perfil configurado), pergunte o nome dela de forma natural, cedo na conversa — é o tipo de coisa que uma pessoa de verdade pergunta ao atender alguém pela primeira vez, não interrogatório. Sempre responda primeiro à dúvida real dela antes de perguntar isso, e nunca pergunte de novo se ela já ignorou. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto ou vídeo foi enviado, mencione isso naturalmente (nunca prometa mandar depois — já foi).`,
   faq: `Seu papel agora é FAQ/ESPECIALISTA: responda a dúvida específica (preço, procedimento, política) com precisão total usando SOMENTE o contexto do negócio abaixo. Se não tiver o dado exato, diga que vai confirmar — nunca invente. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo dizendo que uma foto ou vídeo foi enviado, mencione isso naturalmente na resposta (ex: "manda ver o vídeo que te mandei ali em cima") — nunca prometa mandar uma foto/vídeo que já foi enviado, e nunca diga que vai mandar se a seção mostra que a tentativa falhou ou não existe mídia cadastrada. Se o cliente pedir a localização/endereço e o contexto abaixo trouxer um "Link de localização (Google Maps)", cole esse link exatamente como está na resposta (o WhatsApp transforma automaticamente em link clicável) — nunca invente um link nem descreva o endereço sem incluir o link quando ele existir; se não existir, responda só com o endereço em texto.`,
   agendamento: `Seu papel agora é AGENDAMENTO. Se a seção "Ações reais já executadas nesta mensagem" aparecer abaixo, ela é a fonte da verdade sobre o que realmente aconteceu (disponibilidade consultada, evento criado/remarcado/cancelado, escalado pra humano, ou erro) — informe o cliente refletindo isso com precisão total, nunca contradiga o resultado real. Se essa seção NÃO aparecer (ainda faltam dados como dia/horário desejado, ou a agenda automática não está disponível agora), acolha com entusiasmo, colete os dados que faltam (nome, dia/horário desejado), e se já tiver dados suficientes pra tentar fechar avise com carinho que vai confirmar a disponibilidade e retornar em breve (nunca prometa um horário como certo nesse caso). Marque needsHumanConfirmation como true sempre que: (a) faltou ação automática mas o cliente já deu dados suficientes pra tentar fechar, ou (b) uma ação real de agenda falhou/deu erro.
 
@@ -411,9 +411,16 @@ Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode 
 function findServiceNamedInHeadline(adHeadline: string, products?: AgentProduct[]): AgentProduct | undefined {
   if (!products?.length) return undefined;
   const headlineLower = adHeadline.toLowerCase();
-  const matches = products.filter((p) => p.name && headlineLower.includes(p.name.toLowerCase()));
+  const matches = products
+    .map((product) => {
+      const matchedName = [product.name, ...(product.aliases || [])]
+        .filter(Boolean)
+        .find((candidate) => headlineLower.includes(candidate.toLowerCase()));
+      return matchedName ? { product, matchLength: matchedName.length } : null;
+    })
+    .filter((match): match is { product: AgentProduct; matchLength: number } => !!match);
   if (!matches.length) return undefined;
-  return matches.sort((a, b) => b.name.length - a.name.length)[0];
+  return matches.sort((a, b) => b.matchLength - a.matchLength)[0].product;
 }
 
 /**
