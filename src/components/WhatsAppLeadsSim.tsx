@@ -2290,6 +2290,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // Preenche o compositor para revisão humana antes de qualquer envio real.
+  const handleDraftSuggestedReply = (replyText: string) => {
+    if (!selectedLead) return;
+    setInputMessage(replyText);
+  };
+
   // Apply Smart Reply suggested by AI directly into the chat
   const handleApplySuggestedReply = (replyText: string) => {
     if (!selectedLead) return;
@@ -4091,6 +4097,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               isLoading={isAnalyzingConversation}
               onReanalyze={() => selectedLead && handleAnalyzeConversation(selectedLead)}
               onApplySuggestedReply={handleApplySuggestedReply}
+              onDraftSuggestedReply={handleDraftSuggestedReply}
               leadName={selectedLead?.name || 'Lead'}
               onSendCAPIEvent={handleDirectCAPI}
               onGenerateReplyFromHint={handleGenerateReplyFromHint}
@@ -4127,6 +4134,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 isLoading={isAnalyzingConversation}
                 onReanalyze={() => handleAnalyzeConversation(selectedLead)}
                 onApplySuggestedReply={handleApplySuggestedReply}
+                onDraftSuggestedReply={handleDraftSuggestedReply}
                 leadName={selectedLead.name || 'Lead'}
                 onSendCAPIEvent={handleDirectCAPI}
                 onGenerateReplyFromHint={handleGenerateReplyFromHint}

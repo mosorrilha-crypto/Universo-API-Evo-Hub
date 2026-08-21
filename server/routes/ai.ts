@@ -119,12 +119,17 @@ Analise o histórico da conversa a seguir e a base de conhecimento do agente e r
   },
   "keyTopicsDiscussed": ["tópicos relevantes"],
   "multiModalInsights": ["insights multimídia/áudios"],
-  "recommendedNextAction": "próxima ação recomendada para o operador humanizado",
-  "suggestedSmartReply": "resposta inteligente pronta e persuasiva para o operador enviar, escrita no MESMO idioma do lead (detectedLanguage) — DEVE executar literalmente o que foi descrito em recommendedNextAction (não é uma resposta independente/genérica, é a implementação em texto daquela ação)",
+  "actionObjective": "objetivo concreto da ação em uma frase curta, começando com verbo",
+  "actionRationale": "evidência do histórico que justifica a ação, sem inventar fatos",
+  "actionGuardrail": "limite operacional que a mensagem não pode ultrapassar neste caso",
+  "recommendedNextAction": "próxima ação recomendada para o operador humanizado, com o próximo dado ou decisão necessária",
+  "suggestedSmartReply": "mensagem pronta para o operador revisar e enviar, no MESMO idioma do lead (detectedLanguage). Deve responder primeiro à última dúvida direta, executar actionObjective e terminar com no máximo uma pergunta de continuidade; nunca pode inventar preço, disponibilidade, desconto, confirmação de pagamento, resultado ou urgência",
   "suggestedSmartReplyTranslation": "tradução literal de suggestedSmartReply para o Português, SOMENTE se detectedLanguage não for português — se já for português, use string vazia"
 }
 
-IMPORTANTE: se o lead mandou mais de uma mensagem seguida antes de qualquer resposta do operador/agente (rajada), trate todas como uma única pergunta composta — recommendedNextAction e suggestedSmartReply DEVEM responder a TODAS as perguntas/tópicos dessa rajada, não só à primeira ou à mais relevante para a venda. Nunca ignore uma pergunta direta do lead (ex: sobre a empresa, localização, quem está atendendo) só porque outra pergunta na mesma rajada parece comercialmente mais importante.
+REGRAS DE QUALIDADE: actionObjective deve ser específica e acionável; actionRationale deve citar somente um sinal realmente presente no histórico; actionGuardrail deve explicitar a principal promessa que não pode ser feita sem confirmação. Se não houver informação suficiente para uma recomendação, diga claramente o que falta e não invente uma solução. A suggestedSmartReply deve parecer uma conversa real de WhatsApp, não e-mail nem discurso de vendas. Ela responde primeiro à dúvida direta, evita repetir pergunta já respondida e contém uma única pergunta de continuidade quando realmente for necessária.
+
+IMPORTANTE: se o lead mandou mais de uma mensagem seguida antes de qualquer resposta do operador/agente (rajada), trate todas como uma única pergunta composta — actionObjective, recommendedNextAction e suggestedSmartReply DEVEM responder a TODAS as perguntas/tópicos dessa rajada, não só à primeira ou à mais relevante para a venda. Nunca ignore uma pergunta direta do lead (ex: sobre a empresa, localização, quem está atendendo) só porque outra pergunta na mesma rajada parece comercialmente mais importante.
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
 Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
@@ -195,6 +200,9 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
         },
         keyTopicsDiscussed: [],
         multiModalInsights: [],
+        actionObjective: 'Revisar a conversa manualmente antes de responder.',
+        actionRationale: 'A análise automática não foi concluída; não há dados confiáveis para orientar uma resposta.',
+        actionGuardrail: 'Não envie promessa comercial, confirmação de agenda ou condição de pagamento sem verificar o histórico e os sistemas reais.',
         recommendedNextAction: 'Análise indisponível no momento — revise a conversa manualmente antes de responder.',
         suggestedSmartReply: '',
         suggestedSmartReplyTranslation: '',

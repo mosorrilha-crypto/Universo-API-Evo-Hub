@@ -324,6 +324,12 @@ export interface FullConversationAnalysis {
   extractedCRMData: ExtractedCRMData;
   keyTopicsDiscussed: string[];
   multiModalInsights: string[];
+  /** Objetivo operacional conciso da próxima ação, apresentado como decisão para o atendente. */
+  actionObjective?: string;
+  /** Evidência da conversa que sustenta a ação recomendada. */
+  actionRationale?: string;
+  /** Limite que a resposta não pode ultrapassar sem uma confirmação real ou humana. */
+  actionGuardrail?: string;
   recommendedNextAction: string;
   suggestedSmartReply: string;
   suggestedSmartReplyTranslation?: string; // Tradução/Explicação em Português para análise prévia do atendente

@@ -86,6 +86,9 @@ describe('POST /api/analyze-conversation — fallback nunca inventa dados de ven
     expect(serialized).not.toContain('R$ 590');
     expect(data.analysis.extractedCRMData.productsOfInterest).toEqual([]);
     expect(data.analysis.extractedCRMData.keyObjections).toEqual([]);
+    expect(data.analysis.actionObjective).toContain('Revisar a conversa manualmente');
+    expect(data.analysis.actionRationale).toContain('não foi concluída');
+    expect(data.analysis.actionGuardrail).toContain('Não envie promessa comercial');
   }, 10000);
 
   it('tenta de novo antes de desistir (withGeminiRetry de fato em uso, não só 1 tentativa) — issue #94', async () => {
