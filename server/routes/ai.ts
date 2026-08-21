@@ -127,9 +127,13 @@ Analise o histórico da conversa a seguir e a base de conhecimento do agente e r
   "suggestedSmartReplyTranslation": "tradução literal de suggestedSmartReply para o Português, SOMENTE se detectedLanguage não for português — se já for português, use string vazia"
 }
 
-REGRAS DE QUALIDADE: actionObjective deve ser específica e acionável; actionRationale deve citar somente um sinal realmente presente no histórico; actionGuardrail deve explicitar a principal promessa que não pode ser feita sem confirmação. Se não houver informação suficiente para uma recomendação, diga claramente o que falta e não invente uma solução. A suggestedSmartReply deve parecer uma conversa real de WhatsApp, não e-mail nem discurso de vendas. Ela responde primeiro à dúvida direta, evita repetir pergunta já respondida e contém uma única pergunta de continuidade quando realmente for necessária.
+REGRAS DE QUALIDADE: actionObjective deve ser específica e acionável; actionRationale deve citar somente um sinal realmente presente no histórico; actionGuardrail deve explicitar a principal promessa que não pode ser feita sem confirmação. Se não houver informação suficiente para uma recomendação, diga claramente o que falta e não invente uma solução. A suggestedSmartReply deve parecer uma conversa real de WhatsApp, não e-mail nem discurso de vendas.
 
-IMPORTANTE: se o lead mandou mais de uma mensagem seguida antes de qualquer resposta do operador/agente (rajada), trate todas como uma única pergunta composta — actionObjective, recommendedNextAction e suggestedSmartReply DEVEM responder a TODAS as perguntas/tópicos dessa rajada, não só à primeira ou à mais relevante para a venda. Nunca ignore uma pergunta direta do lead (ex: sobre a empresa, localização, quem está atendendo) só porque outra pergunta na mesma rajada parece comercialmente mais importante.
+REGRA INEGOCIÁVEL DE PRIORIDADE: antes de propor venda, agenda, catálogo ou próximo passo, identifique a última pergunta ou pedido ainda sem resposta do lead. A primeira frase da suggestedSmartReply DEVE responder exatamente a esse pedido. Uma proposta comercial só pode vir depois, quando ajudar diretamente a resolver a solicitação. Nunca substitua uma pergunta específica por lista de serviços, texto promocional, disponibilidade de agenda ou pergunta de fechamento.
+
+PEDIDOS DE FOTO, VÍDEO, CATÁLOGO OU OUTRA MÍDIA: se a conversa ou a base confirmar que o material pode ser enviado, não finja que anexou o arquivo — diga que o operador precisa enviar a mídia apropriada. Se o histórico registrar que a mídia não está disponível, responda isso com clareza e ofereça uma alternativa honesta e curta, sem listar todo o catálogo. Em ambos os casos, não invente que pode enviar, não prometa anexos e não desvie para agenda sem o lead pedir.
+
+IMPORTANTE: se o lead mandou mais de uma mensagem seguida antes de qualquer resposta do operador/agente (rajada), trate todas como uma única pergunta composta — actionObjective, recommendedNextAction e suggestedSmartReply DEVEM responder a TODAS as perguntas/tópicos dessa rajada, não só à primeira ou à mais relevante para a venda. Nunca ignore uma pergunta direta do lead (ex: sobre a empresa, localização, quem está atendendo) só porque outra pergunta na mesma rajada parece comercialmente mais importante. Termine com no máximo uma pergunta de continuidade, somente se ela for necessária para atender o pedido atual.
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
 Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
@@ -238,7 +242,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 Um operador humano te deu a seguinte instrução sobre o que responder ao lead a seguir — ela é a fonte principal do que escrever, não uma sugestão opcional:
 INSTRUÇÃO DO OPERADOR: "${hint.trim()}"
 
-Use o histórico da conversa e a base de conhecimento SÓ pra manter o tom, o idioma e o contexto consistentes com o que já foi dito — nunca pra contrariar ou ignorar a instrução do operador.
+Use o histórico da conversa e a base de conhecimento SÓ pra manter o tom, o idioma e o contexto consistentes com o que já foi dito — nunca pra contrariar ou ignorar a instrução do operador. Mesmo quando a instrução for comercial, não ignore uma pergunta específica e ainda sem resposta da última mensagem do lead: responda-a primeiro, salvo se a instrução disser explicitamente o contrário. Não diga que enviou ou vai anexar foto, vídeo, catálogo ou outro arquivo se você não tiver uma ferramenta real de envio de mídia. Não invente disponibilidade, preço, desconto ou confirmação de agenda.
 
 Responda estritamente em formato JSON:
 {

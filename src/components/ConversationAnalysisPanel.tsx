@@ -48,9 +48,7 @@ interface ConversationAnalysisPanelProps {
   analysis?: FullConversationAnalysis;
   isLoading: boolean;
   onReanalyze: () => void;
-  /** Envia a mensagem diretamente. Deve permanecer uma ação explícita, pois pode disparar WhatsApp real. */
-  onApplySuggestedReply?: (reply: string) => void;
-  /** Preenche o compositor do WhatsApp sem enviar, para revisão humana antes da ação irreversível. */
+  /** Preenche o compositor do WhatsApp sem enviar, para revisão humana obrigatória antes da ação irreversível. */
   onDraftSuggestedReply?: (reply: string) => void;
   leadName: string;
   onSendCAPIEvent?: (eventName: 'Lead' | 'Contact' | 'QualifiedLead' | 'Schedule' | 'PurchaseIntention' | 'Purchase') => void;
@@ -120,7 +118,6 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   analysis,
   isLoading,
   onReanalyze,
-  onApplySuggestedReply,
   onDraftSuggestedReply,
   leadName,
   onSendCAPIEvent,
@@ -186,28 +183,17 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   };
 
   const renderReplyActions = (reply: string, origin: 'analysis' | 'hint') => (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-      {onDraftSuggestedReply && (
+    <div className="grid grid-cols-1 gap-2">
+      {onDraftSuggestedReply ? (
         <button
           type="button"
           onClick={() => onDraftSuggestedReply(reply)}
           className="min-h-10 rounded-xl border border-violet-500/35 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-200 hover:bg-violet-500/20 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
         >
           <PencilLine className="w-3.5 h-3.5" />
-          Editar antes de enviar
+          Levar para revisão no compositor
         </button>
-      )}
-      {onApplySuggestedReply && (
-        <button
-          type="button"
-          onClick={() => onApplySuggestedReply(reply)}
-          className="min-h-10 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-        >
-          <Send className="w-3.5 h-3.5" />
-          Enviar agora
-        </button>
-      )}
-      {!onDraftSuggestedReply && !onApplySuggestedReply && (
+      ) : (
         <button
           type="button"
           onClick={() => handleCopyReply(reply, origin)}

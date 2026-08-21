@@ -2296,33 +2296,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setInputMessage(replyText);
   };
 
-  // Apply Smart Reply suggested by AI directly into the chat
-  const handleApplySuggestedReply = (replyText: string) => {
-    if (!selectedLead) return;
-    const newMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      sender: 'agent',
-      type: 'text',
-      text: replyText,
-      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    const updatedLead = {
-      ...selectedLead,
-      messages: [...(selectedLead.messages || []), newMsg],
-    };
-
-    setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
-
-    if ((selectedLead as any).isReal) {
-      sendRealWhatsAppMessage(selectedLead.id, selectedLead.phone, newMsg.id, replyText);
-    }
-
-    if (autoAnalyze) {
-      handleAnalyzeConversation(updatedLead);
-    }
-  };
-
   // Simulate sending an Audio Note from Lead or Agent
   const handleSendAudioNote = async (promptText?: string) => {
     if (!selectedLead) return;
@@ -4096,7 +4069,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
               onReanalyze={() => selectedLead && handleAnalyzeConversation(selectedLead)}
-              onApplySuggestedReply={handleApplySuggestedReply}
               onDraftSuggestedReply={handleDraftSuggestedReply}
               leadName={selectedLead?.name || 'Lead'}
               onSendCAPIEvent={handleDirectCAPI}
@@ -4133,7 +4105,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 analysis={selectedLead.fullAnalysis}
                 isLoading={isAnalyzingConversation}
                 onReanalyze={() => handleAnalyzeConversation(selectedLead)}
-                onApplySuggestedReply={handleApplySuggestedReply}
                 onDraftSuggestedReply={handleDraftSuggestedReply}
                 leadName={selectedLead.name || 'Lead'}
                 onSendCAPIEvent={handleDirectCAPI}
