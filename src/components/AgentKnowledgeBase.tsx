@@ -388,7 +388,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     category: string;
     description: string;
     price: string;
-    priceAmount: string;
     currency: string;
     durationMinutes: string;
     bookable: boolean;
@@ -399,7 +398,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     category: '',
     description: '',
     price: '',
-    priceAmount: '',
     currency: 'PYG',
     durationMinutes: '',
     bookable: true,
@@ -428,8 +426,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       name: productDraft.name.trim(),
       category: productDraft.category.trim() || undefined,
       price: productDraft.price.trim() || 'Sob Consulta',
-      priceAmount: productDraft.priceAmount.trim() ? Number(productDraft.priceAmount) : undefined,
-      currency: productDraft.priceAmount.trim() ? productDraft.currency : undefined,
+      priceAmount: productDraft.price.trim() ? parsePriceToNumber(productDraft.price) || undefined : undefined,
+      currency: productDraft.price.trim() ? productDraft.currency : undefined,
       description: productDraft.description.trim() || 'Sem descrição cadastrada',
       durationMinutes: productDraft.durationMinutes.trim() ? Number(productDraft.durationMinutes) : undefined,
       bookable: productDraft.bookable ? undefined : false,
@@ -770,6 +768,22 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
+  const handleVariantPromoChange = (productId: string, index: number, field: 'promoPrice' | 'promoUntil', value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((product) => {
+        if (product.id !== productId || !product.variants) return product;
+        const variants = product.variants.map((variant, variantIndex) => {
+          if (variantIndex !== index) return variant;
+          const updated = { ...variant, [field]: value || undefined };
+          if (field === 'promoPrice') updated.promoPriceAmount = value.trim() ? parsePriceToNumber(value) : undefined;
+          return updated;
+        });
+        return { ...product, variants };
+      }),
+    }));
+  };
+
   const handleDeleteVariant = (productId: string, index: number) => {
     setFormData((prev) => ({
       ...prev,
@@ -793,18 +807,6 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setFormData((prev) => ({
       ...prev,
       products: prev.products.map((p) => (p.id === id ? { ...p, active: p.active === false ? true : false } : p)),
-    }));
-  };
-
-  // `priceAmount` é a fonte de verdade numérica usada por resolveProductPriceAmount()
-  // (valor cobrado no agendamento, lançamento financeiro automático) — até aqui só dava
-  // pra definir uma vez no assistente de criação, sem campo pra corrigir depois. Achado
-  // real: um produto criado com desconto ficava com esse valor travado pra sempre, mesmo
-  // editando o preço em texto (que é só o que aparece pro cliente, não afeta esse cálculo).
-  const handleProductPriceAmountChange = (id: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      products: prev.products.map((p) => (p.id === id ? { ...p, priceAmount: value.trim() ? Number(value) : undefined } : p)),
     }));
   };
 
@@ -2025,6 +2027,11 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     </button>
                   </div>
                   <div className="space-y-1.5">
+                    {!!prod.variants?.length && (
+                      <p className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-200">
+                        Família com {prod.variants.length} variação(ões): o preço e a duração podem ficar somente em cada variação abaixo. O item pai organiza nome, descrição, mídia e aliases.
+                      </p>
+                    )}
                     <input
                       type="text"
                       value={prod.name}
@@ -2039,18 +2046,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       className="w-full bg-transparent text-xs font-extrabold text-emerald-400 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                       title="Editar preço (texto — o que aparece pro cliente)"
                     />
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] text-slate-500 shrink-0">Gs</span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={prod.priceAmount ?? ''}
-                        onChange={(e) => handleProductPriceAmountChange(prod.id, e.target.value)}
-                        placeholder="Valor numérico (cálculo real)"
-                        title="Valor numérico usado de verdade pro cálculo do agendamento e do lançamento financeiro — diferente do preço em texto acima, que é só o que aparece pro cliente. Vazio = calcula a partir do texto do preço."
-                        className="w-full bg-transparent text-[11px] text-emerald-300 placeholder-slate-600 focus:outline-none focus:bg-slate-900 rounded py-0.5"
-                      />
-                    </div>
+                    {!prod.variants?.length && (
+                      <div className="flex items-center gap-1.5 rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-[10px]" title="Calculado automaticamente a partir do preço exibido ao cliente; não pode ser editado separadamente.">
+                        <span className="text-slate-500">Valor financeiro automático</span>
+                        <span className="font-bold text-emerald-300">{prod.priceAmount != null ? prod.priceAmount.toLocaleString('pt-BR') : 'sem valor calculável'}</span>
+                      </div>
+                    )}
                     <input
                       type="text"
                       value={prod.category || ''}
@@ -2059,18 +2060,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       title="Agrupa este item no prompt do agente e na lista abaixo — opcional, deixe vazio pra ficar fora de qualquer categoria."
                       className="w-full bg-transparent text-[11px] text-cyan-300 placeholder-slate-600 focus:outline-none focus:bg-slate-900 rounded py-0.5"
                     />
-                    <div className="flex items-center gap-1.5">
-                      <Clock className="w-3 h-3 text-slate-500 shrink-0" />
-                      <input
-                        type="number"
-                        min="0"
-                        value={prod.durationMinutes ?? ''}
-                        onChange={(e) => handleProductDurationChange(prod.id, e.target.value)}
-                        placeholder="Duração (min)"
-                        title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
-                        className="w-full bg-transparent text-xs text-slate-300 focus:outline-none focus:bg-slate-900 rounded py-0.5"
-                      />
-                    </div>
+                    {!prod.variants?.length && (
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3 h-3 text-slate-500 shrink-0" />
+                        <input
+                          type="number"
+                          min="0"
+                          value={prod.durationMinutes ?? ''}
+                          onChange={(e) => handleProductDurationChange(prod.id, e.target.value)}
+                          placeholder="Duração (min)"
+                          title="Duração real do serviço em minutos — usada pra calcular o fim do agendamento no Calendar (sem isso, o agente assume 1h por padrão)."
+                          className="w-full bg-transparent text-xs text-slate-300 focus:outline-none focus:bg-slate-900 rounded py-0.5"
+                        />
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleToggleProductActive(prod.id)}
@@ -2105,49 +2108,69 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       </button>
                     </div>
                     {(prod.variants || []).map((variant, vIndex) => (
-                      <div key={vIndex} className="flex gap-1 items-center flex-wrap">
-                        <input
-                          type="text"
-                          placeholder="Nome/modelo (ex: Lash Lift, MS F600)"
-                          value={variant.code}
-                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'code', e.target.value)}
-                          className="w-32 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Medidas"
-                          value={variant.dimensions || ''}
-                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'dimensions', e.target.value)}
-                          className="w-16 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Preço"
-                          value={variant.price}
-                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'price', e.target.value)}
-                          className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-emerald-400 font-semibold"
-                        />
-                        <input
-                          type="number"
-                          min="1"
-                          placeholder="Duração (min)"
-                          value={variant.durationMinutes ?? ''}
-                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'durationMinutes', e.target.value)}
-                          title="Duração real desta variante em minutos — quando vazio, o agente usa a duração cadastrada no produto (acima). Necessário quando as variantes desta família têm durações diferentes, senão o agendamento no Calendar sai com o horário de fim errado."
-                          className="w-24 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteVariant(prod.id, vIndex)}
-                          className="text-slate-500 hover:text-red-400 cursor-pointer p-0.5"
-                          title="Excluir variante"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                      <div key={vIndex} className="space-y-1 rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
+                        <div className="flex gap-1 items-center flex-wrap">
+                          <input
+                            type="text"
+                            placeholder="Nome/modelo (ex: Lash Lift, MS F600)"
+                            value={variant.code}
+                            onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'code', e.target.value)}
+                            className="w-32 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Medidas"
+                            value={variant.dimensions || ''}
+                            onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'dimensions', e.target.value)}
+                            className="w-16 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Preço regular"
+                            value={variant.price}
+                            onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'price', e.target.value)}
+                            className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-emerald-400 font-semibold"
+                          />
+                          <span className="text-[9px] text-emerald-300 whitespace-nowrap" title="Valor financeiro calculado automaticamente a partir do preço regular.">→ {variant.priceAmount != null ? variant.priceAmount.toLocaleString('pt-BR') : '—'}</span>
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="Duração (min)"
+                            value={variant.durationMinutes ?? ''}
+                            onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'durationMinutes', e.target.value)}
+                            title="Duração real desta variação, usada para reservar o tempo correto no calendário."
+                            className="w-24 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteVariant(prod.id, vIndex)}
+                            className="text-slate-500 hover:text-red-400 cursor-pointer p-0.5"
+                            title="Excluir variação"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-semibold text-amber-300 whitespace-nowrap">Desconto temporário</span>
+                          <input
+                            type="text"
+                            placeholder="Preço promocional"
+                            value={variant.promoPrice || ''}
+                            onChange={(e) => handleVariantPromoChange(prod.id, vIndex, 'promoPrice', e.target.value)}
+                            className="min-w-0 flex-1 bg-slate-900 border border-amber-500/25 rounded-lg px-2 py-1 text-[10px] text-amber-100 placeholder-slate-600"
+                          />
+                          <input
+                            type="date"
+                            value={variant.promoUntil || ''}
+                            onChange={(e) => handleVariantPromoChange(prod.id, vIndex, 'promoUntil', e.target.value)}
+                            title="Data final do desconto: depois dela, o preço regular volta automaticamente."
+                            className="bg-slate-900 border border-amber-500/25 rounded-lg px-2 py-1 text-[10px] text-amber-100"
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <div className="border-t border-slate-800 pt-2 space-y-1.5">
+                  {!prod.variants?.length && <div className="border-t border-slate-800 pt-2 space-y-1.5">
                     <span className="text-[10px] text-amber-400 font-semibold block">Promoção (opcional, expira sozinha):</span>
                     <div className="flex gap-1.5">
                       <input
@@ -2164,7 +2187,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                         className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white"
                       />
                     </div>
-                  </div>
+                  </div>}
                   <div className="flex items-center gap-2 pt-1">
                     {prod.exampleImageBase64 ? (
                       <img src={prod.exampleImageBase64} alt={prod.name} className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
@@ -2843,19 +2866,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-300 mb-1">Valor numérico (opcional)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={productDraft.priceAmount}
-                        onChange={(e) => updateProductDraft('priceAmount', e.target.value)}
-                        placeholder="Ex: 140000"
-                        title="Fonte de verdade pro cálculo financeiro/Meta CAPI — sem isso, o sistema tenta extrair o número do texto do preço."
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
-                      />
-                    </div>
+                  <div className="space-y-2 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3">
+                    <p className="text-[11px] leading-4 text-emerald-100">O valor usado no financeiro será calculado automaticamente a partir do preço que você informar acima. Não há um segundo campo editável, evitando divergência entre o preço exibido e o valor cobrado.</p>
                     <div>
                       <label className="block text-xs font-bold text-slate-300 mb-1">Moeda</label>
                       <input

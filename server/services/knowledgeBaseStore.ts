@@ -24,6 +24,10 @@ export interface ProductVariant {
   price: string;
   /** Valor numérico do preço da variante — mesmo papel de AgentProduct.priceAmount, mas por tamanho. */
   priceAmount?: number;
+  /** Promoção aplicada exclusivamente a esta variação até a data indicada. */
+  promoPrice?: string;
+  promoPriceAmount?: number;
+  promoUntil?: string; // YYYY-MM-DD
   /**
    * Duração real desta variante em minutos — quando ausente, cai pro
    * durationMinutes do produto pai (ver findProductMatch/
@@ -133,6 +137,23 @@ export function resolveProductPriceAmount(product: AgentProduct, timezone = 'Ame
   return parsePriceToNumber(resolveProductPrice(product, timezone));
 }
 
+/** Resolve o preço vigente de uma variação, sem transferir a promoção para outras variações da família. */
+export function resolveVariantPrice(variant: ProductVariant, timezone = 'America/Asuncion'): string {
+  if (!variant.promoPrice || !variant.promoUntil) return variant.price;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+  return today <= variant.promoUntil ? variant.promoPrice : variant.price;
+}
+
+/** Obtém o valor financeiro derivado do preço vigente da variação. */
+export function resolveVariantPriceAmount(variant: ProductVariant, timezone = 'America/Asuncion'): number {
+  if (variant.promoPriceAmount != null && variant.promoUntil) {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone });
+    if (today <= variant.promoUntil) return variant.promoPriceAmount;
+  }
+  if (variant.priceAmount != null) return variant.priceAmount;
+  return parsePriceToNumber(resolveVariantPrice(variant, timezone));
+}
+
 /** Converte um preço em texto (ex: "Gs 500.000") pro valor numérico (500000) — usado pra mandar `value` numérico ao Meta CAPI (Epic 4.5.6). Sem dígitos reconhecíveis, devolve 0 (nunca inventa um valor). */
 export function parsePriceToNumber(priceText: string | undefined): number {
   if (!priceText) return 0;
@@ -203,7 +224,7 @@ export function resolveProductAmountByName(kb: AgentKnowledgeBase | null, produc
   const match = findProductMatch(kb, productName);
   if (!match) return undefined;
   if (match.variant) {
-    return match.variant.priceAmount != null ? match.variant.priceAmount : parsePriceToNumber(match.variant.price);
+    return resolveVariantPriceAmount(match.variant, timezone);
   }
   return resolveProductPriceAmount(match.product, timezone);
 }
@@ -382,7 +403,7 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
     const line = (p: AgentProduct) => {
       const variantsLine = p.variants?.length
         ? `\n  Tamanhos/modelos disponíveis (cote SEMPRE o preço do tamanho específico escolhido pelo cliente, nunca o preço genérico do produto):\n${p.variants
-            .map((v) => `    • ${v.code}${v.dimensions ? ` (${v.dimensions}${v.litros ? `, ${v.litros}L` : ''})` : ''}: ${v.price}`)
+            .map((v) => `    • ${v.code}${v.dimensions ? ` (${v.dimensions}${v.litros ? `, ${v.litros}L` : ''})` : ''}: ${resolveVariantPrice(v)}`)
             .join('\n')}`
         : '';
       const aliasesLine = p.aliases?.length ? ` — também conhecido como ${p.aliases.join(', ')}` : '';

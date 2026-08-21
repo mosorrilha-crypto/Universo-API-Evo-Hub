@@ -158,6 +158,10 @@ export interface ProductVariant {
   litros?: number;
   price: string;
   priceAmount?: number;
+  /** Preço promocional específico desta variação, ativo somente até promoUntil. */
+  promoPrice?: string;
+  promoPriceAmount?: number;
+  promoUntil?: string;
   /** Duração real desta variante em minutos — quando ausente, cai pro durationMinutes do produto pai (ver findProductDurationMinutes em knowledgeBaseStore.ts). Necessário quando variantes da mesma família têm durações diferentes (ex: Lash Lift 90min vs Efecto Delineado 120min). */
   durationMinutes?: number;
   /** false = esta variante específica não é agendável sozinha, mesmo que o produto pai seja. Quando ausente, cai pro bookable do produto pai. */

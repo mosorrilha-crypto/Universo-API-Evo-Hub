@@ -42,12 +42,21 @@ function variantNeedsAttention(variant: ProductVariant, parent: AgentProduct) {
   return isBookable && !(variant.durationMinutes ?? parent.durationMinutes);
 }
 
+function isProductFamily(product: AgentProduct) {
+  return Boolean(product.variants?.length);
+}
+
 export function productNeedsAttention(product: AgentProduct, now = new Date()) {
   if (product.active === false) return false;
   if (!hasText(product.category) || !hasText(product.description) || product.description === 'Sem descrição cadastrada') return true;
-  if (isUnspecifiedPrice(product.price)) return true;
-  if (hasNumericPrice(product.price) && product.priceAmount == null) return true;
-  if (product.bookable !== false && !product.durationMinutes) return true;
+  // Uma família (ex.: "Pestañas") pode ter o preço e a duração definidos
+  // exclusivamente em cada variação. O item pai serve para agrupar mídia,
+  // descrição e aliases e não precisa duplicar esses campos.
+  if (!isProductFamily(product)) {
+    if (isUnspecifiedPrice(product.price)) return true;
+    if (hasNumericPrice(product.price) && product.priceAmount == null) return true;
+    if (product.bookable !== false && !product.durationMinutes) return true;
+  }
   if (product.variants?.some((variant) => variantNeedsAttention(variant, product))) return true;
   return Boolean(product.promoUntil && new Date(`${product.promoUntil}T23:59:59`).getTime() < now.getTime());
 }
@@ -86,15 +95,18 @@ export function auditKnowledgeBase(kb: AgentKnowledgeBase, businessHours: Busine
   }
   for (const product of activeProducts) {
     const prefix = `catalog-${product.id}`;
+    const family = isProductFamily(product);
     if (!hasText(product.category)) add({ id: `${prefix}-category`, area: 'catalog', severity: 'info', title: `${product.name}: sem categoria`, description: 'Categorize o item para manter o catálogo organizado e o contexto do agente mais claro.' });
     if (!hasText(product.description) || product.description === 'Sem descrição cadastrada') add({ id: `${prefix}-description`, area: 'catalog', severity: 'attention', title: `${product.name}: descrição insuficiente`, description: 'Inclua uma explicação objetiva para o agente diferenciar o serviço corretamente.' });
-    if (isUnspecifiedPrice(product.price)) add({ id: `${prefix}-price`, area: 'catalog', severity: 'attention', title: `${product.name}: preço sob consulta`, description: 'O agente não deve inventar valores; defina o preço ou uma regra explícita de encaminhamento.' });
-    if (hasNumericPrice(product.price) && product.priceAmount == null) add({ id: `${prefix}-amount`, area: 'catalog', severity: 'attention', title: `${product.name}: valor numérico ausente`, description: 'Preencha o valor estruturado para que agenda e financeiro usem o mesmo montante.' });
-    if (product.bookable !== false && !product.durationMinutes) add({ id: `${prefix}-duration`, area: 'operation', severity: 'attention', title: `${product.name}: duração ausente`, description: 'Serviços agendáveis precisam de duração para não bloquear horários incorretos no calendário.' });
+    if (!family && isUnspecifiedPrice(product.price)) add({ id: `${prefix}-price`, area: 'catalog', severity: 'attention', title: `${product.name}: preço sob consulta`, description: 'O agente não deve inventar valores; defina o preço ou uma regra explícita de encaminhamento.' });
+    if (!family && hasNumericPrice(product.price) && product.priceAmount == null) add({ id: `${prefix}-amount`, area: 'catalog', severity: 'attention', title: `${product.name}: valor numérico ausente`, description: 'Preencha o valor estruturado para que agenda e financeiro usem o mesmo montante.' });
+    if (!family && product.bookable !== false && !product.durationMinutes) add({ id: `${prefix}-duration`, area: 'operation', severity: 'attention', title: `${product.name}: duração ausente`, description: 'Serviços agendáveis precisam de duração para não bloquear horários incorretos no calendário.' });
     if (product.promoUntil && new Date(`${product.promoUntil}T23:59:59`).getTime() < now.getTime()) add({ id: `${prefix}-promotion`, area: 'catalog', severity: 'info', title: `${product.name}: promoção expirada`, description: 'A regra já voltou ao preço regular; remova ou renove a promoção para manter o catálogo limpo.' });
     product.variants?.forEach((variant, index) => {
       if (!hasText(variant.code) || isUnspecifiedPrice(variant.price)) add({ id: `${prefix}-variant-${index}`, area: 'catalog', severity: 'attention', title: `${product.name}: variante incompleta`, description: 'Toda variante precisa de nome e preço ou regra de encaminhamento claros.' });
       if (hasNumericPrice(variant.price) && variant.priceAmount == null) add({ id: `${prefix}-variant-amount-${index}`, area: 'catalog', severity: 'attention', title: `${product.name}: valor estruturado da variante ausente`, description: 'Preencha o valor numérico para evitar divergência no financeiro.' });
+      const variantBookable = variant.bookable ?? product.bookable ?? true;
+      if (variantBookable && !(variant.durationMinutes ?? product.durationMinutes)) add({ id: `${prefix}-variant-duration-${index}`, area: 'operation', severity: 'attention', title: `${product.name}: duração da variação ausente`, description: 'Defina a duração desta variação para que o calendário reserve o tempo correto.' });
     });
   }
 

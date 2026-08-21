@@ -23,4 +23,21 @@ describe('auditKnowledgeBase', () => {
     expect(audit.actionableProductIds).toContain('p2');
     expect(audit.findings.map((finding) => finding.id)).toEqual(expect.arrayContaining(['catalog-p2-category', 'catalog-p2-amount', 'catalog-p2-duration', 'operation-hours', 'documents-pending']));
   });
+
+  it('não exige preço nem duração no procedimento-pai quando as variações estão completas', () => {
+    const family = {
+      ...completeKb,
+      products: [{
+        id: 'family-1', name: 'Pestañas', category: 'Olhar', description: 'Família de procedimentos para cílios.', price: 'Sob consulta',
+        variants: [
+          { code: 'Lash Lift', price: 'Gs 140.000', priceAmount: 140000, durationMinutes: 90 },
+          { code: 'Efecto Delineado', price: 'Gs 220.000', priceAmount: 220000, durationMinutes: 120 },
+        ],
+      }],
+    };
+    const audit = auditKnowledgeBase(family, { '1': { open: '09:00', close: '18:00' } }, new Date('2026-08-21'));
+    expect(productNeedsAttention(family.products[0], new Date('2026-08-21'))).toBe(false);
+    expect(audit.actionableProductIds).not.toContain('family-1');
+    expect(audit.findings.map((finding) => finding.id)).not.toEqual(expect.arrayContaining(['catalog-family-1-price', 'catalog-family-1-amount', 'catalog-family-1-duration']));
+  });
 });

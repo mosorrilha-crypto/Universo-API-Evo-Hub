@@ -22,4 +22,10 @@
 - [x] Adicionar filtro de pendências no catálogo para priorizar itens sem preço estruturado, duração, categoria ou descrição.
 - [x] Implementar as melhorias prioritárias sem substituir ou inventar dados reais dos tenants.
 - [x] Validar as evoluções de base de conhecimento, catálogo e organização no Universo.
+- [x] Corrigir pendências indevidas em produtos-família cujos preço, duração e agendabilidade são definidos nas variações.
+- [x] Cobrir a regra de auditoria de famílias com variações por teste automatizado e validar a publicação.
+- [x] Ocultar preço numérico e duração no item pai quando o procedimento for uma família com variações.
+- [x] Verificar e restaurar a configuração de preço promocional com data de expiração no cadastro de produtos e variações.
+- [x] Permitir configurar preço promocional e vencimento por variação, refletindo o valor vigente no agente e no financeiro.
+- [x] Remover a edição independente de valores numéricos e derivá-los sempre do preço regular ou promocional exibido ao cliente.
 - [ ] Revisar a experiência visual e entregar a atualização no repositório Universo.
