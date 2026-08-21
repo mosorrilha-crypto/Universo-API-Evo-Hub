@@ -185,7 +185,7 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(specialistCall.contents[0].text).not.toContain('atendente humano');
   });
 
-  it('reconhece o nome comercial "Combo Full Face" no título do anúncio e entrega ao especialista a oferta oficial correspondente', async () => {
+  it('reconhece o nome comercial "Combo Full Face" no título do anúncio sem presumir agendamento no primeiro contato', async () => {
     getKnowledgeBase.mockResolvedValueOnce({
       products: [{
         name: 'Combo Triple: Micro Cejas + Labios + Pestañas',
@@ -196,10 +196,10 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     } as any);
     const { ai, calls } = makeFakeAi();
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a',
       ai,
-      'Hola, quiero saber más',
+      'Me gustaría reservar un horario para el Combo Full Face',
       undefined,
       undefined,
       [],
@@ -208,14 +208,20 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
       'beauty_studio',
       undefined,
       undefined,
-      'Combo Full Face'
+      'Combo Full Face',
+      undefined,
+      undefined,
+      undefined,
+      true
     );
 
     const specialistCall = calls[1];
     const userContent: string = specialistCall.contents[0].text;
     expect(userContent).toContain('Clique para WhatsApp');
     expect(userContent).toContain('Combo Triple: Micro Cejas + Labios + Pestañas');
-    expect(userContent).toContain('Pule a pergunta genérica de qual serviço a cliente busca');
+    expect(userContent).toContain('SINAL DE INTERESSE');
+    expect(userContent).toContain('sem pressupor que ela quer fechar');
+    expect(result?.agent).toBe('triagem');
   });
 
   it('reforça a regra anti-parênteses/dois-pontos na camada Global (achado real em produção)', async () => {
@@ -444,14 +450,16 @@ describe('generateAutoReplyForText — menção ao anúncio na abertura', () => 
   // en Luque") mas a IA nunca sabia disso — toda saudação inicial saía
   // genérica e quase idêntica entre clientes diferentes. ad_headline já era
   // gravado (attachAdReferralIfMissing, pro CAPI), só nunca chegava ao prompt.
-  it('menciona o anúncio no contents quando é o primeiro contato (histórico vazio)', async () => {
+  it('contextualiza o anúncio como interesse inicial quando é o primeiro contato de campanha (histórico vazio)', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText(
       'tenant-a', ai, 'oi', 'Cliente Teste', undefined, [], undefined, undefined, 'beauty_studio', undefined, undefined,
-      'Técnica brasileña en Luque'
+      'Técnica brasileña en Luque', undefined, undefined, undefined, true
     );
     const userContent: string = calls[1].contents[0].text;
     expect(userContent).toContain('Técnica brasileña en Luque');
+    expect(userContent).toContain('SINAL DE INTERESSE');
+    expect(userContent).toContain('NÃO consulte, ofereça nem cite horários agora');
   });
 
   it('NUNCA repete a menção ao anúncio quando já existe histórico (evita virar outro tique repetitivo)', async () => {
@@ -849,28 +857,30 @@ describe('generateAutoReplyForText — headline do anúncio nomeando serviço do
     return { ai, calls };
   }
 
-  it('pede pra pular a pergunta de triagem quando o headline nomeia um produto real do catálogo (mock: Microlips)', async () => {
+  it('usa o serviço do headline como contexto sem presumir fechamento quando é o primeiro contato de campanha (mock: Microlips)', async () => {
     const { ai, calls } = makeFakeAiTriagem();
     await generateAutoReplyForText(
       'tenant-a', ai, 'Hola', 'Cliente', undefined, [] /* histórico vazio = primeiro contato */,
       undefined, undefined, undefined, undefined, undefined,
-      'Conocé Microlips en Luque'
+      'Conocé Microlips en Luque', undefined, undefined, undefined, true
     );
     const userContent: string = calls[1].contents[0].text;
-    expect(userContent).toContain('Pule a pergunta genérica de qual serviço a cliente busca');
-    expect(userContent).toContain('"Microlips"');
+    expect(userContent).toContain('O tema corresponde ao serviço "Microlips"');
+    expect(userContent).toContain('sem pressupor que ela quer fechar');
+    expect(userContent).toContain('NÃO faça a pergunta genérica “qual serviço você busca?”');
   });
 
-  it('NÃO pede pra pular a triagem quando o headline é genérico (não nomeia produto nenhum do catálogo)', async () => {
+  it('contextualiza headline genérico sem tratar a mensagem pré-preenchida como pedido de agenda', async () => {
     const { ai, calls } = makeFakeAiTriagem();
     await generateAutoReplyForText(
       'tenant-a', ai, 'Hola', 'Cliente', undefined, [],
       undefined, undefined, undefined, undefined, undefined,
-      'Técnica brasileña en Luque'
+      'Técnica brasileña en Luque', undefined, undefined, undefined, true
     );
     const userContent: string = calls[1].contents[0].text;
-    expect(userContent).not.toContain('Pule a pergunta genérica');
     expect(userContent).toContain('Técnica brasileña en Luque');
+    expect(userContent).toContain('SINAL DE INTERESSE');
+    expect(userContent).toContain('NÃO consulte, ofereça nem cite horários agora');
   });
 
   it('não menciona o anúncio quando já há histórico (não é mais o primeiro contato)', async () => {

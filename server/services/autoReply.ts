@@ -1597,14 +1597,22 @@ export async function generateAutoReplyForText(
    * mensagem pode ter quebra de linha interna legítima). Chamadores que não
    * bufferizam (ex: transcrição de áudio) podem simplesmente omitir.
    */
-  messageCount?: number
+  messageCount?: number,
+  /** Primeiro contato identificado como entrada de anúncio (headline Meta ou ice breaker configurado). A mensagem pode ter sido pré-preenchida pelo anúncio, portanto indica interesse inicial — não pedido confirmado de agenda. */
+  isCampaignEntry: boolean = false
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
   const isBurst = messageCount !== undefined ? messageCount > 1 : undefined;
+  const isFirstCampaignContact = isCampaignEntry && (!history || history.length === 0);
 
   try {
     const routerStart = Date.now();
-    const agent = await classifyAgent(tenantId, ai, text, history, phone, groqApiKey, isBurst);
+    const routedAgent = await classifyAgent(tenantId, ai, text, history, phone, groqApiKey, isBurst);
+    // A frase pré-preenchida do anúncio pode dizer “quero reservar”, mas não
+    // comprova intenção real de agenda. No primeiro toque de uma campanha, a
+    // etapa correta é qualificar interesse com baixo atrito; horários só
+    // entram depois de uma resposta livre da própria lead.
+    const agent = isFirstCampaignContact ? 'triagem' : routedAgent;
     const routerElapsedMs = Date.now() - routerStart;
 
     let extraContext: string | undefined;
@@ -1631,7 +1639,7 @@ export async function generateAutoReplyForText(
     // Os dois agora rodam de forma independente sempre que fizerem sentido.
     const contextParts: string[] = [];
 
-    if (agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
+    if (!isFirstCampaignContact && agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
       const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId);
       if (result.actionsSummary.length) {
         contextParts.push(result.actionsSummary.map((s) => `- ${s}`).join('\n'));
@@ -1661,23 +1669,17 @@ export async function generateAutoReplyForText(
       extraContext = contextParts.join('\n');
     }
 
-    // Só faz sentido mencionar o anúncio na saudação inicial (histórico
-    // vazio) — repetir isso mensagem após mensagem soaria tão robótico
-    // quanto o problema que essa personalização tenta resolver.
+    // A origem de anúncio só orienta a primeira interação. Mensagens
+    // pré-preenchidas são conveniência da Meta, não confirmação de que a
+    // pessoa aceita preço, quer agenda ou sequer leu todos os detalhes.
     let adContext: string | undefined;
-    if (adHeadline && (!history || history.length === 0)) {
-      const baseAdContext = `Este é o primeiro contato desta conversa. O cliente clicou num anúncio "Clique para WhatsApp" com o tema "${adHeadline}" pra chegar até aqui — se fizer sentido, deixe a saudação inicial soar como continuação natural desse anúncio (ex: mencionar brevemente esse tema), sem forçar nem soar automático. Nunca repita essa menção em mensagens seguintes.`;
-      // Issue #153, Parte 2 — quando o headline já nomeia um serviço
-      // específico do catálogo (ex: "Combo Cejas + Labios"), a pergunta
-      // genérica de triagem ("cejas, pestañas ou labios?") é redundante:
-      // a cliente já sinalizou o que quer ao clicar nesse anúncio
-      // específico. Match simples pelo nome exato do produto contido no
-      // headline — nunca por categoria solta, pra não dar falso positivo
-      // com headline genérico que só cita "beleza" ou similar.
+    if (isFirstCampaignContact) {
+      const campaignTheme = adHeadline ? ` com o tema "${adHeadline}"` : '';
+      const baseAdContext = `Este é o primeiro contato de uma lead que chegou por um anúncio "Clique para WhatsApp"${campaignTheme}. A mensagem inicial pode ter sido pré-preenchida pelo próprio anúncio: trate-a como SINAL DE INTERESSE, nunca como pedido confirmado de agendamento, preço aceito ou escolha definitiva do serviço. Faça uma abertura curta, contextual e sem pressão. A microconversão deste turno é conseguir uma resposta livre da lead sobre o que ela quer ver primeiro (por exemplo: valor, resultado/como funciona ou disponibilidade). NÃO consulte, ofereça nem cite horários agora; NÃO mande preço, duração e catálogo completos de uma vez; NÃO faça a pergunta genérica “qual serviço você busca?” se o tema da campanha já permite uma referência mais útil. Se a lead tiver digitado uma pergunta concreta além do texto padrão, responda essa pergunta antes de convidá-la a escolher o próximo assunto. Nunca repita a menção ao anúncio nos turnos seguintes.`;
       const kb = await getKnowledgeBase(tenantId);
-      const matchedService = findServiceNamedInHeadline(adHeadline, kb?.products);
+      const matchedService = adHeadline ? findServiceNamedInHeadline(adHeadline, kb?.products) : undefined;
       adContext = matchedService
-        ? `${baseAdContext} O headline já nomeia um serviço específico do catálogo: "${matchedService.name}". Pule a pergunta genérica de qual serviço a cliente busca — vá direto pra apresentar esse serviço (o que é, preço, duração) como continuação natural da saudação, a menos que a mensagem dela já deixe claro que quer outra coisa.`
+        ? `${baseAdContext} O tema corresponde ao serviço "${matchedService.name}". Você pode mencioná-lo de forma breve, mas sem pressupor que ela quer fechar: apresente o benefício em uma frase e pergunte o que ela prefere saber primeiro.`
         : baseAdContext;
     }
 
