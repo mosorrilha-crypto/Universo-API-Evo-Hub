@@ -30,6 +30,7 @@ import { startPaymentPendingAlertJob } from './server/services/paymentPendingAle
 import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
 import { initWebPush } from './server/services/webPush';
 import { notifySystemError } from './server/services/systemErrorAlertService';
+import { configureAdminAlertChannel } from './server/services/adminAlertChannel';
 
 dotenv.config();
 
@@ -83,6 +84,19 @@ async function startServer() {
   if (!supabase) {
     console.warn('⚠️  SUPABASE_URL/SUPABASE_KEY ausentes — conversas, agenda, base de conhecimento e login real não vão funcionar até configurar.');
   }
+
+  // Credencial compartilhada (.env) pro canal de alerta AO OPERADOR (não é o
+  // canal de mensagem do cliente) — issue #290, seção 1: os 3 serviços de
+  // alerta (systemErrorAlertService/escalationAlertService/agentPausedAlertJob)
+  // nunca recebiam isso antes, então caíam sempre no fallback Meta vazio e
+  // nunca tentavam Evolution API pro tenant que atende de verdade por lá.
+  configureAdminAlertChannel({
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
+  });
 
   app.use(express.json({
     limit: '50mb',
@@ -202,6 +216,9 @@ async function startServer() {
   startAgentPausedAlertJob({
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
   });
 
   // Job em background que alerta o operador quando um pagamento fica

@@ -12,10 +12,14 @@
  * paused_alert_sent_at com updated_at detecta se já alertou pra ESSA pausa
  * específica, sem duplicar a cada tick do job nem deixar de alertar de novo
  * se pausar → reativar → pausar de novo.
+ *
+ * Canal 2 (WhatsApp) via adminAlertChannel.ts (issue #290, seção 1) — antes
+ * chamava resolveMetaCredentialsForTenant só com a credencial Meta recebida
+ * por deps, nunca tentava Evolution API pro tenant que atende de verdade
+ * por lá.
  */
 import { getDb } from './db';
-import { sendWhatsAppTemplateMessage } from './metaSend';
-import { resolveMetaCredentialsForTenant } from './tenantResolver';
+import { sendAdminAlert } from './adminAlertChannel';
 import { sendPushToTenant } from './webPush';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -112,6 +116,9 @@ async function markAlertSent(tenantId: string): Promise<void> {
 export interface AgentPausedAlertJobDeps {
   metaAccessToken?: string;
   metaPhoneNumberId?: string;
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  evolutionInstanceName?: string;
   intervalMs?: number;
   pauseThresholdMs?: number;
 }
@@ -147,15 +154,23 @@ async function alertForTenant(row: AgentStatusRow, deps: AgentPausedAlertJobDeps
     return;
   }
 
-  const { metaAccessToken, metaPhoneNumberId } = await resolveMetaCredentialsForTenant(row.tenant_id, {
-    metaAccessToken: deps.metaAccessToken,
-    metaPhoneNumberId: deps.metaPhoneNumberId,
-  });
-  await sendWhatsAppTemplateMessage(metaPhoneNumberId, metaAccessToken, adminPhone, TEMPLATE_NAME, TEMPLATE_LANGUAGE, [
-    tenantName,
-    String(pausedMinutes),
-    leadLabel,
-  ]);
+  await sendAdminAlert(
+    row.tenant_id,
+    adminPhone,
+    {
+      templateName: TEMPLATE_NAME,
+      templateLanguage: TEMPLATE_LANGUAGE,
+      templateArgs: [tenantName, String(pausedMinutes), leadLabel],
+      freeText: `⚠️ O agente de ${tenantName} está pausado há ${pausedMinutes}min com lead sem resposta (ex: ${leadLabel}).`,
+    },
+    {
+      metaAccessToken: deps.metaAccessToken,
+      metaPhoneNumberId: deps.metaPhoneNumberId,
+      evolutionApiUrl: deps.evolutionApiUrl,
+      evolutionApiKey: deps.evolutionApiKey,
+      evolutionInstanceName: deps.evolutionInstanceName,
+    }
+  );
   await markAlertSent(row.tenant_id);
   console.log(`🔔 [Alerta agente pausado] tenant=${row.tenant_id} avisou ${adminPhone} (pausado há ${pausedMinutes}min).`);
 }

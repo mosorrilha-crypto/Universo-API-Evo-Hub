@@ -11,8 +11,11 @@ import { createFakeSupabase } from './fakeSupabase';
 const sendWhatsAppTemplateMessage = vi.fn(async () => undefined);
 vi.mock('../metaSend', () => ({ sendWhatsAppTemplateMessage }));
 
-const resolveMetaCredentialsForTenant = vi.fn(async () => ({ metaAccessToken: 'tok', metaPhoneNumberId: 'pn' }));
-vi.mock('../tenantResolver', () => ({ resolveMetaCredentialsForTenant }));
+const sendEvolutionTextMessage = vi.fn(async () => 'wamid-evo');
+vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage }));
+
+const resolveCredentialsForTenant = vi.fn(async (): Promise<Record<string, any>> => ({ provider: 'meta', metaAccessToken: 'tok', metaPhoneNumberId: 'pn' }));
+vi.mock('../tenantResolver', () => ({ resolveCredentialsForTenant }));
 
 const { logEscalation } = await import('../escalationStore');
 
@@ -62,5 +65,29 @@ describe('logEscalation — alerta imediato pro operador', () => {
 
     expect(escalation.id).toBeTruthy();
     expect(escalation.resolved).toBe(false);
+  });
+
+  it('tenant cujo canal real é Evolution API recebe o alerta por texto livre, não por template Meta (issue #290)', async () => {
+    initDb(createFakeSupabase({
+      tenants: [{ id: TENANT_A, name: 'Monique Sorrilha Beauty Studio', admin_alert_phone: '595990000000' }],
+    }));
+    resolveCredentialsForTenant.mockResolvedValueOnce({
+      provider: 'evolution',
+      evolutionInstanceName: 'inst-monique',
+      evolutionApiUrl: 'https://evo.example.com',
+      evolutionApiKey: 'evo-key',
+    });
+
+    await logEscalation(TENANT_A, '595981234567', 'Cliente Teste', 'Cliente com reclamação — atendimento humano obrigatório', 'oi');
+    await new Promise((r) => setImmediate(r));
+
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(1);
+    const [instanceName, apiUrl, apiKey, to, text] = sendEvolutionTextMessage.mock.calls[0] as any[];
+    expect(instanceName).toBe('inst-monique');
+    expect(apiUrl).toBe('https://evo.example.com');
+    expect(apiKey).toBe('evo-key');
+    expect(to).toBe('595990000000');
+    expect(text).toContain('Cliente Teste');
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 });
