@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { LeadInfo, CRMStage, UserProfile, CRMOperatorNote, CRMTask, LeadSourceChannel } from '../types';
-import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Kanban,
@@ -60,7 +59,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   currentOperator,
   onNavigateToFinancial,
 }) => {
-  const leads = propLeads || INITIAL_MOCK_LEADS;
+  const leads = propLeads || [];
   const currentUser = propCurrentUser || currentOperator || { name: 'Operador Admin', id: 'op_1' };
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   const [searchTerm, setSearchTerm] = useState('');
@@ -289,7 +288,12 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
             <span>+ Novo Lead Real</span>
           </button>
 
-          {/* Clear Test Leads Button if function passed */}
+          {/* Apaga TODOS os leads do CRM, reais inclusive (onClearAllLeads chama
+              setLeads([]) em App.tsx) — rótulo/tooltip corrigidos (achado na
+              auditoria "Raio-X do Universo"): dizia "leads fictícios de
+              teste", mas desde que o CRM passou a mesclar leads reais
+              (GET /api/crm/leads), esse botão apaga cliente de verdade
+              também. Confirmação abaixo já é honesta sobre isso. */}
           {onClearAllLeads && leads.length > 0 && (
             <button
               onClick={() => {
@@ -298,10 +302,10 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                 }
               }}
               className="px-3 py-2 bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-800/60 font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
-              title="Limpar leads fictícios de teste"
+              title="Apaga todos os leads do CRM — ação irreversível"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Limpar Teste</span>
+              <span className="hidden sm:inline">Limpar Todos</span>
             </button>
           )}
 

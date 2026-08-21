@@ -6,7 +6,6 @@ import {
   PaymentStatus,
   UserProfile
 } from '../types';
-import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import {
   DollarSign,
   TrendingUp,
@@ -76,7 +75,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   currency = 'PYG',
   locale = 'es-PY',
 }) => {
-  const leads = propLeads || INITIAL_MOCK_LEADS;
+  const leads = propLeads || [];
   const currentUser = propCurrentUser || { name: 'Operador Admin', id: 'op_1' };
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
