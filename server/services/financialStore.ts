@@ -8,6 +8,7 @@ import { getDb } from './db';
 
 export type PaymentMethod = 'PIX' | 'Transferência Bancária' | 'Cartão de Crédito' | 'Boleto Bancário' | 'Link WhatsApp';
 export type PaymentStatus = 'pago' | 'pendente' | 'atrasado' | 'cancelado';
+export type FinancialEntryType = 'income' | 'expense';
 
 export interface FinancialTransactionRecord {
   id: string;
@@ -25,6 +26,8 @@ export interface FinancialTransactionRecord {
   paymentLinkUrl?: string;
   /** Referência estável da origem (ex: "apt:<eventId do Google Calendar>") — só presente em transação criada automaticamente pelo verify-payment (ver conversations.ts). undefined pra qualquer transação registrada manualmente. Único por tenant (migration 0037) — garante que reenviar/reprocessar o mesmo verify-payment nunca duplica a transação. */
   sourceRef?: string;
+  /** Receita vinculada a uma venda/agendamento ou despesa operacional avulsa. */
+  entryType: FinancialEntryType;
 }
 
 type FinancialTransactionRow = {
@@ -42,10 +45,11 @@ type FinancialTransactionRow = {
   pix_qr_code: string | null;
   payment_link_url: string | null;
   source_ref: string | null;
+  entry_type: FinancialEntryType | null;
 };
 
 const FINANCIAL_TRANSACTION_COLUMNS =
-  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url, source_ref';
+  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url, source_ref, entry_type';
 
 function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTransactionRecord {
   return {
@@ -63,6 +67,7 @@ function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTr
     pixQrCode: row.pix_qr_code ?? undefined,
     paymentLinkUrl: row.payment_link_url ?? undefined,
     sourceRef: row.source_ref ?? undefined,
+    entryType: row.entry_type || 'income',
   };
 }
 
@@ -93,6 +98,7 @@ export interface CreateFinancialTransactionInput {
   pixQrCode?: string;
   paymentLinkUrl?: string;
   sourceRef?: string;
+  entryType?: FinancialEntryType;
 }
 
 /** true quando o erro é a constraint única (tenant_id, source_ref) da migration 0037 — sinal de que essa transação já foi criada antes (reentrega/retry), nunca um erro real. Quem chama pra criação automática (ver conversations.ts verify-payment) deve tratar isso como sucesso silencioso, não propagar. */
@@ -128,6 +134,7 @@ export async function createFinancialTransaction(
       pix_qr_code: input.pixQrCode,
       payment_link_url: input.paymentLinkUrl,
       source_ref: input.sourceRef,
+      entry_type: input.entryType || 'income',
     })
     .select(FINANCIAL_TRANSACTION_COLUMNS)
     .single();

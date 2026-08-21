@@ -1,0 +1,373 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  AlertCircle,
+  ArrowDownRight,
+  ArrowUpRight,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CircleDollarSign,
+  Clock3,
+  MoreHorizontal,
+  Plus,
+  ReceiptText,
+  Trash2,
+  UserRound,
+  WalletCards,
+  X,
+} from 'lucide-react';
+import { apiFetch } from '../lib/apiClient';
+import { summarizeFinancialTransactions } from '../lib/agendaFinanceiroMetrics';
+import type { FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, UserProfile } from '../types';
+
+type CenterView = 'unified' | 'agenda' | 'financial';
+type CalendarEvent = {
+  id: string;
+  summary: string;
+  startIso: string;
+  endIso?: string;
+  completed?: boolean;
+  payment?: { amount: number; paymentMethod: PaymentMethod; status: PaymentStatus } | null;
+};
+
+interface AgendaFinanceiroCenterProps {
+  transactions: FinancialTransaction[];
+  leads: LeadInfo[];
+  currentUser: UserProfile;
+  currency?: string;
+  locale?: string;
+  onAddTransaction: (transaction: FinancialTransaction) => Promise<boolean>;
+  onUpdateTransactionStatus: (id: string, status: PaymentStatus) => Promise<void> | void;
+  onDeleteTransaction: (id: string) => Promise<void> | void;
+  onToast: (message: string) => void;
+}
+
+const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
+const statusStyle: Record<PaymentStatus, string> = {
+  pago: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25',
+  pendente: 'bg-amber-400/10 text-amber-200 border-amber-400/25',
+  atrasado: 'bg-rose-500/10 text-rose-200 border-rose-500/25',
+  cancelado: 'bg-slate-700/70 text-slate-300 border-slate-600',
+};
+
+function dateInputValue(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function timeInputValue(date: Date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function getApiError(data: unknown, fallback: string) {
+  return typeof data === 'object' && data && 'error' in data && typeof data.error === 'string' ? data.error : fallback;
+}
+
+export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
+  transactions,
+  leads,
+  currentUser,
+  currency = 'PYG',
+  locale = 'es-PY',
+  onAddTransaction,
+  onUpdateTransactionStatus,
+  onDeleteTransaction,
+  onToast,
+}) => {
+  const [view, setView] = useState<CenterView>('unified');
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<'month' | 'all'>('month');
+  const [appointmentDialog, setAppointmentDialog] = useState<{ mode: 'new' | 'edit'; event?: CalendarEvent } | null>(null);
+  const [transactionDialog, setTransactionDialog] = useState<'income' | 'expense' | null>(null);
+  const [paymentDialog, setPaymentDialog] = useState<CalendarEvent | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const formatMoney = (amount: number) => new Intl.NumberFormat(locale, { style: 'currency', currency }).format(amount);
+  const monthLabel = calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+  const refreshEvents = async () => {
+    setLoadingEvents(true);
+    setEventsError(null);
+    try {
+      const year = calendarDate.getFullYear();
+      const month = calendarDate.getMonth() + 1;
+      const response = await apiFetch(`/api/google-calendar/upcoming-events?year=${year}&month=${month}`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(getApiError(data, 'Não foi possível carregar a agenda.'));
+      setEvents(data?.events || []);
+    } catch (error) {
+      setEventsError(error instanceof Error ? error.message : 'Não foi possível carregar a agenda.');
+      setEvents([]);
+    } finally {
+      setLoadingEvents(false);
+    }
+  };
+
+  useEffect(() => { refreshEvents(); }, [calendarDate.getFullYear(), calendarDate.getMonth()]);
+
+  const financial = useMemo(() => summarizeFinancialTransactions(transactions, period), [transactions, period]);
+
+  const todayAppointments = events.filter((event) => {
+    const eventDate = new Date(event.startIso);
+    const today = new Date();
+    return eventDate.getFullYear() === today.getFullYear() && eventDate.getMonth() === today.getMonth() && eventDate.getDate() === today.getDate() && !event.completed;
+  });
+  const nextAppointments = events.filter((event) => new Date(event.startIso).getTime() >= Date.now() && !event.completed).sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso)).slice(0, 5);
+  const hasOperationalData = events.length > 0 || transactions.length > 0;
+
+  const changeMonth = (offset: number) => setCalendarDate((date) => new Date(date.getFullYear(), date.getMonth() + offset, 1));
+
+  const callEventAction = async (url: string, method: string, body?: object) => {
+    const response = await apiFetch(url, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(getApiError(data, 'Não foi possível atualizar o agendamento.'));
+    await refreshEvents();
+  };
+
+  const saveAppointment = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const service = String(form.get('service') || '').trim();
+    const date = String(form.get('date') || '');
+    const time = String(form.get('time') || '');
+    const clientId = String(form.get('clientId') || '');
+    const clientName = String(form.get('clientName') || '').trim();
+    const clientPhone = String(form.get('clientPhone') || '').trim();
+    const amount = Number(form.get('amount') || 0);
+    const source = String(form.get('source') || 'unknown');
+    if (!service || !date || !time) return;
+    const selectedLead = leads.find((lead) => lead.id === clientId);
+    const phone = selectedLead?.phone || clientPhone;
+    if (!phone) {
+      onToast('Informe um cliente do CRM ou um telefone para criar o agendamento.');
+      return;
+    }
+    const prefix = source === 'ads' ? '[Ads] ' : source === 'referral' ? '[Indicação] ' : source === 'organic' ? '[Orgânico] ' : '[?] ';
+    const summary = `${prefix}${service}`;
+    const start = new Date(`${date}T${time}:00`);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    setSubmitting(true);
+    try {
+      if (appointmentDialog?.mode === 'edit' && appointmentDialog.event) {
+        const existing = appointmentDialog.event;
+        await callEventAction(`/api/google-calendar/events/${encodeURIComponent(existing.id)}`, 'PATCH', { summary });
+        const oldStart = new Date(existing.startIso);
+        if (oldStart.getTime() !== start.getTime()) {
+          await callEventAction(`/api/google-calendar/events/${encodeURIComponent(existing.id)}/reschedule`, 'PATCH', { newStartIso: start.toISOString(), newEndIso: end.toISOString() });
+        }
+        onToast('Agendamento atualizado e agenda sincronizada.');
+      } else {
+        const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/manual-appointment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            serviceName: summary,
+            startIso: start.toISOString().slice(0, 19),
+            endIso: end.toISOString().slice(0, 19),
+            notes: clientName ? `Cliente informado na central: ${clientName}` : undefined,
+            amount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+          }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(getApiError(data, 'Não foi possível criar o agendamento.'));
+        onToast('Agendamento criado e cobrança pendente vinculada automaticamente.');
+      }
+      setAppointmentDialog(null);
+      await refreshEvents();
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Não foi possível salvar o agendamento.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const saveTransaction = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!transactionDialog) return;
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get('amount') || 0);
+    const description = String(form.get('description') || '').trim();
+    const clientId = String(form.get('clientId') || '');
+    const selectedLead = leads.find((lead) => lead.id === clientId);
+    if (!description || !Number.isFinite(amount) || amount <= 0) return;
+    setSubmitting(true);
+    const isExpense = transactionDialog === 'expense';
+    const created = await onAddTransaction({
+      id: crypto.randomUUID(),
+      leadId: isExpense ? 'business-expense' : selectedLead?.id || 'manual-income',
+      leadName: isExpense ? 'Negócio' : selectedLead?.name || 'Cliente sem cadastro',
+      leadPhone: isExpense ? 'interno' : selectedLead?.phone || 'não informado',
+      productName: description,
+      amount,
+      paymentMethod: String(form.get('paymentMethod') || 'Transferência Bancária') as PaymentMethod,
+      status: String(form.get('status') || 'pago') as PaymentStatus,
+      date: new Date().toISOString(),
+      operatorName: currentUser.name,
+      channel: isExpense ? 'Despesa operacional' : 'Receita manual',
+      entryType: isExpense ? 'expense' : 'income',
+    });
+    setSubmitting(false);
+    if (created) {
+      setTransactionDialog(null);
+      onToast(isExpense ? 'Despesa registrada no financeiro.' : 'Receita manual registrada no financeiro.');
+    }
+  };
+
+  const savePayment = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!paymentDialog) return;
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get('amount') || 0);
+    setSubmitting(true);
+    try {
+      const payload = {
+        amount,
+        paymentMethod: String(form.get('paymentMethod')),
+        status: String(form.get('status')),
+      };
+      await callEventAction(`/api/google-calendar/events/${encodeURIComponent(paymentDialog.id)}/payment`, paymentDialog.payment ? 'PATCH' : 'POST', payload);
+      setPaymentDialog(null);
+      onToast('Cobrança do agendamento atualizada sem lançamento duplicado.');
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Não foi possível atualizar a cobrança.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const quickComplete = async (calendarEvent: CalendarEvent) => {
+    try {
+      await callEventAction(`/api/google-calendar/events/${encodeURIComponent(calendarEvent.id)}/complete`, 'POST', { completed: !calendarEvent.completed });
+      onToast(calendarEvent.completed ? 'Atendimento reaberto.' : 'Atendimento marcado como concluído.');
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Não foi possível atualizar o atendimento.');
+    }
+  };
+
+  const cancelAppointment = async (calendarEvent: CalendarEvent) => {
+    if (!window.confirm(`Cancelar “${calendarEvent.summary}”? O evento será removido da agenda real.`)) return;
+    try {
+      await callEventAction(`/api/google-calendar/events/${encodeURIComponent(calendarEvent.id)}`, 'DELETE');
+      onToast('Agendamento cancelado e removido da agenda.');
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : 'Não foi possível cancelar o agendamento.');
+    }
+  };
+
+  const eventDays = useMemo(() => {
+    const daysInMonth = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0).getDate();
+    return Array.from({ length: daysInMonth }, (_, index) => {
+      const day = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), index + 1);
+      const appointments = events.filter((calendarEvent) => {
+        const eventDate = new Date(calendarEvent.startIso);
+        return eventDate.getFullYear() === day.getFullYear() && eventDate.getMonth() === day.getMonth() && eventDate.getDate() === day.getDate();
+      });
+      return { day, appointments };
+    });
+  }, [calendarDate, events]);
+
+  const EventCard = ({ calendarEvent, compact = false }: { calendarEvent: CalendarEvent; compact?: boolean }) => (
+    <article className={`group rounded-2xl border border-slate-800 bg-slate-950/55 p-${compact ? '3' : '4'} transition-colors hover:border-emerald-500/35`}>
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300">
+          <span className="text-[10px] font-bold uppercase">{new Date(calendarEvent.startIso).toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')}</span>
+          <span className="text-sm font-black leading-none">{new Date(calendarEvent.startIso).getDate()}</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-bold text-white">{calendarEvent.summary}</h3>
+              <p className="mt-1 flex items-center gap-1 text-xs text-slate-400"><Clock3 className="h-3.5 w-3.5" />{new Date(calendarEvent.startIso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}{calendarEvent.endIso ? ` — ${new Date(calendarEvent.endIso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+            </div>
+            {calendarEvent.completed && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {calendarEvent.payment ? <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusStyle[calendarEvent.payment.status]}`}>{calendarEvent.payment.status === 'pago' ? 'Recebido' : calendarEvent.payment.status === 'atrasado' ? 'Em atraso' : 'A receber'} · {formatMoney(calendarEvent.payment.amount)}</button> : <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className="rounded-full border border-dashed border-amber-500/35 px-2 py-1 text-[10px] font-bold text-amber-200 hover:bg-amber-500/10">Vincular cobrança</button>}
+            {!compact && <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+              <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title="Editar agendamento"><MoreHorizontal className="h-4 w-4" /></button>
+              <button type="button" onClick={() => quickComplete(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-300" title="Concluir atendimento"><CheckCircle2 className="h-4 w-4" /></button>
+              <button type="button" onClick={() => cancelAppointment(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300" title="Cancelar agendamento"><Trash2 className="h-4 w-4" /></button>
+            </div>}
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <section className="overflow-hidden rounded-3xl border border-emerald-500/15 bg-[radial-gradient(circle_at_86%_2%,rgba(16,185,129,0.18),transparent_32%),linear-gradient(125deg,#111827_0%,#0f172a_52%,#101827_100%)] p-6 shadow-2xl shadow-slate-950/35 sm:p-8">
+        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+          <div className="max-w-2xl">
+            <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.17em] text-emerald-300"><span className="h-px w-7 bg-emerald-400" />Operação integrada</div>
+            <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Agenda &amp; Financeiro</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">Uma central para programar atendimentos, acompanhar recebimentos e manter o caixa conectado à operação — sem repetir lançamentos.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setTransactionDialog('expense')} className="rounded-xl border border-slate-700 bg-slate-900/70 px-3.5 py-2.5 text-xs font-bold text-slate-200 transition-colors hover:border-rose-400/50 hover:bg-rose-500/10"><ArrowDownRight className="mr-1.5 inline h-4 w-4 text-rose-300" />Nova despesa</button>
+            <button type="button" onClick={() => setAppointmentDialog({ mode: 'new' })} className="rounded-xl bg-emerald-400 px-4 py-2.5 text-xs font-black text-slate-950 shadow-lg shadow-emerald-950/30 transition-transform active:scale-[0.98]"><Plus className="mr-1.5 inline h-4 w-4" />Novo agendamento</button>
+          </div>
+        </div>
+      </section>
+
+      <div className="flex w-full gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/75 p-1 sm:w-fit">
+        {([['unified', 'Visão unificada'], ['agenda', 'Agenda'], ['financial', 'Financeiro']] as Array<[CenterView, string]>).map(([key, label]) => <button key={key} type="button" onClick={() => setView(key)} className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold transition-colors ${view === key ? 'bg-emerald-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>{label}</button>)}
+      </div>
+
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric icon={<CalendarDays className="h-4 w-4" />} label="Agendamentos hoje" value={String(todayAppointments.length)} note={todayAppointments.length ? `${todayAppointments.filter((event) => event.payment?.status !== 'pago').length} aguardando baixa` : 'Nenhum atendimento na agenda'} tone="emerald" />
+        <Metric icon={<ArrowUpRight className="h-4 w-4" />} label="Recebido no período" value={formatMoney(financial.received)} note={period === 'month' ? 'Receitas confirmadas no mês' : 'Todas as receitas confirmadas'} tone="emerald" />
+        <Metric icon={<AlertCircle className="h-4 w-4" />} label="Em aberto" value={formatMoney(financial.open)} note={financial.overdue ? `${formatMoney(financial.overdue)} em atraso` : 'Nenhuma cobrança atrasada'} tone="amber" />
+        <Metric icon={<WalletCards className="h-4 w-4" />} label="Resultado líquido" value={formatMoney(financial.net)} note={`${formatMoney(financial.spent)} em despesas no período`} tone={financial.net >= 0 ? 'blue' : 'rose'} />
+      </section>
+
+      {!hasOperationalData && !loadingEvents && <section className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/45 p-6 text-center"><CircleDollarSign className="mx-auto h-7 w-7 text-emerald-400" /><h2 className="mt-3 font-bold text-white">A central está pronta para receber dados reais</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-400">Ainda não há atendimentos ou lançamentos vinculados neste período. Isso não indica ausência de vendas; pode apenas refletir o início da adoção do módulo.</p></section>}
+
+      {(view === 'unified' || view === 'agenda') && <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold text-white">Agenda operacional</h2><p className="mt-1 text-xs text-slate-400">Eventos reais do calendário, cobrança e atendimento no mesmo fluxo.</p></div><div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1"><button onClick={() => changeMonth(-1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Mês anterior"><ChevronLeft className="h-4 w-4" /></button><span className="min-w-28 text-center text-xs font-bold capitalize text-slate-200">{monthLabel}</span><button onClick={() => changeMonth(1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Próximo mês"><ChevronRight className="h-4 w-4" /></button></div></div>
+          {loadingEvents ? <div className="grid grid-cols-7 gap-2 animate-pulse">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-20 rounded-xl bg-slate-800/70" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">Tentar novamente</button></div> : <div className="grid grid-cols-7 gap-1.5 sm:gap-2"><div className="col-span-7 grid grid-cols-7 gap-1.5 pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:gap-2">{['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} />)}{eventDays.map(({ day, appointments }) => <button type="button" key={day.toISOString()} onClick={() => setAppointmentDialog({ mode: 'new' })} className={`min-h-20 rounded-xl border p-2 text-left transition-colors ${appointments.length ? 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'}`}><div className="flex justify-between"><span className={`text-xs font-bold ${day.toDateString() === new Date().toDateString() ? 'text-emerald-300' : 'text-slate-300'}`}>{day.getDate()}</span>{appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[9px] font-black text-slate-950">{appointments.length}</span>}</div><div className="mt-2 space-y-1">{appointments.slice(0, 2).map((event) => <span key={event.id} className="block truncate rounded bg-slate-900 px-1.5 py-1 text-[9px] font-medium text-slate-300">{new Date(event.startIso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} {event.summary.replace(/^\[[^\]]+\]\s*/, '')}</span>)}</div></button>)}</div>}
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-white">Próximos compromissos</h2><p className="mt-1 text-xs text-slate-400">Ações que exigem atenção na sequência.</p></div><button type="button" onClick={refreshEvents} className="text-xs font-bold text-emerald-300 hover:text-emerald-200">Atualizar</button></div><div className="space-y-3">{nextAppointments.length ? nextAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">Nenhum compromisso futuro encontrado neste mês.</p>}</div></div>
+      </section>}
+
+      {(view === 'unified' || view === 'financial') && <section className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-bold text-white">Fluxo financeiro</h2><p className="mt-1 text-xs text-slate-400">Receitas vinculadas à agenda, lançamentos manuais e despesas operacionais.</p></div><div className="flex flex-wrap gap-2"><select value={period} onChange={(event) => setPeriod(event.target.value as 'month' | 'all')} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200"><option value="month">Mês atual</option><option value="all">Todo histórico</option></select><button type="button" onClick={() => setTransactionDialog('income')} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/15"><Plus className="mr-1 inline h-3.5 w-3.5" />Receita avulsa</button></div></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="pb-3 font-bold">Data</th><th className="pb-3 font-bold">Cliente / descrição</th><th className="pb-3 font-bold">Tipo</th><th className="pb-3 font-bold">Status</th><th className="pb-3 text-right font-bold">Valor</th><th className="pb-3" /></tr></thead><tbody className="divide-y divide-slate-800/80">{financial.scoped.length ? financial.scoped.map((transaction) => <tr key={transaction.id} className="transition-colors hover:bg-slate-800/30"><td className="py-3.5 text-slate-400">{new Date(transaction.date).toLocaleDateString('pt-BR')}</td><td className="py-3.5"><p className="font-bold text-slate-200">{transaction.productName}</p><p className="mt-0.5 text-[10px] text-slate-500">{transaction.entryType === 'expense' ? 'Despesa operacional' : transaction.leadName}</p></td><td className="py-3.5"><span className={`inline-flex items-center gap-1 font-bold ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? <ArrowDownRight className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}{transaction.entryType === 'expense' ? 'Despesa' : 'Receita'}</span></td><td className="py-3.5"><button type="button" onClick={() => transaction.status !== 'pago' && onUpdateTransactionStatus(transaction.id, 'pago')} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusStyle[transaction.status]}`}>{transaction.status}</button></td><td className={`py-3.5 text-right font-black ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? '-' : '+'}{formatMoney(transaction.amount)}</td><td className="py-3.5 text-right"><button type="button" onClick={() => onDeleteTransaction(transaction.id)} className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title="Excluir lançamento"><Trash2 className="h-3.5 w-3.5" /></button></td></tr>) : <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-500">Ainda não há lançamentos reais para este filtro.</td></tr>}</tbody></table></div></section>}
+
+      {appointmentDialog && <AppointmentDialog dialog={appointmentDialog} leads={leads} currency={currency} onClose={() => setAppointmentDialog(null)} onSubmit={saveAppointment} submitting={submitting} />}
+      {transactionDialog && <TransactionDialog kind={transactionDialog} leads={leads} currency={currency} onClose={() => setTransactionDialog(null)} onSubmit={saveTransaction} submitting={submitting} />}
+      {paymentDialog && <PaymentDialog event={paymentDialog} currency={currency} onClose={() => setPaymentDialog(null)} onSubmit={savePayment} submitting={submitting} />}
+    </div>
+  );
+};
+
+function Metric({ icon, label, value, note, tone }: { icon: React.ReactNode; label: string; value: string; note: string; tone: 'emerald' | 'amber' | 'blue' | 'rose' }) {
+  const tones = { emerald: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20', amber: 'bg-amber-400/10 text-amber-200 border-amber-400/20', blue: 'bg-sky-500/10 text-sky-200 border-sky-500/20', rose: 'bg-rose-500/10 text-rose-200 border-rose-500/20' };
+  return <article className="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-400">{label}</span><span className={`rounded-lg border p-2 ${tones[tone]}`}>{icon}</span></div><p className="mt-4 text-2xl font-black tracking-tight text-white">{value}</p><p className="mt-1 text-[11px] text-slate-500">{note}</p></article>;
+}
+
+function DialogShell({ title, description, children, onClose }: { title: string; description: string; children: React.ReactNode; onClose: () => void }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"><div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4"><div><h2 className="font-bold text-white">{title}</h2><p className="mt-1 text-xs leading-5 text-slate-400">{description}</p></div><button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button></div>{children}</div></div>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-xs font-semibold text-slate-300"><span className="mb-1.5 block">{label}</span>{children}</label>; }
+const inputClass = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition-colors placeholder:text-slate-600 focus:border-emerald-400';
+
+function AppointmentDialog({ dialog, leads, currency, onClose, onSubmit, submitting }: { dialog: { mode: 'new' | 'edit'; event?: CalendarEvent }; leads: LeadInfo[]; currency: string; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
+  const eventDate = dialog.event ? new Date(dialog.event.startIso) : new Date();
+  const cleanSummary = dialog.event?.summary.replace(/^\[[^\]]+\]\s*/, '') || '';
+  return <DialogShell title={dialog.mode === 'new' ? 'Novo agendamento' : 'Editar agendamento'} description="O serviço, a agenda e a cobrança ficam vinculados ao mesmo fluxo." onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="Cliente do CRM"><select name="clientId" defaultValue="" className={inputClass} disabled={dialog.mode === 'edit'}><option value="">Selecionar cliente</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field><Field label="Telefone para cliente avulso"><input name="clientPhone" disabled={dialog.mode === 'edit'} placeholder="Ex.: 595 981 123456" className={inputClass} /></Field></div><Field label="Nome do cliente (opcional)"><input name="clientName" placeholder="Usado para identificar o cadastro avulso" className={inputClass} disabled={dialog.mode === 'edit'} /></Field><Field label="Serviço"><input name="service" required defaultValue={cleanSummary} placeholder="Ex.: Consulta inicial" className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label="Data"><input name="date" type="date" required defaultValue={dateInputValue(eventDate)} className={inputClass} /></Field><Field label="Hora"><input name="time" type="time" required defaultValue={timeInputValue(eventDate)} className={inputClass} /></Field></div><div className="grid grid-cols-2 gap-4"><Field label={`Valor da cobrança (${currency})`}><input name="amount" type="number" min="0" step="0.01" defaultValue={dialog.event?.payment?.amount ?? ''} disabled={dialog.mode === 'edit'} placeholder="0" className={inputClass} /></Field><Field label="Origem"><select name="source" defaultValue="unknown" className={inputClass}><option value="unknown">Sem origem identificada</option><option value="ads">Ads</option><option value="referral">Indicação</option><option value="organic">Orgânico</option></select></Field></div><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 transition-opacity disabled:opacity-50">{submitting ? 'Salvando...' : dialog.mode === 'new' ? 'Criar agendamento e cobrança' : 'Salvar alterações'}</button></form></DialogShell>;
+}
+
+function TransactionDialog({ kind, leads, currency, onClose, onSubmit, submitting }: { kind: 'income' | 'expense'; leads: LeadInfo[]; currency: string; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
+  const isExpense = kind === 'expense';
+  return <DialogShell title={isExpense ? 'Registrar despesa' : 'Registrar receita avulsa'} description={isExpense ? 'Controle uma saída operacional que não veio de um agendamento.' : 'Registre uma receita externa sem duplicar cobranças da agenda.'} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5">{!isExpense && <Field label="Cliente do CRM"><select name="clientId" defaultValue="" className={inputClass}><option value="">Cliente sem cadastro</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field>}<Field label="Descrição"><input name="description" required placeholder={isExpense ? 'Ex.: Compra de materiais' : 'Ex.: Venda presencial'} className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label={`Valor (${currency})`}><input name="amount" type="number" min="0.01" step="0.01" required className={inputClass} /></Field><Field label="Forma"><select name="paymentMethod" className={inputClass}>{PAYMENT_METHODS.map((method) => <option key={method}>{method}</option>)}</select></Field></div><Field label="Status"><select name="status" defaultValue="pago" className={inputClass}><option value="pago">Pago / confirmado</option>{!isExpense && <option value="pendente">Pendente</option>}</select></Field><button type="submit" disabled={submitting} className={`w-full rounded-xl py-3 text-xs font-black transition-opacity disabled:opacity-50 ${isExpense ? 'bg-rose-300 text-rose-950' : 'bg-emerald-400 text-slate-950'}`}>{submitting ? 'Salvando...' : isExpense ? 'Registrar despesa' : 'Registrar receita'}</button></form></DialogShell>;
+}
+
+function PaymentDialog({ event, currency, onClose, onSubmit, submitting }: { event: CalendarEvent; currency: string; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) { return <DialogShell title="Cobrança do agendamento" description="Esta cobrança usa a referência do evento e é atualizada sem criar um lançamento duplicado." onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5"><p className="rounded-xl bg-slate-950 p-3 text-sm font-bold text-white">{event.summary}</p><div className="grid grid-cols-2 gap-4"><Field label={`Valor (${currency})`}><input name="amount" type="number" min="0" step="0.01" required defaultValue={event.payment?.amount ?? ''} className={inputClass} /></Field><Field label="Forma"><select name="paymentMethod" defaultValue={event.payment?.paymentMethod || 'PIX'} className={inputClass}>{PAYMENT_METHODS.map((method) => <option key={method}>{method}</option>)}</select></Field></div><Field label="Situação"><select name="status" defaultValue={event.payment?.status || 'pendente'} className={inputClass}><option value="pago">Recebido</option><option value="pendente">A receber</option><option value="atrasado">Em atraso</option><option value="cancelado">Cancelado</option></select></Field><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 disabled:opacity-50">{submitting ? 'Salvando...' : 'Salvar cobrança'}</button></form></DialogShell>; }

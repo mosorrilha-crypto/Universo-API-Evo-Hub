@@ -6,6 +6,7 @@ import {
   deleteFinancialTransaction,
   type PaymentMethod,
   type PaymentStatus,
+  type FinancialEntryType,
 } from '../services/financialStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -22,6 +23,7 @@ function tenantOf(req: AuthenticatedRequest): string {
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['pago', 'pendente', 'atrasado', 'cancelado'];
+const ENTRY_TYPES: FinancialEntryType[] = ['income', 'expense'];
 
 /**
  * Achado real em produção: o Financeiro (FinancialDashboard.tsx) era 100%
@@ -38,7 +40,7 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
   }));
 
   router.post('/api/financial/transactions', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl } = req.body || {};
+    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType } = req.body || {};
 
     if (typeof id !== 'string' || !id.trim()) return res.status(400).json({ error: 'id é obrigatório.' });
     if (typeof leadId !== 'string' || !leadId.trim()) return res.status(400).json({ error: 'leadId é obrigatório.' });
@@ -48,6 +50,7 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
     if (typeof amount !== 'number' || !Number.isFinite(amount)) return res.status(400).json({ error: 'amount precisa ser um número.' });
     if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
     const resolvedStatus: PaymentStatus = PAYMENT_STATUSES.includes(status) ? status : 'pendente';
+    const resolvedEntryType: FinancialEntryType = ENTRY_TYPES.includes(entryType) ? entryType : 'income';
 
     const transaction = await createFinancialTransaction(tenantOf(req), {
       id,
@@ -63,6 +66,7 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
       channel: typeof channel === 'string' ? channel : undefined,
       pixQrCode: typeof pixQrCode === 'string' ? pixQrCode : undefined,
       paymentLinkUrl: typeof paymentLinkUrl === 'string' ? paymentLinkUrl : undefined,
+      entryType: resolvedEntryType,
     });
     res.json({ transaction });
   }));

@@ -33,6 +33,7 @@ import {
   ChevronRight,
   Building2,
   Layers,
+  CalendarDays,
   X,
   Menu
 } from 'lucide-react';
@@ -401,16 +402,16 @@ export const Header: React.FC<HeaderProps> = ({
 
             {canSeeFinancial && (
               <button
-                id="tab-financial"
-                onClick={() => setActiveTab('financial')}
+                id="tab-agenda-financeiro"
+                onClick={() => setActiveTab('agenda_financeiro')}
                 className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                  activeTab === 'financial'
+                  activeTab === 'agenda_financeiro'
                     ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
                     : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
                 }`}
               >
-                <DollarSign className="w-4 h-4 text-emerald-400" />
-                <span>Financeiro</span>
+                <CalendarDays className="w-4 h-4 text-emerald-400" />
+                <span>Agenda &amp; Financeiro</span>
               </button>
             )}
 

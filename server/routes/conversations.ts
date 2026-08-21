@@ -22,7 +22,7 @@ import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTypin
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, findProductMatch, resolveProductAmountByName } from '../services/knowledgeBaseStore';
-import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
+import { createFinancialTransaction, updateFinancialTransactionBySourceRef, isDuplicateSourceRefError } from '../services/financialStore';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -710,7 +710,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const { serviceName, startIso, endIso, notes, paymentReceived, paymentAmountReceived } = req.body || {};
+    const { serviceName, startIso, endIso, notes, paymentReceived, paymentAmountReceived, amount } = req.body || {};
     if (!serviceName?.trim() || !startIso || !endIso) {
       return res.status(400).json({ error: 'Campos "serviceName", "startIso" e "endIso" são obrigatórios.' });
     }
@@ -720,6 +720,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // catálogo — nunca aceita um valor negativo/zero por engano.
     if (paymentAmountReceived !== undefined && !(typeof paymentAmountReceived === 'number' && paymentAmountReceived > 0)) {
       return res.status(400).json({ error: '"paymentAmountReceived", quando informado, precisa ser um número maior que zero.' });
+    }
+    if (amount !== undefined && !(typeof amount === 'number' && amount >= 0)) {
+      return res.status(400).json({ error: '"amount", quando informado, precisa ser um número igual ou maior que zero.' });
     }
 
     // Mesmo bug real de produção corrigido em autoReply.ts/criar_agendamento
@@ -762,6 +765,28 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // isto é sempre um ciclo de pagamento novo (nunca deve herdar payment_status
     // de um agendamento antigo, existente ou não), mesmo raciocínio do PR #203.
     await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: true });
+
+    // A central cria uma cobrança pendente já no agendamento confirmado. A
+    // referência apt:<eventId> é a mesma usada na aprovação do comprovante,
+    // portanto nunca há lançamento duplicado quando o pagamento for baixado.
+    if (typeof amount === 'number') {
+      const conversation = await getConversation(tenantId, phone);
+      await createFinancialTransaction(tenantId, {
+        id: crypto.randomUUID(),
+        leadId: phone,
+        leadName: conversation?.name || phone,
+        leadPhone: phone,
+        productName: serviceName.trim(),
+        amount,
+        paymentMethod: 'Transferência Bancária',
+        status: 'pendente',
+        date: new Date().toISOString(),
+        operatorName: 'Central Agenda & Financeiro',
+        channel: 'Agendamento manual',
+        sourceRef: `apt:${eventId}`,
+        entryType: 'income',
+      });
+    }
 
     // Agendamento fechado fora do WhatsApp (ex: presencial, telefone) já pode
     // vir com o comprovante conferido na hora do cadastro — sem isso não
@@ -819,6 +844,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         getConversation(tenantId, phone),
       ]);
       const amount = overrideAmount ?? (resolveProductAmountByName(kb, appointment.summary) ?? 0);
+      const sourceRef = `apt:${appointment.eventId}`;
+      const updatedExisting = await updateFinancialTransactionBySourceRef(tenantId, sourceRef, {
+        amount,
+        status: 'pago',
+      });
+      if (updatedExisting) return;
       await createFinancialTransaction(tenantId, {
         id: crypto.randomUUID(),
         leadId: phone,
@@ -831,7 +862,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         date: new Date().toISOString(),
         operatorName: 'Automático (comprovante aprovado)',
         channel: appointment.source === 'manual' ? 'Agendamento manual' : 'WhatsApp',
-        sourceRef: `apt:${appointment.eventId}`,
+        sourceRef,
+        entryType: 'income',
       });
     } catch (err) {
       if (isDuplicateSourceRefError(err)) return; // já registrado antes (retry/reentrega) — nada a fazer

@@ -15,7 +15,7 @@ import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import { OperatorCRM } from './components/OperatorCRM';
 import { EscalationsPanel } from './components/EscalationsPanel';
-import { FinancialDashboard } from './components/FinancialDashboard';
+import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
@@ -147,7 +147,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
-      (activeTab === 'financial' && !canSeeFinancial) ||
+      (['financial', 'agenda_financeiro'].includes(activeTab) && !canSeeFinancial) ||
       (['attribution', 'knowledge', 'integration'].includes(activeTab) && !canSeeAdminTools);
     if (blocked) setActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -759,6 +759,7 @@ export const App: React.FC = () => {
           channel: newTx.channel,
           pixQrCode: newTx.pixQrCode,
           paymentLinkUrl: newTx.paymentLinkUrl,
+          entryType: newTx.entryType,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -817,7 +818,7 @@ export const App: React.FC = () => {
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
     setFinancialPreselectedLead(lead);
-    setActiveTab('financial');
+    setActiveTab('agenda_financeiro');
   };
 
   return (
@@ -912,21 +913,17 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'financial' && canSeeFinancial && (
-          <FinancialDashboard
+        {activeTab === 'agenda_financeiro' && canSeeFinancial && (
+          <AgendaFinanceiroCenter
             transactions={transactions}
             onAddTransaction={handleAddTransaction}
             onUpdateTransactionStatus={handleUpdateTransactionStatus}
             onDeleteTransaction={handleDeleteTransaction}
-            onClearAllTransactions={() => {
-              setTransactions([]);
-              showToast('Faturas limpas');
-            }}
             leads={leads}
             currentUser={currentUser || GUEST_USER}
-            initialSelectedLead={financialPreselectedLead}
             currency={activeTenant.currency}
             locale={activeTenant.locale}
+            onToast={showToast}
           />
         )}
 

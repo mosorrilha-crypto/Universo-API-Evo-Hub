@@ -1,4 +1,4 @@
-export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'escalations';
+export type ActiveTab = 'whatsapp' | 'crm' | 'financial' | 'agenda_financeiro' | 'saas' | 'attribution' | 'knowledge' | 'integration' | 'escalations';
 
 export type UserRole = 'operator' | 'manager' | 'admin' | 'saas_admin';
 
@@ -87,6 +87,8 @@ export interface FinancialTransaction {
   isReal?: boolean;
   /** Referência estável da origem (ex: "apt:<eventId>") — só presente em transação criada automaticamente pelo backend quando um comprovante é aprovado. undefined em transação registrada manualmente. */
   sourceRef?: string;
+  /** Receita vinculada a atendimento/cobrança ou despesa operacional avulsa. Registros legados são receita por padrão. */
+  entryType?: 'income' | 'expense';
 }
 
 export type LeadSourceChannel = 'meta_ads' | 'instagram_ads' | 'google_ads' | 'instagram_organic' | 'google_organic' | 'whatsapp_direct';
@@ -521,4 +523,3 @@ export interface Operator {
   role: 'operator' | 'admin' | 'saas_admin';
   tenantId: string;
 }
-
