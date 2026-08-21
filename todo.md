@@ -10,4 +10,16 @@
 - [x] Criar testes e executar validação de tipos e da suíte do Universo.
 - [x] Adicionar cobertura unitária para os cálculos de receitas, despesas e valores em aberto da central integrada.
 - [ ] Investigar duas falhas preexistentes de testes de lembretes relacionadas a horário e fuso, sem alterar o escopo da central.
+- [ ] Confirmar que as credenciais Supabase disponíveis pertencem à instância de produção do Universo antes de aplicar a migração 0039.
+- [ ] Aplicar e verificar a migração 0039_financial_entry_type.sql somente na instância Supabase confirmada do Universo.
+- [ ] Corrigir o erro de produção em GET /api/financial/transactions causado pela coluna entry_type ausente.
+- [ ] Fornecer ao responsável o SQL idempotente para aplicação manual da migração 0039 no Supabase do Universo.
+- [ ] Validar o endpoint financeiro do Universo após a confirmação da coluna entry_type no banco.
+- [x] Auditar a base de conhecimento por tenant, incluindo regras, FAQs, documentos e conteúdo desatualizado.
+- [x] Revisar a estrutura do cadastro de produtos, variantes, preços, duração, agendabilidade e status de catálogo.
+- [x] Revisar a organização visual e operacional da área de Base de Conhecimento e Produtos.
+- [x] Adicionar diagnóstico de completude para contexto do negócio, catálogo, FAQ, documentos e horários.
+- [x] Adicionar filtro de pendências no catálogo para priorizar itens sem preço estruturado, duração, categoria ou descrição.
+- [x] Implementar as melhorias prioritárias sem substituir ou inventar dados reais dos tenants.
+- [x] Validar as evoluções de base de conhecimento, catálogo e organização no Universo.
 - [ ] Revisar a experiência visual e entregar a atualização no repositório Universo.

@@ -39,6 +39,7 @@ import {
   ChevronDown,
   GripVertical
 } from 'lucide-react';
+import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
@@ -72,6 +73,17 @@ const FIRST_CONTACT_BLOCK_META: Record<FirstContactBlockType, { label: string; i
   video: { label: 'Vídeo', icon: <Video className="w-3.5 h-3.5" />, color: 'text-emerald-400' },
   file: { label: 'Arquivo', icon: <Paperclip className="w-3.5 h-3.5" />, color: 'text-purple-400' },
 };
+
+function AuditMetric({ label, value, tone }: { label: string; value: string | number; tone: 'emerald' | 'sky' | 'amber' | 'rose' | 'slate' }) {
+  const styles = {
+    emerald: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300',
+    sky: 'border-sky-500/20 bg-sky-500/5 text-sky-200',
+    amber: 'border-amber-400/20 bg-amber-400/5 text-amber-200',
+    rose: 'border-rose-500/20 bg-rose-500/5 text-rose-200',
+    slate: 'border-slate-700 bg-slate-950/70 text-slate-300',
+  };
+  return <div className={`rounded-xl border p-2.5 ${styles[tone]}`}><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>;
+}
 
 /**
  * Achado real em produção: os catálogos semeados via scripts/seed-monique-
@@ -435,6 +447,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // por categoria, então continua reaproveitando o mesmo agrupamento visual.
   const [productSearch, setProductSearch] = useState('');
   const [productCategoryFilter, setProductCategoryFilter] = useState('');
+  const [productQualityFilter, setProductQualityFilter] = useState<'all' | 'pending' | 'active' | 'inactive'>('all');
 
   // Página de catálogo lista + painel de detalhe (pedido real, 20/08/2026:
   // grade de cards ficava difícil de escanear com muitos itens e não dava
@@ -686,6 +699,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     const search = productSearch.trim().toLowerCase();
     const filtered = formData.products.filter((p) => {
       if (productCategoryFilter && (p.category?.trim() || '') !== productCategoryFilter) return false;
+      if (productQualityFilter === 'pending' && !productNeedsAttention(p)) return false;
+      if (productQualityFilter === 'active' && p.active === false) return false;
+      if (productQualityFilter === 'inactive' && p.active !== false) return false;
       if (!search) return true;
       return (
         p.name.toLowerCase().includes(search) ||
@@ -705,7 +721,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       byCategory.get(category)!.push(p);
     }
     return { categorized: Array.from(byCategory.entries()), uncategorized };
-  }, [formData.products, productSearch, productCategoryFilter]);
+  }, [formData.products, productSearch, productCategoryFilter, productQualityFilter]);
+
+  const knowledgeAudit = useMemo(() => auditKnowledgeBase(formData, hoursForm), [formData, hoursForm]);
 
   // Variantes de tamanho/modelo dentro de um produto unificado (ex: "Piscina Fapac
   // Maresias" cobrindo 4x2.20m/5x2.60m/6x2.80m/7x3m, cada tamanho com preço próprio) —
@@ -1351,6 +1369,42 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       </div>
 
+      <section className="rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-bold text-white">
+              <BrainCircuit className="h-4 w-4 text-emerald-400" />
+              Diagnóstico de completude
+            </div>
+            <p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-400">Varredura local dos dados desta empresa. Ela aponta informações que podem comprometer respostas, agendamentos ou valores financeiros, mas não altera nenhum conteúdo automaticamente.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setOpenSections((prev) => ({ ...prev, s3: true }));
+              setProductQualityFilter('pending');
+            }}
+            className="shrink-0 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-400/15"
+          >
+            Ver {knowledgeAudit.actionableProductIds.size} pendência(s) do catálogo
+          </button>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <AuditMetric label="Itens ativos" value={knowledgeAudit.activeProducts} tone="emerald" />
+          <AuditMetric label="Categorizados" value={`${knowledgeAudit.categorizedProducts}/${knowledgeAudit.activeProducts}`} tone="sky" />
+          <AuditMetric label="Precisam atenção" value={knowledgeAudit.totals.attention} tone="amber" />
+          <AuditMetric label="Críticos" value={knowledgeAudit.totals.critical} tone={knowledgeAudit.totals.critical ? 'rose' : 'slate'} />
+        </div>
+        {knowledgeAudit.findings.length > 0 ? (
+          <div className="mt-4 border-t border-slate-800 pt-3">
+            <div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Prioridades encontradas</span><span className="text-[10px] text-slate-500">Exibindo as 4 primeiras</span></div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {knowledgeAudit.findings.slice(0, 4).map((finding) => <div key={finding.id} className="rounded-xl border border-slate-800 bg-slate-950/65 p-2.5"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${finding.severity === 'critical' ? 'bg-rose-400' : finding.severity === 'attention' ? 'bg-amber-300' : 'bg-sky-400'}`} /><p className="truncate text-[11px] font-bold text-slate-200">{finding.title}</p></div><p className="mt-1 pl-3.5 text-[10px] leading-4 text-slate-500">{finding.description}</p></div>)}
+            </div>
+          </div>
+        ) : <p className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3 text-xs text-emerald-200">A estrutura principal está completa para o agente usar dados reais desta empresa.</p>}
+      </section>
+
       {/* Preset Fast Template Buttons */}
       <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-md space-y-3">
         <div className="flex items-center justify-between">
@@ -1832,6 +1886,17 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     ))}
                   </select>
                 )}
+                <select
+                  value={productQualityFilter}
+                  onChange={(e) => setProductQualityFilter(e.target.value as 'all' | 'pending' | 'active' | 'inactive')}
+                  className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  title="Organize o catálogo por estado e complete os itens pendentes antes de salvar"
+                >
+                  <option value="all">Todos os itens</option>
+                  <option value="pending">Com pendências ({knowledgeAudit.actionableProductIds.size})</option>
+                  <option value="active">Somente ativos</option>
+                  <option value="inactive">Somente inativos</option>
+                </select>
               </div>
             )}
 
@@ -1889,6 +1954,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                             <div className="flex items-center gap-1.5">
                               <span className="text-xs font-bold text-white truncate">{prod.name}</span>
                               {prod.active === false && <span className="text-[9px] text-slate-500 shrink-0">inativo</span>}
+                              {knowledgeAudit.actionableProductIds.has(prod.id) && <span className="text-[9px] text-amber-300 shrink-0">atenção</span>}
                             </div>
                             <div className="flex items-center gap-2 mt-0.5 text-[10.5px] text-slate-400 flex-wrap">
                               <span className="text-emerald-400 font-semibold">{prod.price}</span>
