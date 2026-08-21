@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { LeadInfo, CAPIConfig, MetaCAPIEvent } from '../types';
-import { INITIAL_MOCK_LEADS } from '../data/mockLeads';
 import { apiFetch } from '../lib/apiClient';
 import { 
   BarChart3, 
@@ -45,7 +44,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   onTriggerCAPIEvent,
   onAddNewAttributedLead,
 }) => {
-  const leads = propLeads || INITIAL_MOCK_LEADS;
+  const leads = propLeads || [];
   const [activeTab, setActiveTab] = useState<'overview' | 'ai_insights' | 'capi_settings' | 'utm_simulator'>('overview');
 
   // Meta CAPI Configuration State
