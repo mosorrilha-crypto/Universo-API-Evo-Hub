@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { reviewAutoReplyBeforeSend } from './replySafetyGate';
+import { generateCorrectedReplySuggestion, reviewAutoReplyBeforeSend } from './replySafetyGate';
 
 describe('revisor pré-envio de respostas automáticas', () => {
   it('bloqueia uma apresentação repetida em conversa em andamento sem chamar outro modelo', async () => {
@@ -32,6 +32,47 @@ describe('revisor pré-envio de respostas automáticas', () => {
     }, { ai: null });
 
     expect(verdict).toMatchObject({ approved: false, source: 'unavailable', severity: 'high' });
+  });
+
+  it('gera uma sugestão supervisionada sem enviar e preserva a exigência de espanhol/voseo no prompt', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ reply: '¡Claro! ¿Qué servicio te gustaría consultar?' }) });
+    const suggestion = await generateCorrectedReplySuggestion({
+      customerMessage: 'Hola, ¿cuánto dura?',
+      blockedDraft: 'Dura un año. ¿Agendamos tu turno?',
+      reviewerReason: 'A resposta conduzia para agenda após pergunta informativa.',
+      history: [{ sender: 'lead', text: 'Hola, ¿cuánto dura?' }],
+      knowledgeContext: 'Pestañas: duración según servicio; no afirmar disponibilidad.',
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(suggestion).toEqual({ text: '¡Claro! ¿Qué servicio te gustaría consultar?', source: 'gemini-suggestion' });
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('espanhol paraguaio natural com voseo'),
+    }));
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('NUNCA será enviada automaticamente'),
+    }));
+  });
+
+  it('não gera sugestão para pagamento ou dado sensível', async () => {
+    const generateContent = vi.fn();
+    const suggestion = await generateCorrectedReplySuggestion({
+      customerMessage: 'Te envío el comprobante de pago.',
+      blockedDraft: 'Pago confirmado.',
+      reviewerReason: 'Pagamento requer conferência humana.',
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(suggestion).toBeNull();
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it('falha de forma segura quando o modelo retorna JSON sem resposta', async () => {
+    const suggestion = await generateCorrectedReplySuggestion({
+      customerMessage: 'Hola, ¿cuánto dura?',
+      blockedDraft: 'Te confirmo un horario.',
+      reviewerReason: 'Não confirmar disponibilidade sem verificar.',
+    }, { ai: { models: { generateContent: vi.fn().mockResolvedValue({ text: '{"reply":""}' }) } } as any });
+
+    expect(suggestion).toBeNull();
   });
 
   it('aceita a aprovação estruturada do segundo agente', async () => {

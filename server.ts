@@ -139,6 +139,7 @@ async function startServer() {
     supabaseUrl: config.supabaseUrl,
     supabaseKey: config.supabaseKey,
     getAi: () => getGeminiClient(config),
+    groqApiKey: config.groqApiKey,
     googleClientId: config.googleClientId,
     googleClientSecret: config.googleClientSecret,
     googleRedirectUri: config.googleRedirectUri,

@@ -522,6 +522,11 @@ export interface EscalationInfo {
   serviceWindowExpiresAt?: string;
   /** 'payment_proof' = card mostra "Confirmar pagamento"/"Rejeitar pagamento" em vez das ações genéricas — verificação de pagamento unificada aqui (não mais um banner separado dentro da conversa). 'owner_review'/'customer_reply' = acompanhamento de funil (server/services/pendingFollowUpJob.ts) — mesmas ações genéricas do 'general'. */
   kind?: 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
+  /** Sugestão corrigida gerada sob demanda; nunca enviada automaticamente. */
+  suggestedReply?: string;
+  suggestedReplyAt?: string;
+  suggestedReplyStatus?: 'generated' | 'edited' | 'copied' | 'discarded';
+  suggestedReplySource?: 'groq-suggestion' | 'gemini-suggestion';
 }
 
 export interface Operator {

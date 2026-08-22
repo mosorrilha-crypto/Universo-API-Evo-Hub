@@ -27,10 +27,11 @@ import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours }
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
-import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
+import { listEscalations, getEscalation, resolveEscalation, deleteEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
+import { generateCorrectedReplySuggestion } from '../services/replySafetyGate';
 import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
 import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
@@ -59,6 +60,8 @@ interface ConversationsRouterDeps {
   supabaseKey?: string;
   /** Issue #97 — retomada guiada pelo operador precisa da IA pra redigir a mensagem dentro da janela de 24h. */
   getAi?: () => import('@google/genai').GoogleGenAI | null;
+  /** Chave opcional do Groq para primeira tentativa da sugestão supervisionada. */
+  groqApiKey?: string;
   /** Issue #182 — cadastro manual de agendamento cria um evento real no Google Calendar, mesmo caminho que a ferramenta criar_agendamento da IA usa. */
   googleClientId?: string;
   googleClientSecret?: string;
@@ -86,7 +89,7 @@ function tenantOf(req: AuthenticatedRequest): string {
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, googleClientId, googleClientSecret, googleRedirectUri }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri }: ConversationsRouterDeps): Router {
   const router = Router();
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
 
@@ -1364,6 +1367,92 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // Issue #97 — operador deixa uma orientação em vez de assumir a conversa
   // pessoalmente; a IA retoma o atendimento com base nela (texto livre se
   // ainda dentro da janela de 24h da Meta, template de reengajamento se não).
+  router.post('/api/escalations/:id/reply-suggestion', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const escalation = await getEscalation(tenantId, req.params.id);
+    if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    if (escalation.resolved) return res.status(409).json({ error: 'Este escalonamento já foi resolvido; não há uma sugestão ativa para gerar.' });
+    if (escalation.kind === 'payment_proof') {
+      return res.status(400).json({ error: 'Comprovantes e pagamentos continuam exigindo resposta humana direta; não geramos sugestão automática para esse caso.' });
+    }
+
+    const conversation = await getConversation(tenantId, escalation.phone);
+    const knowledgeBase = await getKnowledgeBase(tenantId);
+    const safeKnowledgeContext = knowledgeBase
+      ? formatKnowledgeBaseForPrompt({
+          companyName: knowledgeBase.companyName,
+          toneOfVoice: knowledgeBase.toneOfVoice,
+          businessModel: knowledgeBase.businessModel,
+          locationMapsUrl: knowledgeBase.locationMapsUrl,
+          products: (knowledgeBase.products || []).map((product) => ({
+            name: product.name,
+            active: product.active,
+            category: product.category,
+            price: product.price,
+            description: product.description,
+            aliases: product.aliases,
+            variants: product.variants,
+          })),
+          faqs: knowledgeBase.faqs,
+          agentGoal: undefined,
+          pricingAndPolicies: undefined,
+          businessRules: [],
+          documents: [],
+        })
+      : '';
+    const history = (conversation?.messages || []).slice(-12).map((message) => ({
+      sender: message.sender,
+      text: message.text,
+      timestamp: message.timestamp,
+    }));
+    const customerMessage = [...history].reverse().find((message) => message.sender === 'lead' && message.text?.trim())?.text || escalation.lastMessage || '';
+    const blockedDraft = escalation.reason.match(/Rascunho bloqueado:\s*(.*)$/i)?.[1] || escalation.reason;
+    const suggestion = await generateCorrectedReplySuggestion({
+      customerMessage,
+      blockedDraft,
+      reviewerReason: escalation.reason,
+      history,
+      knowledgeContext: safeKnowledgeContext,
+    }, { ai: getAi?.() ?? null, groqApiKey });
+    if (!suggestion) return res.status(503).json({ error: 'Não foi possível gerar uma sugestão agora. O bloqueio permanece e o operador pode responder manualmente.' });
+
+    const saved = await saveReplySuggestion(tenantId, escalation.id, suggestion.text, 'generated', suggestion.source);
+    if (!saved) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    await recordQualityAuditEvent({
+      tenantId,
+      eventType: 'reply_suggestion_generated',
+      source: 'revisor-pre-envio',
+      entityType: 'escalation',
+      entityId: escalation.id,
+      conversationPhone: escalation.phone,
+      actorId: req.user?.id,
+      payload: { source: suggestion.source, reviewerReasonLength: escalation.reason.length },
+    });
+    res.json({ escalation: saved, suggestion: { text: suggestion.text, source: suggestion.source } });
+  }));
+
+  router.post('/api/escalations/:id/reply-suggestion-feedback', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const status = req.body?.status as ReplySuggestionStatus;
+    if (!['edited', 'copied', 'discarded'].includes(status)) {
+      return res.status(400).json({ error: 'Status de sugestão inválido.' });
+    }
+    const suggestion = typeof req.body?.suggestion === 'string' ? req.body.suggestion : '';
+    const saved = await saveReplySuggestion(tenantId, req.params.id, suggestion, status);
+    if (!saved) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    await recordQualityAuditEvent({
+      tenantId,
+      eventType: `reply_suggestion_${status}`,
+      source: 'operador',
+      entityType: 'escalation',
+      entityId: saved.id,
+      conversationPhone: saved.phone,
+      actorId: req.user?.id,
+      payload: { suggestionLength: suggestion.trim().length },
+    });
+    res.json({ escalation: saved });
+  }));
+
   router.post('/api/escalations/:id/operator-reply', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const reply: string = (req.body?.reply || '').trim();
