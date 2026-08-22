@@ -30,6 +30,7 @@ import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
+import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
 import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
@@ -496,14 +497,44 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!label || typeof label !== 'string' || !label.trim()) {
       return res.status(400).json({ error: 'Campo "label" é obrigatório.' });
     }
-    const labels = await addLabel(tenantOf(req), req.params.phone, label);
+    const tenantId = tenantOf(req);
+    const labels = await addLabel(tenantId, req.params.phone, label);
     if (labels === undefined) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    try {
+      await recordQualityAuditEvent({
+        tenantId,
+        eventType: 'conversation_label_added',
+        source: 'operator_panel',
+        entityType: 'conversation',
+        entityId: req.params.phone,
+        conversationPhone: req.params.phone,
+        actorId: req.user?.id,
+        payload: { label: label.trim(), labels },
+      });
+    } catch (err: any) {
+      console.warn(`⚠️ [Auditoria] Falha ao registrar etiqueta adicionada (tenant=${tenantId}, phone=${req.params.phone}):`, err?.message || err);
+    }
     res.json({ success: true, labels });
   }));
 
   router.delete('/api/conversations/:phone/labels/:label', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const labels = await removeLabel(tenantOf(req), req.params.phone, req.params.label);
+    const tenantId = tenantOf(req);
+    const labels = await removeLabel(tenantId, req.params.phone, req.params.label);
     if (labels === undefined) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    try {
+      await recordQualityAuditEvent({
+        tenantId,
+        eventType: 'conversation_label_removed',
+        source: 'operator_panel',
+        entityType: 'conversation',
+        entityId: req.params.phone,
+        conversationPhone: req.params.phone,
+        actorId: req.user?.id,
+        payload: { label: req.params.label, labels },
+      });
+    } catch (err: any) {
+      console.warn(`⚠️ [Auditoria] Falha ao registrar etiqueta removida (tenant=${tenantId}, phone=${req.params.phone}):`, err?.message || err);
+    }
     res.json({ success: true, labels });
   }));
 
@@ -871,6 +902,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
   }
 
+  async function recordPaymentDecisionAudit(tenantId: string, phone: string, status: 'verified' | 'rejected', operatorId: string, appointment: TrackedAppointment): Promise<void> {
+    try {
+      await recordQualityAuditEvent({
+        tenantId,
+        eventType: 'payment_receipt_reviewed',
+        source: 'operator_payment_review',
+        entityType: 'appointment',
+        entityId: appointment.eventId || phone,
+        conversationPhone: phone,
+        actorId: operatorId,
+        payload: {
+          decision: status,
+          paymentStatus: appointment.paymentStatus || null,
+          paymentProofMessageId: appointment.paymentProofMessageId || null,
+          requiresHumanReview: false,
+        },
+      });
+    } catch (err: any) {
+      // Auditoria não pode desfazer uma decisão financeira já confirmada.
+      console.warn(`⚠️ [Auditoria] Falha ao registrar decisão do comprovante (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+    }
+  }
+
   // Etapa 8 (fluxo de verificação de pagamento) — marca o comprovante que
   // chegou (webhooks.ts já grava pending_verification automaticamente
   // quando uma imagem chega com agendamento ativo sem comprovante ainda)
@@ -935,6 +989,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!updated) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
     const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, updated) : false;
     if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, updated);
+    await recordPaymentDecisionAudit(tenantId, phone, status, operatorId, updated);
     res.json({ success: true, appointment: updated, calendarReleased });
   }));
 
@@ -1346,6 +1401,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // verify-payment acima), a função só não registra nada — sem evento
     // não há `sourceRef` estável pra deduplicar.
     if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, appointment);
+    await recordPaymentDecisionAudit(tenantId, phone, status, operatorId, appointment);
 
     const trimmedReply: string = (reply || '').trim();
     if (!trimmedReply) {

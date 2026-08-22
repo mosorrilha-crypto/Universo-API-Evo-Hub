@@ -27,6 +27,7 @@ import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnaly
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
+import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
 
@@ -462,6 +463,39 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
               await markPaymentPendingVerification(tenantId, msg.from, msg.messageId, receiptHint);
               const hintSuffix = receiptHint ? ` IA: "${receiptHint}"` : '';
               await logEscalation(tenantId, msg.from, msg.contactName, `Possível comprovante de pagamento recebido (imagem com agendamento ativo) — precisa de verificação humana antes de confirmar o turno.${hintSuffix}`, '[imagem]', 'payment_proof');
+
+              // A imagem e a dica da IA viram um item de revisão na Central de
+              // Qualidade. A auditoria é efeito secundário: se a migration ainda
+              // não estiver aplicada ou houver indisponibilidade temporária, o
+              // comprovante continua escalado e o atendimento não é bloqueado.
+              void createQualityReview({
+                tenantId,
+                kind: 'ai_suggestion',
+                title: 'Possível comprovante recebido no WhatsApp',
+                description: receiptHint || 'Imagem recebida com agendamento aguardando pagamento; validar manualmente antes de confirmar.',
+                context: {
+                  decision: 'pending',
+                  source: 'payment_receipt',
+                  messageId: msg.messageId,
+                  requiresHumanReview: true,
+                  mediaStored: Boolean(downloadPromise),
+                },
+                originalValue: receiptHint || null,
+                createdBy: null,
+              }).then((review) => recordQualityAuditEvent({
+                tenantId,
+                eventType: 'payment_receipt_detected',
+                source: 'whatsapp_webhook',
+                entityType: 'quality_review',
+                entityId: review.id,
+                conversationPhone: msg.from,
+                payload: {
+                  messageId: msg.messageId,
+                  receiptHint: receiptHint || null,
+                  paymentStatus: 'pending_verification',
+                  requiresHumanReview: true,
+                },
+              })).catch((err) => console.warn(`⚠️ [Auditoria] Não foi possível registrar a revisão do comprovante ${msg.messageId}:`, err?.message || err));
             })
             .catch((err) => console.warn(`❌ [Pagamento] Falha ao processar possível comprovante de ${msg.from}:`, err.message));
         } else {
