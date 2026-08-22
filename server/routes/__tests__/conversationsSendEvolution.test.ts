@@ -198,7 +198,7 @@ describe('Roteamento por provedor (Evolution vs Meta) no envio manual do painel'
     expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
   });
 
-  it('POST /send-media (áudio) transcodifica e usa a rota Evolution de nota de voz, nunca Meta', async () => {
+  it('POST /send-media (áudio) transcodifica e usa o endpoint PTT nativo da Evolution, nunca Meta', async () => {
     currentTenantId = TENANT_EVOLUTION;
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
@@ -211,8 +211,8 @@ describe('Roteamento por provedor (Evolution vs Meta) no envio manual do painel'
       'instancia-cliente', 'https://evo-cliente.example.com', 'tenant-evo-key',
       '595981111111', 'b2dnLW9wdXMtY29udmVydGlkbw==', 'audio/ogg; codecs=opus'
     );
-    expect(sendWhatsAppAudioMessage).not.toHaveBeenCalled();
     expect(sendEvolutionMediaMessage).not.toHaveBeenCalled();
+    expect(sendWhatsAppAudioMessage).not.toHaveBeenCalled();
 
     expect(saveMediaImage).toHaveBeenCalledTimes(1);
     const [, , , savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];

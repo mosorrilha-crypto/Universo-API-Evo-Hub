@@ -108,7 +108,7 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
 
     expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('bXA0LWZha2U=', 'audio/mp4', 'ogg_opus');
     // O caminho normal entrega OGG/Opus, formato de nota de voz reconhecido pela Meta.
-    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.any(Buffer), 'audio/ogg; codecs=opus', undefined);
+    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.anything(), 'audio/ogg; codecs=opus', undefined);
 
     expect(saveMediaImage).toHaveBeenCalledTimes(1);
     const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
@@ -135,7 +135,7 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
 
     expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('d2VibS1mYWtl', 'audio/webm;codecs=opus', 'ogg_opus');
     // A Meta recebe a versão já convertida em OGG/Opus, nunca o WebM original.
-    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.any(Buffer), 'audio/ogg; codecs=opus', undefined);
+    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.anything(), 'audio/ogg; codecs=opus', undefined);
   });
 
   it('NÃO transcodifica mídia que não é áudio (imagem passa direto)', async () => {

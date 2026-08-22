@@ -16,6 +16,7 @@
  * com uma única instância).
  */
 import { EventEmitter } from 'events';
+import { recordOperationEvent } from './operationEventStore';
 
 const emitter = new EventEmitter();
 // Cada tenant pode ter vários operadores com o painel aberto ao mesmo
@@ -29,7 +30,7 @@ function eventName(tenantId: string): string {
 
 export interface ConversationEventMeta {
   /** Status da resposta automática pra essa conversa — ver emitAiReplyStatus abaixo. Ausente em atualizações comuns (nova mensagem, arquivar, etc.). */
-  aiReplyStatus?: 'generating' | 'sent' | 'failed';
+  aiReplyStatus?: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | 'resolved';
 }
 
 /** Assina atualizações de conversa de um tenant. Retorna a função de cancelar a assinatura. */
@@ -55,4 +56,12 @@ export function emitConversationUpdated(tenantId: string, phone: string): void {
  */
 export function emitAiReplyStatus(tenantId: string, phone: string, aiReplyStatus: ConversationEventMeta['aiReplyStatus']): void {
   emitter.emit(eventName(tenantId), phone, { aiReplyStatus });
+  // SSE continua sendo imediato e em memória; este espelho permite recuperar
+  // a linha do tempo após reinício, reconexão ou troca de instância.
+  void recordOperationEvent({
+    tenantId,
+    phone,
+    eventType: 'ai_reply_status',
+    payload: { status: aiReplyStatus },
+  }).catch((error) => console.warn(`⚠️ [Observabilidade] Não foi possível persistir status ${aiReplyStatus}:`, error?.message || error));
 }

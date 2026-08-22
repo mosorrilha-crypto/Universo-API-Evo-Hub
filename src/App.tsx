@@ -669,6 +669,19 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleAssignEscalationToSelf = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+      showToast('Você assumiu este escalonamento.');
+    } catch (err) {
+      console.error('Falha ao assumir escalonamento:', err);
+      showToast('Não foi possível assumir esse caso agora. Tente novamente.');
+    }
+  };
+
   // Issue #97 — operador deixa uma orientação em vez de assumir a conversa
   // pessoalmente; o backend decide se a IA já responde agora (dentro da
   // janela de 24h) ou manda o template de reengajamento (fora dela).
@@ -1047,6 +1060,7 @@ export const App: React.FC = () => {
             escalations={escalations}
             onResolve={handleResolveEscalation}
             onDelete={handleDeleteEscalation}
+            onAssignSelf={handleAssignEscalationToSelf}
             onSubmitOperatorReply={handleSubmitOperatorReply}
             onResolvePayment={handleResolvePaymentEscalation}
             onGoToConversation={(phone) => {

@@ -232,7 +232,11 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
                   <Globe className="w-2.5 h-2.5" /> {analysis.detectedLanguage}
                 </span>
               )}
-              {analysis?.lastUpdated && <span className="text-[9px] text-slate-500">Análise: {analysis.lastUpdated}</span>}
+              {analysis?.persistence ? (
+                <span className={`text-[9px] font-semibold ${analysis.persistence.isFresh ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {analysis.persistence.isFresh ? 'Ficha atualizada' : `${analysis.persistence.newMessages || 0} nova(s) mensagem(ns) — reanalise`}
+                </span>
+              ) : analysis?.lastUpdated ? <span className="text-[9px] text-slate-500">Análise local: {analysis.lastUpdated}</span> : null}
             </div>
           </div>
         </div>
@@ -299,6 +303,9 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
               <Lightbulb className="h-3.5 w-3.5" /> Decisão para agora
             </div>
             <p className="mt-1.5 text-xs font-semibold leading-relaxed text-amber-50">{actionObjective}</p>
+            {analysis?.persistence && !analysis.persistence.isFresh && (
+              <p className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-2 text-[10px] leading-relaxed text-amber-100">Chegaram {analysis.persistence.newMessages || 0} mensagem(ns) depois desta leitura. Atualize a Ficha antes de usar este rascunho.</p>
+            )}
             <div className="mt-2 border-t border-amber-500/15 pt-2 text-[11px] leading-relaxed text-amber-100/75">
               <span className="font-bold text-amber-300">Por quê: </span>{actionReason}
             </div>

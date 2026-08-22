@@ -27,7 +27,8 @@ import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours }
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
-import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
+import { assignEscalation, listEscalations, resolveEscalation, deleteEscalation, submitOperatorReply } from '../services/escalationStore';
+import { listOperationEvents } from '../services/operationEventStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
@@ -1500,8 +1501,30 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ escalations: withWindow });
   }));
 
+  router.get('/api/operation-events', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const phone = typeof req.query.phone === 'string' && req.query.phone.trim() ? req.query.phone.trim() : undefined;
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 500)) : 200;
+    const events = await listOperationEvents(tenantOf(req), { phone, limit });
+    res.json({ events });
+  }));
+
+  router.post('/api/escalations/:id/assign', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const operatorId = req.body?.operatorId === null ? null : (req.body?.operatorId || req.user?.id);
+    if (operatorId !== null && typeof operatorId !== 'string') return res.status(400).json({ error: 'Campo "operatorId" inválido.' });
+    const escalation = await assignEscalation(tenantOf(req), req.params.id, operatorId, { id: req.user?.id });
+    if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ escalation });
+  }));
+
   router.post('/api/escalations/:id/resolve', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const e = await resolveEscalation(tenantOf(req), req.params.id);
+    const resolutionCode = typeof req.body?.resolutionCode === 'string' ? req.body.resolutionCode.trim() : undefined;
+    const resolutionNote = typeof req.body?.resolutionNote === 'string' ? req.body.resolutionNote.trim() : undefined;
+    const e = await resolveEscalation(tenantOf(req), req.params.id, {
+      actor: { id: req.user?.id },
+      resolutionCode: resolutionCode || undefined,
+      resolutionNote: resolutionNote || undefined,
+    });
     if (!e) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ escalation: e });
   }));
@@ -1514,7 +1537,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const reply: string = (req.body?.reply || '').trim();
     if (!reply) return res.status(400).json({ error: 'Campo "reply" é obrigatório.' });
 
-    const escalation = await submitOperatorReply(tenantId, req.params.id, reply);
+    const escalation = await submitOperatorReply(tenantId, req.params.id, reply, { id: req.user?.id });
     if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
 
     const { data: tenant } = await getDb().from('tenants').select('name').eq('id', tenantId).maybeSingle();
@@ -1564,7 +1587,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     const trimmedReply: string = (reply || '').trim();
     if (!trimmedReply) {
-      const escalation = await resolveEscalation(tenantId, req.params.id);
+      const escalation = await resolveEscalation(tenantId, req.params.id, {
+        actor: { id: operatorId },
+        resolutionCode: status === 'verified' ? 'payment_verified' : 'payment_rejected',
+      });
       if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
       return res.json({ appointment, escalation, outcome: null, calendarReleased });
     }
@@ -1582,7 +1608,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const deleted = await deleteEscalation(tenantOf(req), req.params.id);
+    const deleted = await deleteEscalation(tenantOf(req), req.params.id, { id: req.user?.id });
     if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ success: true });
   }));

@@ -9,10 +9,14 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
 import {
-  logEscalation,
-  submitOperatorReply,
+  assignEscalation,
+  deleteEscalation,
   getPendingOperatorGuidance,
+  listEscalations,
+  logEscalation,
   markOperatorGuidanceConsumed,
+  resolveEscalation,
+  submitOperatorReply,
 } from '../escalationStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
@@ -34,12 +38,44 @@ describe('logEscalation — kind (verificação de pagamento unificada)', () => 
   });
 });
 
+describe('governança do caso', () => {
+  it('deduplica a mesma fonte e incrementa ocorrências sem criar outro card ativo', async () => {
+    const first = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Falha de envio', 'Mensagem A', 'general', { sourceKey: 'message:wamid-1' });
+    const second = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Falha de envio', 'Mensagem A', 'general', { sourceKey: 'message:wamid-1' });
+
+    expect(second.id).toBe(first.id);
+    expect(second.occurrenceCount).toBe(2);
+    expect((await listEscalations(TENANT_A)).filter((item) => item.sourceKey === 'message:wamid-1')).toHaveLength(1);
+  });
+
+  it('atribui, resolve com trilha de decisão e arquiva sem apagar a história', async () => {
+    const esc = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Comprovante pendente', undefined, 'payment_proof');
+    const assigned = await assignEscalation(TENANT_A, esc.id, 'operator-1', { id: 'operator-1', name: 'Monique' });
+    expect(assigned?.status).toBe('assigned');
+    expect(assigned?.assignedOperatorId).toBe('operator-1');
+
+    const resolved = await resolveEscalation(TENANT_A, esc.id, {
+      actor: { id: 'operator-1', name: 'Monique' },
+      resolutionCode: 'payment_verified',
+      resolutionNote: 'Comprovante conferido no banco.',
+    });
+    expect(resolved?.status).toBe('resolved');
+    expect(resolved?.resolutionCode).toBe('payment_verified');
+    expect(resolved?.resolvedAt).toBeTruthy();
+
+    expect(await deleteEscalation(TENANT_A, esc.id, { id: 'operator-1' })).toBe(true);
+    expect((await listEscalations(TENANT_A)).find((item) => item.id === esc.id)).toBeUndefined();
+  });
+});
+
 describe('submitOperatorReply', () => {
   it('grava a orientação e o timestamp, undefined para escalonamento inexistente', async () => {
     const esc = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Sumiu no meio da conversa');
     const updated = await submitOperatorReply(TENANT_A, esc.id, 'Diz que o horário de sábado ainda está livre.');
     expect(updated?.operatorReply).toBe('Diz que o horário de sábado ainda está livre.');
     expect(updated?.operatorReplyAt).toBeTruthy();
+    expect(updated?.guidanceExpiresAt).toBeTruthy();
+    expect(updated?.status).toBe('awaiting_customer');
 
     expect(await submitOperatorReply(TENANT_A, 'nao-existe', 'x')).toBeUndefined();
   });

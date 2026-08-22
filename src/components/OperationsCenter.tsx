@@ -91,7 +91,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
       tone: 'sky' as const,
       tab: 'escalations' as ActiveTab,
     })),
-    ...summary.uncompletedTasks.slice(0, 3).map((task) => ({
+    ...summary.uncompletedTasks.map((task) => ({
       id: task.id,
       type: t('commercialNextAction'),
       description: task.title,
@@ -101,7 +101,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
       tone: 'emerald' as const,
       tab: 'crm' as ActiveTab,
     })),
-  ].slice(0, 5);
+  ];
 
   const quickActions = [
     { label: t('openConversations'), description: t('openConversationsDetail'), icon: MessageSquare, tab: 'whatsapp' as ActiveTab, visible: true },
@@ -146,7 +146,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('smartQueue')}</p>
               <h2 className="mt-1 text-base font-bold text-white">{t('attentionNow')}</h2>
-              <p className="mt-0.5 text-xs text-slate-400">{t('actionsPrioritized')}</p>
+              <p className="mt-0.5 text-xs text-slate-400">{t('actionsPrioritized')} {priorityItems.length > 0 && `Exibindo ${priorityItems.length} item${priorityItems.length === 1 ? '' : 's'} da fila.`}</p>
             </div>
             {summary.unresolved.length > 0 && (
               <button onClick={() => onNavigate('escalations')} className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-300 transition-colors hover:text-emerald-100">

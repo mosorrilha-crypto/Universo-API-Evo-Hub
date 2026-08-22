@@ -576,9 +576,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // processando a última mensagem — o operador ficava sem saber se ia
   // chegar resposta em instantes ou se precisava assumir. Vem pelo mesmo SSE
   // de conversas (aiReplyStatus no payload, ver emitAiReplyStatus em
-  // conversationEvents.ts). Chave = telefone; 'failed' se auto-limpa depois
-  // de alguns segundos (o escalonamento real já fica registrado à parte).
-  const [aiReplyStatusByPhone, setAiReplyStatusByPhone] = useState<Record<string, 'generating' | 'failed'>>({});
+  // conversationEvents.ts). Chave = telefone; o aviso é transitório porque a
+  // linha do tempo persistida e os Escalonamentos são a fonte de verdade.
+  const [aiReplyStatusByPhone, setAiReplyStatusByPhone] = useState<Record<string, 'generating' | 'awaiting_human' | 'delivery_failed'>>({});
 
   // Modo "somente anúncios" (pedido real, 14/08/2026): quando ativo, o
   // agente só responde automaticamente contatos com atribuição de anúncio
@@ -1462,27 +1462,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           if (phone && phone === activeLeadPhoneRef.current) {
             void loadRealConversationHistory(phone, `real-${phone}`);
           }
-          const status: 'generating' | 'sent' | 'failed' | undefined = payload?.aiReplyStatus;
+          const status: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | undefined = payload?.aiReplyStatus;
           if (!phone || !status) return;
-          if (status === 'generating') {
+          if (status === 'generating' || status === 'drafted') {
             setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'generating' }));
-          } else if (status === 'sent') {
+          } else if (status === 'sent' || status === 'template_sent') {
             setAiReplyStatusByPhone((prev) => {
               if (!(phone in prev)) return prev;
               const { [phone]: _removed, ...rest } = prev;
               return rest;
             });
-          } else if (status === 'failed') {
-            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'failed' }));
-            // Some sozinho depois de alguns segundos — o escalonamento real
-            // já fica registrado em Escalonamentos, este é só um aviso rápido.
+          } else {
+            const localStatus = status === 'delivery_failed' ? 'delivery_failed' : 'awaiting_human';
+            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: localStatus }));
+            // Some sozinho depois de alguns segundos — o escalonamento e os
+            // eventos persistidos permanecem disponíveis para auditoria.
             setTimeout(() => {
               setAiReplyStatusByPhone((prev) => {
-                if (prev[phone] !== 'failed') return prev;
+                if (prev[phone] !== localStatus) return prev;
                 const { [phone]: _removed, ...rest } = prev;
                 return rest;
               });
-            }, 6000);
+            }, 9000);
           }
         } catch {
           // Heartbeat (": heartbeat\n\n") ou payload antigo sem JSON válido — ignora.
@@ -2217,6 +2218,39 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return () => clearTimeout(timer);
   }, [activeLeadId, selectedLead?.messages?.length, autoAnalyze, isAnalyzingConversation]);
 
+  // Recupera a última Ficha versionada no servidor ao trocar de conversa. Isso
+  // evita que uma recarga ou outro operador perca uma leitura já validada.
+  useEffect(() => {
+    if (!selectedLead?.phone || selectedLead.fullAnalysis || isAnalyzingConversation) return;
+    let cancelled = false;
+    const loadPersistedAnalysis = async () => {
+      try {
+        const messageCount = selectedLead.messages?.length || 0;
+        const response = await apiFetch(`/api/conversation-analysis/${encodeURIComponent(selectedLead.phone)}?messageCount=${messageCount}`);
+        const data = await response.json();
+        if (cancelled || !response.ok || !data.success || !data.analysis || !data.persisted) return;
+        const fullAnalysis: FullConversationAnalysis = {
+          ...data.analysis,
+          source: data.persisted.source,
+          lastUpdated: new Date(data.persisted.generatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          persistence: {
+            generatedAt: data.persisted.generatedAt,
+            contextHash: data.persisted.contextHash,
+            messageCount: data.persisted.messageCount,
+            model: data.persisted.model,
+            newMessages: data.freshness?.newMessages || 0,
+            isFresh: Boolean(data.freshness?.isFresh),
+          },
+        };
+        setLeads((prev) => prev.map((lead) => lead.id === selectedLead.id ? { ...lead, fullAnalysis } : lead));
+      } catch (error) {
+        console.warn('Não foi possível recuperar a Ficha Inteligente persistida:', error);
+      }
+    };
+    void loadPersistedAnalysis();
+    return () => { cancelled = true; };
+  }, [activeLeadId, selectedLead?.phone, selectedLead?.messages?.length, selectedLead?.fullAnalysis, isAnalyzingConversation]);
+
   // Full Conversation Analysis API call
   const handleAnalyzeConversation = async (
     targetLead = selectedLead,
@@ -2252,10 +2286,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         throw new Error(data?.error || 'Erro ao analisar histórico da conversa.');
       }
 
+      // Uma indisponibilidade do modelo nunca substitui a última Ficha confiável
+      // por um fallback vazio: o operador mantém a leitura persistida e recebe
+      // a falha para decidir se tenta de novo.
+      if (data.source === 'fallback' && targetLead.fullAnalysis?.persistence) {
+        setErrorMsg(data.analysis?.conversationSummary || 'A Ficha não pôde ser atualizada agora; a última leitura confiável foi preservada.');
+        return;
+      }
+
       const fullAnalysis: FullConversationAnalysis = {
         ...data.analysis,
         source: data.source,
-        lastUpdated: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        lastUpdated: new Date(data.persisted?.generatedAt || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        persistence: data.persisted ? {
+          generatedAt: data.persisted.generatedAt,
+          contextHash: data.persisted.contextHash,
+          messageCount: data.persisted.messageCount,
+          newMessages: 0,
+          isFresh: true,
+        } : undefined,
       };
 
       setLeads((prev) =>
@@ -4280,10 +4329,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <span>A IA está formulando uma resposta para {selectedLead.name}...</span>
                   </div>
                 )}
-                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'failed' && (
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'awaiting_human' && (
+                  <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-1.5 text-[11px] text-amber-200">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Atendimento transferido para humano — verifique Escalonamentos antes de responder.</span>
+                  </div>
+                )}
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'delivery_failed' && (
                   <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-1.5 text-[11px] text-rose-300">
                     <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>A IA não conseguiu gerar resposta — escalado, veja Escalonamentos ou responda manualmente.</span>
+                    <span>A entrega automática falhou e o caso foi escalado para acompanhamento manual.</span>
                   </div>
                 )}
 

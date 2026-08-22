@@ -340,7 +340,16 @@ export interface FullConversationAnalysis {
   suggestedSmartReply: string;
   suggestedSmartReplyTranslation?: string; // Tradução/Explicação em Português para análise prévia do atendente
   lastUpdated?: string;
-  source?: 'gemini' | 'fallback'; // 'fallback' = Gemini indisponível, resposta simulada
+  /** Origem efetiva do modelo; fallback nunca substitui uma análise persistida confiável. */
+  source?: 'groq' | 'gemini' | 'fallback';
+  persistence?: {
+    generatedAt: string;
+    messageCount: number;
+    contextHash?: string;
+    model?: string;
+    newMessages?: number;
+    isFresh: boolean;
+  };
 }
 
 export interface ContactContextOpenLoop {
@@ -545,16 +554,32 @@ export interface EscalationInfo {
   reason: string;
   lastMessage?: string;
   country: string;
+  /** Compatibilidade com o fluxo existente; `status` é a fonte de verdade para a fila. */
   resolved: boolean;
   createdAt: string;
-  /** Orientação que o operador deixou pra IA usar ao retomar (issue #97). */
+  status?: 'open' | 'assigned' | 'awaiting_customer' | 'resolved' | 'archived';
+  priority?: 'critical' | 'high' | 'medium' | 'low';
+  dueAt?: string;
+  assignedOperatorId?: string;
+  assignedAt?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolutionCode?: string;
+  resolutionNote?: string;
+  sourceKey?: string;
+  occurrenceCount?: number;
+  /** Orientação que o operador deixou pra IA usar ao retomar. */
   operatorReply?: string;
   operatorReplyAt?: string;
   operatorReplyConsumedAt?: string;
-  /** true = ainda dentro da janela de 24h da Meta (desde a última mensagem do lead) — só presente pra escalonamentos pendentes, ver GET /api/escalations. */
+  guidanceExpiresAt?: string;
+  guidanceContextHash?: string;
+  lastAlertAttemptAt?: string;
+  lastAlertStatus?: 'sent' | 'failed' | string;
+  /** true = ainda dentro da janela de 24h da Meta (desde a última mensagem do lead). */
   withinServiceWindow?: boolean;
   serviceWindowExpiresAt?: string;
-  /** 'payment_proof' = card mostra "Confirmar pagamento"/"Rejeitar pagamento" em vez das ações genéricas — verificação de pagamento unificada aqui (não mais um banner separado dentro da conversa). 'owner_review'/'customer_reply' = acompanhamento de funil (server/services/pendingFollowUpJob.ts) — mesmas ações genéricas do 'general'. */
+  /** Casos de pagamento, revisão do dono e retorno de cliente usam políticas e SLA distintos. */
   kind?: 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
 }
 
