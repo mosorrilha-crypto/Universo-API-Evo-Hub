@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  BookOpen,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { AgentContextUsageDocumentation } from './AgentContextUsageDocumentation';
 
 interface QualityReview {
   id: string;
@@ -305,6 +307,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState('');
   const [showComposer, setShowComposer] = useState(false);
+  const [showUsageDocumentation, setShowUsageDocumentation] = useState(false);
   const [composerKind, setComposerKind] = useState<ComposerKind>('operator_idea');
   const [composerTitle, setComposerTitle] = useState('');
   const [composerDescription, setComposerDescription] = useState('');
@@ -515,6 +518,10 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     { id: 'events', label: isSpanish ? 'Auditoría' : 'Auditoria', icon: <ClipboardCheck className="w-4 h-4" />, count: events.length },
   ];
 
+  if (showUsageDocumentation) {
+    return <AgentContextUsageDocumentation onBack={() => setShowUsageDocumentation(false)} />;
+  }
+
   return (
     <section className="quality-workspace space-y-5 animate-fade-in">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
@@ -525,11 +532,14 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
           <h2 className="text-2xl sm:text-3xl font-bold text-white mt-2">{isSpanish ? 'Mejoras del servicio' : 'Melhorias do atendimento'}</h2>
           <p className="text-sm text-slate-400 mt-2 max-w-3xl">{isSpanish ? 'Acompañá sugerencias, problemas y decisiones que ayudan a mejorar la atención.' : 'Acompanhe sugestões, problemas e decisões que ajudam a melhorar o atendimento.'}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 rounded-control border border-slate-700 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition-colors" disabled={loading}>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setShowUsageDocumentation(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-control border border-sky-500/30 bg-sky-500/10 text-xs font-semibold text-sky-200 hover:bg-sky-500/20 transition-colors">
+            <BookOpen className="w-3.5 h-3.5" /> {isSpanish ? 'Guía de uso' : 'Como usar'}
+          </button>
+          <button type="button" onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 rounded-control border border-slate-700 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition-colors" disabled={loading}>
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {isSpanish ? 'Actualizar' : 'Atualizar'}
           </button>
-          <button onClick={() => setShowComposer(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-control bg-sky-500 text-white text-xs font-bold hover:bg-sky-400 transition-colors">
+          <button type="button" onClick={() => setShowComposer(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-control bg-sky-500 text-white text-xs font-bold hover:bg-sky-400 transition-colors">
             <Send className="w-3.5 h-3.5" /> {isSpanish ? 'Registrar ítem' : 'Registrar item'}
           </button>
         </div>
