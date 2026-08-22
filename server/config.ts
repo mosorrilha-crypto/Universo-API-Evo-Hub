@@ -7,6 +7,8 @@ export interface ServerConfig {
   supabaseUrl?: string;
   supabaseKey?: string;
   metaWebhookVerifyToken: string;
+  /** Segredo do App Meta usado para validar HMAC dos POSTs de webhook. Obrigatório em produção. */
+  metaAppSecret?: string;
   geminiApiKey?: string;
   /** Chave do Groq — primeira tentativa (mais barata/rápida) na classificação do router; sem ela, o router usa só o Gemini como sempre. */
   groqApiKey?: string;
@@ -58,6 +60,14 @@ export function loadConfig(): ServerConfig {
     console.warn('⚠️  META_WEBHOOK_VERIFY_TOKEN não configurada — usando um valor temporário (dev only), a integração real com a Meta não vai funcionar até configurar um token fixo.');
   }
 
+  const metaAppSecret = process.env.META_APP_SECRET;
+  if (!metaAppSecret) {
+    if (isProduction) {
+      throw new Error('META_APP_SECRET é obrigatória em produção para validar a assinatura dos webhooks Meta.');
+    }
+    console.warn('⚠️  META_APP_SECRET não configurada — validação HMAC de webhooks Meta fica desativada somente em desenvolvimento.');
+  }
+
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     console.warn('⚠️  VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY não configuradas — push notification do PWA fica desativado até gerar um par de chaves (npx web-push generate-vapid-keys) e configurar as duas.');
   }
@@ -69,6 +79,7 @@ export function loadConfig(): ServerConfig {
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseKey: process.env.SUPABASE_KEY,
     metaWebhookVerifyToken,
+    metaAppSecret,
     geminiApiKey: process.env.GEMINI_API_KEY,
     groqApiKey: process.env.GROQ_API_KEY,
     metaAccessToken: process.env.META_ACCESS_TOKEN,

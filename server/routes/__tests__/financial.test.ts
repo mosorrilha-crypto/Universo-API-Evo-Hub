@@ -17,9 +17,10 @@ const TENANT_B = 'tenant-b';
 let server: Server;
 let baseUrl: string;
 let supabase: ReturnType<typeof createFakeSupabase>;
+let authenticatedRole: 'operator' | 'manager' | 'admin' | 'saas_admin' = 'admin';
 
 function fakeAuthenticateToken(req: any, _res: any, next: any) {
-  req.user = { id: 'op-1', tenantId: TENANT_A, role: 'admin' };
+  req.user = { id: 'op-1', tenantId: TENANT_A, role: authenticatedRole };
   next();
 }
 
@@ -46,6 +47,7 @@ afterAll(() => {
 const NOW = new Date().toISOString();
 
 beforeEach(() => {
+  authenticatedRole = 'admin';
   supabase = createFakeSupabase({
     financial_transactions: [
       {
@@ -111,6 +113,25 @@ describe('POST /api/financial/transactions', () => {
     const listRes = await fetch(`${baseUrl}/api/financial/transactions`);
     const listData = await listRes.json();
     expect(listData.transactions).toHaveLength(2);
+  });
+
+  it('recusa criação por operador, mesmo que a interface esteja oculta', async () => {
+    authenticatedRole = 'operator';
+    const res = await fetch(`${baseUrl}/api/financial/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'tx-blocked',
+        leadId: 'real-1',
+        leadName: 'Sem permissão',
+        leadPhone: '595981111111',
+        productName: 'Serviço',
+        amount: 100,
+        paymentMethod: 'PIX',
+      }),
+    });
+
+    expect(res.status).toBe(403);
   });
 
   it('400 quando falta campo obrigatório', async () => {

@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import { getQueueStats } from '../services/transcriptionQueue';
 import { getTokenTelemetry } from '../services/tokenUsageStore';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { requireRole } from '../middleware/rbac';
 
 interface TelemetryRouterDeps {
   authenticateToken: RequestHandler;
@@ -37,7 +38,7 @@ export function createTelemetryRouter({ authenticateToken }: TelemetryRouterDeps
   // chamada real nenhuma — parecia proteção de custo, não protegia nada.
   // Removido (usuário pediu explicitamente pra tirar tudo que é fake/mock
   // desta tela).
-  router.get('/api/telemetry/tokens', authenticateToken, asyncHandler(async (req, res) => {
+  router.get('/api/telemetry/tokens', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
     const { summary, tenantsTelemetry } = await getTokenTelemetry();
     res.json({ summary, tenantsTelemetry });
   }));
@@ -54,7 +55,7 @@ export function createTelemetryRouter({ authenticateToken }: TelemetryRouterDeps
   // completedJobs/failedJobs. Não travava a tela (os campos só entram em
   // template string, "undefined" vira texto em vez de lançar), mas mostrava
   // "undefined Jobs Concluídos" no painel. Mapeado pros nomes certos.
-  router.get('/api/queue/status', authenticateToken, (req, res) => {
+  router.get('/api/queue/status', authenticateToken, requireRole('admin'), (req, res) => {
     const stats = getQueueStats();
     res.json({
       activeJobs: stats.activeWorkers,

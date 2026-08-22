@@ -1057,7 +1057,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ status, adsOnly, adTriggerMessages });
   }));
 
-  router.post('/api/agent-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/agent-status', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status, adsOnly, adTriggerMessages } = req.body || {};
     const tenantId = tenantOf(req);
     try {
@@ -1082,7 +1082,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ knowledgeBase: await getKnowledgeBase(tenantOf(req)) });
   }));
 
-  router.post('/api/knowledge-base', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { knowledgeBase } = req.body || {};
     if (!knowledgeBase || typeof knowledgeBase !== 'object') {
       return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
@@ -1147,7 +1147,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ businessHours: await getTenantBusinessHours(tenantOf(req)) });
   }));
 
-  router.post('/api/business-hours', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/business-hours', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { businessHours } = req.body || {};
     if (!validateBusinessHours(businessHours)) {
       return res.status(400).json({ error: 'Campo "businessHours" inválido — cada dia precisa de open/close em formato "HH:mm", com close depois de open.' });
@@ -1195,7 +1195,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // (PDF/TXT/CSV/JSON/MD, ver knowledgeBaseDocumentStore.ts) pra o agente
   // usar como contexto real (formatKnowledgeBaseForPrompt), com teto de
   // tamanho pra nunca inflar o prompt sem limite.
-  router.post('/api/knowledge-base/documents', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base/documents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64 } = req.body || {};
     if (!fileName?.trim() || !base64) {
@@ -1245,7 +1245,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.send(doc.buffer);
   }));
 
-  router.delete('/api/knowledge-base/documents/:docId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/knowledge-base/documents/:docId', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const docId = req.params.docId;
     await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId);
@@ -1262,7 +1262,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // Quem associa a referência a um produto é o cliente (AgentKnowledgeBase.tsx),
   // no mesmo formData local que já guarda exampleImageBase64 — só persiste
   // de verdade quando a base inteira é salva (POST /api/knowledge-base acima).
-  router.post('/api/knowledge-base/videos', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base/videos', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64 } = req.body || {};
     if (!fileName?.trim() || !base64 || !mimeType) {
@@ -1337,7 +1337,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // e roda extração de texto; um catálogo de primeiro contato é só pra
   // MANDAR pro cliente, nunca deve virar contexto de prompt nem contar no
   // teto de MAX_DOCUMENTS_PER_TENANT daquela lista.
-  router.post('/api/knowledge-base/first-contact-file', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base/first-contact-file', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64, oldFileId } = req.body || {};
     if (!fileName?.trim() || !base64) {

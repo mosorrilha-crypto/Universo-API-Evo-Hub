@@ -47,6 +47,8 @@ async function endOfBusinessDayIso(tenantId: string): Promise<string> {
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
+  /** Segredo do App Meta para validar a assinatura dos POSTs de webhook. */
+  metaAppSecret?: string;
   getAi?: () => GoogleGenAI | null;
   /** Router fallback Groq (plano aprovado) — ver classifyAgent em autoReply.ts. Opcional: sem ela, o router usa só o Gemini como sempre. */
   groqApiKey?: string;
@@ -63,7 +65,7 @@ interface WebhooksRouterDeps {
   googleRedirectUri?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, getAi, groqApiKey, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri
     ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
     : undefined;
@@ -520,7 +522,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
     const verifyToken = metaWebhookVerifyToken;
 
     if (challenge) {
-      if (mode === 'subscribe' && token && token !== verifyToken) {
+      if (mode !== 'subscribe' || !token || token !== verifyToken) {
         return res.status(403).json({ error: 'Token de verificação inválido' });
       }
       return res.status(200).send(challenge);
@@ -543,7 +545,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
     // WhatsApp inteiras só omitindo o header. Corrigido pra fail-closed:
     // com o secret configurado, o header é obrigatório.
     const signatureHeader = (req.headers['x-hub-signature-256'] || req.headers['x-hub-signature']) as string | undefined;
-    const appSecret = process.env.META_APP_SECRET || process.env.META_API_TOKEN;
+    const appSecret = metaAppSecret;
 
     if (appSecret) {
       if (!signatureHeader) {

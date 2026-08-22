@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { Router, type RequestHandler } from 'express';
 import { hashUserDataField, normalizePhoneForHash } from '../services/metaCapiService';
+import { requireRole } from '../middleware/rbac';
 
 interface MetaCapiRouterDeps {
   authenticateToken: RequestHandler;
@@ -28,7 +29,7 @@ export { hashUserDataField, normalizePhoneForHash };
 export function createMetaCapiRouter({ authenticateToken }: MetaCapiRouterDeps): Router {
   const router = Router();
 
-  router.post('/api/meta-capi/send-event', authenticateToken, async (req, res) => {
+  router.post('/api/meta-capi/send-event', authenticateToken, requireRole('admin'), async (req, res) => {
     const { eventName, pixelId, accessToken, testEventCode, leadInfo, eventValue } = req.body || {};
 
     if (!pixelId || !accessToken) {
@@ -88,7 +89,7 @@ export function createMetaCapiRouter({ authenticateToken }: MetaCapiRouterDeps):
 
   // Criar Conexão Canal Endpoint — achado numa auditoria externa: única
   // rota deste arquivo sem authenticateToken.
-  router.post('/api/canais/criar', authenticateToken, (req, res) => {
+  router.post('/api/canais/criar', authenticateToken, requireRole('admin'), (req, res) => {
     const { empresaId, nomeCanal } = req.body || {};
     const channel_token = `evo_tok_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     res.json({
