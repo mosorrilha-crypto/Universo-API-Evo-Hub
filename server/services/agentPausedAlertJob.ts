@@ -21,6 +21,7 @@
 import { getDb } from './db';
 import { sendAdminAlert } from './adminAlertChannel';
 import { sendPushToTenant } from './webPush';
+import { startPeriodicJob } from './periodicJob';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 /** Sugestão da issue #115 — tempo pausado antes de considerar "alguém precisa saber". */
@@ -198,7 +199,10 @@ export async function checkPausedAgentsAndAlert(deps: AgentPausedAlertJobDeps = 
 /** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 15 min) — mesmo padrão de startReminderJob/startPreReservationFollowUpJob. */
 export function startAgentPausedAlertJob(deps: AgentPausedAlertJobDeps = {}): void {
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const run = () => checkPausedAgentsAndAlert(deps).catch((err) => console.warn('⚠️  [Alerta agente pausado] Erro no job:', err.message));
-  run();
-  setInterval(run, intervalMs);
+  startPeriodicJob(
+    'alerta-agente-pausado',
+    intervalMs,
+    () => checkPausedAgentsAndAlert(deps),
+    (err) => console.warn('⚠️  [Alerta agente pausado] Erro no job:', err instanceof Error ? err.message : String(err)),
+  );
 }

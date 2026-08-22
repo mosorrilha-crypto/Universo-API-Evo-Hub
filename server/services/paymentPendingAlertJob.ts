@@ -25,6 +25,7 @@ import {
 } from './appointmentStore';
 import { getConversation } from './conversationStore';
 import { logEscalation } from './escalationStore';
+import { startPeriodicJob } from './periodicJob';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_THRESHOLD_MS = 2 * 60 * 60 * 1000;
@@ -85,7 +86,10 @@ export async function checkPaymentPendingAndAlert(deps: PaymentPendingAlertJobDe
 /** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 15 min) — mesmo padrão de startPreReservationFollowUpJob. */
 export function startPaymentPendingAlertJob(deps: PaymentPendingAlertJobDeps = {}): void {
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const run = () => checkPaymentPendingAndAlert(deps).catch((err) => console.warn('⚠️  [Alerta pagamento pendente] Erro no job:', err.message));
-  run();
-  setInterval(run, intervalMs);
+  startPeriodicJob(
+    'alerta-pagamento-pendente',
+    intervalMs,
+    () => checkPaymentPendingAndAlert(deps),
+    (err) => console.warn('⚠️  [Alerta pagamento pendente] Erro no job:', err instanceof Error ? err.message : String(err)),
+  );
 }

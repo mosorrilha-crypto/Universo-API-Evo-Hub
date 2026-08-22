@@ -17,6 +17,7 @@
  */
 import { listTenantIdsWithPendingFollowUps, listPendingFollowUps, markFollowUpAlerted, type PendingFollowUp } from './pendingFollowUpStore';
 import { logEscalation } from './escalationStore';
+import { startPeriodicJob } from './periodicJob';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -71,7 +72,10 @@ export interface PendingFollowUpJobDeps {
 /** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 15 min) — mesmo padrão de startPreReservationFollowUpJob. */
 export function startPendingFollowUpJob(deps: PendingFollowUpJobDeps = {}): void {
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const run = () => checkPendingFollowUps().catch((err) => console.warn('⚠️  [Acompanhamento de funil] Erro no job:', err.message));
-  run();
-  setInterval(run, intervalMs);
+  startPeriodicJob(
+    'acompanhamento-funil',
+    intervalMs,
+    checkPendingFollowUps,
+    (err) => console.warn('⚠️  [Acompanhamento de funil] Erro no job:', err instanceof Error ? err.message : String(err)),
+  );
 }

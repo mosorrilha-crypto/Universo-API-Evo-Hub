@@ -18,6 +18,7 @@
  * precise de atenção humana.
  */
 import { listTenantIdsWithExpiredHolds, listExpiredHolds, clearAppointmentForPhone } from './appointmentStore';
+import { startPeriodicJob } from './periodicJob';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -60,7 +61,10 @@ export async function expireStaleHolds(): Promise<void> {
 /** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 15 min) — mesmo padrão de startPaymentPendingAlertJob. */
 export function startHeldAppointmentExpiryJob(deps: HeldAppointmentExpiryJobDeps = {}): void {
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const run = () => expireStaleHolds().catch((err) => console.warn('⚠️  [Expiração de reserva] Erro no job:', err.message));
-  run();
-  setInterval(run, intervalMs);
+  startPeriodicJob(
+    'expiracao-reservas-retidas',
+    intervalMs,
+    expireStaleHolds,
+    (err) => console.warn('⚠️  [Expiração de reserva] Erro no job:', err instanceof Error ? err.message : String(err)),
+  );
 }

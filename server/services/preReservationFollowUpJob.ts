@@ -15,6 +15,7 @@
  */
 import { listTenantIdsWithPendingPreReservations, listPendingPreReservations, markFollowUpAlerted, type PreReservation } from './preReservationStore';
 import { logEscalation } from './escalationStore';
+import { startPeriodicJob } from './periodicJob';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -86,7 +87,10 @@ export interface PreReservationFollowUpJobDeps {
 /** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 15 min) — mesmo padrão de startReminderJob. */
 export function startPreReservationFollowUpJob(deps: PreReservationFollowUpJobDeps = {}): void {
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const run = () => checkPreReservationFollowUps().catch((err) => console.warn('⚠️  [Follow-up pré-reserva] Erro no job:', err.message));
-  run();
-  setInterval(run, intervalMs);
+  startPeriodicJob(
+    'follow-up-pre-reserva',
+    intervalMs,
+    checkPreReservationFollowUps,
+    (err) => console.warn('⚠️  [Follow-up pré-reserva] Erro no job:', err instanceof Error ? err.message : String(err)),
+  );
 }

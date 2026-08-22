@@ -1,5 +1,7 @@
-import { mkdir, open, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { execFile as execFileCallback } from 'node:child_process';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 const TASK_ID_PATTERN = /^TASK-(\d{4,})\.md$/;
 const LOCK_STALE_AFTER_MS = 5 * 60 * 1000;
@@ -9,6 +11,7 @@ const LOCK_RETRY_DELAY_MS = 100;
 const root = process.cwd();
 const registryDir = path.join(root, 'docs', 'task-registry');
 const lockPath = path.join(registryDir, '.sequence.lock');
+const execFile = promisify(execFileCallback);
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -38,6 +41,18 @@ function parseArgs(args: string[]) {
   }
 
   return { description, agent };
+}
+
+async function assertCleanWorktree() {
+  try {
+    const { stdout } = await execFile('git', ['status', '--porcelain=v1'], { cwd: root });
+    if (stdout.trim()) {
+      throw new Error('O checkout possui alterações ou conflitos. Faça commit/stash e sincronize a main antes de gerar outro TASK-XXXX.');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('O checkout possui alterações')) throw error;
+    throw new Error(`Não foi possível verificar o estado do Git antes de gerar a tarefa: ${(error as Error).message}`);
+  }
 }
 
 async function acquireLock() {
@@ -89,6 +104,7 @@ function buildTaskRecord(taskId: string, description: string, agent: string, sta
 
 async function main() {
   const { description, agent } = parseArgs(process.argv.slice(2));
+  await assertCleanWorktree();
   const lockHandle = await acquireLock();
 
   try {

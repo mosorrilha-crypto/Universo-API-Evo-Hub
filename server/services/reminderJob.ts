@@ -16,6 +16,7 @@ import { sendWhatsAppInteractiveButtons } from './metaSend';
 import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForTenant } from './tenantResolver';
 import { getTenantBusinessHours, getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
+import { startPeriodicJob } from './periodicJob';
 
 // O Paraguai opera atualmente em UTC-3 durante todo o ano. Algumas versões
 // de ICU embarcadas no Node ainda aplicam a antiga regra sazonal para
@@ -202,7 +203,10 @@ async function checkAndSendRemindersForTenant(
 /** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 15 min). */
 export function startReminderJob(deps: ReminderJobDeps): void {
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const run = () => checkAndSendReminders(deps).catch((err) => console.warn('⚠️  [Lembretes] Erro no job:', err.message));
-  run();
-  setInterval(run, intervalMs);
+  startPeriodicJob(
+    'lembretes',
+    intervalMs,
+    () => checkAndSendReminders(deps),
+    (err) => console.warn('⚠️  [Lembretes] Erro no job:', err instanceof Error ? err.message : String(err)),
+  );
 }
