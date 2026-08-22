@@ -1,14 +1,37 @@
 # Como pegar e executar trabalho neste repo
 
-**Comece sempre pela issue [#290](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/290)**
-("[PAINEL] Status consolidado do backlog") — é o painel único e vivo com
-todo o backlog real organizado por categoria e o status mais recente de cada
-item. Ela substitui o padrão antigo de abrir uma issue `[REGISTRO] Sessão X`
-nova a cada handoff (que virou 5+ issues longas pra reler toda vez): agora o
-handoff é editar o corpo da #290 (mover item concluído pra lá, atualizar
-status), nunca abrir registro novo. Ler só essa issue já dá o contexto
-completo de "onde paramos" sem precisar escanear todas as issues abertas ou
-o histórico de commits.
+## Abertura obrigatória de toda nova conversa de desenvolvimento
+
+Antes de analisar, editar código, alterar configuração ou escolher uma tarefa,
+leia a issue [#290](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/290)
+("[PAINEL] Status consolidado do backlog"). Ela é o painel único e vivo com
+o backlog real, o estado mais recente do sistema e os handoffs compartilhados
+entre Manus.Ai, Claude e outras plataformas. Confirme nela se a tarefa já foi
+realizada, está em andamento, bloqueada ou aguardando validação. Em seguida,
+leia este workflow e `CLAUDE.md` antes de executar o trabalho.
+
+Ao finalizar qualquer tarefa, registre na #290 um comentário ou atualização
+contendo o identificador sequencial da tarefa, o responsável, a data, o que foi
+concluído, os arquivos/commits, as validações e as pendências. Não presuma que
+uma nova conversa consiga enxergar o histórico de outra sessão.
+
+**A #290 é a issue canônica.** Não abra uma nova issue apenas para registrar uma
+sessão ou um handoff. A issue #357 foi encerrada como duplicata depois que seu
+conteúdo de ponte foi incorporado à #290.
+
+Para iniciar uma tarefa, gere primeiro um identificador compartilhado:
+
+```bash
+npm run task:start -- --agent "Manus.Ai" "descrição da tarefa"
+```
+
+O comando cria o próximo identificador (`TASK-0001`, `TASK-0002`, etc.) e um
+registro em `docs/task-registry/`. Inclua esse registro no commit da tarefa e
+use o mesmo identificador no comentário de conclusão da issue #290. Como a
+sequência é compartilhada por Git, atualize a branch antes de iniciar quando
+houver possibilidade de outra sessão ter criado uma tarefa simultaneamente.
+
+## Onde encontrar trabalho
 
 Migrado do board Trello "Universo — Backlog Técnico" (lista "📜 Diretrizes") em
 2026-08-09 — GitHub (issues + PRs) passou a ser o canal oficial de trabalho e

@@ -14,7 +14,7 @@ Other docs carry deeper/historical context — read them for detail, not for cur
 - `docs/REVISAO_E_REESTRUTURACAO.md` — structural review from an even earlier snapshot (pre-refactor); the issues it describes have been fixed. Historical only.
 - `docs/AGENTE-PROMPT-MONIQUE-CAMPOS.md` — field-by-field snapshot of the real Layer 1 (universal, code) and Layer 3 (tenant Knowledge Base) prompt content for Monique, plus known open gaps (e.g. the payment gate). It's a snapshot of editable KB content, not a live source — re-check Supabase for the current value before relying on it operationally.
 
-**Before picking up any task from the backlog, read `.github/WORKFLOW.md`** — how to find work, branch/PR/merge rules (including which areas never self-merge), and status-reporting conventions. GitHub (issues + PRs) is the official work-tracking channel; a prior Trello board was migrated out of use on 2026-08-09.
+**At the start of every new development conversation, read the [GitHub issue #290](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/290) before doing analysis, editing code, changing configuration, or choosing a task.** It is the canonical live status and handoff record shared by Manus.Ai, Claude, and other agents. Confirm the current state of the relevant item there, then read `.github/WORKFLOW.md` before picking up backlog work. After finishing a task, report the result back in #290 with the task identifier, files/commits, validation, and pending risks. GitHub (issues + PRs) is the official work-tracking channel; a prior Trello board was migrated out of use on 2026-08-09.
 
 ## Commands
 
@@ -25,8 +25,11 @@ npm start                 # NODE_ENV=production node dist/server.cjs — run the
 npm run lint               # tsc --noEmit — this is the only lint step, no eslint configured
 npm test                  # vitest run — all tests
 npx vitest run path/to/file.test.ts        # run a single test file
-npx vitest run -t "test name substring"    # run tests matching a name
+npx vitest run -t "test name substring"    # run tests matching a name substring
+npm run task:start -- --agent "Claude" "descrição da tarefa"  # gera TASK-XXXX e registro inicial
 ```
+
+Before starting a development task, run `npm run task:start -- --agent "NomeDaPlataforma" "descrição da tarefa"`. This creates the next sequential `TASK-XXXX` record under `docs/task-registry/`; include that record in the task commit and report the same identifier in issue #290. The sequence is shared through Git, so fetch/rebase the current `main` before starting when another session may have registered a task.
 
 Always run `npm run lint`, `npx vitest run`, and `npm run build` before committing — all three must pass clean.
 
