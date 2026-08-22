@@ -88,11 +88,29 @@ interface MemoryPatternReview {
   updated_at: string;
 }
 
+interface ControlledExperiment {
+  id: string;
+  quality_review_id: string;
+  status: 'draft' | 'ready' | 'running' | 'paused' | 'completed' | 'rejected';
+  hypothesis: string;
+  variation_summary: string;
+  scope_routes: Array<'triagem' | 'faq' | 'reclamacao'>;
+  sample_limit: number;
+  success_criteria: string[];
+  stop_conditions: string[];
+  outcome_summary: string | null;
+  decision_note: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface QualityAuditCenterProps {
   onToast: (message: string) => void;
 }
 
-type CenterTab = 'overview' | 'reviews' | 'bugs' | 'ideas' | 'knowledge' | 'memory' | 'events';
+type CenterTab = 'overview' | 'reviews' | 'bugs' | 'ideas' | 'knowledge' | 'memory' | 'experiments' | 'events';
 type ComposerKind = 'bug' | 'operator_idea';
 
 const KIND_LABELS: Record<QualityReview['kind'], string> = {
@@ -211,6 +229,10 @@ function auditEventPresentation(event: QualityAuditEvent) {
       return { title: 'Fila de padrões atualizada', summary: typeof payload.count === 'number' && payload.count > 0 ? `${payload.count} padrão(ões) recorrente(s) foram preparados para decisão humana.` : 'Não havia evidência recorrente suficiente para criar novos itens na fila.' };
     case 'memory_pattern_review_decided':
       return { title: 'Decisão sobre padrão registrada', summary: typeof payload.patternKey === 'string' ? `O padrão “${readableAuditField(payload.patternKey)}” recebeu uma decisão administrativa; nenhuma mudança automática foi aplicada.` : 'Uma decisão administrativa sobre padrão foi registrada.' };
+    case 'controlled_experiment_created':
+      return { title: 'Experimento controlado desenhado', summary: 'Foi registrado um protocolo limitado para revisão humana; nenhuma variação foi publicada.' };
+    case 'controlled_experiment_transitioned':
+      return { title: 'Estado do experimento atualizado', summary: typeof payload.status === 'string' ? `O experimento foi marcado como “${EXPERIMENT_STATUS_LABELS[payload.status as ControlledExperiment['status']] || payload.status}”, sem alteração automática no agente.` : 'O estado de um experimento foi atualizado sob supervisão humana.' };
     default:
       return { title: 'Atualização registrada', summary: 'Uma atualização operacional foi registrada nesta linha do tempo.' };
   }
@@ -255,6 +277,10 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [metrics, setMetrics] = useState({ totalReviews: 0, pendingCount: 0, correctedCount: 0, rejectedCount: 0, lowConfidenceCount: 0, totalEvents: 0 });
   const [memoryCorrectionInsights, setMemoryCorrectionInsights] = useState<MemoryCorrectionInsights>(EMPTY_MEMORY_CORRECTION_INSIGHTS);
   const [memoryPatternReviews, setMemoryPatternReviews] = useState<MemoryPatternReview[]>([]);
+  const [controlledExperiments, setControlledExperiments] = useState<ControlledExperiment[]>([]);
+  const [mandatoryExperimentStops, setMandatoryExperimentStops] = useState<string[]>([]);
+  const [submittingExperiment, setSubmittingExperiment] = useState(false);
+  const [transitioningExperimentId, setTransitioningExperimentId] = useState<string | null>(null);
   const [syncingMemoryPatternQueue, setSyncingMemoryPatternQueue] = useState(false);
   const [decidingMemoryPatternId, setDecidingMemoryPatternId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -282,6 +308,8 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       setRecommendations(data.recommendations || []);
       setMemoryCorrectionInsights(data.memoryCorrectionInsights || EMPTY_MEMORY_CORRECTION_INSIGHTS);
       setMemoryPatternReviews(data.memoryPatternReviews || []);
+      setControlledExperiments(data.controlledExperiments || []);
+      setMandatoryExperimentStops(Array.isArray(data.mandatoryExperimentStopConditions) ? data.mandatoryExperimentStopConditions.filter((item: unknown): item is string => typeof item === 'string') : []);
       setMetrics(data.metrics || { totalReviews: 0, pendingCount: 0, correctedCount: 0, rejectedCount: 0, lowConfidenceCount: 0, totalEvents: 0 });
     } catch (error: any) {
       setLoadError(error?.message || 'Não foi possível carregar os dados de auditoria.');
@@ -374,6 +402,55 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     }
   };
 
+  const createControlledExperiment = async (payload: {
+    qualityReviewId: string;
+    hypothesis: string;
+    variationSummary: string;
+    scopeRoutes: string[];
+    sampleLimit: number;
+    successCriteria: string[];
+    stopConditions: string[];
+  }) => {
+    setSubmittingExperiment(true);
+    try {
+      const response = await apiFetch('/api/quality-audit/controlled-experiments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível registrar o experimento.');
+      onToast('Experimento criado como rascunho. Ele não altera o agente nem publica uma variação.');
+      await loadData();
+    } catch (error: any) {
+      onToast(error?.message || 'Não foi possível registrar o experimento.');
+    } finally {
+      setSubmittingExperiment(false);
+    }
+  };
+
+  const transitionControlledExperiment = async (experimentId: string, status: ControlledExperiment['status'], decisionNote?: string, outcomeSummary?: string) => {
+    setTransitioningExperimentId(experimentId);
+    try {
+      const response = await apiFetch(`/api/quality-audit/controlled-experiments/${encodeURIComponent(experimentId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, decisionNote, outcomeSummary }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível registrar a transição do experimento.');
+      const labels: Record<ControlledExperiment['status'], string> = {
+        draft: 'rascunho', ready: 'pronto para avaliação', running: 'em acompanhamento manual', paused: 'pausado', completed: 'concluído', rejected: 'encerrado',
+      };
+      onToast(`Experimento ${labels[status]}. Nenhuma alteração automática foi aplicada ao agente.`);
+      await loadData();
+    } catch (error: any) {
+      onToast(error?.message || 'Não foi possível registrar a transição do experimento.');
+    } finally {
+      setTransitioningExperimentId(null);
+    }
+  };
+
   const submitComposer = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!composerTitle.trim() || !composerDescription.trim()) return;
@@ -406,6 +483,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     { id: 'ideas', label: isSpanish ? 'Ideas' : 'Ideias', icon: <Lightbulb className="w-4 h-4" />, count: reviews.filter((review) => review.kind === 'operator_idea' && review.status === 'pending').length },
     { id: 'knowledge', label: isSpanish ? 'Conocimiento' : 'Conhecimento', icon: <LockKeyhole className="w-4 h-4" /> },
     { id: 'memory', label: isSpanish ? 'Memoria' : 'Memória', icon: <Wrench className="w-4 h-4" />, count: memoryPatternReviews.filter((review) => review.status === 'pending').length || memoryCorrectionInsights.totalCorrections },
+    { id: 'experiments', label: isSpanish ? 'Experimentos' : 'Experimentos', icon: <FileSearch className="w-4 h-4" />, count: controlledExperiments.filter((experiment) => ['draft', 'ready', 'running', 'paused'].includes(experiment.status)).length },
     { id: 'events', label: isSpanish ? 'Auditoría' : 'Auditoria', icon: <ClipboardCheck className="w-4 h-4" />, count: events.length },
   ];
 
@@ -509,7 +587,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
         </>
       )}
 
-      {activeTab !== 'overview' && activeTab !== 'events' && activeTab !== 'memory' && (
+      {activeTab !== 'overview' && activeTab !== 'events' && activeTab !== 'memory' && activeTab !== 'experiments' && (
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
@@ -546,6 +624,19 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
           decidingReviewId={decidingMemoryPatternId}
           onSyncQueue={() => void syncMemoryPatternQueue()}
           onDecide={(reviewId, status, note) => void decideMemoryPattern(reviewId, status, note)}
+        />
+      )}
+
+      {activeTab === 'experiments' && (
+        <ControlledExperimentsPanel
+          testingReviews={reviews.filter((review) => review.status === 'testing')}
+          experiments={controlledExperiments}
+          mandatoryStops={mandatoryExperimentStops}
+          loading={loading}
+          isSubmitting={submittingExperiment}
+          transitioningExperimentId={transitioningExperimentId}
+          onCreate={(payload) => void createControlledExperiment(payload)}
+          onTransition={(experimentId, status, note, outcome) => void transitionControlledExperiment(experimentId, status, note, outcome)}
         />
       )}
 
@@ -798,6 +889,91 @@ export function MemoryPatternReviewQueue({
         </div>
       )}
     </section>
+  );
+}
+
+const EXPERIMENT_STATUS_LABELS: Record<ControlledExperiment['status'], string> = {
+  draft: 'Rascunho',
+  ready: 'Pronto para avaliação',
+  running: 'Acompanhamento manual',
+  paused: 'Pausado',
+  completed: 'Concluído',
+  rejected: 'Encerrado',
+};
+
+export function ControlledExperimentsPanel({
+  testingReviews,
+  experiments,
+  mandatoryStops,
+  loading,
+  isSubmitting,
+  transitioningExperimentId,
+  onCreate,
+  onTransition,
+}: {
+  testingReviews: QualityReview[];
+  experiments: ControlledExperiment[];
+  mandatoryStops: string[];
+  loading: boolean;
+  isSubmitting: boolean;
+  transitioningExperimentId: string | null;
+  onCreate: (payload: { qualityReviewId: string; hypothesis: string; variationSummary: string; scopeRoutes: string[]; sampleLimit: number; successCriteria: string[]; stopConditions: string[] }) => void;
+  onTransition: (experimentId: string, status: ControlledExperiment['status'], decisionNote?: string, outcomeSummary?: string) => void;
+}) {
+  const experimentsByReview = new Set(experiments.map((experiment) => experiment.quality_review_id));
+  const availableReviews = testingReviews.filter((review) => !experimentsByReview.has(review.id));
+  const [qualityReviewId, setQualityReviewId] = useState('');
+  const [hypothesis, setHypothesis] = useState('');
+  const [variationSummary, setVariationSummary] = useState('');
+  const [scopeRoutes, setScopeRoutes] = useState<Array<'triagem' | 'faq' | 'reclamacao'>>(['faq']);
+  const [sampleLimit, setSampleLimit] = useState(10);
+  const [successCriteria, setSuccessCriteria] = useState('Reduzir correções humanas sem elevar escalonamentos ou respostas bloqueadas.');
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
+
+  if (loading) return <LoadingState />;
+  const toggleRoute = (route: 'triagem' | 'faq' | 'reclamacao') => setScopeRoutes((current) => current.includes(route) ? (current.length > 1 ? current.filter((item) => item !== route) : current) : [...current, route]);
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!qualityReviewId || !hypothesis.trim() || !variationSummary.trim()) return;
+    const criteria = successCriteria.split('\n').map((item) => item.trim()).filter(Boolean);
+    onCreate({ qualityReviewId, hypothesis, variationSummary, scopeRoutes, sampleLimit, successCriteria: criteria, stopConditions: mandatoryStops });
+  };
+  const statusClass = (status: ControlledExperiment['status']) => status === 'running' ? 'border-sky-500/30 bg-sky-500/10 text-sky-200' : status === 'ready' ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : status === 'paused' ? 'border-orange-500/30 bg-orange-500/10 text-orange-200' : status === 'completed' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : status === 'rejected' ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-slate-700 bg-slate-800 text-slate-200';
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-card border border-sky-500/25 bg-slate-900/70 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-sky-300"><FileSearch className="h-3.5 w-3.5" /> Experimento controlado</div><h3 className="mt-1 text-lg font-bold text-white">Teste limitado, reversível e supervisionado</h3><p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-400">O experimento registra hipótese, escopo e critérios para acompanhamento humano. Ele não modifica prompt, roteamento, agenda, pagamento ou o comportamento do agente em produção.</p></div><div className="flex items-start gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-[10px] leading-relaxed text-emerald-100/90 sm:max-w-60"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />Não há ativação automática. Toda mudança de estado é uma decisão administrativa auditável.</div></div>
+      </section>
+
+      <div className="grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+        <form onSubmit={submit} className="rounded-card border border-slate-800 bg-slate-900/70 p-4 space-y-3">
+          <div><h4 className="text-sm font-bold text-white">Desenhar experimento</h4><p className="mt-1 text-[11px] leading-relaxed text-slate-500">Somente itens já marcados como “Em teste” podem receber este protocolo. A variação é uma descrição de avaliação, não um prompt publicável.</p></div>
+          {availableReviews.length === 0 ? <EmptyState icon={<FileSearch className="h-5 w-5" />} title="Nenhum item em teste disponível" text="Encaminhe um padrão recorrente para teste controlado na fila de Memória antes de criar o experimento." /> : <>
+            <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Item em teste</span><select required value={qualityReviewId} onChange={(event) => setQualityReviewId(event.target.value)} className="mt-1.5 w-full rounded-control border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-slate-200 focus:border-sky-400/50 focus:outline-none"><option value="">Selecione um item</option>{availableReviews.map((review) => <option key={review.id} value={review.id}>{review.title}</option>)}</select></label>
+            <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Hipótese</span><textarea required maxLength={600} rows={3} value={hypothesis} onChange={(event) => setHypothesis(event.target.value)} placeholder="Ex.: uma orientação mais clara pode reduzir correções humanas sem aumentar escalonamentos." className="mt-1.5 w-full resize-none rounded-control border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" /></label>
+            <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Resumo da variação avaliada</span><textarea required maxLength={800} rows={3} value={variationSummary} onChange={(event) => setVariationSummary(event.target.value)} placeholder="Descreva o que será avaliado, sem colar prompt completo ou publicar regra." className="mt-1.5 w-full resize-none rounded-control border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" /></label>
+            <div><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Rotas permitidas</span><div className="mt-1.5 grid grid-cols-3 gap-2">{(['triagem', 'faq', 'reclamacao'] as const).map((route) => <label key={route} className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-control border px-2 py-2 text-[10px] font-bold ${scopeRoutes.includes(route) ? 'border-sky-500/35 bg-sky-500/10 text-sky-200' : 'border-slate-700 bg-slate-950 text-slate-400'}`}><input className="sr-only" type="checkbox" checked={scopeRoutes.includes(route)} onChange={() => toggleRoute(route)} />{safeAgentRouteLabel(route)}</label>)}</div><p className="mt-1 text-[10px] text-amber-200/80">Agendamento fica fora do escopo; pagamento e confirmação nunca entram no teste.</p></div>
+            <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Máximo de conversas elegíveis: {sampleLimit}</span><input value={sampleLimit} onChange={(event) => setSampleLimit(Math.min(25, Math.max(1, Number(event.target.value) || 1)))} type="range" min="1" max="25" className="mt-2 w-full accent-sky-400" /><div className="flex justify-between text-[10px] text-slate-600"><span>1</span><span>25</span></div></label>
+            <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Critérios de sucesso</span><textarea required rows={3} value={successCriteria} onChange={(event) => setSuccessCriteria(event.target.value)} placeholder="Um critério por linha" className="mt-1.5 w-full resize-none rounded-control border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" /></label>
+            <div className="rounded-panel border border-rose-500/20 bg-rose-500/5 p-3"><p className="text-[10px] font-bold uppercase tracking-wide text-rose-200">Paradas obrigatórias</p><ul className="mt-1.5 space-y-1 text-[11px] leading-relaxed text-rose-100/80">{mandatoryStops.map((condition) => <li key={condition} className="flex gap-1.5"><X className="mt-0.5 h-3 w-3 shrink-0" />{condition}</li>)}</ul></div>
+            <button disabled={isSubmitting} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-control bg-sky-500 px-3 py-2.5 text-xs font-bold text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"><FileSearch className="h-3.5 w-3.5" />{isSubmitting ? 'Registrando...' : 'Criar rascunho controlado'}</button>
+          </>}
+        </form>
+
+        <section className="overflow-hidden rounded-card border border-slate-800 bg-slate-900/70"><div className="border-b border-slate-800 p-4"><h4 className="text-sm font-bold text-white">Acompanhamento administrativo</h4><p className="mt-1 text-[11px] text-slate-500">Registre o protocolo e a decisão; a aplicação prática continua manual e submetida aos gates existentes.</p></div>{experiments.length === 0 ? <div className="p-5"><EmptyState icon={<Clock3 className="h-5 w-5" />} title="Nenhum experimento registrado" text="Crie um rascunho a partir de um item de Qualidade em teste." /></div> : <div className="divide-y divide-slate-800/80">{experiments.map((experiment) => {
+          const linkedReview = testingReviews.find((review) => review.id === experiment.quality_review_id);
+          const isTransitioning = transitioningExperimentId === experiment.id;
+          const canReady = experiment.status === 'draft' || experiment.status === 'paused';
+          const canRun = experiment.status === 'ready';
+          const canPause = experiment.status === 'ready' || experiment.status === 'running';
+          const canComplete = experiment.status === 'running' || experiment.status === 'paused';
+          const terminal = experiment.status === 'completed' || experiment.status === 'rejected';
+          return <article key={experiment.id} className="p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h5 className="text-sm font-bold text-white">{linkedReview?.title || 'Item de Qualidade vinculado'}</h5><span className={`rounded-pill border px-2 py-0.5 text-[10px] font-bold ${statusClass(experiment.status)}`}>{EXPERIMENT_STATUS_LABELS[experiment.status]}</span></div><p className="mt-1 text-[11px] text-slate-500">Amostra máxima: {experiment.sample_limit} • rotas: {experiment.scope_routes.map(safeAgentRouteLabel).join(', ')}</p></div><time className="text-[10px] text-slate-500">{formatDate(experiment.updated_at)}</time></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><div className="rounded-panel border border-slate-800 bg-slate-950/45 p-2.5"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Hipótese</p><p className="mt-1 text-xs leading-relaxed text-slate-300">{experiment.hypothesis}</p></div><div className="rounded-panel border border-slate-800 bg-slate-950/45 p-2.5"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Critérios</p><p className="mt-1 text-xs leading-relaxed text-slate-300">{experiment.success_criteria.join(' • ')}</p></div></div>{!terminal && <div className="mt-3 rounded-panel border border-slate-800 bg-slate-950/45 p-3"><textarea value={notes[experiment.id] || ''} onChange={(event) => setNotes((current) => ({ ...current, [experiment.id]: event.target.value }))} maxLength={600} rows={2} placeholder="Nota administrativa da transição (opcional)..." className="w-full resize-none rounded-control border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" />{canComplete && <textarea value={outcomes[experiment.id] || ''} onChange={(event) => setOutcomes((current) => ({ ...current, [experiment.id]: event.target.value }))} maxLength={800} rows={2} placeholder="Resumo do resultado obrigatório ao concluir..." className="mt-2 w-full resize-none rounded-control border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" />}<div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{canReady && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'ready', notes[experiment.id])} className="rounded-control border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[10px] font-bold text-amber-200 disabled:opacity-50">Revisar desenho</button>}{canRun && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'running', notes[experiment.id])} className="rounded-control border border-sky-500/30 bg-sky-500/10 px-2 py-2 text-[10px] font-bold text-sky-200 disabled:opacity-50">Iniciar acompanhamento</button>}{canPause && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'paused', notes[experiment.id])} className="rounded-control border border-orange-500/30 bg-orange-500/10 px-2 py-2 text-[10px] font-bold text-orange-200 disabled:opacity-50">Pausar</button>}{canComplete && <button type="button" disabled={isTransitioning || !(outcomes[experiment.id] || '').trim()} onClick={() => onTransition(experiment.id, 'completed', notes[experiment.id], outcomes[experiment.id])} className="rounded-control border border-emerald-500/30 bg-emerald-500/10 px-2 py-2 text-[10px] font-bold text-emerald-200 disabled:opacity-50">Concluir</button>}<button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'rejected', notes[experiment.id])} className="rounded-control border border-rose-500/30 bg-rose-500/10 px-2 py-2 text-[10px] font-bold text-rose-200 disabled:opacity-50">Encerrar</button></div></div>}{terminal && <div className="mt-3 flex items-start gap-1.5 rounded-panel border border-slate-800 bg-slate-950/45 p-2.5 text-[11px] leading-relaxed text-slate-400"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" /><span>{experiment.outcome_summary || experiment.decision_note || 'Experimento encerrado; nenhuma publicação foi promovida automaticamente.'}</span></div>}</article>;
+        })}</div>}</section>
+      </div>
+    </div>
   );
 }
 

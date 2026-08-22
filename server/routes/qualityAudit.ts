@@ -14,6 +14,13 @@ import {
   type QualityReviewStatus,
 } from '../services/qualityAuditStore';
 import {
+  createControlledExperiment,
+  getMandatoryStopConditions,
+  listControlledExperiments,
+  transitionControlledExperiment,
+  type ControlledExperimentStatus,
+} from '../services/controlledExperimentStore';
+import {
   decideMemoryPatternReview,
   listMemoryPatternReviews,
   syncMemoryPatternReviewCandidates,
@@ -48,10 +55,11 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
     const kind = parseKind(req.query.kind);
     const status = parseStatus(req.query.status);
     const tenantId = tenantOf(req);
-    const [reviews, events, memoryPatternReviews] = await Promise.all([
+    const [reviews, events, memoryPatternReviews, controlledExperiments] = await Promise.all([
       listQualityReviews(tenantId, { kind, status }),
       listQualityAuditEvents(tenantId),
       listMemoryPatternReviews(tenantId),
+      listControlledExperiments(tenantId),
     ]);
     const pendingCount = reviews.filter((item) => item.status === 'pending').length;
     const correctedCount = reviews.filter((item) => item.context?.decision === 'corrected').length;
@@ -63,6 +71,8 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
       recommendations: deriveQualityRecommendations(reviews),
       memoryCorrectionInsights: deriveMemoryCorrectionInsights(events),
       memoryPatternReviews,
+      controlledExperiments,
+      mandatoryExperimentStopConditions: getMandatoryStopConditions(),
       metrics: {
         totalReviews: reviews.length,
         pendingCount,
@@ -72,6 +82,79 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
         totalEvents: events.length,
       },
     });
+  }));
+
+  /**
+   * Cria somente o desenho administrativo do experimento. O objeto resultante
+   * não é lido pelo autoReply nem altera prompt, agenda, pagamento ou canal.
+   */
+  router.post('/api/quality-audit/controlled-experiments', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const qualityReviewId = req.body?.qualityReviewId;
+    const testingReview = typeof qualityReviewId === 'string'
+      ? (await listQualityReviews(tenantId, { status: 'testing' })).find((review) => review.id === qualityReviewId)
+      : null;
+    if (!testingReview) return res.status(400).json({ error: 'Selecione um item de Qualidade existente e em teste.' });
+
+    const experiment = await createControlledExperiment({
+      tenantId,
+      qualityReviewId: testingReview.id,
+      hypothesis: req.body?.hypothesis,
+      variationSummary: req.body?.variationSummary,
+      scopeRoutes: req.body?.scopeRoutes,
+      sampleLimit: req.body?.sampleLimit,
+      successCriteria: req.body?.successCriteria,
+      stopConditions: req.body?.stopConditions,
+      createdBy: req.user?.id || null,
+    });
+    await recordQualityAuditEvent({
+      tenantId,
+      eventType: 'controlled_experiment_created',
+      source: 'quality_admin',
+      entityType: 'controlled_quality_experiment',
+      entityId: experiment.id,
+      actorId: req.user?.id,
+      payload: {
+        qualityReviewId: experiment.quality_review_id,
+        scopeRoutes: experiment.scope_routes,
+        sampleLimit: experiment.sample_limit,
+        successCriteriaCount: experiment.success_criteria.length,
+        stopConditionsCount: experiment.stop_conditions.length,
+      },
+    });
+    res.status(201).json({ experiment });
+  }));
+
+  router.patch('/api/quality-audit/controlled-experiments/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const requestedStatus = req.body?.status;
+    const allowedStatuses: ControlledExperimentStatus[] = ['ready', 'running', 'paused', 'completed', 'rejected'];
+    if (!allowedStatuses.includes(requestedStatus)) return res.status(400).json({ error: 'Transição de experimento inválida.' });
+    const tenantId = tenantOf(req);
+    const experiment = await transitionControlledExperiment({
+      tenantId,
+      experimentId: req.params.id,
+      status: requestedStatus,
+      decisionNote: req.body?.decisionNote,
+      outcomeSummary: req.body?.outcomeSummary,
+      actorId: req.user?.id || null,
+    });
+    if (!experiment) return res.status(404).json({ error: 'Experimento não encontrado.' });
+    await recordQualityAuditEvent({
+      tenantId,
+      eventType: 'controlled_experiment_transitioned',
+      source: 'quality_admin',
+      entityType: 'controlled_quality_experiment',
+      entityId: experiment.id,
+      actorId: req.user?.id,
+      payload: {
+        qualityReviewId: experiment.quality_review_id,
+        status: experiment.status,
+        scopeRoutes: experiment.scope_routes,
+        sampleLimit: experiment.sample_limit,
+        hasOutcome: !!experiment.outcome_summary,
+      },
+    });
+    res.json({ experiment });
   }));
 
   /** Materializa na fila apenas candidatos recorrentes; não muda prompt, KB ou agente. */
