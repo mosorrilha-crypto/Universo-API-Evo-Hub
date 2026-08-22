@@ -2767,7 +2767,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto animate-page-enter">
+    <div className="atendimento-conversations space-y-4 max-w-7xl mx-auto animate-page-enter">
       {/* Controls Bar — achado real em produção: as duas barras acima disso
           (seletor "Ambiente" produção/sandbox e o card "Instância Online" /
           "Motor: Z-API Managed" / "Failover Ativo" / botões "Número Real &
