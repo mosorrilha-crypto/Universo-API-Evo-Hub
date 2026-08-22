@@ -20,3 +20,13 @@ export const spaFallbackRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Muitas requisições. Aguarde um minuto e tente novamente.' },
 });
+
+// Catálogo público é leitura barata, mas precisa de limite próprio para evitar
+// abuso do endpoint sem misturar o tráfego de visitantes com o fallback da SPA.
+export const publicCatalogRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas consultas ao catálogo. Aguarde um minuto e tente novamente.' },
+});

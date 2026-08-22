@@ -998,6 +998,7 @@ export const App: React.FC = () => {
               }
             }}
             canUseBusinessTemplates={canSeeSaasMaster}
+            publicCatalogSlug={activeTenant.slug}
             onGoToWhatsAppSim={() => setActiveTab('whatsapp')}
             // Pedido real do saas_admin (18/08/2026): os "Modelos de Negócio
             // Prontos" são fixos em código — isso deixa carregar a Base de
