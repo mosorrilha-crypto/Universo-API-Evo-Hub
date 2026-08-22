@@ -6,7 +6,7 @@
  * automático). Mesmo princípio do buffer.js do whatsapp-agent-monique.
  *
  * O timer em memória (Map) continua sendo o caminho rápido pro caso comum —
- * sem round-trip de banco no meio da janela de 6s. Achado real em produção
+ * sem round-trip de banco no meio da janela de 10s. Achado real em produção
  * (15/08/2026): um restart de deploy no meio dessa janela perdia a mensagem
  * inteira — o timer nunca disparava de novo, e o cliente ficava sem
  * resposta nenhuma, silenciosamente. Cada chamada agora também persiste
@@ -19,9 +19,12 @@
 import { getDb } from './db';
 import type { ResolvedTenant } from './tenantResolver';
 
-const SILENCE_MS = 6000;
+// Dez segundos capturam complementos naturais enviados após a primeira frase
+// (por exemplo, "quanto dura?" seguido de "os três"), sem deixar a conversa
+// parecer travada para a cliente.
+const SILENCE_MS = 10_000;
 
-/** Intervalo do sweeper de recuperação — bem mais espaçado que a janela de silêncio (6s), só existe pra cobrir o caso raro de restart no meio dela. */
+/** Intervalo do sweeper de recuperação — bem mais espaçado que a janela de silêncio (10s), só existe pra cobrir o caso raro de restart no meio dela. */
 const SWEEP_INTERVAL_MS = 15_000;
 
 type FlushCallback = (combinedText: string, contactName: string | undefined, lastMessageId: string, messageCount: number, resolvedTenant: ResolvedTenant) => void;
@@ -48,12 +51,17 @@ function bufferKey(tenantId: string, phone: string): string {
   return `${tenantId}:${phone}`;
 }
 
-function doFlush(key: string, phone: string, buffer: PendingBuffer, onFlush: FlushCallback) {
+async function doFlush(key: string, phone: string, buffer: PendingBuffer, onFlush: FlushCallback) {
   buffers.delete(key);
-  onFlush(buffer.texts.join('\n'), buffer.contactName, buffer.lastMessageId, buffer.texts.length, buffer.resolvedTenant);
-  deletePersistedBuffer(buffer.resolvedTenant.tenantId, phone).catch((err: any) => {
+  // A marca persistida precisa ser removida ANTES de iniciar o processamento.
+  // Assim um sweeper de recuperação em outra instância não reenvia a mesma
+  // pergunta enquanto esta resposta já está sendo gerada.
+  try {
+    await deletePersistedBuffer(buffer.resolvedTenant.tenantId, phone);
+  } catch (err: any) {
     console.warn(`⚠️  [Buffer de rajada] Falha ao remover marca persistida pra ${phone}:`, err.message);
-  });
+  }
+  onFlush(buffer.texts.join('\n'), buffer.contactName, buffer.lastMessageId, buffer.texts.length, buffer.resolvedTenant);
 }
 
 export function bufferIncomingText(
@@ -74,7 +82,7 @@ export function bufferIncomingText(
     contactName: contactName || existing?.contactName,
     lastMessageId: messageId,
     resolvedTenant,
-    timer: setTimeout(() => doFlush(key, phone, buffer, onFlush), SILENCE_MS),
+    timer: setTimeout(() => void doFlush(key, phone, buffer, onFlush), SILENCE_MS),
   };
   buffers.set(key, buffer);
 

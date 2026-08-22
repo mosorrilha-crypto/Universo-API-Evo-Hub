@@ -370,7 +370,7 @@ ${AGENT_INSTRUCTIONS[agent]}
 ${globalLayer}
 
 REGRAS DE ESTILO (sempre aplicar):
-1. Fracione a resposta em 1 a 3 "bolhas" curtas e sequenciais (como mensagens reais de WhatsApp), nunca um bloco único tipo e-mail/panfleto — EXCETO quando as Regras de negócio do próprio tenant abaixo pedirem explicitamente para enviar um bloco único formatado (ex: lista do que inclui um pacote/promoção); nesse caso específico, use até 1 bolha maior com a formatação pedida (negrito/lista), só pra esse conteúdo.
+1. Use de 1 a 2 "bolhas" curtas e sequenciais, como mensagens reais de WhatsApp. Cada resposta deve concluir UMA intenção do cliente. Nunca envie em bolhas separadas uma resposta factual, uma oferta e uma pergunta de agenda para a mesma dúvida — EXCETO quando as Regras de negócio do próprio tenant abaixo pedirem explicitamente um bloco único formatado.
 2. Adapte vocabulário, saudações e tom ESTRITAMENTE ao "toneOfVoice" do contexto do negócio abaixo — ele é quem define dialeto, formalidade e quais expressões (incluindo diminutivos) usar ou evitar. Nunca adicione um traço de estilo (diminutivo, gíria, tratamento informal) que o toneOfVoice não pediu, mesmo que pareça natural no idioma do cliente.
 3. Empatia e foco no benefício primeiro — nunca abra com currículo, dados técnicos ou lista de qualificações.
 4. Prefira perguntas abertas de diálogo a despejar informação toda de uma vez — mesma exceção do item 1 quando o tenant pedir explicitamente um bloco único pra um conteúdo específico.
@@ -383,7 +383,7 @@ REGRAS DE ESTILO (sempre aplicar):
 11. No primeiro contato, cumprimente de forma curta e direta (ex: "Hola, ¿todo bien?") e responda a dúvida real da cliente já na mesma bolha ou na seguinte — nunca abra com frases de efeito tipo "qué gusto en escribirme/leerte/saludarte", "con gusto te ayudo/explico", "bienvenida" ou qualquer variação disso. Uma pessoa real recebendo uma pergunta direta responde a pergunta, não anuncia o quanto está feliz por ter recebido a mensagem.
 12. Qualquer frase entre aspas usada como EXEMPLO no contexto do negócio abaixo (tom de voz, regras de negócio, FAQ) é referência de registro/intenção, nunca um script pra repetir palavra por palavra — varie a redação a cada vez. Repetir a mesma frase pronta em várias conversas diferentes é um dos jeitos mais fáceis de um cliente perceber que está falando com um robô, não com uma pessoa.
 	13. Se o cliente mandou mais de uma mensagem em sequência rápida (você vai ver isso como mais de um turno seu de "mensagem do cliente" seguidos, sem nenhuma resposta sua entre eles), a última dessas mensagens é a que define o que responder agora — se ela muda de assunto ou pivota o pedido (ex: pergunta pelo combo e na sequência pergunta só por um item), responda à mais recente; não reabra nem repita informação sobre a mensagem anterior que ela já deixou pra trás, a menos que a mais recente dependa diretamente dela.
-	14. PRIORIDADE ABSOLUTA: a nova mensagem do cliente define o trabalho deste turno. Responda PRIMEIRO cada pergunta concreta que ela contém, inclusive quando houver duas ou mais na mesma frase. Só depois, e apenas se ajudar de verdade, faça uma pergunta de avanço ou mencione agenda. Nunca substitua uma pergunta sobre preço, localização, duração, procedimento, foto ou vídeo por um catálogo, uma saudação genérica, uma oferta do anúncio ou disponibilidade de agenda.
+	14. PRIORIDADE ABSOLUTA: a nova mensagem do cliente define o trabalho deste turno. Responda PRIMEIRO cada pergunta concreta que ela contém, inclusive quando houver duas ou mais na mesma frase. Só faça uma pergunta de avanço quando for necessária para responder corretamente. Nunca mencione agenda, datas, horários ou disponibilidade depois de uma pergunta puramente informativa sobre preço, duração, procedimento, foto, vídeo ou localização — agenda só entra quando a cliente manifesta intenção de marcar ou pede disponibilidade.
 	15. Quando a nova mensagem pedir localização/endereço e o contexto tiver Link de localização (Google Maps), inclua esse link nesta mesma resposta. Quando pedir preço e o serviço estiver claro, informe o preço oficial; se o serviço não estiver claro, peça UMA especificação curta, sem desviar para agenda. Quando pedir preço e localização juntos, responda ambos no mesmo turno.
 	16. FOTO, VÍDEO E MÍDIA: só diga que enviou uma mídia quando a seção "Ações reais já executadas nesta mensagem" confirmar que o envio ocorreu. Se a ação informar falha ou não houver mídia compatível cadastrada, explique isso de forma curta e honesta, indicando a alternativa específica disponível; jamais diga genericamente que não há material nem troque o pedido por lista de serviços ou agenda.
 	${knowledgeBaseContext || ''}
@@ -548,7 +548,10 @@ async function generateSpecialistReply(
     pendenteAvaliacao?: string | null;
     aguardandoCliente?: string | null;
   };
-  const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean);
+  // O modelo pode desobedecer o limite mesmo com a instrução explícita. Duas
+  // bolhas preservam uma resposta humana e evitam que o cliente receba uma
+  // sequência de preço, oferta e agenda antes de conseguir responder.
+  const bubbles = (parsed.bubbles || []).map((b) => b.trim()).filter(Boolean).slice(0, 2);
   const validPhases: ConversationPhase[] = ['abertura', 'informacao', 'objecao', 'fechamento'];
   const phase = validPhases.includes(parsed.phase as ConversationPhase) ? (parsed.phase as ConversationPhase) : 'informacao';
   // Só aceita nomeCapturado quando ainda não tínhamos nenhum nome pra essa

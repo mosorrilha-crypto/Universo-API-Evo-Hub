@@ -34,4 +34,14 @@
 - [x] Exibir estado de salvamento, sucesso e falha de forma clara para a Base de Conhecimento.
 - [x] Adicionar ação flutuante de salvar durante a rolagem da Base de Conhecimento.
 - [x] Validar e publicar as melhorias de experiência da Base de Conhecimento.
+- [x] Corrigir a resposta recomendada que reinicia com saudação genérica em perguntas de continuidade da conversa.
+- [x] Garantir que a resposta recomendada preserve o idioma predominante do cliente e o contexto recente do tratamento citado.
+- [x] Cobrir o cenário de continuidade de conversa por teste automatizado e publicar a correção.
+- [x] Bloquear saudações de apresentação repetidas quando a conversa já possui atendimento em andamento.
+- [x] Impedir que a resposta recomendada misture oferta, agenda e fechamento antes de concluir a intenção atual do cliente.
+- [x] Recuperar o histórico completo da Tereza pela conexão Supabase vinculada ao Universo para análise turno a turno.
+- [x] Aumentar o agrupamento de mensagens consecutivas para capturar complementos enviados após mais de seis segundos.
+- [x] Impedir a repetição de respostas automáticas sem nova mensagem do cliente e reduzir mensagens fragmentadas por uma única intenção.
+- [x] Testar a sequência real da Tereza: preço do combo, duração dos três procedimentos e encerramento sem agenda antecipada.
+- [x] Corrigir a simulação de persistência no teste do buffer para validar a remoção atômica sem avisos falsos.
 - [ ] Revisar a experiência visual e entregar a atualização no repositório Universo.

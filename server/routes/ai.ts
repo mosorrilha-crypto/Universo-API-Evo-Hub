@@ -4,6 +4,7 @@ import { getGeminiClient, withGeminiRetry } from '../gemini';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { callGroqJsonCompletion } from '../services/groqClient';
 import { formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { buildChronologicalConversationContext, guardContinuationReply } from '../services/conversationReplyGuard';
 
 /**
  * Achado real em produção (18/08/2026): os quatro endpoints deste arquivo
@@ -101,7 +102,8 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
     try {
       const { leadInfo, messages, agentKnowledgeBase } = req.body || {};
 
-      const prompt = `Você é um analista de Vendas e CRM inteligente para um sistema SaaS no WhatsApp em Português.
+      const chronologicalHistory = buildChronologicalConversationContext(messages);
+      const prompt = `Você é um analista de Vendas e CRM inteligente para um sistema SaaS no WhatsApp.
 Analise o histórico da conversa a seguir e a base de conhecimento do agente e responda estritamente em formato JSON com a seguinte estrutura:
 {
   "leadStage": "novo" | "contato" | "proposta" | "negociacao" | "ganho" | "perdido",
@@ -135,8 +137,10 @@ PEDIDOS DE FOTO, VÍDEO, CATÁLOGO OU OUTRA MÍDIA: se a conversa ou a base conf
 
 IMPORTANTE: se o lead mandou mais de uma mensagem seguida antes de qualquer resposta do operador/agente (rajada), trate todas como uma única pergunta composta — actionObjective, recommendedNextAction e suggestedSmartReply DEVEM responder a TODAS as perguntas/tópicos dessa rajada, não só à primeira ou à mais relevante para a venda. Nunca ignore uma pergunta direta do lead (ex: sobre a empresa, localização, quem está atendendo) só porque outra pergunta na mesma rajada parece comercialmente mais importante. Termine com no máximo uma pergunta de continuidade, somente se ela for necessária para atender o pedido atual.
 
+CONTINUIDADE E IDIOMA: o histórico abaixo está em ordem cronológica e marca CLIENTE/ATENDIMENTO. Se houver uma mensagem anterior de ATENDIMENTO antes da última pergunta do CLIENTE, a conversa já está em andamento: NUNCA recomece com "Olá, sou...", nunca volte a se apresentar e nunca faça uma saudação genérica. Responda diretamente à última pergunta no idioma predominante do CLIENTE. Se a referência estiver ambígua, reconheça a dúvida e peça somente a identificação necessária, sem inventar uma duração, preço ou resultado.
+
 Dados do Lead: ${JSON.stringify(leadInfo)}
-Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
+Histórico cronológico de Mensagens:\n${chronologicalHistory}
 Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)}
 `;
 
@@ -146,7 +150,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
           if (!parsed || typeof parsed.leadStage !== 'string') {
             throw new Error(`Groq retornou análise sem "leadStage" válido: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
-          return res.json({ success: true, source: 'groq', analysis: parsed });
+          return res.json({ success: true, source: 'groq', analysis: guardContinuationReply(parsed, messages) });
         } catch (groqError) {
           console.warn('⚠️  [Ficha IA] Groq falhou (analyze-conversation), caindo pro Gemini:', (groqError as Error)?.message || groqError);
         }
@@ -169,7 +173,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 
           const rawText = response.text || '';
           const parsed = JSON.parse(rawText);
-          return res.json({ success: true, source: 'gemini', analysis: parsed });
+          return res.json({ success: true, source: 'gemini', analysis: guardContinuationReply(parsed, messages) });
         } catch (geminiError) {
           console.warn('Gemini API call error, fallbacking to preset analysis:', geminiError);
         }
