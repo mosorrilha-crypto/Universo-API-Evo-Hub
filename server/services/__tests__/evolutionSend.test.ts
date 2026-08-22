@@ -38,7 +38,7 @@ describe('sendEvolutionTextMessage', () => {
 });
 
 describe('sendEvolutionVoiceMessage', () => {
-  it('usa o endpoint PTT dedicado e fornece o áudio como Data URL com codificação habilitada', async () => {
+  it('usa o endpoint PTT dedicado e fornece o áudio em Base64 puro com codificação habilitada', async () => {
     const fetchMock = vi.fn(async (_url: string, _options?: any) => ({
       ok: true,
       json: async () => ({ key: { id: 'voice-123' } }),
@@ -53,20 +53,20 @@ describe('sendEvolutionVoiceMessage', () => {
     expect((options as any).headers.apikey).toBe('key-1');
     expect(JSON.parse((options as any).body)).toEqual({
       number: '595981234567',
-      audio: 'data:audio/ogg;base64,T2dnUw==',
+      audio: 'T2dnUw==',
       encoding: true,
       delay: 1200,
     });
   });
 
-  it('remove parâmetros adicionais do MIME sem alterar o Base64 enviado à Evolution', async () => {
+  it('remove o cabeçalho Data URL e preserva somente os bytes Base64 enviados à Evolution', async () => {
     const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({}) }));
     global.fetch = fetchMock as any;
 
     await sendEvolutionVoiceMessage('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'data:audio/ogg; codecs=opus;base64,T2dnUw==', 'audio/ogg; codecs=opus');
 
     const [, options] = fetchMock.mock.calls[0];
-    expect(JSON.parse((options as any).body).audio).toBe('data:audio/ogg;base64,T2dnUw==');
+    expect(JSON.parse((options as any).body).audio).toBe('T2dnUw==');
   });
 
   it('propaga uma falha do endpoint PTT', async () => {

@@ -72,13 +72,10 @@ export async function sendEvolutionVoiceMessage(
 ): Promise<void> {
   requireCredentials(instanceName, apiUrl, apiKey);
 
-  // O endpoint PTT aceita Base64 puro ou Data URL simples. O parâmetro
-  // `codecs=opus` é válido no MIME de upload da Meta, mas a Evolution usa um
-  // parser de Data URL estrito e rejeita parâmetros extras no cabeçalho.
-  // Removê-los aqui não altera um único byte do contêiner OGG/Opus.
-  const cleanBase64 = base64.replace(/^data:[^,]*;base64,/i, '');
-  const dataUrlMimeType = mimeType.split(';', 1)[0].trim();
-  const audio = `data:${dataUrlMimeType};base64,${cleanBase64}`;
+  // Esta instância da Evolution reconhece Base64 puro. Ela rejeitou Data URL
+  // tanto com quanto sem `codecs=opus` como mídia inválida (HTTP 400). A remoção
+  // do cabeçalho preserva integralmente os bytes do contêiner OGG/Opus.
+  const audio = base64.replace(/^data:[^,]*;base64,/i, '');
   const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/message/sendWhatsAppAudio/${instanceName}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: apiKey! },
