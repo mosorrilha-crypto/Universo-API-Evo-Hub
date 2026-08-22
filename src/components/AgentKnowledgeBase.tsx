@@ -1353,10 +1353,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const selectedProduct = formData.products.find((p) => p.id === selectedProductId) || null;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="knowledge-workspace space-y-6 max-w-7xl mx-auto">
       
       {/* Top Header Banner */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl flex items-center justify-between gap-3">
+      <div className="knowledge-workspace__hero p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl flex items-center justify-between gap-3">
         <div className="flex items-center space-x-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0">
             <Brain className="w-5 h-5 text-emerald-400" />

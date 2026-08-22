@@ -996,3 +996,200 @@ html[data-theme='light'] .operations-module-frame__header {
   .atendimento-workspace__tenant strong { max-width: 15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .atendimento-signal:nth-child(3) span:not(.atendimento-signal__icon) { display: none; }
 }
+
+
+/* --------------------------------------------------------------------------
+   Responsividade operacional compartilhada
+   O Atendimento define o padrão: contexto breve, próxima ação legível e
+   conteúdo rolável dentro do módulo — nunca a página inteira lateralmente.
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .app-main {
+    gap: .75rem;
+    padding: .75rem;
+  }
+
+  .app-toast {
+    max-width: calc(100vw - 1.5rem);
+  }
+
+  .operations-module-frame {
+    gap: .75rem;
+  }
+
+  .operations-module-frame__content {
+    min-width: 0;
+  }
+
+  .operations-module-frame__header {
+    gap: .7rem;
+    padding: .9rem 1rem;
+    border-radius: 1rem;
+  }
+
+  .operations-module-frame__header p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .operations-module-frame__badge {
+    width: 100%;
+    padding: .45rem .6rem;
+    text-align: left;
+  }
+
+  .responsive-tab-strip {
+    max-width: 100%;
+    scroll-padding-inline: .25rem;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+  }
+
+  .responsive-tab-strip > * {
+    flex: 0 0 auto;
+  }
+
+  .responsive-table-scroll {
+    margin-inline: -.2rem;
+    padding-inline: .2rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .crm-workspace,
+  .agenda-financeiro-workspace,
+  .growth-workspace,
+  .traffic-workspace,
+  .knowledge-workspace,
+  .quality-workspace,
+  .saas-workspace {
+    gap: .75rem;
+  }
+
+  .crm-workspace__hero,
+  .agenda-financeiro-workspace__hero,
+  .growth-workspace__hero,
+  .traffic-workspace__hero,
+  .knowledge-workspace__hero {
+    padding: 1rem;
+    border-radius: 1rem;
+    box-shadow: none;
+  }
+
+  .agenda-financeiro-workspace__hero h1 {
+    font-size: 1.65rem;
+  }
+
+  .agenda-financeiro-workspace__hero p,
+  .growth-workspace__hero p,
+  .traffic-workspace__hero p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .crm-workspace__actions,
+  .agenda-financeiro-workspace__actions,
+  .growth-workspace__actions,
+  .traffic-workspace__actions {
+    width: 100%;
+    gap: .5rem;
+  }
+
+  .agenda-financeiro-workspace__actions > button,
+  .growth-workspace__actions > button,
+  .traffic-workspace__actions > button {
+    flex: 1 1 calc(50% - .25rem);
+    justify-content: center;
+  }
+
+  .crm-workspace__metrics,
+  .agenda-financeiro-workspace__metrics,
+  .growth-workspace__metrics,
+  .traffic-workspace__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .55rem;
+  }
+
+  .crm-workspace__metrics > *,
+  .agenda-financeiro-workspace__metrics > *,
+  .growth-workspace__metrics > *,
+  .traffic-workspace__metrics > * {
+    padding: .75rem;
+  }
+
+  .crm-workspace__filters {
+    align-items: stretch;
+    padding: .75rem;
+  }
+
+  .crm-workspace__filters > div:last-child {
+    justify-content: flex-start;
+  }
+
+  .crm-workspace__kanban {
+    display: flex;
+    gap: .75rem;
+    margin-right: -.75rem;
+    padding-right: .75rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .crm-workspace__kanban > * {
+    flex: 0 0 min(82vw, 18rem);
+    scroll-snap-align: start;
+  }
+
+  .knowledge-workspace__hero {
+    align-items: flex-start;
+  }
+
+  .knowledge-workspace__hero p {
+    -webkit-line-clamp: 2;
+  }
+
+  .quality-workspace > div:first-child > div:last-child {
+    width: 100%;
+  }
+
+  .quality-workspace > div:first-child > div:last-child > button {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .saas-workspace__tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .saas-workspace__tabs > button {
+    flex: 0 0 auto;
+  }
+}
+
+
+@media (max-width: 640px) {
+  .saas-workspace__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .6rem;
+  }
+
+  .saas-workspace__metrics > * {
+    padding: .8rem;
+  }
+}
+
+html[data-theme='light'] .quality-workspace__persistence-alert {
+  color: #6D4A00;
+  background: #FFF8E8;
+  border-color: #E8C678;
+}
+
+html[data-theme='light'] .quality-workspace__persistence-alert .text-amber-200,
+html[data-theme='light'] .quality-workspace__persistence-alert .text-amber-100\/70 {
+  color: #6D4A00 !important;
+}

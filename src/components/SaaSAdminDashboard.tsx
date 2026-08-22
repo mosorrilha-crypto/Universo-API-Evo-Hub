@@ -1208,7 +1208,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const knownSegments = Array.from(new Set(realTenants.map((t) => t.segment).filter((s): s is string => !!s)));
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="saas-workspace space-y-6 animate-fade-in">
       {/* SaaS Admin Banner — achado real em produção: repetia "Painel SaaS
           Master" (a aba logo acima já diz isso) e "Empresa Selecionada no
           Painel" duplicava o nome do tenant que já aparece no topo da
@@ -1229,7 +1229,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       </div>
 
       {/* Admin Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
+      <div className="saas-workspace__tabs responsive-tab-strip flex items-center gap-2 border-b border-slate-800 pb-3">
         <button
           onClick={() => setActiveAdminTab('tenants')}
           className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all ${
@@ -1305,7 +1305,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           nenhum dos quais existe de verdade na tabela `tenants`. */}
       {activeAdminTab === 'tenants' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="saas-workspace__metrics grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
               <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
                 <span>Empresas Cadastradas</span>

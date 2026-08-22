@@ -848,11 +848,11 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8 space-y-5">
+      <main className="app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8">
         
         {/* Toast Alert */}
         {toastMsg && (
-          <div className="fixed top-4 right-4 z-50 bg-emerald-600 text-slate-950 font-bold px-3 py-2 rounded-xl shadow-xl animate-fade-in border border-emerald-400 text-xs flex items-center gap-2">
+          <div className="app-toast fixed right-3 top-3 z-50 flex items-center gap-2 rounded-xl border border-emerald-400 bg-emerald-600 px-3 py-2 text-xs font-bold text-slate-950 shadow-xl animate-fade-in sm:right-4 sm:top-4">
             <span>{toastMsg}</span>
           </div>
         )}

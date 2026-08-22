@@ -243,7 +243,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   ];
 
   return (
-    <section className="space-y-5 animate-fade-in">
+    <section className="quality-workspace space-y-5 animate-fade-in">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-violet-300 text-xs font-semibold uppercase tracking-[0.18em]">
@@ -263,7 +263,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       </div>
 
       {loadError && (
-        <div className="rounded-card border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3">
+        <div className="quality-workspace__persistence-alert rounded-card border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-300 mt-0.5 flex-shrink-0" />
           <div className="min-w-0">
             <p className="text-sm font-semibold text-amber-200">{isSpanish ? 'La central todavía no pudo consultar la persistencia' : 'Central ainda não conseguiu consultar a persistência'}</p>
@@ -272,7 +272,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
         </div>
       )}
 
-      <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+      <div className="quality-workspace__tabs responsive-tab-strip flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
         {tabs.map((tab) => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-3 py-2 rounded-control text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-violet-500/15 text-violet-200 border border-violet-400/30' : 'text-slate-400 border border-transparent hover:bg-slate-800 hover:text-white'}`}>
             {tab.icon}

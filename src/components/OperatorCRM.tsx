@@ -271,9 +271,9 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   };
 
   return (
-    <div className="space-y-5 animate-page-enter">
+    <div className="crm-workspace space-y-5 animate-page-enter">
       {/* Header Banner */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border border-slate-800 rounded-card p-5 sm:p-6 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+      <div className="crm-workspace__hero bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border border-slate-800 rounded-card p-5 sm:p-6 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
@@ -290,7 +290,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
         </div>
 
         {/* View mode toggle & Action Buttons */}
-        <div className="flex items-center space-x-3 w-full lg:w-auto justify-between lg:justify-end flex-wrap gap-2">
+        <div className="crm-workspace__actions flex items-center space-x-3 w-full lg:w-auto justify-between lg:justify-end flex-wrap gap-2">
           
           {/* Create Real Lead Button */}
           <button
@@ -350,7 +350,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       </div>
 
       {/* Metric Cards Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+      <div className="crm-workspace__metrics grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-slate-900/90 border border-slate-800/80 p-4 rounded-xl">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span>{isSpanish ? 'Embudo abierto' : 'Pipeline em aberto'}</span>
@@ -398,7 +398,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-slate-900/80 border border-slate-800 p-3.5 sm:p-4 rounded-card flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md shadow-slate-950/15">
+      <div className="crm-workspace__filters bg-slate-900/80 border border-slate-800 p-3.5 sm:p-4 rounded-card flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md shadow-slate-950/15">
         <div className="relative w-full sm:w-80">
           <input
             type="text"
@@ -430,7 +430,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
 
       {/* Main View Area: KANBAN vs LIST */}
       {viewMode === 'kanban' ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 overflow-x-auto pb-4">
+        <div className="crm-workspace__kanban grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 overflow-x-auto pb-4">
           {STAGES.map((stage) => {
             const columnLeads = filteredLeads.filter((l) => getLeadStage(l) === stage.id);
             const columnTotal = columnLeads.reduce((acc, l) => acc + (getLeadValue(l) ?? 0), 0);

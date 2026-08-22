@@ -305,10 +305,10 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   };
 
   return (
-    <div className="space-y-5 animate-page-enter">
+    <div className="growth-workspace space-y-5 animate-page-enter">
       
       {/* Top Banner & Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-card p-5 sm:p-6 shadow-xl relative overflow-hidden">
+      <div className="growth-workspace__hero bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-card p-5 sm:p-6 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 transform translate-x-10 -translate-y-10 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 relative z-10">
@@ -326,7 +326,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="growth-workspace__actions flex flex-wrap items-center gap-2">
             <button
               onClick={handleGenerateAIReport}
               disabled={isGeneratingReport}
@@ -356,7 +356,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
         </div>
 
         {/* Sub-navigation tabs inside header */}
-        <div className="flex items-center space-x-2 mt-6 pt-4 border-t border-slate-800/80 overflow-x-auto scrollbar-none">
+        <div className="responsive-tab-strip flex items-center space-x-2 mt-6 pt-4 border-t border-slate-800/80 overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('traffic_center')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
@@ -426,7 +426,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
       {activeTab === 'traffic_center' && <TrafficCenter />}
 
       {/* Metric Cards Banner */}
-      {activeTab !== 'traffic_center' && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {activeTab !== 'traffic_center' && <div className="growth-workspace__metrics grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between text-slate-400 mb-2">
