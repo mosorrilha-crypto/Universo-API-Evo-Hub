@@ -30,6 +30,7 @@ export function isSaasAdmin(req: AuthenticatedRequest): boolean {
 
 /** Header que o seletor de tenant do painel (Header.tsx) manda pra apontar qual tenant um saas_admin está gerenciando no momento — ver resolveTenantId abaixo. */
 export const TENANT_OVERRIDE_HEADER = 'x-tenant-id';
+const TENANT_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Resolve o tenant_id de verdade de uma requisição autenticada. Por padrão
@@ -59,7 +60,11 @@ export function resolveTenantId(req: AuthenticatedRequest): string {
   if (isSaasAdmin(req)) {
     const override = req.headers[TENANT_OVERRIDE_HEADER];
     const value = Array.isArray(override) ? override[0] : override;
-    if (value?.trim()) return value.trim();
+    const normalized = value?.trim();
+    // O banco usa UUID em tenant_id. Overrides legados (ex: "tenant_004")
+    // devem ser ignorados, nunca enviados ao Postgres; o JWT continua sendo a
+    // fonte segura de fallback para a requisição autenticada.
+    if (normalized && TENANT_UUID_PATTERN.test(normalized)) return normalized;
   }
   return req.user.tenantId;
 }
