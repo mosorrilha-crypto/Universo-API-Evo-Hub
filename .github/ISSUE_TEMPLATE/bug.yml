@@ -1,0 +1,65 @@
+name: Bug de produto
+description: Relate um comportamento incorreto ou uma regressão.
+title: "[BUG] "
+labels:
+  - bug
+  - backlog
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Não inclua tokens, credenciais, dados pessoais, comprovantes ou payloads reais. Remova ou substitua qualquer dado sensível antes de enviar.
+
+  - type: textarea
+    id: resumo
+    attributes:
+      label: Resumo
+      description: O que aconteceu e qual era o comportamento esperado?
+      placeholder: Descreva o problema de forma objetiva.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área afetada
+      options:
+        - WhatsApp e webhooks
+        - Agendamento e Google Calendar
+        - CRM
+        - Financeiro e comprovantes
+        - Base de conhecimento e IA
+        - Autenticação e permissões
+        - Interface
+        - Infraestrutura e deploy
+        - Outra
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduzir
+    attributes:
+      label: Como reproduzir
+      description: Informe passos, ambiente e commit aproximado. Use dados fictícios ou anonimizados.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: impacto
+    attributes:
+      label: Impacto
+      description: Quem é afetado e qual é o impacto observado?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: seguranca
+    attributes:
+      label: Segurança dos dados
+      options:
+        - label: Confirmei que não incluí dados reais ou segredos neste relato.
+          required: true
