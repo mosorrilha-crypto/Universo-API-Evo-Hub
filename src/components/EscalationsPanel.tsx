@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { EscalationInfo } from '../types';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
-import { AlertTriangle, CheckCircle2, XCircle, Trash2, Clock, Phone, MessageSquare, Globe2, MessageCircle, ExternalLink, MessageCircleReply, Send, TimerReset } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle, Trash2, Clock, Phone, MessageSquare, Globe2, MessageCircle, ExternalLink, MessageCircleReply, Send, TimerReset, Sparkles, Copy, RefreshCw } from 'lucide-react';
 
 interface EscalationsPanelProps {
   escalations: EscalationInfo[];
@@ -18,6 +18,10 @@ interface EscalationsPanelProps {
    * manda um convite e usa a orientação assim que o cliente escrever de novo.
    */
   onSubmitOperatorReply?: (id: string, reply: string) => void;
+  /** Gera uma sugestão corrigida sob demanda; nunca envia ao cliente. */
+  onGenerateReplySuggestion?: (id: string) => Promise<EscalationInfo | null>;
+  /** Salva edição/cópia/descarte da sugestão para auditoria e aprendizado. */
+  onReplySuggestionFeedback?: (id: string, suggestion: string, status: 'edited' | 'copied' | 'discarded') => Promise<EscalationInfo | null>;
   /**
    * Verificação de pagamento unificada aqui (pedido real do dono do
    * produto, 12/08/2026) — antes existiam dois lugares desconectados pro
@@ -55,10 +59,13 @@ function formatWindowRemaining(expiresAtIso: string): string {
   return diffMs > 0 ? `expira em ${label}` : `expirou há ${label}`;
 }
 
-export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations, onResolve, onDelete, onGoToConversation, onSubmitOperatorReply, onResolvePayment }) => {
+export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations, onResolve, onDelete, onGoToConversation, onSubmitOperatorReply, onGenerateReplySuggestion, onReplySuggestionFeedback, onResolvePayment }) => {
   const [filter, setFilter] = useState<'pendentes' | 'resolvidos'>('pendentes');
   const [replyDraftById, setReplyDraftById] = useState<Record<string, string>>({});
   const [openReplyId, setOpenReplyId] = useState<string | null>(null);
+  const [openSuggestionId, setOpenSuggestionId] = useState<string | null>(null);
+  const [suggestionDraftById, setSuggestionDraftById] = useState<Record<string, string>>({});
+  const [suggestionBusyId, setSuggestionBusyId] = useState<string | null>(null);
 
   const pending = escalations.filter((e) => !e.resolved);
   const resolved = escalations.filter((e) => e.resolved);
@@ -188,6 +195,95 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                     </div>
                   </div>
                 )}
+                {openSuggestionId === e.id && onGenerateReplySuggestion && onReplySuggestionFeedback && (
+                  <div className="mt-3 flex flex-col gap-2 rounded-xl border border-sky-500/25 bg-sky-500/5 p-3" onClick={(evt) => evt.stopPropagation()}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="flex items-center gap-1.5 text-xs font-bold text-sky-200"><Sparkles className="h-3.5 w-3.5 text-sky-300" /> Sugestão corrigida supervisionada{e.suggestedReplySource ? ` · ${e.suggestedReplySource === 'groq-suggestion' ? 'Groq' : 'Gemini'}` : ''}</p>
+                        <p className="mt-1 text-[10px] leading-4 text-slate-400">Apenas uma proposta para o operador revisar. Nada é enviado automaticamente.</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={suggestionBusyId === e.id}
+                        onClick={async () => {
+                          setSuggestionBusyId(e.id);
+                          const updated = await onGenerateReplySuggestion(e.id);
+                          if (updated) setSuggestionDraftById((prev) => ({ ...prev, [e.id]: updated.suggestedReply || '' }));
+                          setSuggestionBusyId(null);
+                        }}
+                        className="shrink-0 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[10px] font-bold text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+                      >
+                        <RefreshCw className={`mr-1 inline h-3 w-3 ${suggestionBusyId === e.id ? 'animate-spin' : ''}`} /> Gerar novamente
+                      </button>
+                    </div>
+                    <AutoResizeTextarea
+                      value={suggestionDraftById[e.id] ?? e.suggestedReply ?? ''}
+                      onChange={(evt) => setSuggestionDraftById((prev) => ({ ...prev, [e.id]: evt.target.value }))}
+                      placeholder="A sugestão corrigida aparecerá aqui. Revise antes de copiar."
+                      minRows={3}
+                      maxLength={900}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-2 text-xs leading-5 text-slate-200 placeholder-slate-600 focus:border-sky-500 focus:outline-none"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()}
+                        onClick={async () => {
+                          const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim();
+                          if (!suggestion) return;
+                          setSuggestionBusyId(e.id);
+                          const updated = await onReplySuggestionFeedback(e.id, suggestion, 'edited');
+                          if (updated) setSuggestionDraftById((prev) => ({ ...prev, [e.id]: updated.suggestedReply || suggestion }));
+                          setSuggestionBusyId(null);
+                        }}
+                        className="rounded-lg bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-slate-200 hover:bg-slate-700 disabled:opacity-40"
+                      >Salvar edição</button>
+                      <button
+                        type="button"
+                        disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()}
+                        onClick={async () => {
+                          const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim();
+                          if (!suggestion) return;
+                          setSuggestionBusyId(e.id);
+                          try {
+                            if (navigator.clipboard?.writeText) {
+                              await navigator.clipboard.writeText(suggestion);
+                            } else {
+                              const helper = document.createElement('textarea');
+                              helper.value = suggestion;
+                              helper.setAttribute('readonly', '');
+                              helper.style.position = 'fixed';
+                              helper.style.opacity = '0';
+                              document.body.appendChild(helper);
+                              helper.select();
+                              const copied = document.execCommand('copy');
+                              helper.remove();
+                              if (!copied) throw new Error('Clipboard indisponível');
+                            }
+                            await onReplySuggestionFeedback(e.id, suggestion, 'copied');
+                          } catch (err) {
+                            console.error('Não foi possível copiar a sugestão:', err);
+                          } finally {
+                            setSuggestionBusyId(null);
+                          }
+                        }}
+                        className="rounded-lg bg-sky-600 px-3 py-1.5 text-[10px] font-bold text-white hover:bg-sky-500 disabled:opacity-40"
+                      ><Copy className="mr-1 inline h-3 w-3" /> Copiar resposta</button>
+                      <button
+                        type="button"
+                        disabled={suggestionBusyId === e.id}
+                        onClick={async () => {
+                          setSuggestionBusyId(e.id);
+                          await onReplySuggestionFeedback(e.id, '', 'discarded');
+                          setSuggestionDraftById((prev) => ({ ...prev, [e.id]: '' }));
+                          setOpenSuggestionId(null);
+                          setSuggestionBusyId(null);
+                        }}
+                        className="rounded-lg px-3 py-1.5 text-[10px] font-bold text-rose-300 hover:bg-rose-950/40"
+                      >Descartar</button>
+                    </div>
+                  </div>
+                )}
               </div>
               {/* Achado real em produção (mesmo padrão já documentado em
                   WhatsAppLeadsSim.tsx): flex-wrap sozinho não quebra linha
@@ -235,6 +331,26 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations,
                   </>
                 ) : (
                   <>
+                    {!e.resolved && onGenerateReplySuggestion && onReplySuggestionFeedback && (
+                      <button
+                        onClick={async () => {
+                          const shouldOpen = openSuggestionId !== e.id;
+                          setOpenSuggestionId(shouldOpen ? e.id : null);
+                          if (!shouldOpen || e.suggestedReply || !onGenerateReplySuggestion) return;
+                          setSuggestionBusyId(e.id);
+                          try {
+                            const updated = await onGenerateReplySuggestion(e.id);
+                            if (updated) setSuggestionDraftById((prev) => ({ ...prev, [e.id]: updated.suggestedReply || '' }));
+                          } finally {
+                            setSuggestionBusyId(null);
+                          }
+                        }}
+                        disabled={suggestionBusyId === e.id}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-600/90 text-white hover:bg-sky-500 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <Sparkles className={`w-3.5 h-3.5 ${suggestionBusyId === e.id ? 'animate-pulse' : ''}`} /> {e.suggestedReply ? 'Revisar sugestão' : 'Gerar sugestão'}
+                      </button>
+                    )}
                     {!e.resolved && onSubmitOperatorReply && (
                       <button
                         onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)}

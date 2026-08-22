@@ -20,6 +20,21 @@ export interface ReplySafetyVerdict {
   reason: string;
 }
 
+export interface ReplySuggestionInput {
+  customerMessage: string;
+  blockedDraft: string;
+  reviewerReason: string;
+  history?: { sender?: string; text?: string; timestamp?: string }[];
+  knowledgeContext?: string;
+  isBookingFlow?: boolean;
+  needsHumanConfirmation?: boolean;
+}
+
+export interface ReplySuggestion {
+  text: string;
+  source: 'groq-suggestion' | 'gemini-suggestion';
+}
+
 const MAX_CONTEXT_CHARS = 7_000;
 
 function normalize(text: string): string {
@@ -112,6 +127,82 @@ SINAIS OPERACIONAIS:
 
 RASCUNHO A VALIDAR:
 ${input.draftBubbles.map((bubble, index) => `${index + 1}. ${bubble}`).join('\n')}`;
+}
+
+function buildSuggestionPrompt(input: ReplySuggestionInput): string {
+  const history = (input.history || [])
+    .slice(-12)
+    .map((message) => `${message.sender === 'lead' ? 'CLIENTE' : 'ATENDIMENTO'}: ${String(message.text || '').slice(0, 700)}`)
+    .join('\n');
+
+  return `Você é um assistente de correção para um operador humano de WhatsApp. Gere UMA sugestão de resposta curta e segura para o operador revisar. A sugestão será apenas exibida e copiada para edição; NUNCA será enviada automaticamente. Não diga que é uma IA.
+
+Regras obrigatórias:
+- Responda no mesmo idioma da última mensagem da cliente. Se for espanhol, use espanhol paraguaio natural com voseo; nunca misture português em uma frase em espanhol.
+- Corrija o motivo apontado pelo revisor e não repita o erro do rascunho.
+- Não invente preço, duração, serviço, horário, localização, pagamento, disponibilidade ou política. Use somente o contexto fornecido.
+- Se faltar informação essencial, faça uma pergunta objetiva em vez de afirmar algo.
+- Se a cliente ainda não informou o nome e a próxima ação depender disso, peça o nome antes de avançar.
+- Não solicite senha, documento, código, token ou outros dados sensíveis.
+- Não pressione a cliente a agendar nem transforme uma pergunta informativa em confirmação de agenda.
+- Escreva no máximo duas frases e 420 caracteres. Não use JSON dentro do texto.
+
+Responda APENAS JSON no formato: {"reply":"texto sugerido"}
+
+ÚLTIMA MENSAGEM DA CLIENTE:
+${String(input.customerMessage || '').slice(0, 2_500)}
+
+HISTÓRICO RECENTE:
+${history || '[sem histórico anterior]'}
+
+CONTEXTO PERMITIDO DO NEGÓCIO:
+${String(input.knowledgeContext || '[não fornecido]').slice(0, MAX_CONTEXT_CHARS)}
+
+MOTIVO DO BLOQUEIO:
+${String(input.reviewerReason || '').slice(0, 900)}
+
+RASCUNHO BLOQUEADO:
+${String(input.blockedDraft || '').slice(0, 1_200)}`;
+}
+
+function parseReplySuggestion(value: unknown, source: ReplySuggestion['source']): ReplySuggestion {
+  const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const text = typeof data.reply === 'string' ? data.reply.trim().slice(0, 900) : '';
+  if (!text) throw new Error('O gerador não retornou uma sugestão de resposta válida.');
+  return { text, source };
+}
+
+export async function generateCorrectedReplySuggestion(
+  input: ReplySuggestionInput,
+  deps: { ai?: GoogleGenAI | null; groqApiKey?: string },
+): Promise<ReplySuggestion | null> {
+  if (!String(input.customerMessage || '').trim() || input.needsHumanConfirmation || isPaymentOrSensitive(input.customerMessage)) {
+    return null;
+  }
+  const prompt = buildSuggestionPrompt(input);
+  if (deps.groqApiKey) {
+    try {
+      const result = await callGroqJsonCompletion(deps.groqApiKey, prompt);
+      return parseReplySuggestion(result.parsed, 'groq-suggestion');
+    } catch (error: any) {
+      console.warn(`⚠️ [Sugestão supervisionada] Groq indisponível, tentando Gemini: ${error?.message || error}`);
+    }
+  }
+
+  if (deps.ai) {
+    try {
+      const response = await withGeminiRetry(() => deps.ai!.models.generateContent({
+        model: 'gemini-3.5-flash-lite',
+        contents: prompt,
+        config: { responseMimeType: 'application/json', temperature: 0 },
+      }), 12_000);
+      return parseReplySuggestion(JSON.parse(response.text || '{}'), 'gemini-suggestion');
+    } catch (error: any) {
+      console.warn(`⚠️ [Sugestão supervisionada] Gemini indisponível: ${error?.message || error}`);
+    }
+  }
+
+  return null;
 }
 
 function parseReviewerDecision(value: unknown, source: ReplySafetySource): ReplySafetyVerdict {

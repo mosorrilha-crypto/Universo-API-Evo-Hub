@@ -12,6 +12,8 @@ import { inferCountryFromPhone } from './conversationStore';
 import { notifyEscalationCreated } from './escalationAlertService';
 
 export type EscalationKind = 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
+export type ReplySuggestionStatus = 'generated' | 'edited' | 'copied' | 'discarded';
+export type ReplySuggestionSource = 'groq-suggestion' | 'gemini-suggestion';
 
 export interface Escalation {
   id: string;
@@ -35,6 +37,11 @@ export interface Escalation {
    * mesmo caso (pedido real do dono do produto).
    */
   kind: EscalationKind;
+  /** Sugestão corrigida gerada sob demanda; nunca é enviada automaticamente. */
+  suggestedReply?: string;
+  suggestedReplyAt?: string;
+  suggestedReplyStatus?: ReplySuggestionStatus;
+  suggestedReplySource?: ReplySuggestionSource;
 }
 
 type EscalationRow = {
@@ -50,6 +57,10 @@ type EscalationRow = {
   operator_reply_at: string | null;
   operator_reply_consumed_at: string | null;
   kind: EscalationKind | null;
+  suggested_reply?: string | null;
+  suggested_reply_at?: string | null;
+  suggested_reply_status?: ReplySuggestionStatus | null;
+  suggested_reply_source?: ReplySuggestionSource | null;
 };
 
 function toEscalation(row: EscalationRow): Escalation {
@@ -66,6 +77,10 @@ function toEscalation(row: EscalationRow): Escalation {
     operatorReplyAt: row.operator_reply_at || undefined,
     operatorReplyConsumedAt: row.operator_reply_consumed_at || undefined,
     kind: row.kind || 'general',
+    suggestedReply: row.suggested_reply || undefined,
+    suggestedReplyAt: row.suggested_reply_at || undefined,
+    suggestedReplyStatus: row.suggested_reply_status || undefined,
+    suggestedReplySource: row.suggested_reply_source || undefined,
   };
 }
 
@@ -162,6 +177,18 @@ export async function resolveEscalation(tenantId: string, id: string): Promise<E
   return data ? toEscalation(data as EscalationRow) : undefined;
 }
 
+export async function getEscalation(tenantId: string, id: string): Promise<Escalation | undefined> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('escalations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toEscalation(data as EscalationRow) : undefined;
+}
+
 export async function deleteEscalation(tenantId: string, id: string): Promise<boolean> {
   const db = getDb();
   const { data, error } = await db.from('escalations').delete().eq('tenant_id', tenantId).eq('id', id).select('id');
@@ -176,6 +203,32 @@ export async function deleteEscalation(tenantId: string, id: string): Promise<bo
  * agora (dentro da janela de 24h) ou se espera o cliente reabrir a janela
  * primeiro (fora dela).
  */
+export async function saveReplySuggestion(
+  tenantId: string,
+  id: string,
+  suggestion: string,
+  status: ReplySuggestionStatus,
+  source?: ReplySuggestionSource,
+): Promise<Escalation | undefined> {
+  const trimmed = suggestion.trim().slice(0, 1_600);
+  if (!trimmed && status !== 'discarded') throw new Error('Sugestão de resposta não pode ficar vazia.');
+  const db = getDb();
+  const { data, error } = await db
+    .from('escalations')
+    .update({
+      suggested_reply: trimmed || null,
+      suggested_reply_at: new Date().toISOString(),
+      suggested_reply_status: status,
+      ...(source ? { suggested_reply_source: source } : {}),
+    })
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toEscalation(data as EscalationRow) : undefined;
+}
+
 export async function submitOperatorReply(tenantId: string, id: string, reply: string): Promise<Escalation | undefined> {
   const db = getDb();
   const { data, error } = await db
