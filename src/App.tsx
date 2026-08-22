@@ -824,7 +824,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row font-sans selection:bg-emerald-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
       
       {/* Header Navigation */}
       <Header
@@ -846,7 +846,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="min-w-0 flex-1 w-full p-3 sm:p-4 lg:p-5 xl:p-6 space-y-4">
+      <main className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8 space-y-5">
         
         {/* Toast Alert */}
         {toastMsg && (
