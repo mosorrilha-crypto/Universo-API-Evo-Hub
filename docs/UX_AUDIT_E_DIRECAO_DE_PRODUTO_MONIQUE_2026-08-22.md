@@ -93,7 +93,6 @@ A primeira entrega criará o shell premium responsivo, substituirá o cabeçalho
 A prévia local confirmou o carregamento da navegação lateral e da Central **Hoje** em desktop. A interface passou a expor apenas os destinos operacionais adequados ao papel visível, reduzindo a navegação principal para **Hoje**, **Conversas** e **Vendas** no contexto de acesso não autenticado. A Central abre com uma fila de prioridade, indicadores de operação e atalhos de rotina, enquanto a autenticação permanece bloqueante e não expõe dados de cliente antes do login.
 
 A inspeção também confirmou que os cards da Central permanecem legíveis em uma viewport de desktop e que o modal de autenticação continua acima da aplicação, preservando o controle de acesso existente. A validação autenticada e dos módulos especializados será realizada após integrar os refinamentos de cada área.
-
 ## Validação visual em produção
 
 A versão publicada foi verificada com sessão administrativa ativa. A navegação lateral aparece como uma estrutura única, com os destinos **Hoje**, **Conversas**, **Vendas**, **Agenda & Caixa**, **Crescimento**, **Configurar**, **Qualidade da IA** e **Empresas** — os últimos itens respeitando o papel SaaS Master. A antiga combinação de cabeçalho, abas horizontais e subabas foi removida da entrada do produto.
