@@ -19,6 +19,7 @@ import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
+import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { isStandalonePwa } from './lib/pwa';
@@ -148,7 +149,7 @@ export const App: React.FC = () => {
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (['financial', 'agenda_financeiro'].includes(activeTab) && !canSeeFinancial) ||
-      (['attribution', 'knowledge', 'integration'].includes(activeTab) && !canSeeAdminTools);
+      (['attribution', 'knowledge', 'integration', 'quality'].includes(activeTab) && !canSeeAdminTools);
     if (blocked) setActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
@@ -1026,6 +1027,10 @@ export const App: React.FC = () => {
 
         {activeTab === 'integration' && canSeeAdminTools && (
           <WhatsAppGuide />
+        )}
+
+        {activeTab === 'quality' && canSeeAdminTools && (
+          <QualityAuditCenter onToast={showToast} />
         )}
 
       </main>

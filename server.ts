@@ -20,6 +20,7 @@ import { createRoadmapRouter } from './server/routes/roadmap';
 import { createCrmRouter } from './server/routes/crm';
 import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
+import { createQualityAuditRouter } from './server/routes/qualityAudit';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
@@ -153,6 +154,7 @@ async function startServer() {
   app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
   app.use(createPushSubscriptionsRouter({ authenticateToken, vapidPublicKey: config.vapidPublicKey }));
+  app.use(createQualityAuditRouter({ authenticateToken }));
 
   // Middleware de erro global do Express — precisa vir DEPOIS de todas as
   // rotas de API acima (é assim que o Express decide quem trata um

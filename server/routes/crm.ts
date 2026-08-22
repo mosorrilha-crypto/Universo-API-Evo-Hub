@@ -5,6 +5,7 @@ import { createFinancialTransaction, isDuplicateSourceRefError } from '../servic
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId } from '../middleware/rbac';
+import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 
 interface CrmRouterDeps {
   authenticateToken: RequestHandler;
@@ -116,6 +117,25 @@ export function createCrmRouter({ authenticateToken }: CrmRouterDeps): Router {
 
     if (patch.stage === 'ganho') {
       await recordFinancialTransactionForWonDeal(tenantId, state);
+    }
+
+    try {
+      await recordQualityAuditEvent({
+        tenantId,
+        eventType: 'crm_lead_updated',
+        source: 'crm_panel',
+        entityType: 'crm_lead',
+        entityId: state.phone,
+        conversationPhone: state.phone,
+        actorId: req.user?.id,
+        payload: {
+          changedFields: Object.keys(patch),
+          stage: state.stage,
+          dealValue: state.dealValue ?? null,
+        },
+      });
+    } catch (err: any) {
+      console.warn(`⚠️ [Auditoria] Falha ao registrar atualização de CRM (tenant=${tenantId}, phone=${state.phone}):`, err?.message || err);
     }
 
     res.json({ leadState: state });

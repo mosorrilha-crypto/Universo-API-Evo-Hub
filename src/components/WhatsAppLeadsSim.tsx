@@ -494,6 +494,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // boolean simples basta, sem precisar de key por id.
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
+  // Feedback supervisionado — o operador pode registrar uma melhoria ou bug
+  // ligado à conversa aberta. A decisão de publicar qualquer mudança continua
+  // restrita ao admin na Central de Qualidade.
+  const [operatorFeedbackKind, setOperatorFeedbackKind] = useState<'bug' | 'operator_idea' | null>(null);
+  const [operatorFeedbackTitle, setOperatorFeedbackTitle] = useState('');
+  const [operatorFeedbackDescription, setOperatorFeedbackDescription] = useState('');
+  const [isSubmittingOperatorFeedback, setIsSubmittingOperatorFeedback] = useState(false);
+
   // Message Sending State
   const [inputMessage, setInputMessage] = useState('');
   // Item 3 do checklist visual (issue #100): o botão de emoji do composer
@@ -1587,6 +1595,47 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const selectedLead = leads.find((l) => l.id === activeLeadId) || leads[0];
+
+  const openOperatorFeedback = (kind: 'bug' | 'operator_idea') => {
+    setOperatorFeedbackKind(kind);
+    setOperatorFeedbackTitle('');
+    setOperatorFeedbackDescription('');
+    setIsHeaderMenuOpen(false);
+  };
+
+  const submitOperatorFeedback = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!operatorFeedbackKind || !selectedLead || !operatorFeedbackTitle.trim() || !operatorFeedbackDescription.trim()) return;
+    setIsSubmittingOperatorFeedback(true);
+    try {
+      const response = await apiFetch('/api/quality-audit/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: operatorFeedbackKind,
+          title: operatorFeedbackTitle.trim(),
+          description: operatorFeedbackDescription.trim(),
+          context: {
+            source: 'whatsapp_conversation',
+            conversationPhone: selectedLead.phone,
+            leadName: selectedLead.name,
+            conversationId: selectedLead.id,
+          },
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível registrar o feedback.');
+      setOperatorFeedbackKind(null);
+      setOperatorFeedbackTitle('');
+      setOperatorFeedbackDescription('');
+      setErrorMsg(null);
+      console.info('Feedback operacional registrado:', data?.review?.id);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Não foi possível registrar o feedback. Tente de novo.');
+    } finally {
+      setIsSubmittingOperatorFeedback(false);
+    }
+  };
 
   // Achado a pedido do dono do tenant: numa conversa real, "Enviar como:
   // Cliente" não faz sentido nenhum — não existe como forjar uma mensagem
@@ -3317,6 +3366,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 <span>Ativar IA e preparar rascunho</span>
                               </button>
                             )}
+                            <div className="border-t border-slate-700" />
+                            <button
+                              onClick={() => openOperatorFeedback('operator_idea')}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              title="Enviar uma melhoria contextual para a Central de Qualidade"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>Sugerir melhoria</span>
+                            </button>
+                            <button
+                              onClick={() => openOperatorFeedback('bug')}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              title="Registrar um comportamento inesperado nesta conversa"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>Reportar bug</span>
+                            </button>
+                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
@@ -4288,6 +4355,36 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {operatorFeedbackKind && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setOperatorFeedbackKind(null)}>
+          <form onSubmit={submitOperatorFeedback} onClick={(event) => event.stopPropagation()} className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className={`text-[10px] uppercase tracking-wider font-bold ${operatorFeedbackKind === 'bug' ? 'text-rose-300' : 'text-amber-300'}`}>Feedback supervisionado</p>
+                <h3 className="text-lg font-bold text-white mt-1">{operatorFeedbackKind === 'bug' ? 'Reportar bug' : 'Sugerir melhoria'}</h3>
+                <p className="text-xs text-slate-500 mt-1">Conversa: {selectedLead?.name || selectedLead?.phone || 'não selecionada'}</p>
+              </div>
+              <button type="button" onClick={() => setOperatorFeedbackKind(null)} className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <label className="block">
+              <span className="text-[11px] text-slate-400">Título</span>
+              <input required value={operatorFeedbackTitle} onChange={(event) => setOperatorFeedbackTitle(event.target.value)} placeholder={operatorFeedbackKind === 'bug' ? 'Ex.: Comprovante aparece sem vínculo' : 'Ex.: Mostrar cobrança ao lado da conversa'} className="mt-1 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500" />
+            </label>
+            <label className="block">
+              <span className="text-[11px] text-slate-400">O que aconteceu e o que deveria acontecer?</span>
+              <textarea required rows={5} value={operatorFeedbackDescription} onChange={(event) => setOperatorFeedbackDescription(event.target.value)} placeholder="Descreva o contexto para que o administrador consiga revisar depois." className="mt-1 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500" />
+            </label>
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <p className="text-[10px] text-slate-500">A decisão de publicar qualquer ajuste continua com o administrador.</p>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button type="button" onClick={() => setOperatorFeedbackKind(null)} className="px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white cursor-pointer">Cancelar</button>
+                <button type="submit" disabled={isSubmittingOperatorFeedback} className={`px-3.5 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-50 cursor-pointer ${operatorFeedbackKind === 'bug' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-amber-600 hover:bg-amber-500'}`}>{isSubmittingOperatorFeedback ? 'Enviando...' : 'Enviar para revisão'}</button>
+              </div>
+            </div>
+          </form>
         </div>
       )}
 

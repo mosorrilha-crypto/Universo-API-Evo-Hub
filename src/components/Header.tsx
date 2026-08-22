@@ -35,7 +35,8 @@ import {
   Layers,
   CalendarDays,
   X,
-  Menu
+  Menu,
+  ShieldCheck
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -180,6 +181,18 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Layers className="w-4 h-4" />
                 <span>Painel Multi-Tenant</span>
+              </Button>
+            )}
+
+            {canSeeAdminTools && (
+              <Button
+                active={activeTab === 'quality'}
+                size="md"
+                onClick={() => { setActiveTab('quality'); setIsMobileMenuOpen(false); }}
+                className="w-full justify-center"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Qualidade IA</span>
               </Button>
             )}
 
@@ -428,6 +441,19 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Target className="w-4 h-4 text-emerald-400" />
                   <span>Meta CAPI</span>
+                </button>
+
+                <button
+                  id="tab-quality"
+                  onClick={() => setActiveTab('quality')}
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === 'quality'
+                      ? 'bg-violet-600 text-white shadow-sm shadow-violet-900/50'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4 text-violet-300" />
+                  <span>Qualidade IA</span>
                 </button>
 
                 <button
