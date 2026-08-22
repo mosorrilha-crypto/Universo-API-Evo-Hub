@@ -243,7 +243,7 @@ app.get('/webhook/whatsapp', (req, res) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Box 1: Quando incide o custo da Z-API? */}
             <div className="p-4 bg-slate-950/90 rounded-xl border border-slate-800 space-y-2">
-              <h4 className="text-xs font-bold text-purple-400 flex items-center gap-1.5">
+              <h4 className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
                 <Shield className="w-4 h-4" /> Quando incide o custo de R$ 99/mês da Z-API?
               </h4>
               <p className="text-[11px] text-slate-300 leading-relaxed">
@@ -287,7 +287,7 @@ app.get('/webhook/whatsapp', (req, res) => {
               </div>
 
               <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800">
-                <h5 className="font-semibold text-purple-300 mb-1">2. Onboarding Manual (Opção de Início)</h5>
+                <h5 className="font-semibold text-sky-300 mb-1">2. Onboarding Manual (Opção de Início)</h5>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
                   Caso prefira iniciar sem automação de API, você cria a instância manualmente no painel da Z-API ou Evolution (leva ~1 minuto) e cola o ID e Token no cadastro do cliente no seu SaaS Admin.
                 </p>

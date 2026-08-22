@@ -188,7 +188,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
         <button
           type="button"
           onClick={() => onDraftSuggestedReply(reply)}
-          className="min-h-10 rounded-xl border border-violet-500/35 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-200 hover:bg-violet-500/20 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+          className="min-h-10 rounded-xl border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/20 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
         >
           <PencilLine className="w-3.5 h-3.5" />
           Levar para revisão no compositor
@@ -300,10 +300,10 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
         </>
       )}
 
-      <section className="rounded-xl border border-violet-500/25 bg-slate-950 p-3 space-y-3">
+      <section className="rounded-xl border border-sky-500/25 bg-slate-950 p-3 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-300">
+            <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-300">
               <Wand2 className="h-3.5 w-3.5" /> Próxima mensagem
             </span>
             <p className="mt-0.5 text-[11px] text-slate-500">A resposta é um rascunho revisável; enviar continua sendo uma decisão explícita.</p>
@@ -312,7 +312,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
             <button
               type="button"
               onClick={() => setShowHintComposer((value) => !value)}
-              className="shrink-0 rounded-lg border border-violet-500/30 px-2 py-1 text-[10px] font-bold text-violet-300 hover:bg-violet-500/10 transition-colors cursor-pointer"
+              className="shrink-0 rounded-lg border border-sky-500/30 px-2 py-1 text-[10px] font-bold text-sky-300 hover:bg-sky-500/10 transition-colors cursor-pointer"
             >
               {showHintComposer ? 'Fechar ajuste' : 'Ajustar'}
             </button>
@@ -347,7 +347,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
                   key={label}
                   onClick={() => setHintDraft(hint)}
                   title={hint}
-                  className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[10px] font-medium text-slate-300 hover:border-violet-500/45 hover:text-violet-200 transition-colors cursor-pointer"
+                  className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[10px] font-medium text-slate-300 hover:border-sky-500/45 hover:text-sky-200 transition-colors cursor-pointer"
                 >
                   {label}
                 </button>
@@ -358,13 +358,13 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
               onChange={(event) => setHintDraft(event.target.value)}
               placeholder="Descreva o objetivo da mensagem. Ex.: responda à dúvida sobre duração e depois pergunte qual dia ela prefere."
               minRows={3}
-              className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5 text-xs leading-relaxed text-slate-200 placeholder:text-slate-500 focus:border-violet-500 focus:outline-none"
+              className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5 text-xs leading-relaxed text-slate-200 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
             />
             <button
               type="button"
               onClick={handleGenerateHintReply}
               disabled={!hintDraft.trim() || isGeneratingHintReply}
-              className="flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50 transition-colors cursor-pointer"
+              className="flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 transition-colors cursor-pointer"
             >
               {isGeneratingHintReply ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
               {isGeneratingHintReply ? 'Criando rascunho...' : 'Criar resposta para revisão'}
@@ -375,9 +375,9 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
         {hintReplyResult?.error && <div className="rounded-lg border border-rose-500/30 bg-rose-950/30 p-2.5 text-xs text-rose-200">{hintReplyResult.error}</div>}
 
         {hintReplyResult?.reply && (
-          <div className="rounded-xl border border-violet-500/25 bg-violet-950/15 p-3 space-y-2.5">
+          <div className="rounded-xl border border-sky-500/25 bg-sky-950/15 p-3 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Rascunho com orientação</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-sky-300">Rascunho com orientação</span>
               <button type="button" onClick={() => handleCopyReply(hintReplyResult.reply, 'hint')} className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white cursor-pointer">
                 <Copy className="h-3 w-3" /> {hintReplyCopied ? 'Copiado' : 'Copiar'}
               </button>

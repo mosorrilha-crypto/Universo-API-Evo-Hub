@@ -45,7 +45,7 @@ interface OperatorCRMProps {
 const STAGES_BASE: { id: CRMStage; label: string; color: string; badge: string }[] = [
   { id: 'novo', label: 'Novo Lead', color: 'border-blue-500/50 bg-blue-950/20 text-blue-300', badge: 'bg-blue-500/20 text-blue-300' },
   { id: 'contato', label: 'Contato Realizado', color: 'border-yellow-500/50 bg-yellow-950/20 text-yellow-300', badge: 'bg-yellow-500/20 text-yellow-300' },
-  { id: 'proposta', label: 'Proposta Enviada', color: 'border-purple-500/50 bg-purple-950/20 text-purple-300', badge: 'bg-purple-500/20 text-purple-300' },
+  { id: 'proposta', label: 'Proposta Enviada', color: 'border-sky-500/50 bg-sky-950/20 text-sky-300', badge: 'bg-sky-500/20 text-sky-300' },
   { id: 'negociacao', label: 'Em Negociação', color: 'border-amber-500/50 bg-amber-950/20 text-amber-300', badge: 'bg-amber-500/20 text-amber-300' },
   { id: 'ganho', label: 'Fechado / Ganho', color: 'border-emerald-500/50 bg-emerald-950/20 text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-300' },
   { id: 'perdido', label: 'Perdido', color: 'border-rose-500/50 bg-rose-950/20 text-rose-300', badge: 'bg-rose-500/20 text-rose-300' },
@@ -66,7 +66,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   const STAGES: { id: CRMStage; label: string; color: string; badge: string }[] = isSpanish ? [
     { id: 'novo', label: 'Lead nuevo', color: 'border-blue-500/50 bg-blue-950/20 text-blue-300', badge: 'bg-blue-500/20 text-blue-300' },
     { id: 'contato', label: 'Contacto realizado', color: 'border-yellow-500/50 bg-yellow-950/20 text-yellow-300', badge: 'bg-yellow-500/20 text-yellow-300' },
-    { id: 'proposta', label: 'Propuesta enviada', color: 'border-purple-500/50 bg-purple-950/20 text-purple-300', badge: 'bg-purple-500/20 text-purple-300' },
+    { id: 'proposta', label: 'Propuesta enviada', color: 'border-sky-500/50 bg-sky-950/20 text-sky-300', badge: 'bg-sky-500/20 text-sky-300' },
     { id: 'negociacao', label: 'En negociación', color: 'border-amber-500/50 bg-amber-950/20 text-amber-300', badge: 'bg-amber-500/20 text-amber-300' },
     { id: 'ganho', label: 'Cerrado / ganado', color: 'border-emerald-500/50 bg-emerald-950/20 text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-300' },
     { id: 'perdido', label: 'Perdido', color: 'border-rose-500/50 bg-rose-950/20 text-rose-300', badge: 'bg-rose-500/20 text-rose-300' },
@@ -390,7 +390,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
         <div className="bg-slate-900/90 border border-slate-800/80 p-4 rounded-xl">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span>{isSpanish ? 'Operador conectado' : 'Operador conectado'}</span>
-            <User className="w-4 h-4 text-purple-400" />
+            <User className="w-4 h-4 text-sky-400" />
           </div>
           <div className="text-sm font-bold text-white truncate">{currentUser.name}</div>
           <p className="text-[10px] text-emerald-400 mt-1">{isSpanish ? `Sesión activa (${currentUser.department})` : `Sessão ativa (${currentUser.department})`}</p>
@@ -816,7 +816,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
               {/* Operator Notes Feed */}
               <div className="mt-6 space-y-3">
                 <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-purple-400" />
+                  <FileText className="w-4 h-4 text-sky-400" />
                   {isSpanish ? 'Notas internas e historial del operador' : 'Notas internas e histórico do operador'}
                 </h3>
 
@@ -826,12 +826,12 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
                     value={newNoteText}
                     onChange={(e) => setNewNoteText(e.target.value)}
                     placeholder={isSpanish ? 'Registrá una observación interna (ej.: a la clienta le gustó la propuesta)...' : 'Registrar observação interna (ex.: cliente gostou da proposta)...'}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500"
                   />
                   <div className="flex justify-end">
                     <button
                       type="submit"
-                      className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
+                      className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
                     >
                       <Send className="w-3.5 h-3.5 mr-1" />
                       <span>{isSpanish ? 'Guardar nota' : 'Salvar nota'}</span>

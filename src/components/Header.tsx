@@ -38,7 +38,7 @@ interface HeaderProps {
   onSelectTenant: (tenant: Tenant) => void;
 }
 
-type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'violet' | 'amber' };
+type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
 
 const firstName = (name?: string | null) => (name || 'Operador').trim().split(/\s+/)[0] || 'Operador';
 
@@ -79,7 +79,7 @@ export const Header: React.FC<HeaderProps> = ({
     ...(canSeeAdminTools ? [{ id: 'attribution' as ActiveTab, label: copy.growth, icon: <Target className="w-4 h-4" /> }] : []),
   ];
   const adminNavigation: NavigationItem[] = canSeeAdminTools ? [
-    { id: 'quality', label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'violet' },
+    { id: 'quality', label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' },
     { id: 'knowledge', label: copy.knowledge, icon: <Brain className="w-4 h-4" /> },
     { id: 'integration', label: copy.integration, icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'escalations', label: copy.escalations, icon: <Archive className="w-4 h-4" />, accent: 'amber' },
@@ -96,11 +96,11 @@ export const Header: React.FC<HeaderProps> = ({
   const scrollTabs = (direction: 'left' | 'right') => tabsRef.current?.scrollBy({ left: direction === 'left' ? -320 : 320, behavior: 'smooth' });
   const tabClass = (item: NavigationItem) => {
     if (activeTab !== item.id) return 'text-slate-300 hover:text-white hover:bg-slate-800/80';
-    if (item.accent === 'violet') return 'bg-violet-600 text-white shadow-sm shadow-violet-950/40';
+    if (item.accent === 'sky') return 'bg-sky-600 text-white shadow-sm shadow-sky-950/40';
     if (item.accent === 'amber') return 'bg-amber-500 text-slate-950 shadow-sm shadow-amber-950/40';
     return 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/40';
   };
-  const renderTab = (item: NavigationItem) => <button key={item.id} type="button" onClick={() => selectTab(item.id)} className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors ${tabClass(item)}`}><span className={activeTab === item.id ? 'text-current' : item.accent === 'violet' ? 'text-violet-300' : item.accent === 'amber' ? 'text-amber-300' : 'text-emerald-400'}>{item.icon}</span><span>{item.label}</span>{item.id === 'whatsapp' && savedCount > 0 && <span className="rounded-full bg-black/15 px-1.5 py-0.5 text-[10px] font-bold">{savedCount}</span>}</button>;
+  const renderTab = (item: NavigationItem) => <button key={item.id} type="button" onClick={() => selectTab(item.id)} className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors ${tabClass(item)}`}><span className={activeTab === item.id ? 'text-current' : item.accent === 'sky' ? 'text-sky-300' : item.accent === 'amber' ? 'text-amber-300' : 'text-emerald-400'}>{item.icon}</span><span>{item.label}</span>{item.id === 'whatsapp' && savedCount > 0 && <span className="rounded-full bg-black/15 px-1.5 py-0.5 text-[10px] font-bold">{savedCount}</span>}</button>;
 
   return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md">
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">

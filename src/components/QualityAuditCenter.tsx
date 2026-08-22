@@ -92,14 +92,14 @@ const STATUS_CLASSES: Record<QualityReview['status'], string> = {
   pending: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
   approved: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',
   testing: 'bg-sky-500/10 text-sky-300 border-sky-500/30',
-  published: 'bg-violet-500/10 text-violet-300 border-violet-500/30',
+  published: 'bg-sky-500/10 text-sky-300 border-sky-500/30',
   rejected: 'bg-rose-500/10 text-rose-300 border-rose-500/30',
   resolved: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',
   reopened: 'bg-orange-500/10 text-orange-300 border-orange-500/30',
 };
 
 function kindIcon(kind: QualityReview['kind']) {
-  if (kind === 'ai_suggestion') return <Sparkles className="w-4 h-4 text-violet-300" />;
+  if (kind === 'ai_suggestion') return <Sparkles className="w-4 h-4 text-sky-300" />;
   if (kind === 'bug') return <BugIcon />;
   if (kind === 'operator_idea') return <Lightbulb className="w-4 h-4 text-amber-300" />;
   return <ShieldCheck className="w-4 h-4 text-emerald-300" />;
@@ -306,7 +306,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     <section className="quality-workspace space-y-5 animate-fade-in">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-violet-300 text-xs font-semibold uppercase tracking-[0.18em]">
+          <div className="flex items-center gap-2 text-sky-300 text-xs font-semibold uppercase tracking-[0.18em]">
             <ShieldCheck className="w-4 h-4" /> {isSpanish ? 'Mejoras de la operación' : 'Melhorias da operação'}
           </div>
           <h2 className="text-2xl sm:text-3xl font-bold text-white mt-2">{isSpanish ? 'Mejoras del servicio' : 'Melhorias do atendimento'}</h2>
@@ -316,7 +316,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
           <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 rounded-control border border-slate-700 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition-colors" disabled={loading}>
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {isSpanish ? 'Actualizar' : 'Atualizar'}
           </button>
-          <button onClick={() => setShowComposer(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-control bg-violet-500 text-white text-xs font-bold hover:bg-violet-400 transition-colors">
+          <button onClick={() => setShowComposer(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-control bg-sky-500 text-white text-xs font-bold hover:bg-sky-400 transition-colors">
             <Send className="w-3.5 h-3.5" /> {isSpanish ? 'Registrar ítem' : 'Registrar item'}
           </button>
         </div>
@@ -334,7 +334,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
 
       <div className="quality-workspace__tabs responsive-tab-strip flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
         {tabs.map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-3 py-2 rounded-control text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-violet-500/15 text-violet-200 border border-violet-400/30' : 'text-slate-400 border border-transparent hover:bg-slate-800 hover:text-white'}`}>
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-3 py-2 rounded-control text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-sky-500/15 text-sky-200 border border-sky-400/30' : 'text-slate-400 border border-transparent hover:bg-slate-800 hover:text-white'}`}>
             {tab.icon}
             {tab.label}
             {typeof tab.count === 'number' && <span className="px-1.5 py-0.5 rounded-pill text-[10px] bg-slate-800 text-slate-300">{tab.count}</span>}
@@ -348,7 +348,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             <MetricCard label={isSpanish ? 'Pendientes' : 'Pendentes'} value={metrics.pendingCount} tone="amber" icon={<Clock3 className="w-4 h-4" />} />
             <MetricCard label={isSpanish ? 'Corregidas' : 'Corrigidas'} value={metrics.correctedCount} tone="sky" icon={<Wrench className="w-4 h-4" />} />
             <MetricCard label={isSpanish ? 'Rechazadas' : 'Rejeitadas'} value={metrics.rejectedCount} tone="rose" icon={<ThumbsDown className="w-4 h-4" />} />
-            <MetricCard label={isSpanish ? 'Baja confianza' : 'Baixa confiança'} value={metrics.lowConfidenceCount} tone="violet" icon={<CircleDot className="w-4 h-4" />} />
+            <MetricCard label={isSpanish ? 'Baja confianza' : 'Baixa confiança'} value={metrics.lowConfidenceCount} tone="sky" icon={<CircleDot className="w-4 h-4" />} />
             <MetricCard label={isSpanish ? 'Ítems revisados' : 'Itens revisados'} value={metrics.totalReviews} tone="emerald" icon={<CheckCircle2 className="w-4 h-4" />} />
             <MetricCard label="Eventos" value={metrics.totalEvents} tone="slate" icon={<ClipboardCheck className="w-4 h-4" />} />
           </div>
@@ -360,19 +360,19 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
                   <h3 className="text-sm font-bold text-white">{isSpanish ? 'Sugerencias automáticas para el administrador' : 'Sugestões automáticas para o admin'}</h3>
                   <p className="text-xs text-slate-500 mt-1">{isSpanish ? 'Patrones observados en los registros revisados.' : 'Padrões observados nos registros revisados.'}</p>
                 </div>
-                <Sparkles className="w-5 h-5 text-violet-300" />
+                <Sparkles className="w-5 h-5 text-sky-300" />
               </div>
               {recommendations.length === 0 ? (
                 <EmptyState icon={<Sparkles className="w-5 h-5" />} title="Ainda não há padrão suficiente" text="As recomendações aparecerão quando houver decisões humanas suficientes para comparar." />
               ) : (
                 <div className="space-y-2.5">
                   {recommendations.map((recommendation) => (
-                    <button key={recommendation.id} onClick={() => setActiveTab(recommendation.kind === 'bug' ? 'bugs' : recommendation.kind === 'operator_idea' ? 'ideas' : 'reviews')} className="w-full text-left flex items-start gap-3 p-3 rounded-panel border border-slate-800 hover:border-violet-500/30 hover:bg-violet-500/5 transition-colors">
-                      <div className="w-8 h-8 rounded-control bg-violet-500/10 border border-violet-400/20 flex items-center justify-center flex-shrink-0">{kindIcon(recommendation.kind)}</div>
+                    <button key={recommendation.id} onClick={() => setActiveTab(recommendation.kind === 'bug' ? 'bugs' : recommendation.kind === 'operator_idea' ? 'ideas' : 'reviews')} className="w-full text-left flex items-start gap-3 p-3 rounded-panel border border-slate-800 hover:border-sky-500/30 hover:bg-sky-500/5 transition-colors">
+                      <div className="w-8 h-8 rounded-control bg-sky-500/10 border border-sky-400/20 flex items-center justify-center flex-shrink-0">{kindIcon(recommendation.kind)}</div>
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-semibold text-slate-100">{recommendation.title}</p>
                         <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{recommendation.description}</p>
-                        <span className="inline-flex items-center gap-1 text-[10px] text-violet-300 mt-2">{recommendation.evidenceCount} evidências <ArrowRight className="w-3 h-3" /></span>
+                        <span className="inline-flex items-center gap-1 text-[10px] text-sky-300 mt-2">{recommendation.evidenceCount} evidências <ArrowRight className="w-3 h-3" /></span>
                       </div>
                     </button>
                   ))}
@@ -392,7 +392,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
                 <p className="text-sm leading-relaxed text-emerald-100">“A IA pode classificar um comprovante e sugerir uma cobrança, mas nunca confirmar o pagamento sozinha.”</p>
               </div>
               <div className="grid grid-cols-2 gap-2 mt-3">
-                <ControlPill label="Sugestão" value="Permitida" tone="violet" />
+                <ControlPill label="Sugestão" value="Permitida" tone="sky" />
                 <ControlPill label="Correção" value="Registrada" tone="sky" />
                 <ControlPill label="Publicação" value="Admin" tone="amber" />
                 <ControlPill label="Pagamento" value="Humano" tone="emerald" />
@@ -407,12 +407,12 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={isSpanish ? 'Buscá por título, descripción u observación...' : 'Buscar por título, descrição ou observação...'} className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-control text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-400/50" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={isSpanish ? 'Buscá por título, descripción u observación...' : 'Buscar por título, descrição ou observação...'} className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-control text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-sky-400/50" />
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Filter className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="appearance-none pl-8 pr-8 py-2.5 bg-slate-900 border border-slate-800 rounded-control text-xs text-slate-300 focus:outline-none focus:border-violet-400/50">
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="appearance-none pl-8 pr-8 py-2.5 bg-slate-900 border border-slate-800 rounded-control text-xs text-slate-300 focus:outline-none focus:border-sky-400/50">
                   <option value="all">{isSpanish ? 'Todos los estados' : 'Todos os estados'}</option>
                   {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
@@ -471,14 +471,14 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       {showComposer && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowComposer(false)}>
           <form onSubmit={submitComposer} onClick={(event) => event.stopPropagation()} className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-card shadow-2xl p-5 space-y-4">
-            <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-violet-300 font-bold">Entrada supervisionada</p><h3 className="text-lg font-bold text-white mt-1">Registrar bug ou sugestão</h3></div><button type="button" onClick={() => setShowComposer(false)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button></div>
+            <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-sky-300 font-bold">Entrada supervisionada</p><h3 className="text-lg font-bold text-white mt-1">Registrar bug ou sugestão</h3></div><button type="button" onClick={() => setShowComposer(false)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button></div>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => setComposerKind('operator_idea')} className={`flex items-center gap-2 p-3 rounded-panel border text-left text-xs ${composerKind === 'operator_idea' ? 'border-amber-400/40 bg-amber-500/10 text-amber-100' : 'border-slate-700 text-slate-400 hover:bg-slate-800'}`}><Lightbulb className="w-4 h-4" /> Sugestão de melhoria</button>
               <button type="button" onClick={() => setComposerKind('bug')} className={`flex items-center gap-2 p-3 rounded-panel border text-left text-xs ${composerKind === 'bug' ? 'border-rose-400/40 bg-rose-500/10 text-rose-100' : 'border-slate-700 text-slate-400 hover:bg-slate-800'}`}><BugIcon /> Reportar bug</button>
             </div>
-            <label className="block"><span className="text-[11px] text-slate-400">Título</span><input required value={composerTitle} onChange={(event) => setComposerTitle(event.target.value)} className="mt-1 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 focus:outline-none focus:border-violet-400/50" placeholder={composerKind === 'bug' ? 'Ex.: Comprovante duplicado no histórico' : 'Ex.: Mostrar cobrança no painel da conversa'} /></label>
-            <label className="block"><span className="text-[11px] text-slate-400">Descrição e contexto</span><textarea required rows={5} value={composerDescription} onChange={(event) => setComposerDescription(event.target.value)} className="mt-1 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-violet-400/50" placeholder="Explique o que aconteceu, o que deveria acontecer e qual impacto isso causa." /></label>
-            <div className="flex justify-end gap-2 pt-1"><button type="button" onClick={() => setShowComposer(false)} className="px-3 py-2 rounded-control text-xs text-slate-400 hover:text-white">Cancelar</button><button disabled={submitting} className="inline-flex items-center gap-2 px-3.5 py-2 rounded-control bg-violet-500 text-white text-xs font-bold hover:bg-violet-400 disabled:opacity-50"><Send className="w-3.5 h-3.5" /> {submitting ? 'Salvando...' : 'Registrar'}</button></div>
+            <label className="block"><span className="text-[11px] text-slate-400">Título</span><input required value={composerTitle} onChange={(event) => setComposerTitle(event.target.value)} className="mt-1 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 focus:outline-none focus:border-sky-400/50" placeholder={composerKind === 'bug' ? 'Ex.: Comprovante duplicado no histórico' : 'Ex.: Mostrar cobrança no painel da conversa'} /></label>
+            <label className="block"><span className="text-[11px] text-slate-400">Descrição e contexto</span><textarea required rows={5} value={composerDescription} onChange={(event) => setComposerDescription(event.target.value)} className="mt-1 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-sky-400/50" placeholder="Explique o que aconteceu, o que deveria acontecer e qual impacto isso causa." /></label>
+            <div className="flex justify-end gap-2 pt-1"><button type="button" onClick={() => setShowComposer(false)} className="px-3 py-2 rounded-control text-xs text-slate-400 hover:text-white">Cancelar</button><button disabled={submitting} className="inline-flex items-center gap-2 px-3.5 py-2 rounded-control bg-sky-500 text-white text-xs font-bold hover:bg-sky-400 disabled:opacity-50"><Send className="w-3.5 h-3.5" /> {submitting ? 'Salvando...' : 'Registrar'}</button></div>
           </form>
         </div>
       )}
@@ -487,11 +487,11 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-end" onClick={() => setSelectedReviewId(null)}>
           <aside onClick={(event) => event.stopPropagation()} className="h-full w-full max-w-xl bg-slate-900 border-l border-slate-700 shadow-2xl overflow-y-auto p-5 sm:p-6">
             <div className="flex items-start justify-between gap-4"><div className="flex items-start gap-3"><div className="w-9 h-9 rounded-control bg-slate-800 flex items-center justify-center">{kindIcon(selectedReview.kind)}</div><div><p className="text-[10px] uppercase tracking-wider text-slate-500">{KIND_LABELS[selectedReview.kind]}</p><h3 className="text-lg font-bold text-white mt-1">{selectedReview.title}</h3></div></div><button onClick={() => setSelectedReviewId(null)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button></div>
-            <div className="flex flex-wrap items-center gap-2 mt-4"><span className={`px-2 py-1 rounded-pill border text-[10px] font-bold ${STATUS_CLASSES[selectedReview.status]}`}>{STATUS_LABELS[selectedReview.status]}</span><span className="text-[10px] text-slate-500">Criado em {formatDate(selectedReview.created_at)}</span>{selectedReview.kind === 'ai_suggestion' && <span className="text-[10px] text-violet-300">Confiança: {confidenceLabel(selectedReview.confidence)}</span>}</div>
+            <div className="flex flex-wrap items-center gap-2 mt-4"><span className={`px-2 py-1 rounded-pill border text-[10px] font-bold ${STATUS_CLASSES[selectedReview.status]}`}>{STATUS_LABELS[selectedReview.status]}</span><span className="text-[10px] text-slate-500">Criado em {formatDate(selectedReview.created_at)}</span>{selectedReview.kind === 'ai_suggestion' && <span className="text-[10px] text-sky-300">Confiança: {confidenceLabel(selectedReview.confidence)}</span>}</div>
             <div className="mt-5 rounded-panel border border-slate-800 bg-slate-950/50 p-4"><p className="text-xs leading-relaxed text-slate-300 whitespace-pre-wrap">{selectedReview.description}</p></div>
             {(selectedReview.original_value || selectedReview.corrected_value) && <div className="grid sm:grid-cols-2 gap-3 mt-3"><ValueBlock label="Sugestão original" value={selectedReview.original_value || '—'} tone="rose" /><ValueBlock label="Resultado corrigido" value={selectedReview.corrected_value || '—'} tone="emerald" /></div>}
             {Object.keys(selectedReview.context || {}).length > 0 && <div className="mt-3"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Contexto registrado</p><pre className="text-[10px] text-slate-400 whitespace-pre-wrap break-words bg-slate-950 border border-slate-800 rounded-control p-3">{JSON.stringify(selectedReview.context, null, 2)}</pre></div>}
-            <div className="mt-5"><label className="text-[10px] uppercase tracking-wider text-slate-500">Nota da revisão</label><textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} rows={3} placeholder="Explique a decisão para a próxima pessoa que consultar este item..." className="mt-1.5 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-violet-400/50" /></div>
+            <div className="mt-5"><label className="text-[10px] uppercase tracking-wider text-slate-500">Nota da revisão</label><textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} rows={3} placeholder="Explique a decisão para a próxima pessoa que consultar este item..." className="mt-1.5 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-sky-400/50" /></div>
             <div className="mt-5 pt-4 border-t border-slate-800"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Decisão administrativa</p><div className="grid grid-cols-2 gap-2"><button onClick={() => updateReview(selectedReview.id, 'approved')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 text-xs font-bold hover:bg-emerald-500/25"><Check className="w-3.5 h-3.5" /> Aprovar</button><button onClick={() => updateReview(selectedReview.id, 'testing')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-bold hover:bg-sky-500/25"><Wrench className="w-3.5 h-3.5" /> Enviar para teste</button><button onClick={() => updateReview(selectedReview.id, selectedReview.kind === 'bug' ? 'resolved' : 'rejected')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-rose-500/10 border border-rose-400/30 text-rose-200 text-xs font-bold hover:bg-rose-500/20"><ThumbsDown className="w-3.5 h-3.5" /> {selectedReview.kind === 'bug' ? 'Marcar resolvido' : 'Rejeitar'}</button><button onClick={() => updateReview(selectedReview.id, 'reopened')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-orange-500/10 border border-orange-400/30 text-orange-200 text-xs font-bold hover:bg-orange-500/20"><RotateCcw className="w-3.5 h-3.5" /> Reabrir</button></div></div>
           </aside>
         </div>
@@ -500,18 +500,18 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   );
 };
 
-const toneMap: Record<string, string> = { amber: 'text-amber-300 bg-amber-500/10 border-amber-400/20', sky: 'text-sky-300 bg-sky-500/10 border-sky-400/20', rose: 'text-rose-300 bg-rose-500/10 border-rose-400/20', violet: 'text-violet-300 bg-violet-500/10 border-violet-400/20', emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/20', slate: 'text-slate-300 bg-slate-500/10 border-slate-400/20' };
+const toneMap: Record<string, string> = { amber: 'text-amber-300 bg-amber-500/10 border-amber-400/20', sky: 'text-sky-300 bg-sky-500/10 border-sky-400/20', rose: 'text-rose-300 bg-rose-500/10 border-rose-400/20', emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/20', slate: 'text-slate-300 bg-slate-500/10 border-slate-400/20' };
 
 function MetricCard({ label, value, tone, icon }: { label: string; value: number; tone: string; icon: React.ReactNode }) {
   return <div className="bg-slate-900/70 border border-slate-800 rounded-panel p-3"><div className={`w-7 h-7 rounded-control border flex items-center justify-center ${toneMap[tone] || toneMap.slate}`}>{icon}</div><p className="text-xl font-bold text-white mt-2">{value.toLocaleString('pt-BR')}</p><p className="text-[10px] text-slate-500 mt-0.5">{label}</p></div>;
 }
 
 function ControlPill({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className={`quality-workspace__control-pill quality-workspace__control-pill--${tone} rounded-control border border-slate-800 bg-slate-950/60 p-2`}><p className="text-[10px] text-slate-500">{label}</p><p className={`text-[11px] font-semibold mt-0.5 ${tone === 'emerald' ? 'text-emerald-300' : tone === 'amber' ? 'text-amber-300' : tone === 'sky' ? 'text-sky-300' : 'text-violet-300'}`}>{value}</p></div>;
+  return <div className={`quality-workspace__control-pill quality-workspace__control-pill--${tone} rounded-control border border-slate-800 bg-slate-950/60 p-2`}><p className="text-[10px] text-slate-500">{label}</p><p className={`text-[11px] font-semibold mt-0.5 ${tone === 'emerald' ? 'text-emerald-300' : tone === 'amber' ? 'text-amber-300' : tone === 'sky' ? 'text-sky-300' : 'text-sky-300'}`}>{value}</p></div>;
 }
 
 const ReviewCard: React.FC<{ review: QualityReview; onOpen: () => void }> = ({ review, onOpen }) => {
-  return <button onClick={onOpen} className="w-full text-left bg-slate-900/70 border border-slate-800 hover:border-violet-500/40 rounded-card p-4 transition-colors group"><div className="flex items-start gap-3"><div className="w-8 h-8 rounded-control bg-slate-800 flex items-center justify-center flex-shrink-0">{kindIcon(review.kind)}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-[10px] uppercase tracking-wider text-slate-500">{KIND_LABELS[review.kind]}</span><span className={`px-1.5 py-0.5 rounded-pill border text-[9px] font-bold ${STATUS_CLASSES[review.status]}`}>{STATUS_LABELS[review.status]}</span></div><h3 className="text-sm font-semibold text-white mt-1 group-hover:text-violet-200 transition-colors">{review.title}</h3><p className="text-xs text-slate-400 mt-1.5 line-clamp-2 leading-relaxed">{review.description}</p><div className="flex flex-wrap items-center gap-3 mt-3 text-[10px] text-slate-500"><span>{formatDate(review.created_at)}</span>{review.kind === 'ai_suggestion' && <span className="text-violet-300">Confiança {confidenceLabel(review.confidence)}</span>}{getDecision(review) && <span>Decisão: {getDecision(review)}</span>}</div></div><ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-violet-300 transition-colors flex-shrink-0" /></div></button>;
+  return <button onClick={onOpen} className="w-full text-left bg-slate-900/70 border border-slate-800 hover:border-sky-500/40 rounded-card p-4 transition-colors group"><div className="flex items-start gap-3"><div className="w-8 h-8 rounded-control bg-slate-800 flex items-center justify-center flex-shrink-0">{kindIcon(review.kind)}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-[10px] uppercase tracking-wider text-slate-500">{KIND_LABELS[review.kind]}</span><span className={`px-1.5 py-0.5 rounded-pill border text-[9px] font-bold ${STATUS_CLASSES[review.status]}`}>{STATUS_LABELS[review.status]}</span></div><h3 className="text-sm font-semibold text-white mt-1 group-hover:text-sky-200 transition-colors">{review.title}</h3><p className="text-xs text-slate-400 mt-1.5 line-clamp-2 leading-relaxed">{review.description}</p><div className="flex flex-wrap items-center gap-3 mt-3 text-[10px] text-slate-500"><span>{formatDate(review.created_at)}</span>{review.kind === 'ai_suggestion' && <span className="text-sky-300">Confiança {confidenceLabel(review.confidence)}</span>}{getDecision(review) && <span>Decisão: {getDecision(review)}</span>}</div></div><ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-sky-300 transition-colors flex-shrink-0" /></div></button>;
 };
 
 function ValueBlock({ label, value, tone }: { label: string; value: string; tone: 'rose' | 'emerald' }) {
@@ -523,5 +523,5 @@ function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: strin
 }
 
 function LoadingState() {
-  return <div className="p-10 text-center text-xs text-slate-500"><RefreshCw className="w-5 h-5 mx-auto animate-spin text-violet-300" /><p className="mt-2">Carregando registros de qualidade...</p></div>;
+  return <div className="p-10 text-center text-xs text-slate-500"><RefreshCw className="w-5 h-5 mx-auto animate-spin text-sky-300" /><p className="mt-2">Carregando registros de qualidade...</p></div>;
 }

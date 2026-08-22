@@ -314,7 +314,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
         type="button"
         onClick={openModal}
         title="Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)"
-        className="px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+        className="px-3 py-1.5 rounded-xl text-xs font-medium bg-sky-950/60 hover:bg-sky-900/80 text-sky-300 border border-sky-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
       >
         <QrCode className="w-3.5 h-3.5" />
         <span>Reconectar WhatsApp (QR Code)</span>
@@ -328,7 +328,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
           >
             <div className="flex items-center justify-between">
               <h3 className="text-white font-bold text-sm flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-purple-400" /> Reconectar WhatsApp (Evolution API)
+                <QrCode className="w-4 h-4 text-sky-400" /> Reconectar WhatsApp (Evolution API)
               </h3>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
                 <X className="w-4 h-4" />
@@ -361,7 +361,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
                   type="button"
                   onClick={handleRefreshQr}
                   disabled={isGeneratingQr}
-                  className="text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
+                  className="text-xs text-sky-300 hover:text-sky-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3 h-3 ${isGeneratingQr ? 'animate-spin' : ''}`} /> QR expirou? Gerar novo
                 </button>
@@ -371,7 +371,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
                 type="button"
                 onClick={handleGenerateQr}
                 disabled={isGeneratingQr}
-                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 {isGeneratingQr ? <span className="animate-spin">⏳</span> : <QrCode className="w-3.5 h-3.5" />}
                 {isGeneratingQr ? 'Gerando...' : 'Gerar QR Code'}
@@ -4198,7 +4198,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         <button
                           type="button"
                           onClick={handleSendSampleFile}
-                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-purple-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-sky-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
                           title="Simular Envio de PDF (conversa de teste)"
                         >
                           <Paperclip className="w-3 h-3" />

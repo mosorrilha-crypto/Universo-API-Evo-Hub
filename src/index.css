@@ -1605,7 +1605,7 @@ html[data-theme='light'] .quality-workspace__control-pill > p:first-child {
   color: #52706B !important;
 }
 
-html[data-theme='light'] .quality-workspace__control-pill--violet > p:last-child { color: #6D28D9 !important; }
+html[data-theme='light'] .quality-workspace__control-pill--sky > p:last-child { color: #036B91 !important; }
 html[data-theme='light'] .quality-workspace__control-pill--sky > p:last-child { color: #036B91 !important; }
 html[data-theme='light'] .quality-workspace__control-pill--amber > p:last-child { color: #8A5700 !important; }
 html[data-theme='light'] .quality-workspace__control-pill--emerald > p:last-child { color: #09734B !important; }

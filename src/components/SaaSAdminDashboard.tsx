@@ -213,7 +213,7 @@ export function ConectarEvolutionQrCode() {
       <button
         type="button"
         onClick={openModal}
-        className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
+        className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
       >
         <QrCode className="w-3.5 h-3.5" />
         Conectar WhatsApp via QR Code
@@ -227,7 +227,7 @@ export function ConectarEvolutionQrCode() {
           >
             <div className="flex items-center justify-between">
               <h3 className="text-white font-bold text-sm flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-purple-400" /> Conectar WhatsApp (Evolution API)
+                <QrCode className="w-4 h-4 text-sky-400" /> Conectar WhatsApp (Evolution API)
               </h3>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
                 <X className="w-4 h-4" />
@@ -260,7 +260,7 @@ export function ConectarEvolutionQrCode() {
                   type="button"
                   onClick={handleRefreshQr}
                   disabled={isGeneratingQr}
-                  className="text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
+                  className="text-xs text-sky-300 hover:text-sky-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3 h-3 ${isGeneratingQr ? 'animate-spin' : ''}`} /> QR expirou? Gerar novo
                 </button>
@@ -273,7 +273,7 @@ export function ConectarEvolutionQrCode() {
                     value={selectedTenantId}
                     onChange={(e) => setSelectedTenantId(e.target.value)}
                     disabled={isLoadingTenants || !realTenants.length}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     {!realTenants.length && <option value="">{isLoadingTenants ? 'Carregando...' : 'Nenhum tenant cadastrado ainda'}</option>}
                     {realTenants.map((t) => (
@@ -286,7 +286,7 @@ export function ConectarEvolutionQrCode() {
                   type="button"
                   onClick={handleGenerateQr}
                   disabled={!selectedTenantId || isGeneratingQr}
-                  className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
                 >
                   {isGeneratingQr ? <span className="animate-spin">⏳</span> : <QrCode className="w-3.5 h-3.5" />}
                   {isGeneratingQr ? 'Gerando...' : 'Gerar QR Code'}
@@ -300,7 +300,7 @@ export function ConectarEvolutionQrCode() {
                       value={newTenantName}
                       onChange={(e) => setNewTenantName(e.target.value)}
                       placeholder="Nome do tenant"
-                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500"
                     />
                     <button
                       type="submit"
@@ -1246,7 +1246,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           onClick={() => setActiveAdminTab('users')}
           className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all cursor-pointer ${
             activeAdminTab === 'users'
-              ? 'bg-purple-600 text-white shadow-md shadow-purple-950/30'
+              ? 'bg-sky-600 text-white shadow-md shadow-sky-950/30'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
           }`}
         >
@@ -1440,9 +1440,9 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               agora é real — ver geminiSystemInstructionCache.ts. */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
             <div className="flex items-center space-x-2">
-              <Cpu className="w-5 h-5 text-purple-400" />
+              <Cpu className="w-5 h-5 text-sky-400" />
               <h2 className="text-base font-bold text-white">Arquitetura Avançada & Gestão de Tokens Gemini</h2>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-950 text-purple-300 border border-purple-800">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-950 text-sky-300 border border-sky-800">
                 Pay-as-You-Go + Context Cache
               </span>
             </div>
@@ -1461,7 +1461,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg space-y-1">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>Total Tokens Consumidos</span>
-                <Cpu className="w-4 h-4 text-purple-400" />
+                <Cpu className="w-4 h-4 text-sky-400" />
               </div>
               <div className="text-2xl font-black text-white">
                 {telemetryData ? telemetryData.summary.totalSaaSTokens.toLocaleString('pt-BR') : '—'}
@@ -1475,7 +1475,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   {telemetryData.summary.providerBreakdown.groq.tokens.toLocaleString('pt-BR')}
                 </p>
               ) : (
-                <p className="text-[10px] text-purple-300">Medido via objeto `usageMetadata` do Gemini/Groq</p>
+                <p className="text-[10px] text-sky-300">Medido via objeto `usageMetadata` do Gemini/Groq</p>
               )}
             </div>
 
@@ -1533,7 +1533,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Server className="w-4 h-4 text-purple-400" />
+                  <Server className="w-4 h-4 text-sky-400" />
                   Telemetria de Consumo de Tokens por Tenant (Cliente)
                 </h3>
                 <p className="text-xs text-slate-400">
@@ -1585,7 +1585,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                           <div className="text-[10px] text-slate-500 font-mono">{tRecord.tenantId}</div>
                         </td>
                         <td className="p-3 font-mono text-slate-300">{tRecord.promptTokens.toLocaleString()}</td>
-                        <td className="p-3 font-mono text-purple-300">{tRecord.candidatesTokens.toLocaleString()}</td>
+                        <td className="p-3 font-mono text-sky-300">{tRecord.candidatesTokens.toLocaleString()}</td>
                         <td className="p-3 font-mono font-bold text-emerald-400">{tRecord.totalTokens.toLocaleString()}</td>
                         <td className="p-3 font-mono text-amber-400">{tRecord.cachedTokensSaved.toLocaleString()}</td>
                         <td className="p-3 font-mono font-bold text-emerald-400">${tRecord.estimatedCostUSD.toFixed(4)}</td>
@@ -1619,14 +1619,14 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Settings className="w-4 h-4 text-purple-400" />
+                    <Settings className="w-4 h-4 text-sky-400" />
                     Guia de Migração: Google Cloud Vertex AI
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
                     Passos recomendados para escala comercial enterprise e cota reservada.
                   </p>
                 </div>
-                <span className="px-2 py-0.5 text-[10px] bg-purple-950 text-purple-300 border border-purple-800 font-bold rounded-md">
+                <span className="px-2 py-0.5 text-[10px] bg-sky-950 text-sky-300 border border-sky-800 font-bold rounded-md">
                   Pronto p/ Produção
                 </span>
               </div>
@@ -1641,7 +1641,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 </p>
 
                 <div className="font-bold text-white flex items-center gap-1.5 pt-2 border-t border-slate-800">
-                  <CheckCircle2 className="w-4 h-4 text-purple-400" />
+                  <CheckCircle2 className="w-4 h-4 text-sky-400" />
                   2. Migração para Vertex AI (`us-central1`)
                 </div>
                 <p className="text-slate-400">
@@ -1660,7 +1660,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   href="https://console.cloud.google.com/iam-admin/quotas"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-3 inline-flex items-center space-x-1.5 text-xs text-purple-400 hover:text-purple-300 font-bold"
+                  className="mt-3 inline-flex items-center space-x-1.5 text-xs text-sky-400 hover:text-sky-300 font-bold"
                 >
                   <span>Acessar Console do Google Cloud Quotas</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -1684,7 +1684,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-purple-400" />
+                  <Sparkles className="w-5 h-5 text-sky-400" />
                   Lista de Pendências & Roadmap Técnico (Implementações Não-Urgentes)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -1692,7 +1692,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-xs bg-purple-950 text-purple-300 border border-purple-800 px-3 py-1 rounded-xl font-semibold">
+                <span className="text-xs bg-sky-950 text-sky-300 border border-sky-800 px-3 py-1 rounded-xl font-semibold">
                   {roadmapItems.filter((i) => i.status === 'pendente').length} Pendente{roadmapItems.filter((i) => i.status === 'pendente').length === 1 ? '' : 's'}
                 </span>
                 <button
@@ -1701,7 +1701,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     resetRoadmapForm();
                     setIsAddRoadmapModalOpen(true);
                   }}
-                  className="py-2 px-3.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 flex items-center gap-2 transition-all"
+                  className="py-2 px-3.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-sky-950/40 flex items-center gap-2 transition-all"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Nova Pendência</span>
@@ -1852,7 +1852,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Users className="w-5 h-5 text-purple-400" />
+                  <Users className="w-5 h-5 text-sky-400" />
                   Gerenciador de Usuários e Operadores do Sistema
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -1862,7 +1862,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
               <button
                 onClick={() => setIsAddUserModalOpen(true)}
-                className="py-2.5 px-4 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 flex items-center space-x-2 transition-all cursor-pointer"
+                className="py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-sky-950/40 flex items-center space-x-2 transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Novo Usuário / Operador</span>
@@ -1878,7 +1878,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
                   placeholder="Buscar por nome, e-mail..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500"
                 />
               </div>
 
@@ -1887,7 +1887,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <select
                   value={userRoleFilter}
                   onChange={(e) => setUserRoleFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                 >
                   <option value="all">Todas as Funções</option>
                   <option value="saas_admin">SaaS Master Admin</option>
@@ -1944,8 +1944,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                             <td className="p-3">
                               {(() => {
                                 const roleColors: Record<UserRole, string> = {
-                                  saas_admin: 'bg-purple-950 text-purple-300 border-purple-800',
-                                  admin: 'bg-purple-950 text-purple-300 border-purple-800/80',
+                                  saas_admin: 'bg-sky-950 text-sky-300 border-sky-800',
+                                  admin: 'bg-sky-950 text-sky-300 border-sky-800/80',
                                   manager: 'bg-blue-950 text-blue-300 border-blue-800/80',
                                   operator: 'bg-emerald-950 text-emerald-300 border-emerald-800/80',
                                 };
@@ -2006,7 +2006,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             </button>
 
             <div className="flex items-center space-x-3 pb-3 border-b border-slate-800">
-              <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
+              <div className="p-3 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20">
                 <Users className="w-6 h-6" />
               </div>
               <div>
@@ -2023,7 +2023,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   value={newUserName}
                   onChange={(e) => setNewUserName(e.target.value)}
                   placeholder="Ex: Ana Maria Souza"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500"
                   required
                 />
               </div>
@@ -2035,7 +2035,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
                   placeholder="ana@suaempresa.com.br"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500"
                   required
                 />
               </div>
@@ -2048,7 +2048,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                     value={newUserPassword}
                     onChange={(e) => setNewUserPassword(e.target.value)}
                     placeholder="Mínimo 6 caracteres"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                     required
                   />
                   <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
@@ -2061,7 +2061,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   <select
                     value={newUserRole}
                     onChange={(e) => setNewUserRole(e.target.value as UserRole)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     <option value="operator">Operador</option>
                     <option value="manager">Gerente</option>
@@ -2077,7 +2077,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   <select
                     value={newUserTenantId}
                     onChange={(e) => setNewUserTenantId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     {realTenants.length === 0 && <option value="">Carregando tenants...</option>}
                     {realTenants.map((t) => (
@@ -2096,7 +2096,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               <button
                 type="submit"
                 disabled={isSavingUser}
-                className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer mt-4"
+                className="w-full py-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-sky-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer mt-4"
               >
                 <Users className="w-4 h-4" />
                 <span>{isSavingUser ? 'Salvando...' : 'Salvar e Cadastrar Usuário'}</span>
@@ -2118,7 +2118,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             </button>
 
             <div className="flex items-center space-x-3 pb-3 border-b border-slate-800">
-              <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
+              <div className="p-3 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20">
                 <Sparkles className="w-6 h-6" />
               </div>
               <div>
@@ -2135,7 +2135,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   value={newRoadmapTitle}
                   onChange={(e) => setNewRoadmapTitle(e.target.value)}
                   placeholder="Ex: Exportador de relatórios financeiros"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500"
                   required
                 />
               </div>
@@ -2147,7 +2147,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   onChange={(e) => setNewRoadmapDescription(e.target.value)}
                   minRows={4}
                   placeholder="Detalhe o que precisa ser feito..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500"
                 />
               </div>
 
@@ -2156,7 +2156,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <select
                   value={newRoadmapPriority}
                   onChange={(e) => setNewRoadmapPriority(e.target.value as RoadmapPriority)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                 >
                   <option value="alta">Alta</option>
                   <option value="media">Média</option>
@@ -2184,7 +2184,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               <button
                 type="submit"
                 disabled={isSavingRoadmapItem || !newRoadmapTitle.trim()}
-                className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer"
+                className="w-full py-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg shadow-sky-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer"
               >
                 {isSavingRoadmapItem ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 <span>{isSavingRoadmapItem ? 'Salvando...' : 'Adicionar ao Backlog'}</span>
