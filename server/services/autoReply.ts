@@ -1394,10 +1394,26 @@ async function runMidiaTool(
   if (!productsWithPhoto.length && !productsWithVideo.length) return { actionsSummary: [] };
 
   const historyText = buildHistoryText(history);
-  const photoList = productsWithPhoto.map((p) => `- ${p.name}`).join('\n');
-  const videoList = productsWithVideo.map((p) => `- ${p.name}`).join('\n');
+  // Achado real em produção (Clic Piscinas): o nome do produto no catálogo é
+  // só o nome comercial da família (ex: "Piscina Fibratec Maresias") — a
+  // medida/variante que o cliente costuma usar pra se referir ao modelo
+  // ("o de 4 metros") mora em `description` (catálogo sem variantes) ou nos
+  // `variants[].code`/`dimensions` (catálogo em família+variante, ver
+  // ProductVariant em knowledgeBaseStore.ts), mas nunca chegava até aqui.
+  // Sem esse dado, o modelo não tinha como mapear "4 metros" pra nenhum item
+  // da lista e decidia (corretamente, dada a informação que tinha) não
+  // chamar nenhuma ferramenta — zero linha de log de runMidiaTool, silencioso.
+  const formatMediaEntry = (p: AgentProduct) => {
+    const variantHint = (p.variants || []).map((v) => (v.dimensions ? `${v.code} (${v.dimensions})` : v.code)).join(', ');
+    const hint = variantHint || p.description;
+    return hint ? `- ${p.name} (${hint})` : `- ${p.name}`;
+  };
+  const photoList = productsWithPhoto.map(formatMediaEntry).join('\n');
+  const videoList = productsWithVideo.map(formatMediaEntry).join('\n');
 
   const prompt = `${productsWithPhoto.length ? `Produtos/serviços com FOTO de exemplo disponível pra enviar de verdade:\n${photoList}\n\n` : ''}${productsWithVideo.length ? `Produtos/serviços com VÍDEO de exemplo disponível pra enviar de verdade (prefira vídeo quando o mesmo produto tiver os dois — é mais persuasivo):\n${videoList}\n\n` : ''}${historyText ? `Histórico recente da conversa:\n${historyText}\n` : ''}Mensagem do cliente: "${text}"
+
+O texto entre parênteses (quando existir) é a variante/medida/modelo daquele produto — o cliente frequentemente se refere ao serviço por esse detalhe (ex: "o de 4 metros", "o modelo menor") em vez do nome comercial da família. Use isso pra mapear a mensagem do cliente pro item certo da lista antes de decidir. Ao chamar a ferramenta, devolva o nome EXATO do catálogo — o nome da família (ex: "Piscina Acapulco") ou o código exato da variante (ex: "AC F400") quando o cliente se referiu especificamente a ela, nunca o texto entre parênteses.
 
 Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explicitamente pra ver foto/vídeo/exemplo/resultado de um desses serviços, ou está claramente decidido sobre um serviço específico dessa lista e isso ajudaria a fechar. Se o cliente não mencionou nada relacionado a um desses serviços, ou o interesse ainda não está claro, decida "nenhuma".`;
 

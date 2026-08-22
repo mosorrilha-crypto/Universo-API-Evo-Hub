@@ -641,6 +641,67 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(specialistContent).toContain('NUNCA diga que não tem material nenhum disponível');
     expect(specialistContent).toContain('Microlips');
   });
+
+  // Achado real em produção (Clic Piscinas): o nome do produto no catálogo é
+  // só o nome comercial da família ("Piscina Fibratec Maresias"), nunca a
+  // medida/variante ("MS F400, 4,00x2,20m") que o cliente usa pra pedir a
+  // foto ("o modelo de 4 metros"). Sem esse dado na lista mandada pro
+  // modelo, ele não tinha como mapear o pedido — decidia (corretamente, dada
+  // a informação que tinha) não chamar nenhuma ferramenta, silenciosamente.
+  it('inclui a description do produto (variante/medida) na lista mandada pro modelo, quando existir', async () => {
+    getKnowledgeBase.mockResolvedValueOnce({
+      products: [{ ...PRODUCT_WITH_PHOTO, description: 'MS F400, 4,00x2,20m' }],
+    } as any);
+    const { ai, calls } = makeFakeAiWithPhotoTool(false);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do modelo de 4 metros?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    const mediaToolCall = calls.find((c) => c.config?.tools);
+    expect(mediaToolCall.contents[0].parts[0].text).toContain('Microlips (MS F400, 4,00x2,20m)');
+  });
+
+  // Catálogo em família+variante (ProductVariant, PR #341) — cada tamanho
+  // tem código e medida próprios; quando existem, prevalecem sobre a
+  // description solta (caso acima) porque são o dado estruturado real.
+  it('inclui os códigos/medidas das variantes na lista, quando o produto tiver variants', async () => {
+    getKnowledgeBase.mockResolvedValueOnce({
+      products: [
+        {
+          ...PRODUCT_WITH_PHOTO,
+          name: 'Piscina Fibratec Maresias',
+          description: undefined,
+          variants: [
+            { code: 'MS F400', dimensions: '4,00x2,20m', price: 'Gs 15.000.000' },
+            { code: 'MS F500', dimensions: '5,00x2,50m', price: 'Gs 18.000.000' },
+          ],
+        },
+      ],
+    } as any);
+    const { ai, calls } = makeFakeAiWithPhotoTool(false);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do modelo de 4 metros?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    const mediaToolCall = calls.find((c) => c.config?.tools);
+    expect(mediaToolCall.contents[0].parts[0].text).toContain('Piscina Fibratec Maresias (MS F400 (4,00x2,20m), MS F500 (5,00x2,50m))');
+  });
+
+  it('não quebra e mantém só o nome quando o produto não tem description nem variants', async () => {
+    const { ai, calls } = makeFakeAiWithPhotoTool(false);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    const mediaToolCall = calls.find((c) => c.config?.tools);
+    expect(mediaToolCall.contents[0].parts[0].text).toContain('- Microlips\n');
+  });
 });
 
 describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade com Epic 4.5.2)', () => {

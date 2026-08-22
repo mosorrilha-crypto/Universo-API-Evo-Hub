@@ -49,6 +49,12 @@ export interface AgentProduct {
   price: string;
   /** Agrupamento pro prompt (ex: "Pestañas", "Cejas") — opcional, catálogos pequenos podem ficar sem. */
   category?: string;
+  /**
+   * Também usado pelo runMidiaTool (autoReply.ts) pra ajudar o modelo a mapear
+   * a mensagem do cliente pro produto certo quando o nome comercial sozinho
+   * não basta — ex: variantes/medidas de uma mesma família ("MS F400,
+   * 4,00x2,20m") que o cliente costuma citar em vez do nome ("o de 4 metros").
+   */
   description?: string;
   /**
    * Tamanhos/modelos dessa família, cada um com preço próprio — quando
