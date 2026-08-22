@@ -30,3 +30,7 @@ O código atual já possui `adHeadline` e `adGreetingMatchedAt` na conversa, mas
 ## Confirmação na documentação oficial
 
 A referência de “Payload de Webhook de Entrada do WhatsApp” descreve o webhook como o canal de mensagens e interações enviados de usuários do WhatsApp para empresas. O exemplo de entrada contém `messages[]` com `from`, `id`, `timestamp`, `type` e `text.body`. A página de criação de anúncios documenta a saudação como parte da configuração/experiência do anúncio (`welcome_message`, `ice_breakers` e `autofill_message`). A busca pelo texto `ctwa_clid` não retornou resultado na página genérica de payload, portanto a conclusão sobre o campo referral permanece baseada no código do repositório e na referência específica de Conversions API, não no exemplo genérico dessa página.
+
+## Evidência adicional para o canal Evolution/Baileys
+
+O issue aberto [#2408 do Baileys](https://github.com/WhiskeySockets/Baileys/issues/2408) descreve o mesmo comportamento: a primeira interação de uma conversa iniciada por anúncio Clique para WhatsApp aparece no telefone, mas não chega ao evento `messages.upsert`; os eventos observados ficam no fluxo `privacy_token`/trusted contact. Portanto, quando o número usa Evolution/Baileys, não é possível recuperar o texto original da saudação apenas no handler atual, pois o evento pode nunca materializar uma mensagem normal. A implementação deve tratar a atribuição como cartão de origem quando houver referral/marcação disponível e não depender da existência da primeira bolha nativa.
