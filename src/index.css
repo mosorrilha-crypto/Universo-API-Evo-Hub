@@ -893,3 +893,25 @@ html[data-theme='blue'] .operations-hero {
   background: var(--surface-panel);
   border-color: var(--border);
 }
+
+
+/* O modo claro não usa superfícies de conversa pretas nem gradientes decorativos. */
+html[data-theme='light'] .bg-gradient-to-br,
+html[data-theme='light'] .bg-gradient-to-r,
+html[data-theme='light'] .bg-gradient-to-b,
+html[data-theme='light'] [class~='bg-[#0b141a]'],
+html[data-theme='light'] [class~='bg-[#111b21]'] {
+  background-image: none !important;
+}
+
+html[data-theme='light'] [class~='bg-[#0b141a]'],
+html[data-theme='light'] [class~='bg-[#111b21]'] {
+  background-color: var(--surface-panel) !important;
+}
+
+html[data-theme='light'] .atendimento-workspace__header,
+html[data-theme='light'] .operations-module-frame__header {
+  background: var(--surface-panel) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-premium) !important;
+}
