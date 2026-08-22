@@ -13,6 +13,7 @@ import {
 import { Header } from './components/Header';
 import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
+import AtendimentoWorkspaceFrame from './components/AtendimentoWorkspaceFrame';
 import { OperatorCRM } from './components/OperatorCRM';
 import { EscalationsPanel } from './components/EscalationsPanel';
 import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
@@ -894,6 +895,12 @@ export const App: React.FC = () => {
             polling até o próximo ciclo de 8s. Bug real relatado em
             produção: mensagem aparecia e sumia da conversa. */}
         <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
+          <AtendimentoWorkspaceFrame
+            activeTenantName={activeTenant.name}
+            pendingCount={escalations.filter((e) => !e.resolved).length}
+            leadCount={leads.length}
+            onOpenEscalations={() => setActiveTab('escalations')}
+          >
           <WhatsAppLeadsSim
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
@@ -912,6 +919,7 @@ export const App: React.FC = () => {
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
           />
+          </AtendimentoWorkspaceFrame>
         </div>
 
         {activeTab === 'crm' && (
