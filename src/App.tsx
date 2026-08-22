@@ -20,6 +20,7 @@ import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
+import { OperationsCenter } from './components/OperationsCenter';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { isStandalonePwa } from './lib/pwa';
@@ -94,7 +95,7 @@ export const App: React.FC = () => {
   // saas_admin (pedido direto, 19/08/2026) — o Painel Multi-Tenant saiu da
   // faixa de abas e virou um botão próprio no cabeçalho (ver Header.tsx),
   // acessado sob demanda em vez de ser a tela de entrada.
-  const [activeTab, setActiveTab] = useState<ActiveTab>('whatsapp');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('home');
   // Lead a abrir automaticamente ao entrar na aba WhatsApp — usado pelo
   // botão "Voltar pra conversa" do card de Escalonamento. requestId muda a
   // cada clique (mesmo pro mesmo telefone), pra garantir que clicar de novo
@@ -823,7 +824,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row font-sans selection:bg-emerald-500 selection:text-slate-950">
       
       {/* Header Navigation */}
       <Header
@@ -845,13 +846,26 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+      <main className="min-w-0 flex-1 w-full p-4 sm:p-6 lg:p-8 xl:p-10 space-y-6">
         
         {/* Toast Alert */}
         {toastMsg && (
           <div className="fixed top-20 right-6 z-50 bg-emerald-600 text-slate-950 font-bold px-4 py-2.5 rounded-xl shadow-xl animate-fade-in border border-emerald-400 text-xs flex items-center gap-2">
             <span>{toastMsg}</span>
           </div>
+        )}
+
+        {activeTab === 'home' && (
+          <OperationsCenter
+            activeTenant={activeTenant}
+            currentUser={currentUser}
+            leads={leads}
+            transactions={transactions}
+            escalations={escalations}
+            canSeeFinancial={canSeeFinancial}
+            canSeeAdminTools={canSeeAdminTools}
+            onNavigate={setActiveTab}
+          />
         )}
 
         {activeTab === 'saas' && canSeeSaasMaster && (

@@ -1,43 +1,27 @@
-/**
- * Issue #124 — usa a escala nomeada de raio (rounded-control/panel/pill,
- * ver @theme em src/index.css) como referência de como código novo deve
- * escrever isso. Mapeada 1:1 pro valor que rounded-lg/xl/full já tinham
- * aqui — zero mudança visual, só a intenção explícita no JSX.
- *
- * Issue #125 — os botões mais simples deste arquivo (menu mobile, scroll
- * da faixa de abas, entrar/sair) usam o componente <Button> como
- * referência de adoção (foco visível padronizado, que praticamente
- * nenhum botão do painel tinha antes). As abas de navegação (com cor
- * ativa própria por papel — roxo pro SaaS Admin, esmeralda pro resto)
- * continuam com a classe condicional manual: o `active` do <Button> hoje
- * só cobre um tom (esmeralda), não encaixa nesse caso sem estender o
- * componente — fica como próximo passo, não bloqueia esta adoção inicial.
- */
 import React, { useEffect, useRef, useState } from 'react';
+import {
+  BarChart3,
+  BookOpen,
+  Brain,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Home,
+  Kanban,
+  Layers,
+  LogOut,
+  Menu,
+  MessageSquare,
+  Settings2,
+  ShieldCheck,
+  UserRound,
+  X,
+} from 'lucide-react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
 import { isStandalonePwa } from '../lib/pwa';
 import { hasRoleAtLeast } from '../lib/roles';
-import { Button } from './ui/Button';
-import {
-  MessageSquare,
-  Sparkles,
-  CheckCircle2,
-  Brain,
-  Target,
-  Kanban,
-  DollarSign,
-  User,
-  LogOut,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Building2,
-  Layers,
-  CalendarDays,
-  X,
-  Menu,
-  ShieldCheck
-} from 'lucide-react';
 
 interface HeaderProps {
   activeTab: ActiveTab;
@@ -51,6 +35,28 @@ interface HeaderProps {
   onSelectTenant: (tenant: Tenant) => void;
 }
 
+type NavigationItem = {
+  id: ActiveTab;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+  visible: boolean;
+};
+
+const tabLabels: Partial<Record<ActiveTab, string>> = {
+  home: 'Hoje',
+  whatsapp: 'Conversas',
+  crm: 'Vendas',
+  agenda_financeiro: 'Agenda & Caixa',
+  attribution: 'Crescimento',
+  knowledge: 'Configurar',
+  quality: 'Qualidade da IA',
+  escalations: 'Pendências',
+  saas: 'Empresas',
+};
+
+const firstName = (name?: string | null) => (name || 'Operador').trim().split(/\s+/)[0] || 'Operador';
+
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
@@ -62,433 +68,164 @@ export const Header: React.FC<HeaderProps> = ({
   activeTenant,
   onSelectTenant,
 }) => {
-  const tabsRef = useRef<HTMLDivElement>(null);
-  // Duas restrições combinadas nas abas visíveis: (1) aberto pelo ícone
-  // instalado (PWA do atendente, issue #159) sempre restringe pro escopo de
-  // atendimento, não importa o papel do usuário; (2) papel "Operador" fica
-  // restrito ao mesmo escopo mesmo no navegador normal — pedido direto do
-  // Lucas: funcionário de atendimento não deve ver Financeiro nem telas
-  // administrativas. "Gerente" já enxerga Financeiro, mas só
-  // "Administrador"+ vê as ferramentas mais técnicas (Meta CAPI, Base de
-  // Conhecimento, Evo Hub, Guia de API), e só "SaaS Master Admin" vê o
-  // painel multi-tenant. display-mode não muda durante a sessão, então um
-  // cálculo só (não precisa reavaliar em cada render) já é suficiente.
   const [isInstalledApp] = useState(() => isStandalonePwa());
   const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
   const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
   const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
-  // Achado real testando no celular (Lucas): o cabeçalho completo (marca +
-  // seletor de empresa + perfil, cada um sua própria "caixa") empilhava em
-  // 3 blocos cheios antes de qualquer conteúdo útil aparecer na tela. No
-  // mobile, tudo isso agora fica atrás de um botão de menu — no desktop
-  // (md:) o layout original continua igual, sem essa condensação.
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  // Achado direto do dono do produto (19/08/2026): o seletor de empresa
-  // (Building2 + dropdown próprio) e o menu do perfil (setinha ▼ + botão
-  // Sair) eram dois controles lado a lado fazendo coisas parecidas —
-  // confuso. Unificados num só: a setinha do perfil agora abre um dropdown
-  // que, só pra saas_admin, também lista as empresas pra alternar de
-  // verdade (backend já resolve isso via header X-Tenant-Id, ver
-  // resolveTenantId em server/middleware/rbac.ts — não é mais cosmético).
-  // Pra quem não é saas_admin, a setinha continua abrindo direto o modal de
-  // login (nada pra listar), sem esse dropdown extra.
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
-  // Mesmo raciocínio da versão antiga do seletor de empresa: fecha ao
-  // clicar fora, não só no hover (não depende de trajetória do mouse e
-  // também funciona em touch).
   useEffect(() => {
-    if (!isProfileMenuOpen) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
-        setIsProfileMenuOpen(false);
-      }
+    if (!isProfileOpen) return;
+    const onOutsideClick = (event: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) setIsProfileOpen(false);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isProfileMenuOpen]);
+    document.addEventListener('mousedown', onOutsideClick);
+    return () => document.removeEventListener('mousedown', onOutsideClick);
+  }, [isProfileOpen]);
 
-  const scrollTabs = (direction: 'left' | 'right') => {
-    if (tabsRef.current) {
-      const scrollAmount = direction === 'left' ? -280 : 280;
-      tabsRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-    }
+  const primaryNavigation: NavigationItem[] = [
+    { id: 'home', label: 'Hoje', description: 'Prioridades da operação', icon: Home, visible: true },
+    { id: 'whatsapp', label: 'Conversas', description: 'Atendimento no WhatsApp', icon: MessageSquare, visible: true },
+    { id: 'crm', label: 'Vendas', description: 'Pipeline e oportunidades', icon: Kanban, visible: true },
+    { id: 'agenda_financeiro', label: 'Agenda & Caixa', description: 'Horários e recebimentos', icon: CalendarDays, visible: canSeeFinancial },
+  ];
+
+  const growthNavigation: NavigationItem[] = [
+    { id: 'attribution', label: 'Crescimento', description: 'Tráfego e conversões', icon: BarChart3, visible: canSeeAdminTools },
+  ];
+
+  const settingsNavigation: NavigationItem[] = [
+    { id: 'knowledge', label: 'Configurar', description: 'Agente e operação', icon: Settings2, visible: canSeeAdminTools },
+    { id: 'quality', label: 'Qualidade da IA', description: 'Auditar atendimentos', icon: ShieldCheck, visible: canSeeAdminTools },
+  ];
+
+  const navigate = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    setIsMobileOpen(false);
   };
 
-  return (
-    <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30 shadow-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Barra compacta só no mobile: ícone + título curto + status +
-            botão de menu, tudo numa linha só. O bloco completo (marca,
-            seletor de empresa, perfil) fica escondido atrás do menu — ver
-            painel logo abaixo — pra não empilhar 3 caixas grandes antes de
-            qualquer conteúdo real aparecer na tela pequena. */}
-        <div className="flex md:hidden items-center justify-between py-3">
-          <div className="flex items-center space-x-2 min-w-0">
-            <div className="w-8 h-8 rounded-control bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
-              <MessageSquare className="w-4 h-4 text-emerald-400" />
-            </div>
-            <span className="font-bold text-white text-sm truncate">Universo</span>
+  const navigationBlock = (items: NavigationItem[], label?: string) => {
+    const visibleItems = items.filter((item) => item.visible);
+    if (!visibleItems.length) return null;
+    return (
+      <div className="space-y-1">
+        {label && <p className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{label}</p>}
+        {visibleItems.map((item) => (
+          <NavigationButton key={item.id} item={item} active={activeTab === item.id} onClick={() => navigate(item.id)} />
+        ))}
+      </div>
+    );
+  };
+
+  const profilePanel = (
+    <div className="relative mt-auto pt-4" ref={profileMenuRef}>
+      {canSeeSaasMaster && isProfileOpen && (
+        <div className="absolute bottom-[calc(100%+0.65rem)] left-0 right-0 z-50 overflow-hidden rounded-card border border-slate-700 bg-slate-900 p-2 shadow-2xl shadow-slate-950/60 animate-pop-in">
+          <p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Alternar empresa</p>
+          <div className="max-h-56 space-y-1 overflow-y-auto pr-1 custom-scrollbar">
+            {tenants.map((tenant) => (
+              <button
+                key={tenant.id}
+                onClick={() => { onSelectTenant(tenant); setIsProfileOpen(false); }}
+                className={`flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left text-xs transition-colors ${tenant.id === activeTenant.id ? 'bg-emerald-500/12 text-emerald-200' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Building2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                <span className="min-w-0 flex-1 truncate font-semibold">{tenant.name}</span>
+                {tenant.id === activeTenant.id && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+              </button>
+            ))}
           </div>
-          <Button variant="ghost" size="md" iconOnly onClick={() => setIsMobileMenuOpen((open) => !open)} title="Menu" className="flex-shrink-0">
-            {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </Button>
+          <button onClick={() => { setIsProfileOpen(false); onOpenLoginModal(); }} className="mt-2 flex w-full items-center gap-2 border-t border-slate-800 px-2.5 pt-2.5 text-left text-xs font-semibold text-slate-400 transition-colors hover:text-white">
+            <UserRound className="h-3.5 w-3.5" /> Trocar operador
+          </button>
         </div>
+      )}
 
-        {isMobileMenuOpen && (
-          <div className="md:hidden pb-4 space-y-3 border-t border-slate-800/80 pt-3 animate-pop-in origin-top">
-            <p className="text-xs text-slate-400">
-              Plataforma Multi-Empresas de Inteligência de Atendimento, CRM, Financeiro e CAPI
-            </p>
+      {currentUser ? (
+        <div className="rounded-card border border-slate-800 bg-slate-900/90 p-2 shadow-lg shadow-slate-950/25">
+          <button
+            onClick={() => canSeeSaasMaster ? setIsProfileOpen((open) => !open) : onOpenLoginModal()}
+            className="flex w-full items-center gap-2.5 rounded-panel p-1 text-left transition-colors hover:bg-slate-800"
+            title={canSeeSaasMaster ? 'Alternar empresa ou operador' : 'Trocar operador'}
+          >
+            <img src={currentUser.avatar} alt={currentUser.name} className="h-8 w-8 shrink-0 rounded-pill border border-emerald-400/35 object-cover" />
+            <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-white">{firstName(currentUser.name)}</span><span className="mt-0.5 block truncate text-[10px] capitalize text-emerald-400">{currentUser.role.replace('_', ' ')}</span></span>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <button onClick={onLogout} className="mt-1.5 flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300">
+            <LogOut className="h-3.5 w-3.5" /> Sair
+          </button>
+        </div>
+      ) : (
+        <button onClick={onOpenLoginModal} className="flex w-full items-center justify-center gap-2 rounded-panel bg-emerald-500 px-3 py-2.5 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-950/30 transition-transform active:scale-[0.98]">
+          <UserRound className="h-4 w-4" /> Entrar
+        </button>
+      )}
+    </div>
+  );
 
-            {currentUser?.role === 'saas_admin' ? (
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 mb-1">Empresa ativa</div>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {tenants.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => { onSelectTenant(t); setIsMobileMenuOpen(false); }}
-                      className={`w-full text-left px-2.5 py-2 rounded-control text-xs font-medium flex items-center justify-between transition-all ${
-                        t.id === activeTenant.id
-                          ? 'bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50'
-                          : 'text-slate-300 bg-slate-950 border border-slate-800'
-                      }`}
-                    >
-                      <span className="truncate pr-2">{t.name}</span>
-                      {t.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-control bg-slate-950 border border-slate-800 text-slate-300" title={activeTenant.name}>
-                <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                <span className="font-semibold text-xs truncate">{activeTenant.name}</span>
-              </div>
-            )}
+  const sidePanel = (mobile = false) => (
+    <div className={`flex h-full flex-col ${mobile ? 'p-4' : 'p-3'}`}>
+      <div className="flex items-center gap-3 px-2 py-2">
+        <span className="flex h-9 w-9 items-center justify-center rounded-panel border border-emerald-400/25 bg-emerald-400/10 text-emerald-300 shadow-inner shadow-emerald-950/30"><MessageSquare className="h-4.5 w-4.5" /></span>
+        <span className="min-w-0 flex-1"><span className="block text-sm font-bold tracking-tight text-white">Universo</span><span className="block truncate text-[10px] font-medium text-slate-500">Operação de atendimento</span></span>
+        {mobile && <button onClick={() => setIsMobileOpen(false)} className="rounded-control p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>}
+      </div>
 
-            {/* Painel Multi-Tenant saiu da faixa de abas (pedido direto,
-                19/08/2026: Atendimento é a página principal) — vira um botão
-                próprio, só pra quem já enxergava a aba (saas_admin). */}
-            {canSeeSaasMaster && (
-              <Button
-                active={activeTab === 'saas'}
-                size="md"
-                onClick={() => { setActiveTab('saas'); setIsMobileMenuOpen(false); }}
-                className="w-full justify-center"
-              >
-                <Layers className="w-4 h-4" />
-                <span>Painel Multi-Tenant</span>
-              </Button>
-            )}
+      <div className="mt-5 rounded-panel border border-slate-800 bg-slate-900/70 px-3 py-2.5">
+        <div className="flex items-center gap-2"><span className="flex h-5 w-5 items-center justify-center rounded-control bg-emerald-500/10 text-emerald-400"><Building2 className="h-3 w-3" /></span><span className="truncate text-[11px] font-bold text-slate-200">{activeTenant.name}</span></div>
+      </div>
 
-            {canSeeAdminTools && (
-              <Button
-                active={activeTab === 'quality'}
-                size="md"
-                onClick={() => { setActiveTab('quality'); setIsMobileMenuOpen(false); }}
-                className="w-full justify-center"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                <span>Qualidade IA</span>
-              </Button>
-            )}
-
-            {currentUser ? (
-              <div className="flex items-center justify-between bg-slate-800/90 border border-slate-700/80 p-2 rounded-panel text-slate-200">
-                <div className="flex items-center gap-2 min-w-0">
-                  <img src={currentUser.avatar} alt={currentUser.name} className="w-8 h-8 rounded-pill object-cover border border-emerald-500/50 flex-shrink-0" />
-                  <div className="text-left min-w-0">
-                    <div className="font-bold text-white text-xs leading-none truncate">{currentUser.name}</div>
-                    <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <Button variant="ghost" size="sm" iconOnly onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }} title="Trocar Operador / Perfil">
-                    <ChevronDown className="w-4 h-4" />
-                  </Button>
-                  <Button variant="danger" size="sm" iconOnly onClick={() => { onLogout(); setIsMobileMenuOpen(false); }} title="Sair">
-                    <LogOut className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button variant="primary" size="md" onClick={() => { onOpenLoginModal(); setIsMobileMenuOpen(false); }} className="w-full">
-                <User className="w-4 h-4" />
-                <span>Entrar / Login</span>
-              </Button>
-            )}
+      <nav className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+        {navigationBlock(primaryNavigation)}
+        {navigationBlock(growthNavigation, 'Desempenho')}
+        {navigationBlock(settingsNavigation, 'Administração')}
+        {canSeeSaasMaster && (
+          <div className="space-y-1">
+            <p className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Plataforma</p>
+            <NavigationButton item={{ id: 'saas', label: 'Empresas', description: 'Gestão multi-tenant', icon: Layers, visible: true }} active={activeTab === 'saas'} onClick={() => navigate('saas')} />
           </div>
         )}
+      </nav>
 
-        {/* Layout original — só no desktop (md:) a partir daqui, sem
-            nenhuma mudança de comportamento pra quem já usava assim. */}
-        <div className="hidden md:flex md:items-center md:justify-between py-4 gap-4">
-
-          {/* Brand & App Title */}
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-panel bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
-              <MessageSquare className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">
-                SaaS Multi-Tenant <span className="text-emerald-400">WhatsApp & Meta CAPI</span>
-              </h1>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Plataforma Multi-Empresas de Inteligência de Atendimento, CRM, Financeiro e CAPI
-              </p>
-            </div>
-          </div>
-
-          {/* Tenant Switcher & User Auth */}
-          <div className="flex items-center space-x-3 text-xs">
-
-            {/* Empresa ativa — só texto informativo pra quem não é
-                saas_admin (sempre dono de UM tenant só, nada pra trocar).
-                Pra saas_admin, a troca de verdade agora mora no dropdown do
-                perfil (ver abaixo). */}
-            {currentUser?.role !== 'saas_admin' && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-300" title={activeTenant.name}>
-                <Building2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                <span className="font-semibold text-xs truncate max-w-[140px]">{activeTenant.name}</span>
-              </div>
-            )}
-
-            {/* Painel Multi-Tenant saiu da faixa de abas (pedido direto,
-                19/08/2026: Atendimento é a página principal) — vira um botão
-                próprio, só pra quem já enxergava a aba (saas_admin). */}
-            {canSeeSaasMaster && (
-              <Button
-                active={activeTab === 'saas'}
-                size="sm"
-                onClick={() => setActiveTab('saas')}
-                title="Painel Multi-Tenant"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>Painel</span>
-              </Button>
-            )}
-
-            {/* User Profile */}
-            {currentUser ? (
-              <div className="relative" ref={profileMenuRef}>
-                <div className="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/80 p-1.5 pl-2.5 rounded-panel text-slate-200">
-                  <img
-                    src={currentUser.avatar}
-                    alt={currentUser.name}
-                    className="w-7 h-7 rounded-pill object-cover border border-emerald-500/50"
-                  />
-                  <div className="text-left hidden sm:block">
-                    <div className="font-bold text-white text-xs leading-none">{currentUser.name}</div>
-                    <div className="text-[10px] text-emerald-400 capitalize">{currentUser.role}</div>
-                  </div>
-
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    iconOnly
-                    onClick={() => (currentUser.role === 'saas_admin' ? setIsProfileMenuOpen((open) => !open) : onOpenLoginModal())}
-                    title={currentUser.role === 'saas_admin' ? 'Alternar empresa / Trocar operador' : 'Trocar Operador / Perfil'}
-                  >
-                    <ChevronDown className={`w-4 h-4 transition-transform ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
-                  </Button>
-
-                  <Button variant="danger" size="xs" iconOnly onClick={onLogout} title="Sair" className="ml-1">
-                    <LogOut className="w-4 h-4" />
-                  </Button>
-                </div>
-
-                {/* Dropdown só existe pra saas_admin (único papel com algo
-                    real pra listar aqui) — resto continua com o clique
-                    direto na setinha abrindo o modal de login, como sempre. */}
-                {currentUser.role === 'saas_admin' && isProfileMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-panel shadow-2xl p-2 z-50 origin-top-right animate-pop-in">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 border-b border-slate-800 mb-1">
-                      Alternar Cliente (Tenant)
-                    </div>
-                    <div className="space-y-1 max-h-56 overflow-y-auto">
-                      {tenants.map((t) => (
-                        <button
-                          key={t.id}
-                          onClick={() => {
-                            onSelectTenant(t);
-                            setIsProfileMenuOpen(false);
-                          }}
-                          className={`w-full text-left px-2.5 py-2 rounded-control text-xs font-medium flex items-center justify-between transition-all ${
-                            t.id === activeTenant.id
-                              ? 'bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50'
-                              : 'text-slate-300 hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="truncate pr-2">
-                            <div className="truncate">{t.name}</div>
-                            <div className="text-[9px] text-slate-500 font-normal">R$ {t.monthlyMRR}/mês • {t.plan}</div>
-                          </div>
-                          {t.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="border-t border-slate-800 mt-2 pt-2">
-                      <button
-                        onClick={() => {
-                          setIsProfileMenuOpen(false);
-                          onOpenLoginModal();
-                        }}
-                        className="w-full text-left px-2.5 py-2 rounded-control text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-all"
-                      >
-                        Trocar Operador / Perfil
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <Button variant="primary" size="md" onClick={onOpenLoginModal}>
-                <User className="w-4 h-4" />
-                <span>Entrar / Login</span>
-              </Button>
-            )}
-          </div>
-
-        </div>
-
-        {/* Navigation Tabs with Horizontal Scroll Controls */}
-        <div className="relative flex items-center border-t border-slate-800/80 mt-1 pt-1">
-          {/* Scroll Left Button */}
-          <button
-            onClick={() => scrollTabs('left')}
-            className="flex-shrink-0 p-1.5 mr-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-control transition-all border border-slate-800 shadow bg-slate-900/90"
-            title="Rolar menu para esquerda"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          {/* Scrollable Tabs Container */}
-          <div
-            ref={tabsRef}
-            className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto pb-2 pt-0.5 custom-scrollbar scroll-smooth w-full"
-          >
-            {/* Painel Multi-Tenant saiu da faixa de abas (pedido direto,
-                19/08/2026) — agora é um botão próprio no cabeçalho (ver
-                acima, junto do seletor de empresa), não mais uma aba aqui.
-                Atendimento (WhatsApp, abaixo) passa a ser a página
-                principal. */}
-
-            <button
-              id="tab-whatsapp-sim"
-              onClick={() => setActiveTab('whatsapp')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'whatsapp'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <MessageSquare className="w-4 h-4" />
-              {/* Achado real: "Atendimento WhatsApp" ocupava espaço extra numa
-                  faixa de abas que já precisa de rolagem horizontal no
-                  mobile — o ícone de balão de mensagem já deixa o contexto
-                  claro, mesmo padrão do título encurtado dentro da própria
-                  tela (WhatsAppLeadsSim.tsx). */}
-              <span>WhatsApp</span>
-            </button>
-
-            <button
-              id="tab-crm"
-              onClick={() => setActiveTab('crm')}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === 'crm'
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-              }`}
-            >
-              <Kanban className="w-4 h-4 text-emerald-400" />
-              <span>CRM</span>
-            </button>
-
-            {/* Sem aba própria de propósito (pedido do Lucas): já existe um
-                botão "Escalonamentos" com o mesmo badge de contagem dentro
-                do próprio Atendimento WhatsApp (toolbar de
-                WhatsAppLeadsSim.tsx, via onGoToEscalations) — deixava o
-                menu redundante, ainda mais apertado no mobile. */}
-
-            {canSeeFinancial && (
-              <button
-                id="tab-agenda-financeiro"
-                onClick={() => setActiveTab('agenda_financeiro')}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                  activeTab === 'agenda_financeiro'
-                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-                }`}
-              >
-                <CalendarDays className="w-4 h-4 text-emerald-400" />
-                <span>Agenda &amp; Financeiro</span>
-              </button>
-            )}
-
-            {canSeeAdminTools && (
-              <>
-                <button
-                  id="tab-attribution"
-                  onClick={() => setActiveTab('attribution')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                    activeTab === 'attribution'
-                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-                  }`}
-                >
-                  <Target className="w-4 h-4 text-emerald-400" />
-                  <span>Meta CAPI</span>
-                </button>
-
-                <button
-                  id="tab-quality"
-                  onClick={() => setActiveTab('quality')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                    activeTab === 'quality'
-                      ? 'bg-violet-600 text-white shadow-sm shadow-violet-900/50'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4 text-violet-300" />
-                  <span>Qualidade IA</span>
-                </button>
-
-                <button
-                  id="tab-knowledge"
-                  onClick={() => setActiveTab('knowledge')}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-control text-sm font-medium transition-all whitespace-nowrap ${
-                    activeTab === 'knowledge'
-                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-900/50'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
-                  }`}
-                >
-                  <Brain className="w-4 h-4 text-emerald-400" />
-                  <span>Base de Conhecimento</span>
-                </button>
-
-                {/* "Guia Conexão API" removida da navegação (pedido direto,
-                    "pode descartar"/"não é necessário no momento") — a tela
-                    continua existindo no código, só não tem mais aba
-                    própria; reativar é só devolver o botão aqui. A integração
-                    "Evo Hub" (api.evohub.ai) que também tinha aba aqui foi
-                    descontinuada de vez e removida do código. */}
-              </>
-            )}
-          </div>
-
-          {/* Scroll Right Button */}
-          <button
-            onClick={() => scrollTabs('right')}
-            className="flex-shrink-0 p-1.5 ml-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-control transition-all border border-slate-800 shadow bg-slate-900/90"
-            title="Rolar menu para direita"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
+      <div className="mt-3 rounded-panel border border-slate-800 bg-slate-950/50 px-3 py-2 text-[10px] text-slate-500">
+        <span className="font-semibold text-slate-400">{savedCount}</span> histórico(s) de atendimento
       </div>
-    </header>
+      {profilePanel}
+    </div>
+  );
+
+  return (
+    <>
+      <aside className="hidden h-screen w-[244px] shrink-0 border-r border-slate-800/80 bg-slate-950/90 lg:sticky lg:top-0 lg:flex">
+        {sidePanel()}
+      </aside>
+
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-800/80 bg-slate-950/90 px-4 py-3 backdrop-blur-xl lg:hidden">
+        <button onClick={() => setIsMobileOpen(true)} className="rounded-control border border-slate-800 bg-slate-900 p-2 text-slate-300"><Menu className="h-4 w-4" /></button>
+        <div className="min-w-0 text-center"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-400">Universo</p><p className="truncate text-sm font-bold text-white">{tabLabels[activeTab] || 'Operação'}</p></div>
+        <button onClick={() => navigate('home')} className="rounded-control border border-emerald-500/25 bg-emerald-500/10 p-2 text-emerald-300"><Home className="h-4 w-4" /></button>
+      </header>
+
+      {isMobileOpen && (
+        <div className="fixed inset-0 z-[60] flex lg:hidden">
+          <button aria-label="Fechar menu" onClick={() => setIsMobileOpen(false)} className="flex-1 bg-slate-950/75 backdrop-blur-sm" />
+          <aside className="h-full w-[min(86vw,330px)] border-l border-slate-800 bg-slate-950 shadow-2xl shadow-black/60">{sidePanel(true)}</aside>
+        </div>
+      )}
+    </>
+  );
+};
+
+const NavigationButton: React.FC<{ item: NavigationItem; active: boolean; onClick: () => void }> = ({ item, active, onClick }) => {
+  const Icon = item.icon;
+  return (
+    <button onClick={onClick} className={`group flex w-full items-center gap-3 rounded-panel px-3 py-2.5 text-left transition-all ${active ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-950/30' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100'}`}>
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-control ${active ? 'bg-slate-950/12' : 'bg-slate-800/65 text-emerald-400 group-hover:bg-slate-800'}`}><Icon className="h-3.5 w-3.5" /></span>
+      <span className="min-w-0 flex-1"><span className="block text-xs font-bold">{item.label}</span><span className={`mt-0.5 block truncate text-[10px] ${active ? 'text-slate-900/70' : 'text-slate-500'}`}>{item.description}</span></span>
+      <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${active ? 'text-slate-900/65' : 'text-slate-700 group-hover:translate-x-0.5 group-hover:text-slate-400'}`} />
+    </button>
   );
 };

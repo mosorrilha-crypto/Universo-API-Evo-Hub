@@ -2728,7 +2728,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl mx-auto animate-page-enter">
       {/* Controls Bar — achado real em produção: as duas barras acima disso
           (seletor "Ambiente" produção/sandbox e o card "Instância Online" /
           "Motor: Z-API Managed" / "Failover Ativo" / botões "Número Real &
@@ -2742,7 +2742,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className="relative p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl space-y-2.5">
+      <div className="relative p-3 rounded-card bg-slate-900/85 border border-slate-800 shadow-xl shadow-slate-950/25 space-y-2.5">
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -2760,7 +2760,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               title="Ir para a fila de Escalonamentos"
             >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Escalonamentos</span>
+              <span>Pendências</span>
               {escalationsPendingCount > 0 && (
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
                   {escalationsPendingCount}
@@ -2785,7 +2785,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
-            <span>{showRightPanel ? 'Ocultar Ficha IA' : 'Ver Ficha IA'}</span>
+            <span>{showRightPanel ? 'Ocultar assistente' : 'Abrir assistente'}</span>
           </button>
 
           {/* Status e Arquivadas saíram desta fileira (14/08/2026, pedido
@@ -2815,7 +2815,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
-            <span>{adsOnly ? 'Só Anúncios' : 'Todos os Contatos'}</span>
+            <span>{adsOnly ? 'Apenas anúncios' : 'Todos os contatos'}</span>
           </button>
 
           {/* Gatilhos de texto pro modo "somente anúncios" (achado real,
@@ -2831,7 +2831,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               className="flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white"
             >
               <Settings className="w-3.5 h-3.5" />
-              <span>Gatilhos de Anúncio{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}</span>
+              <span>Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}</span>
             </button>
           )}
 
@@ -2867,7 +2867,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <Settings className="w-3.5 h-3.5" />
-            <span>Configurações</span>
+            <span>Mais opções</span>
           </button>
         </div>
 

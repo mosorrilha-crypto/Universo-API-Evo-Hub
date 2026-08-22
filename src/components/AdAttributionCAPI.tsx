@@ -302,10 +302,10 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 animate-page-enter">
       
       {/* Top Banner & Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+      <div className="bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-card p-5 sm:p-6 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 transform translate-x-10 -translate-y-10 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 relative z-10">
@@ -315,22 +315,15 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <Target className="w-6 h-6" />
               </div>
               <h2 className="text-2xl font-bold text-white tracking-tight">
-                Central de Tráfego, Atribuição & Meta CAPI
+                Crescimento
               </h2>
             </div>
             <p className="text-sm text-slate-300 max-w-3xl leading-relaxed">
-              Consulte as métricas reais das campanhas Meta, acompanhe a origem de cada lead no WhatsApp e envie eventos de conversão pela Meta CAPI para aprimorar a otimização dos anúncios.
+              Acompanhe as campanhas, entenda a origem dos contatos e devolva conversões reais para a Meta — tudo em um único lugar.
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={() => setActiveTab('traffic_center')}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-2 transition-all shadow-lg shadow-emerald-950/50"
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>Central de Tráfego</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleGenerateAIReport}
               disabled={isGeneratingReport}
@@ -344,7 +337,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-emerald-300" />
-                  <span>Diagnóstico por IA (Gemini)</span>
+                  <span>Analisar com IA</span>
                 </>
               )}
             </button>
@@ -354,7 +347,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-2 transition-all"
             >
               <Key className="w-4 h-4 text-emerald-400" />
-              <span>Configurar Meta CAPI</span>
+              <span>Configurar conexões</span>
             </button>
           </div>
         </div>
@@ -382,7 +375,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <BarChart3 className="w-4 h-4" />
-            <span>Visão Geral & Atribuição de Anúncios</span>
+            <span>Origem dos leads</span>
           </button>
 
           <button
@@ -394,7 +387,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <Bot className="w-4 h-4 text-purple-400" />
-            <span>Estudos & Relatório Estratégico IA</span>
+            <span>Diagnóstico IA</span>
           </button>
 
           <button
@@ -406,7 +399,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <Send className="w-4 h-4 text-blue-400" />
-            <span>Central & Disparo Meta CAPI</span>
+            <span>Eventos CAPI</span>
             <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">
               {capiEventsLog.length} Eventos
             </span>
@@ -421,7 +414,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <Smartphone className="w-4 h-4 text-amber-400" />
-            <span>Simulador de Link UTM & Anúncios</span>
+            <span>Simular entrada UTM</span>
           </button>
         </div>
       </div>
@@ -623,7 +616,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                         
                         {/* Lead Info */}
                         <td className="py-3.5 pl-2">
-                          <div className="flex items-center space-x-3">
+                          <div className="flex flex-wrap items-center gap-2">
                             <img 
                               src={lead.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'} 
                               alt={lead.name}
