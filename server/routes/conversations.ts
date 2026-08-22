@@ -18,7 +18,7 @@ import {
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
-import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
+import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, findProductMatch, resolveProductAmountByName } from '../services/knowledgeBaseStore';
@@ -353,10 +353,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           uploadFilename = output === 'ogg_opus' ? 'voice-note.ogg' : 'voice-note.mp3';
         };
 
-        await applyTranscode(isEvolution ? 'mp3' : 'ogg_opus');
+        await applyTranscode('ogg_opus');
 
         if (isEvolution) {
-          await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType, uploadFilename);
+          try {
+            await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
+          } catch (error) {
+            console.warn(`🎙️ [audioFallback] evolution_ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            await applyTranscode('mp3');
+            await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
+          }
         } else {
           const sendCurrentAudio = async (diagnosticTag?: string) => {
             const audioBuffer = Buffer.from(uploadBase64, 'base64');

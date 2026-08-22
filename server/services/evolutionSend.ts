@@ -58,6 +58,44 @@ export async function sendEvolutionTextMessage(
 }
 
 /** Envio de mídia (imagem, áudio, documento) via Evolution API (POST /message/sendMedia/{instance}). */
+/**
+ * Envia uma nota de voz PTT nativa. O endpoint dedicado é diferente de
+ * `sendMedia`: este último sempre representa áudio como arquivo/mídia comum.
+ */
+export async function sendEvolutionVoiceMessage(
+  instanceName: string | undefined,
+  apiUrl: string | undefined,
+  apiKey: string | undefined,
+  to: string,
+  base64: string,
+  mimeType: string
+): Promise<void> {
+  requireCredentials(instanceName, apiUrl, apiKey);
+
+  const audio = base64.startsWith('data:')
+    ? base64
+    : `data:${mimeType};base64,${base64}`;
+  const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/message/sendWhatsAppAudio/${instanceName}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: apiKey! },
+    body: JSON.stringify({
+      number: to,
+      audio,
+      // Solicita à Evolution a codificação compatível com o PTT do WhatsApp.
+      encoding: true,
+      delay: 1200,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`Falha ao enviar nota de voz via Evolution API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  console.log(`🎙️ [evolutionVoiceNote] to=***${to.replace(/\D/g, '').slice(-4)} mime="${mimeType}" message_id=${(data as any)?.key?.id || 'não informado'}`);
+}
+
+/** Envio de mídia (imagem, áudio, documento) via Evolution API (POST /message/sendMedia/{instance}). */
 export async function sendEvolutionMediaMessage(
   instanceName: string | undefined,
   apiUrl: string | undefined,
