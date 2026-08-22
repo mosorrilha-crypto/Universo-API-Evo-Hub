@@ -117,17 +117,46 @@ class FakeQueryBuilder {
   }
 }
 
+function buildConversationListSummaries(tables: Tables): Row[] {
+  const conversations = tables.conversations || [];
+  const messages = tables.messages || [];
+  return conversations.map((conversation) => {
+    const conversationMessages = messages
+      .filter((message) => message.tenant_id === conversation.tenant_id && message.conversation_id === conversation.id)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id)));
+    const last = conversationMessages[0];
+    const unreadCount = conversationMessages.filter((message) =>
+      message.sender === 'lead' && String(message.created_at) > String(conversation.last_read_at || '')
+    ).length;
+    return {
+      ...conversation,
+      last_message_id: last?.id || null,
+      last_message_sender: last?.sender || null,
+      last_message_type: last?.type || null,
+      last_message_text: last?.text || null,
+      last_message_created_at: last?.created_at || null,
+      last_message_reply_to_message_id: last?.reply_to_message_id || null,
+      last_message_forwarded_from_message_id: last?.forwarded_from_message_id || null,
+      last_message_reactions: last?.reactions || null,
+      last_message_sent_by: last?.sent_by || null,
+      unread_count: unreadCount,
+    };
+  });
+}
+
 export function createFakeSupabase(seed: Tables = {}) {
   const tables: Tables = seed;
   return {
     from(table: string) {
-      if (!tables[table]) tables[table] = [];
+      const rows = table === 'conversation_list_summaries'
+        ? buildConversationListSummaries(tables)
+        : (tables[table] || (tables[table] = []));
       return {
-        select: (columns?: string) => new FakeQueryBuilder(tables[table], 'select').select(columns),
-        insert: (payload: Row) => new FakeQueryBuilder(tables[table], 'insert', payload),
-        update: (payload: Row) => new FakeQueryBuilder(tables[table], 'update', payload),
-        delete: () => new FakeQueryBuilder(tables[table], 'delete'),
-        upsert: (payload: Row, opts?: { onConflict?: string }) => new FakeQueryBuilder(tables[table], 'upsert', payload, opts),
+        select: (columns?: string) => new FakeQueryBuilder(rows, 'select').select(columns),
+        insert: (payload: Row) => new FakeQueryBuilder(rows, 'insert', payload),
+        update: (payload: Row) => new FakeQueryBuilder(rows, 'update', payload),
+        delete: () => new FakeQueryBuilder(rows, 'delete'),
+        upsert: (payload: Row, opts?: { onConflict?: string }) => new FakeQueryBuilder(rows, 'upsert', payload, opts),
       };
     },
     __tables: tables,
