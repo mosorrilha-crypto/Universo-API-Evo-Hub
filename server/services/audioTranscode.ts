@@ -20,9 +20,13 @@ import ffmpegPath from 'ffmpeg-static';
  * Causa confirmada para OGG gravado no painel: FileReader produz um Data URL
  * como `data:audio/ogg;codecs=opus;base64,...`, mas a limpeza anterior só
  * reconhecia tipos sem parâmetros. O prefixo permanecia no texto convertido
- * por Buffer e corrompia o início do binário antes do ffmpeg. A saída abaixo
- * remove qualquer prefixo Data URL válido e sempre gera OGG/Opus mono, que é
- * o único formato aceito para notas de voz pela Meta.
+ * por Buffer e corrompia o início do binário antes do ffmpeg.
+ *
+ * Fallback provisório: apesar de OGG/Opus válido, a entrega chega como arquivo
+ * e com qualidade inadequada no destinatário. Até a investigação com a Meta
+ * ser concluída, a saída é MP3 mono de 48 kHz a 64 kbps (áudio básico),
+ * priorizando entrega, reprodução e qualidade de voz. A limpeza do Data URL
+ * permanece para a futura retomada do OGG.
  */
 
 /** Remove o cabeçalho de um Data URL sem perder parâmetros como codecs=opus. */
@@ -43,7 +47,7 @@ export async function transcodeToWhatsAppVoiceNote(
   const tmpDir = os.tmpdir();
   const id = crypto.randomBytes(8).toString('hex');
   const inputPath = path.join(tmpDir, `voice-in-${id}`);
-  const outputPath = path.join(tmpDir, `voice-out-${id}.ogg`);
+  const outputPath = path.join(tmpDir, `voice-out-${id}.mp3`);
 
   await fs.writeFile(inputPath, inputBuffer);
   try {
@@ -52,13 +56,11 @@ export async function transcodeToWhatsAppVoiceNote(
         '-y',
         '-i', inputPath,
         '-vn',
-        '-c:a', 'libopus',
+        '-c:a', 'libmp3lame',
         '-ac', '1',
-        '-ar', '16000',
-        '-b:a', '24k',
-        '-vbr', 'on',
-        '-application', 'voip',
-        '-f', 'ogg',
+        '-ar', '48000',
+        '-b:a', '64k',
+        '-f', 'mp3',
         outputPath,
       ]);
       let stderr = '';
@@ -71,12 +73,12 @@ export async function transcodeToWhatsAppVoiceNote(
     });
 
     const outputBuffer = await fs.readFile(outputPath);
-    const magic = outputBuffer.subarray(0, 4).toString('ascii');
-    console.log(`🎙️  [audioTranscode] input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic}" (esperado "OggS")`);
-    if (magic !== 'OggS') {
-      throw new Error('A conversão de áudio não produziu um contêiner OGG válido.');
+    const magic = outputBuffer.subarray(0, 3).toString('ascii');
+    console.log(`🎙️  [audioTranscode] fallback=mp3 input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic}" (esperado "ID3")`);
+    if (magic !== 'ID3') {
+      throw new Error('A conversão de áudio não produziu um MP3 válido.');
     }
-    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/ogg' };
+    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/mpeg' };
   } finally {
     await fs.unlink(inputPath).catch(() => {});
     await fs.unlink(outputPath).catch(() => {});

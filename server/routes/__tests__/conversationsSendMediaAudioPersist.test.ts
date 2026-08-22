@@ -33,7 +33,7 @@ const uploadWhatsAppMedia = vi.fn(async () => 'media-id-123');
 const sendWhatsAppMediaMessage = vi.fn(async () => undefined);
 const sendWhatsAppAudioMessage = vi.fn(async () => 'media-id-123');
 const saveMediaImage = vi.fn(async (_supabaseUrl?: string, _supabaseKey?: string, _messageId?: string, _base64?: string, _mimeType?: string) => undefined);
-const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: string) => ({ base64: 'T0dHLWNvbnZlcnRpZG8=', mimeType: 'audio/ogg; codecs=opus' }));
+const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: string) => ({ base64: 'bXAzLWNvbnZlcnRpZG8=', mimeType: 'audio/mpeg' }));
 
 vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
@@ -94,7 +94,7 @@ beforeEach(() => {
 });
 
 describe('POST /api/conversations/:phone/send-media — persiste a mídia real (áudio/imagem)', () => {
-  it('transcodifica audio/mp4 também — Chrome reporta esse mimeType mas grava Opus dentro do MP4, que a Meta aceita e o WhatsApp não reproduz', async () => {
+  it('transcodifica audio/mp4 para o fallback MP3 — Chrome pode reportar MP4 com Opus interno, que não reproduz corretamente no WhatsApp', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -103,16 +103,14 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(res.status).toBe(200);
 
     expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('bXA0LWZha2U=', 'audio/mp4');
-    // Filename SEMPRE "audio.ogg" quando transcodifica — nunca o nome
-    // original (que teria a extensão de antes da conversão, ex: .mp4).
-    // mimeType mantém "; codecs=opus" — mesmo valor usado no upload pra Meta
-    // e persistido pro player do painel tocar de volta.
-    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.any(Buffer), 'audio/ogg; codecs=opus');
+    // O fallback entrega um MP3 com MIME consistente — nunca o contêiner
+    // informado pelo navegador, que pode carregar um codec incompatível.
+    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.any(Buffer), 'audio/mpeg');
 
     expect(saveMediaImage).toHaveBeenCalledTimes(1);
     const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
-    expect(savedBase64).toBe('T0dHLWNvbnZlcnRpZG8=');
-    expect(savedMimeType).toBe('audio/ogg; codecs=opus');
+    expect(savedBase64).toBe('bXAzLWNvbnZlcnRpZG8=');
+    expect(savedMimeType).toBe('audio/mpeg');
 
     // O id usado pra salvar a mídia precisa ser o MESMO id da mensagem
     // gravada na conversa (tabela crua — fakeSupabase não emula o embedded
@@ -124,7 +122,7 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(savedMessage.id).toBe(savedMessageId);
   });
 
-  it('converte audio/webm pra Ogg/Opus antes de subir pra Meta e persistir', async () => {
+  it('converte audio/webm para o fallback MP3 antes de subir pra Meta e persistir', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -133,9 +131,8 @@ describe('POST /api/conversations/:phone/send-media — persiste a mídia real (
     expect(res.status).toBe(200);
 
     expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('d2VibS1mYWtl', 'audio/webm;codecs=opus');
-    // A Meta recebe a versão JÁ CONVERTIDA (Ogg) com filename consistente,
-    // nunca o webm original nem o filename "audio.webm" antigo.
-    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.any(Buffer), 'audio/ogg; codecs=opus');
+    // A Meta recebe a versão JÁ CONVERTIDA em MP3, nunca o WebM original.
+    expect(sendWhatsAppAudioMessage).toHaveBeenCalledWith('pn', 'tok', '595981111111', expect.any(Buffer), 'audio/mpeg');
   });
 
   it('NÃO transcodifica mídia que não é áudio (imagem passa direto)', async () => {
