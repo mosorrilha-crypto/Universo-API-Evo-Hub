@@ -16,12 +16,15 @@ import {
   MessageSquare,
   Settings2,
   ShieldCheck,
+  Sun,
+  Moon,
   UserRound,
   X,
 } from 'lucide-react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
 import { isStandalonePwa } from '../lib/pwa';
 import { hasRoleAtLeast } from '../lib/roles';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
 
 interface HeaderProps {
   activeTab: ActiveTab;
@@ -43,18 +46,6 @@ type NavigationItem = {
   visible: boolean;
 };
 
-const tabLabels: Partial<Record<ActiveTab, string>> = {
-  home: 'Hoje',
-  whatsapp: 'Conversas',
-  crm: 'Vendas',
-  agenda_financeiro: 'Agenda & Caixa',
-  attribution: 'Crescimento',
-  knowledge: 'Configurar',
-  quality: 'Qualidade da IA',
-  escalations: 'Pendências',
-  saas: 'Empresas',
-};
-
 const firstName = (name?: string | null) => (name || 'Operador').trim().split(/\s+/)[0] || 'Operador';
 
 export const Header: React.FC<HeaderProps> = ({
@@ -68,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTenant,
   onSelectTenant,
 }) => {
+  const { language, setLanguage, theme, toggleTheme, t } = useAppPreferences();
   const [isInstalledApp] = useState(() => isStandalonePwa());
   const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
   const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
@@ -85,20 +77,32 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', onOutsideClick);
   }, [isProfileOpen]);
 
+  const tabLabels: Partial<Record<ActiveTab, string>> = {
+    home: t('home'),
+    whatsapp: t('conversations'),
+    crm: t('sales'),
+    agenda_financeiro: t('scheduleCash'),
+    attribution: t('growth'),
+    knowledge: t('configure'),
+    quality: t('aiQuality'),
+    escalations: t('pending'),
+    saas: t('companies'),
+  };
+
   const primaryNavigation: NavigationItem[] = [
-    { id: 'home', label: 'Hoje', description: 'Prioridades da operação', icon: Home, visible: true },
-    { id: 'whatsapp', label: 'Conversas', description: 'Atendimento no WhatsApp', icon: MessageSquare, visible: true },
-    { id: 'crm', label: 'Vendas', description: 'Pipeline e oportunidades', icon: Kanban, visible: true },
-    { id: 'agenda_financeiro', label: 'Agenda & Caixa', description: 'Horários e recebimentos', icon: CalendarDays, visible: canSeeFinancial },
+    { id: 'home', label: t('home'), description: t('homeDescription'), icon: Home, visible: true },
+    { id: 'whatsapp', label: t('conversations'), description: t('conversationsDescription'), icon: MessageSquare, visible: true },
+    { id: 'crm', label: t('sales'), description: t('salesDescription'), icon: Kanban, visible: true },
+    { id: 'agenda_financeiro', label: t('scheduleCash'), description: t('scheduleCashDescription'), icon: CalendarDays, visible: canSeeFinancial },
   ];
 
   const growthNavigation: NavigationItem[] = [
-    { id: 'attribution', label: 'Crescimento', description: 'Tráfego e conversões', icon: BarChart3, visible: canSeeAdminTools },
+    { id: 'attribution', label: t('growth'), description: t('growthDescription'), icon: BarChart3, visible: canSeeAdminTools },
   ];
 
   const settingsNavigation: NavigationItem[] = [
-    { id: 'knowledge', label: 'Configurar', description: 'Agente e operação', icon: Settings2, visible: canSeeAdminTools },
-    { id: 'quality', label: 'Qualidade da IA', description: 'Auditar atendimentos', icon: ShieldCheck, visible: canSeeAdminTools },
+    { id: 'knowledge', label: t('configure'), description: t('configureDescription'), icon: Settings2, visible: canSeeAdminTools },
+    { id: 'quality', label: t('aiQuality'), description: t('aiQualityDescription'), icon: ShieldCheck, visible: canSeeAdminTools },
   ];
 
   const navigate = (tab: ActiveTab) => {
@@ -119,11 +123,40 @@ export const Header: React.FC<HeaderProps> = ({
     );
   };
 
+  const preferencesBar = (
+    <div className="mt-2 grid grid-cols-[1fr_auto] items-center gap-2 rounded-panel border border-slate-800 bg-slate-900/65 px-2 py-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">{t('language')}</span>
+        <div className="flex overflow-hidden rounded-control border border-slate-700 bg-slate-950/50 p-0.5">
+          {(['pt', 'es'] as const).map((item) => (
+            <button
+              key={item}
+              onClick={() => setLanguage(item)}
+              aria-pressed={language === item}
+              title={item === 'pt' ? 'Português' : 'Español'}
+              className={`rounded px-1.5 py-0.5 text-[9px] font-black transition-colors ${language === item ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-slate-100'}`}
+            >
+              {item.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button
+        onClick={toggleTheme}
+        title={theme === 'dark' ? t('lightMode') : t('darkMode')}
+        aria-label={theme === 'dark' ? t('lightMode') : t('darkMode')}
+        className="rounded-control border border-slate-700 bg-slate-950/50 p-1.5 text-emerald-400 transition-colors hover:border-emerald-500/35 hover:bg-emerald-500/10"
+      >
+        {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+  );
+
   const profilePanel = (
-    <div className="relative mt-auto pt-4" ref={profileMenuRef}>
+    <div className="relative mt-auto pt-3" ref={profileMenuRef}>
       {canSeeSaasMaster && isProfileOpen && (
         <div className="absolute bottom-[calc(100%+0.65rem)] left-0 right-0 z-50 overflow-hidden rounded-card border border-slate-700 bg-slate-900 p-2 shadow-2xl shadow-slate-950/60 animate-pop-in">
-          <p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Alternar empresa</p>
+          <p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{t('switchCompany')}</p>
           <div className="max-h-56 space-y-1 overflow-y-auto pr-1 custom-scrollbar">
             {tenants.map((tenant) => (
               <button
@@ -138,7 +171,7 @@ export const Header: React.FC<HeaderProps> = ({
             ))}
           </div>
           <button onClick={() => { setIsProfileOpen(false); onOpenLoginModal(); }} className="mt-2 flex w-full items-center gap-2 border-t border-slate-800 px-2.5 pt-2.5 text-left text-xs font-semibold text-slate-400 transition-colors hover:text-white">
-            <UserRound className="h-3.5 w-3.5" /> Trocar operador
+            <UserRound className="h-3.5 w-3.5" /> {t('switchOperator')}
           </button>
         </div>
       )}
@@ -148,19 +181,19 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={() => canSeeSaasMaster ? setIsProfileOpen((open) => !open) : onOpenLoginModal()}
             className="flex w-full items-center gap-2.5 rounded-panel p-1 text-left transition-colors hover:bg-slate-800"
-            title={canSeeSaasMaster ? 'Alternar empresa ou operador' : 'Trocar operador'}
+            title={canSeeSaasMaster ? `${t('switchCompany')} / ${t('switchOperator')}` : t('switchOperator')}
           >
             <img src={currentUser.avatar} alt={currentUser.name} className="h-8 w-8 shrink-0 rounded-pill border border-emerald-400/35 object-cover" />
             <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-white">{firstName(currentUser.name)}</span><span className="mt-0.5 block truncate text-[10px] capitalize text-emerald-400">{currentUser.role.replace('_', ' ')}</span></span>
             <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`} />
           </button>
           <button onClick={onLogout} className="mt-1.5 flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300">
-            <LogOut className="h-3.5 w-3.5" /> Sair
+            <LogOut className="h-3.5 w-3.5" /> {t('logout')}
           </button>
         </div>
       ) : (
         <button onClick={onOpenLoginModal} className="flex w-full items-center justify-center gap-2 rounded-panel bg-emerald-500 px-3 py-2.5 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-950/30 transition-transform active:scale-[0.98]">
-          <UserRound className="h-4 w-4" /> Entrar
+          <UserRound className="h-4 w-4" /> {t('login')}
         </button>
       )}
     </div>
@@ -170,7 +203,7 @@ export const Header: React.FC<HeaderProps> = ({
     <div className={`flex h-full flex-col ${mobile ? 'p-4' : 'p-2.5'}`}>
       <div className="flex items-center gap-2.5 px-1.5 py-1.5">
         <span className="flex h-8 w-8 items-center justify-center rounded-panel border border-emerald-400/25 bg-emerald-400/10 text-emerald-300 shadow-inner shadow-emerald-950/30"><MessageSquare className="h-4 w-4" /></span>
-        <span className="min-w-0 flex-1"><span className="block text-[13px] font-bold tracking-tight text-white">Universo</span><span className="block truncate text-[9px] font-medium text-slate-500">Operação de atendimento</span></span>
+        <span className="min-w-0 flex-1"><span className="block text-[13px] font-bold tracking-tight text-white">Universo</span><span className="block truncate text-[9px] font-medium text-slate-500">{t('appSubtitle')}</span></span>
         {mobile && <button onClick={() => setIsMobileOpen(false)} className="rounded-control p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>}
       </div>
 
@@ -178,20 +211,22 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2"><span className="flex h-5 w-5 items-center justify-center rounded-control bg-emerald-500/10 text-emerald-400"><Building2 className="h-3 w-3" /></span><span className="truncate text-[11px] font-bold text-slate-200">{activeTenant.name}</span></div>
       </div>
 
+      {preferencesBar}
+
       <nav className="mt-2.5 min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
         {navigationBlock(primaryNavigation)}
-        {navigationBlock(growthNavigation, 'Desempenho')}
-        {navigationBlock(settingsNavigation, 'Administração')}
+        {navigationBlock(growthNavigation, t('performance'))}
+        {navigationBlock(settingsNavigation, t('administration'))}
         {canSeeSaasMaster && (
           <div className="space-y-1">
-            <p className="px-2.5 pb-1 pt-3 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">Plataforma</p>
-            <NavigationButton item={{ id: 'saas', label: 'Empresas', description: 'Gestão multi-tenant', icon: Layers, visible: true }} active={activeTab === 'saas'} onClick={() => navigate('saas')} />
+            <p className="px-2.5 pb-1 pt-3 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">{t('platform')}</p>
+            <NavigationButton item={{ id: 'saas', label: t('companies'), description: t('companiesDescription'), icon: Layers, visible: true }} active={activeTab === 'saas'} onClick={() => navigate('saas')} />
           </div>
         )}
       </nav>
 
       <div className="mt-2 rounded-panel border border-slate-800 bg-slate-950/50 px-2.5 py-1.5 text-[9px] text-slate-500">
-        <span className="font-semibold text-slate-400">{savedCount}</span> histórico(s) de atendimento
+        <span className="font-semibold text-slate-400">{savedCount}</span> {t('serviceHistory')}
       </div>
       {profilePanel}
     </div>

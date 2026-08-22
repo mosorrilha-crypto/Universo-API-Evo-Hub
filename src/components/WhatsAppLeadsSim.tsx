@@ -15,6 +15,7 @@ import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { ContractModal } from './contracts/ContractModal';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
   Play,
   Sparkles,
@@ -395,6 +396,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   openLeadPhone,
   openLeadRequestId,
 }) => {
+  const { t } = useAppPreferences();
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
@@ -2757,10 +2759,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <button
               onClick={onGoToEscalations}
               className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/60 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
-              title="Ir para a fila de Escalonamentos"
+              title={t('pending')}
             >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Pendências</span>
+              <span>{t('pending')}</span>
               {escalationsPendingCount > 0 && (
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
                   {escalationsPendingCount}
@@ -2785,7 +2787,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
-            <span>{showRightPanel ? 'Ocultar assistente' : 'Abrir assistente'}</span>
+            <span>{showRightPanel ? t('hideAssistant') : t('showAssistant')}</span>
           </button>
 
           {/* Status e Arquivadas saíram desta fileira (14/08/2026, pedido
@@ -2815,7 +2817,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
-            <span>{adsOnly ? 'Apenas anúncios' : 'Todos os contatos'}</span>
+            <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
           </button>
 
           {/* Gatilhos de texto pro modo "somente anúncios" (achado real,
@@ -2849,7 +2851,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <CalendarIcon className="w-3.5 h-3.5" />
-            <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Agenda' : 'Conectar Calendar'}</span>
+            <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
           </button>
 
           {/* Configurações pontuais (Auto IA, notificações, limpar testes,
@@ -2867,7 +2869,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <Settings className="w-3.5 h-3.5" />
-            <span>Mais opções</span>
+            <span>{t('moreOptions')}</span>
           </button>
         </div>
 
@@ -3093,7 +3095,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="Pesquisar ou começar uma nova conversa"
+                  placeholder={t('searchConversation')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -3165,7 +3167,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                Tudo ({leads.length - archivedLeads.length})
+                {t('all')} ({leads.length - archivedLeads.length})
               </button>
               <button
                 onClick={() => setActiveTabFilter('unread')}
@@ -3175,7 +3177,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                Não lidos ({unreadLeadsCount})
+                {t('unread')} ({unreadLeadsCount})
               </button>
 
               {/* Status — só aparece pra números conectados via Evolution API
@@ -3240,7 +3242,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               filteredLeads.map((lead) => renderLeadRow(lead))
             ) : (
               <div className="p-8 text-center text-xs text-slate-500">
-                Nenhuma conversa encontrada com os filtros selecionados.
+                {t('selectConversation')}
               </div>
             )}
           </div>
@@ -4207,7 +4209,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </>
           ) : (
             <div className="bg-[#0b141a] p-12 text-center text-slate-500 text-xs">
-              Selecione uma conversa para visualizar no WhatsApp Web.
+              {t('selectConversation')}
             </div>
           )}
         </div>

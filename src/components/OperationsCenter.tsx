@@ -12,6 +12,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { ActiveTab, EscalationInfo, FinancialTransaction, LeadInfo, Tenant, UserProfile } from '../types';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
 
 interface OperationsCenterProps {
   activeTenant: Tenant;
@@ -30,10 +31,10 @@ const currency = (value: number, tenant: Tenant) => new Intl.NumberFormat(tenant
   maximumFractionDigits: tenant.currency === 'PYG' ? 0 : 2,
 }).format(value);
 
-const formatShortDate = (value: string) => {
+const formatShortDate = (value: string, language: 'pt' | 'es') => {
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return 'Hoje';
-  return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parsed);
+  if (Number.isNaN(parsed.getTime())) return language === 'es' ? 'Hoy' : 'Hoje';
+  return new Intl.DateTimeFormat(language === 'es' ? 'es-PY' : 'pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parsed);
 };
 
 const firstName = (name?: string | null) => (name || 'Operador').trim().split(/\s+/)[0] || 'Operador';
@@ -48,6 +49,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   canSeeAdminTools,
   onNavigate,
 }) => {
+  const { language, t } = useAppPreferences();
   const summary = useMemo(() => {
     const unresolved = escalations.filter((item) => !item.resolved);
     const paymentReviews = unresolved.filter((item) => item.kind === 'payment_proof');
@@ -71,30 +73,30 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   const priorityItems = [
     ...summary.paymentReviews.map((item) => ({
       id: item.id,
-      type: 'Pagamento para revisar',
+      type: t('paymentReview'),
       description: item.contactName || item.phone,
-      detail: item.lastMessage || 'Comprovante recebido e aguardando validação humana.',
-      action: 'Revisar agora',
+      detail: item.lastMessage || t('receiptWaitingReview'),
+      action: t('reviewNow'),
       icon: CircleDollarSign,
       tone: 'amber' as const,
       tab: 'escalations' as ActiveTab,
     })),
     ...summary.unresolved.filter((item) => item.kind !== 'payment_proof').map((item) => ({
       id: item.id,
-      type: 'Precisa de você',
+      type: t('needsYou'),
       description: item.contactName || item.phone,
-      detail: item.reason || 'A conversa foi encaminhada para acompanhamento humano.',
-      action: 'Abrir pendência',
+      detail: item.reason || t('conversationForwarded'),
+      action: t('openPending'),
       icon: ShieldAlert,
       tone: 'violet' as const,
       tab: 'escalations' as ActiveTab,
     })),
     ...summary.uncompletedTasks.slice(0, 3).map((task) => ({
       id: task.id,
-      type: 'Próxima ação comercial',
+      type: t('commercialNextAction'),
       description: task.title,
-      detail: task.dueDate ? `Prazo: ${formatShortDate(task.dueDate)}` : 'Acompanhe este lead para não perder o timing.',
-      action: 'Ver vendas',
+      detail: task.dueDate ? `${language === 'es' ? 'Plazo' : 'Prazo'}: ${formatShortDate(task.dueDate, language)}` : language === 'es' ? 'Acompañá este lead para no perder el momento.' : 'Acompanhe este lead para não perder o timing.',
+      action: t('viewSales'),
       icon: Target,
       tone: 'emerald' as const,
       tab: 'crm' as ActiveTab,
@@ -102,10 +104,10 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   ].slice(0, 5);
 
   const quickActions = [
-    { label: 'Abrir conversas', description: 'Responder clientes e acompanhar a Ana', icon: MessageSquare, tab: 'whatsapp' as ActiveTab, visible: true },
-    { label: 'Ver funil de vendas', description: `${summary.openLeads.length} oportunidade(s) em acompanhamento`, icon: UsersRound, tab: 'crm' as ActiveTab, visible: true },
-    { label: 'Organizar agenda', description: 'Horários, recebimentos e confirmações', icon: CalendarClock, tab: 'agenda_financeiro' as ActiveTab, visible: canSeeFinancial },
-    { label: 'Acompanhar crescimento', description: 'Campanhas, conversas e criativos', icon: Sparkles, tab: 'attribution' as ActiveTab, visible: canSeeAdminTools },
+    { label: t('openConversations'), description: t('openConversationsDetail'), icon: MessageSquare, tab: 'whatsapp' as ActiveTab, visible: true },
+    { label: t('viewSalesPipeline'), description: t('opportunitiesInProgress', { count: summary.openLeads.length }), icon: UsersRound, tab: 'crm' as ActiveTab, visible: true },
+    { label: t('organizeSchedule'), description: t('organizeScheduleDetail'), icon: CalendarClock, tab: 'agenda_financeiro' as ActiveTab, visible: canSeeFinancial },
+    { label: t('followGrowth'), description: t('followGrowthDetail'), icon: Sparkles, tab: 'attribution' as ActiveTab, visible: canSeeAdminTools },
   ].filter((action) => action.visible);
 
   return (
@@ -115,41 +117,41 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         <div className="relative flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-pill border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-300">
-              <Sparkles className="h-3.5 w-3.5" /> Operação do dia
+              <Sparkles className="h-3.5 w-3.5" /> {t('dailyOperation')}
             </div>
-            <h1 className="mt-2.5 text-xl font-bold tracking-tight text-white sm:text-2xl">Bom dia, {firstName(currentUser?.name)}.</h1>
+            <h1 className="mt-2.5 text-xl font-bold tracking-tight text-white sm:text-2xl">{t('greeting', { name: firstName(currentUser?.name) })}</h1>
             <p className="mt-1.5 max-w-2xl text-[13px] leading-5 text-slate-300">
               {priorityCount > 0
-                ? `Existem ${priorityCount} ponto(s) que merecem sua atenção antes de seguir com a rotina.`
-                : 'Sua operação está organizada. Use esta central para acompanhar o que acontece ao longo do dia.'}
+                ? t('operationNeedsAttention', { count: priorityCount })
+                : t('operationOrganized')}
             </p>
           </div>
           <div className="rounded-panel border border-white/8 bg-slate-950/35 px-3 py-2 text-left xl:text-right">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Empresa ativa</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{t('activeCompany')}</p>
             <p className="mt-0.5 text-[13px] font-bold text-white">{activeTenant.name}</p>
-            <p className="mt-0.5 text-[11px] capitalize text-slate-400">{formatShortDate(new Date().toISOString())}</p>
+            <p className="mt-0.5 text-[11px] capitalize text-slate-400">{formatShortDate(new Date().toISOString(), language)}</p>
           </div>
         </div>
       </div>
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Pendências humanas" value={summary.unresolved.length} detail="Comprovantes e conversas que precisam de decisão" icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
-        <MetricCard label="Leads em andamento" value={summary.openLeads.length} detail="Oportunidades que ainda podem virar venda" icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
-        <MetricCard label="Próximas ações" value={summary.uncompletedTasks.length} detail="Tarefas comerciais ainda abertas" icon={<Clock3 className="h-4 w-4" />} tone="violet" onClick={() => onNavigate('crm')} />
-        <MetricCard label="Recebido no período" value={currency(summary.paidRevenue, activeTenant)} detail="Registros pagos já confirmados" icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('agenda_financeiro')} disabled={!canSeeFinancial} />
+        <MetricCard label={t('humanPending')} value={summary.unresolved.length} detail={t('humanPendingDetail')} icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
+        <MetricCard label={t('leadsInProgress')} value={summary.openLeads.length} detail={t('leadsInProgressDetail')} icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
+        <MetricCard label={t('nextActions')} value={summary.uncompletedTasks.length} detail={t('nextActionsDetail')} icon={<Clock3 className="h-4 w-4" />} tone="violet" onClick={() => onNavigate('crm')} />
+        <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('agenda_financeiro')} disabled={!canSeeFinancial} />
       </div>
 
       <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1.45fr)_minmax(270px,0.8fr)]">
         <section className="rounded-card border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">Fila inteligente</p>
-              <h2 className="mt-1 text-base font-bold text-white">O que merece atenção agora</h2>
-              <p className="mt-0.5 text-xs text-slate-400">Ações reais organizadas pela prioridade da operação.</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('smartQueue')}</p>
+              <h2 className="mt-1 text-base font-bold text-white">{t('attentionNow')}</h2>
+              <p className="mt-0.5 text-xs text-slate-400">{t('actionsPrioritized')}</p>
             </div>
             {summary.unresolved.length > 0 && (
               <button onClick={() => onNavigate('escalations')} className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-300 transition-colors hover:text-emerald-100">
-                Ver todas <ArrowRight className="h-3.5 w-3.5" />
+                {language === 'es' ? 'Ver todas' : 'Ver todas'} <ArrowRight className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -179,15 +181,15 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
           ) : (
             <div className="mt-3 rounded-panel border border-dashed border-emerald-500/25 bg-emerald-500/5 px-4 py-5 text-center">
               <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
-              <h3 className="mt-2 text-sm font-bold text-slate-100">Nenhuma pendência crítica agora</h3>
-              <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-slate-400">As validações e acompanhamentos em aberto aparecerão aqui assim que precisarem de uma ação humana.</p>
+              <h3 className="mt-2 text-sm font-bold text-slate-100">{t('noCriticalPending')}</h3>
+              <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-slate-400">{t('noCriticalPendingDetail')}</p>
             </div>
           )}
         </section>
 
         <aside className="rounded-card border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">Acessos rápidos</p>
-          <h2 className="mt-1 text-base font-bold text-white">Siga sua rotina</h2>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('quickAccess')}</p>
+          <h2 className="mt-1 text-base font-bold text-white">{t('followRoutine')}</h2>
           <div className="mt-3 space-y-1.5">
             {quickActions.map((action) => {
               const Icon = action.icon;
