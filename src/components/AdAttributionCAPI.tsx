@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LeadInfo, CAPIConfig, MetaCAPIEvent } from '../types';
 import { apiFetch } from '../lib/apiClient';
+import { TrafficCenter } from './TrafficCenter';
 import { 
   BarChart3, 
   Target, 
@@ -45,7 +46,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   onAddNewAttributedLead,
 }) => {
   const leads = propLeads || [];
-  const [activeTab, setActiveTab] = useState<'overview' | 'ai_insights' | 'capi_settings' | 'utm_simulator'>('overview');
+  const [activeTab, setActiveTab] = useState<'traffic_center' | 'overview' | 'ai_insights' | 'capi_settings' | 'utm_simulator'>('traffic_center');
 
   // Meta CAPI Configuration State
   const [capiConfig, setCapiConfig] = useState<CAPIConfig>(() => {
@@ -314,15 +315,22 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <Target className="w-6 h-6" />
               </div>
               <h2 className="text-2xl font-bold text-white tracking-tight">
-                Análise de Atribuição de Ads & Meta CAPI (Conversions API)
+                Central de Tráfego, Atribuição & Meta CAPI
               </h2>
             </div>
             <p className="text-sm text-slate-300 max-w-3xl leading-relaxed">
-              Monitore a origem de cada lead no WhatsApp (Meta Ads, Instagram, Google Ads), mensure a taxa de conversão por anúncio e envie eventos do funil direto para o **Meta Conversions API (CAPI)** para otimizar suas campanhas.
+              Consulte as métricas reais das campanhas Meta, acompanhe a origem de cada lead no WhatsApp e envie eventos de conversão pela Meta CAPI para aprimorar a otimização dos anúncios.
             </p>
           </div>
 
           <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setActiveTab('traffic_center')}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-2 transition-all shadow-lg shadow-emerald-950/50"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>Central de Tráfego</span>
+            </button>
             <button
               onClick={handleGenerateAIReport}
               disabled={isGeneratingReport}
@@ -353,6 +361,18 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
         {/* Sub-navigation tabs inside header */}
         <div className="flex items-center space-x-2 mt-6 pt-4 border-t border-slate-800/80 overflow-x-auto scrollbar-none">
+          <button
+            onClick={() => setActiveTab('traffic_center')}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+              activeTab === 'traffic_center'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-inner'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4 text-emerald-400" />
+            <span>Central de Tráfego</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('overview')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
@@ -406,8 +426,11 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
         </div>
       </div>
 
+      {/* CENTRAL DE TRÁFEGO: consulta protegida e atualização manual da Marketing API */}
+      {activeTab === 'traffic_center' && <TrafficCenter />}
+
       {/* Metric Cards Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {activeTab !== 'traffic_center' && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between text-slate-400 mb-2">
@@ -477,7 +500,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
           </p>
         </div>
 
-      </div>
+      </div>}
 
       {/* TAB 1: OVERVIEW & ATTRIBUTION BREAKDOWN */}
       {activeTab === 'overview' && (

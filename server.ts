@@ -13,6 +13,7 @@ import { createAiRouter } from './server/routes/ai';
 import { createTelemetryRouter } from './server/routes/telemetry';
 import { createWebhooksRouter } from './server/routes/webhooks';
 import { createMetaCapiRouter } from './server/routes/metaCapi';
+import { createMetaAdsRouter } from './server/routes/metaAds';
 import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
@@ -126,6 +127,7 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
   }));
   app.use(createMetaCapiRouter({ authenticateToken }));
+  app.use(createMetaAdsRouter({ authenticateToken }));
   app.use(createConversationsRouter({
     authenticateToken,
     jwtSecret: config.jwtSecret,

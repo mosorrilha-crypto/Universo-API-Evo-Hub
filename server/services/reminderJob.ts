@@ -17,7 +17,11 @@ import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForTenant } from './tenantResolver';
 import { getTenantBusinessHours, getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
 
-const BUSINESS_TIMEZONE = 'America/Asuncion';
+// O Paraguai opera atualmente em UTC-3 durante todo o ano. Algumas versões
+// de ICU embarcadas no Node ainda aplicam a antiga regra sazonal para
+// America/Asuncion em 2026, deslocando lembretes em uma hora. Para o horário
+// comercial real deste tenant, usamos o offset estável UTC-3 explicitamente.
+const BUSINESS_TIMEZONE = 'Etc/GMT+3';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
 interface DateParts {
