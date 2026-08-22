@@ -451,3 +451,18 @@ html[data-theme='light'] .operations-module-frame h1 { color:#0f172a; }
 html[data-theme='light'] .operations-module-frame__header p { color:#64748b; }
 html[data-theme='light'] .operations-module-frame__badge { color:#0369a1; background:rgba(14,165,233,.07); }
 @media (max-width:640px) { .operations-module-frame__header { align-items:flex-start; flex-direction:column; } .operations-module-frame__badge { white-space:normal; } }
+
+/* Modelo estrutural 6a: contexto essencial dentro da conversa, sem terceira coluna permanente */
+.atendimento-context-strip { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:11px 24px; border-bottom:1px solid var(--border-subtle, #1b242b); background:var(--surface-sunken, #11161b); }
+.atendimento-context-strip__copy { min-width:0; }
+.atendimento-context-strip__label { display:block; color:var(--text-label, #6e7c87); font:700 10.5px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.12em; }
+.atendimento-context-strip__copy p { margin:4px 0 0; color:var(--text-secondary, #a7b4be); font-size:13.5px; line-height:1.45; }
+.atendimento-context-strip__rationale { color:var(--text-muted, #8494a0); }
+.atendimento-context-strip__action { flex:none; border:1px solid var(--border, #232c33); border-radius:7px; padding:7px 11px; color:var(--text-secondary, #a7b4be); background:transparent; font-size:12px; font-weight:700; cursor:pointer; }
+.atendimento-context-strip__action:hover { color:var(--text-primary, #f2f6f9); border-color:var(--action, #5ebf92); }
+html[data-theme='light'] .atendimento-context-strip { background:#fbfaf7; border-color:#e7e5de; }
+html[data-theme='light'] .atendimento-context-strip__label { color:#94918a; }
+html[data-theme='light'] .atendimento-context-strip__copy p { color:#43443f; }
+html[data-theme='light'] .atendimento-context-strip__rationale { color:#8a877f; }
+html[data-theme='light'] .atendimento-context-strip__action { border-color:#dcdad3; color:#5a5b54; }
+@media (max-width:760px) { .atendimento-context-strip { align-items:flex-start; padding:10px 16px; } .atendimento-context-strip__action { padding:8px 10px; } }

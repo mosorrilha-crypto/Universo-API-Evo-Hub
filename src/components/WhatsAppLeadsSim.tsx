@@ -461,7 +461,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread'>('all');
-  const [showRightPanel, setShowRightPanel] = useState(true);
+  // O painel auxiliar continua disponível pelo cabeçalho, mas não ocupa uma
+  // terceira coluna por padrão: a referência canônica coloca a IA no rascunho
+  // revisável e deixa o contexto expandível dentro da conversa.
+  const [showRightPanel, setShowRightPanel] = useState(false);
 
   // Item 2 do checklist visual (issue #100): flash breve na linha da lista
   // quando chega mensagem nova do cliente — mesmo em conversa que não está
@@ -3068,10 +3071,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       <div className="relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
 
         {/* ========================================== */}
-        {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}
+        {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
         {/* ========================================== */}
         <div className={`border-r border-slate-800/80 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
-          showRightPanel ? 'lg:col-span-3' : 'lg:col-span-4'
+          showRightPanel ? 'lg:col-span-3' : 'lg:col-span-3'
         }`}>
           
           {/* Achado real testando com o Lucas em produção ("muita redundância
@@ -3250,10 +3253,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
 
         {/* ========================================== */}
-        {/* COLUMN 2: Interactive WhatsApp Chat Thread */}
+        {/* COLUMN 2: Conversa principal com rascunho revisável da IA */}
         {/* ========================================== */}
         <div className={`${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
-          showRightPanel ? 'lg:col-span-6' : 'lg:col-span-8'
+          showRightPanel ? 'lg:col-span-6' : 'lg:col-span-9'
         }`}>
           {selectedLead ? (
             <>
@@ -3577,6 +3580,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </>
                 )}
               </div>
+
+              {/* Context strip from the canonical design: the essential AI summary
+                  stays in the conversation, while the full panel remains optional. */}
+              {selectedLead.fullAnalysis && (
+                <div className="atendimento-context-strip">
+                  <div className="atendimento-context-strip__copy">
+                    <span className="atendimento-context-strip__label">CONTEXTO</span>
+                    <p>
+                      {selectedLead.fullAnalysis.actionObjective || selectedLead.fullAnalysis.conversationSummary}
+                      {selectedLead.fullAnalysis.actionRationale && <span className="atendimento-context-strip__rationale"> · {selectedLead.fullAnalysis.actionRationale}</span>}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => setShowRightPanel(true)} className="atendimento-context-strip__action">
+                    {isSpanish ? 'Ver ficha' : 'Ver ficha completa'}
+                  </button>
+                </div>
+              )}
 
               {/* Real-time Analyzing Banner */}
               {isAnalyzingConversation && (
@@ -4216,7 +4236,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
 
         {/* ========================================== */}
-        {/* COLUMN 3: Right Side Panel (WhatsApp Contact Info & IA Intelligence Panel) */}
+        {/* COLUMN 3: Painel auxiliar opcional — contexto e inteligência sob demanda */}
         {/* ========================================== */}
         {showRightPanel && (
           // Achado real em produção: essa coluna nunca teve o toggle
