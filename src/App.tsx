@@ -14,6 +14,7 @@ import { Header } from './components/Header';
 import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import AtendimentoWorkspaceFrame from './components/AtendimentoWorkspaceFrame';
+import OperationsModuleFrame from './components/OperationsModuleFrame';
 import { OperatorCRM } from './components/OperatorCRM';
 import { EscalationsPanel } from './components/EscalationsPanel';
 import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
@@ -937,6 +938,12 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'agenda_financeiro' && canSeeFinancial && (
+          <OperationsModuleFrame
+            title="Agenda & Financeiro"
+            eyebrow="Operação financeira"
+            description="Organize horários, recebimentos e confirmações em uma única visão operacional."
+            accent="blue"
+          >
           <AgendaFinanceiroCenter
             transactions={transactions}
             onAddTransaction={handleAddTransaction}
@@ -946,10 +953,10 @@ export const App: React.FC = () => {
             currentUser={currentUser || GUEST_USER}
             currency={activeTenant.currency}
             locale={activeTenant.locale}
-            onToast={showToast}
+                        onToast={showToast}
           />
+          </OperationsModuleFrame>
         )}
-
         {activeTab === 'attribution' && canSeeAdminTools && (
           <AdAttributionCAPI
             leads={leads}
