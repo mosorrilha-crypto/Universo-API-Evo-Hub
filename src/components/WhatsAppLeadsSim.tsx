@@ -1922,6 +1922,39 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       return dateB - dateA;
     });
 
+  // Regra R3 do handoff: a fila é organizada pelo tempo que o cliente espera
+  // por uma resposta humana. O modelo atual não persiste waitingSince, então
+  // ele é derivado com segurança da última mensagem do cliente sem resposta.
+  type WaitingGroupId = 'over30' | 'under30' | 'awaitingClient';
+  const getWaitingGroup = (lead: LeadInfo): WaitingGroupId => {
+    const latestMessage = lead.messages?.[lead.messages.length - 1];
+    if (!latestMessage || latestMessage.sender !== 'lead') return 'awaitingClient';
+
+    const waitingSince = Date.parse(latestMessage.timestamp);
+    // Em registros legados cujo horário não é ISO, prioriza não lidas sem
+    // inventar uma data: elas entram em "até 30 min" até a próxima mensagem.
+    if (Number.isNaN(waitingSince)) return getUnreadCount(lead) > 0 ? 'under30' : 'awaitingClient';
+    return Date.now() - waitingSince > 30 * 60 * 1000 ? 'over30' : 'under30';
+  };
+
+  const waitingGroupMeta: Record<WaitingGroupId, { label: string; className: string }> = {
+    over30: { label: 'ESPERANDO HÁ MAIS DE 30 MIN', className: 'text-[#A33A22] bg-[#231412]' },
+    under30: { label: 'ESPERANDO ATÉ 30 MIN', className: 'text-[#8A5A00] bg-[#231C10]' },
+    awaitingClient: { label: 'AGUARDANDO CLIENTE', className: 'text-[var(--text-label)] bg-[var(--surface-raised)]' },
+  };
+
+  const waitingGroups = (['over30', 'under30', 'awaitingClient'] as WaitingGroupId[]).map((id) => ({
+    id,
+    leads: filteredLeads
+      .filter((lead) => getWaitingGroup(lead) === id)
+      .sort((a, b) => {
+        if (id === 'awaitingClient') return 0;
+        const timeA = Date.parse(a.messages?.[a.messages.length - 1]?.timestamp || '') || 0;
+        const timeB = Date.parse(b.messages?.[b.messages.length - 1]?.timestamp || '') || 0;
+        return timeA - timeB;
+      }),
+  }));
+
   // Seleciona a conversa e, se for real e tiver mensagens não lidas (contagem
   // real vinda do servidor E/OU marcação manual do operador via menu ⋮),
   // zera os dois: manuallyUnread (PATCH /state, já existente) e unreadCount
@@ -2748,7 +2781,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className="relative p-3 rounded-card bg-slate-900/85 border border-slate-800 shadow-xl shadow-slate-950/25 space-y-2.5">
+      <div className="relative p-3 rounded-card bg-[var(--surface-panel)] border border-[var(--line-subtle)] shadow-xl shadow-slate-950/25 space-y-2.5">
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -2762,10 +2795,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {onGoToEscalations && (
             <button
               onClick={onGoToEscalations}
-              className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/60 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+              className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-[var(--pending-surface)] hover:brightness-110 text-[var(--pending)] border border-[var(--pending)]/50 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
               title={t('pending')}
             >
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <AlertTriangle className="w-3.5 h-3.5 text-[var(--pending)]" />
               <span>{t('pending')}</span>
               {escalationsPendingCount > 0 && (
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
@@ -2786,12 +2819,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             onClick={() => setShowRightPanel(!showRightPanel)}
             className={`hidden lg:flex flex-shrink-0 px-3 py-1.5 rounded-xl border text-xs font-semibold items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
               showRightPanel
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
+                : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
-            <span>{showRightPanel ? t('hideAssistant') : t('showAssistant')}</span>
+            <span>{showRightPanel ? 'Fechar ficha' : 'Abrir ficha'}</span>
           </button>
 
           {/* Status e Arquivadas saíram desta fileira (14/08/2026, pedido
@@ -2816,8 +2849,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }
             className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               adsOnly
-                ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
-                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+                ? 'bg-[var(--action)] border-[var(--action)] text-[var(--action-contrast)]'
+                : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
@@ -2829,7 +2862,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               ctwa_clid quase nunca vem preenchido de verdade, então esse é o
               jeito prático de identificar lead de anúncio (ver
               matchesAdTriggerMessage no backend). */}
-          {adsOnly && (
+          {adsOnly && isToolbarSettingsOpen && (
             <button
               type="button"
               onClick={openAdTriggersModal}
@@ -2850,8 +2883,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
             className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               googleCalendarConnected
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+                ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
+                : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             <CalendarIcon className="w-3.5 h-3.5" />
@@ -3243,7 +3276,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             )}
 
             {filteredLeads.length > 0 ? (
-              filteredLeads.map((lead) => renderLeadRow(lead))
+              waitingGroups.map((group) => group.leads.length > 0 && (
+                <section key={group.id} aria-label={waitingGroupMeta[group.id].label}>
+                  <div className={`px-3 py-2 text-[10px] font-bold tracking-[0.11em] ${waitingGroupMeta[group.id].className}`}>
+                    {waitingGroupMeta[group.id].label} · {group.leads.length}
+                  </div>
+                  {group.leads.map((lead) => renderLeadRow(lead))}
+                </section>
+              ))
             ) : (
               <div className="p-8 text-center text-xs text-slate-500">
                 {t('selectConversation')}

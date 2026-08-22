@@ -466,3 +466,147 @@ html[data-theme='light'] .atendimento-context-strip__copy p { color:#43443f; }
 html[data-theme='light'] .atendimento-context-strip__rationale { color:#8a877f; }
 html[data-theme='light'] .atendimento-context-strip__action { border-color:#dcdad3; color:#5a5b54; }
 @media (max-width:760px) { .atendimento-context-strip { align-items:flex-start; padding:10px 16px; } .atendimento-context-strip__action { padding:8px 10px; } }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Handoff aprovado — Atendimento: tokens neutros, ação única e hierarquia
+   sem azul-noite, gradientes ou cor própria para IA.
+   ────────────────────────────────────────────────────────────────────────── */
+:root,
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --surface-deep: #0E1216;
+  --surface-panel: #151C22;
+  --surface-raised: #151C22;
+  --surface-sunken: #0E1216;
+  --line-subtle: #26313A;
+  --text-primary: #F2F6F9;
+  --text-secondary: #A7B4BE;
+  --text-muted: #7F909C;
+  --text-label: #8E9DA7;
+  --action: #5EBF92;
+  --action-contrast: #102018;
+  --pending: #E0A342;
+  --pending-surface: #231C10;
+  --danger: #E2705A;
+  --danger-surface: #231412;
+  --shadow-premium: 0 16px 42px -28px rgba(0, 0, 0, .72);
+}
+
+html[data-theme='dark'] body,
+:root body {
+  color: var(--text-primary);
+  background: var(--surface-deep);
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+  --surface-deep: #F6F7F4;
+  --surface-panel: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #F1F3EF;
+  --line-subtle: #D8DFDA;
+  --text-primary: #1E2A2D;
+  --text-secondary: #62727A;
+  --text-muted: #7A898E;
+  --text-label: #6F7E83;
+  --action: #438965;
+  --action-contrast: #FFFFFF;
+  --pending: #9A670C;
+  --pending-surface: #FFF8E8;
+  --danger: #B74D3A;
+  --danger-surface: #FFF1EE;
+}
+
+html[data-theme='light'] body {
+  background: var(--surface-deep);
+}
+
+/* O azul segue como modo opcional; o tema escuro canônico não usa azul-noite. */
+html[data-theme='dark'] .bg-slate-950,
+html[data-theme='dark'] .bg-slate-950\/90,
+html[data-theme='dark'] .bg-slate-950\/80,
+html[data-theme='dark'] .bg-slate-950\/50 { background-color: #0E1216 !important; }
+html[data-theme='dark'] .bg-slate-900,
+html[data-theme='dark'] .bg-slate-900\/90,
+html[data-theme='dark'] .bg-slate-900\/80,
+html[data-theme='dark'] .bg-slate-900\/70,
+html[data-theme='dark'] .bg-slate-900\/65 { background-color: #151C22 !important; }
+html[data-theme='dark'] .bg-slate-800,
+html[data-theme='dark'] .bg-slate-800\/65,
+html[data-theme='dark'] .bg-slate-800\/70,
+html[data-theme='dark'] .bg-slate-800\/90 { background-color: #1B252D !important; }
+html[data-theme='dark'] .border-slate-800,
+html[data-theme='dark'] .border-slate-800\/80,
+html[data-theme='dark'] .border-slate-800\/60,
+html[data-theme='dark'] .border-slate-700,
+html[data-theme='dark'] .border-slate-700\/80 { border-color: #26313A !important; }
+html[data-theme='dark'] .text-slate-400,
+html[data-theme='dark'] .text-slate-500,
+html[data-theme='dark'] .text-slate-600,
+html[data-theme='dark'] .placeholder-slate-400 { color: #A7B4BE !important; }
+html[data-theme='dark'] .bg-emerald-500 { background-color: var(--action) !important; }
+html[data-theme='dark'] .text-emerald-400,
+html[data-theme='dark'] .text-emerald-300 { color: var(--action) !important; }
+html[data-theme='dark'] .bg-amber-500\/20,
+html[data-theme='dark'] .bg-amber-950\/60 { background-color: var(--pending-surface) !important; }
+html[data-theme='dark'] .text-amber-300,
+html[data-theme='dark'] .text-amber-400 { color: var(--pending) !important; }
+html[data-theme='dark'] .bg-red-500\/20,
+html[data-theme='dark'] .bg-rose-500\/20,
+html[data-theme='dark'] .bg-rose-950\/60 { background-color: var(--danger-surface) !important; }
+html[data-theme='dark'] .text-red-300,
+html[data-theme='dark'] .text-rose-300,
+html[data-theme='dark'] .text-rose-400 { color: var(--danger) !important; }
+
+/* Shell do Atendimento: superfícies planas; a semântica da IA é textual. */
+.atendimento-workspace__header,
+html[data-theme='dark'] .atendimento-workspace__header {
+  background: var(--surface-panel);
+  border-color: var(--line-subtle);
+  box-shadow: var(--shadow-premium);
+}
+.atendimento-workspace__icon,
+html[data-theme='dark'] .atendimento-workspace__icon {
+  color: var(--action-contrast);
+  background: var(--action);
+  box-shadow: none;
+}
+.atendimento-workspace__eyebrow,
+html[data-theme='dark'] .atendimento-workspace__eyebrow { color: var(--action); }
+.atendimento-workspace h1,
+html[data-theme='dark'] .atendimento-workspace h1 { color: var(--text-primary); }
+.atendimento-workspace__header p,
+.atendimento-workspace__tenant span,
+.atendimento-signal span:not(.atendimento-signal__icon) { color: var(--text-secondary); }
+.atendimento-workspace__tenant,
+.atendimento-signal { border-color: var(--line-subtle); }
+.atendimento-workspace__tenant strong,
+.atendimento-signal strong { color: var(--text-primary); }
+.atendimento-signal { background: var(--surface-panel); color: var(--text-secondary); }
+.atendimento-signal--button:hover:not(:disabled) { border-color: var(--pending); background: var(--pending-surface); }
+.atendimento-signal__icon--green,
+.atendimento-signal__icon--blue { color: var(--action); background: color-mix(in srgb, var(--action) 12%, transparent); }
+.atendimento-signal__icon--amber { color: var(--pending); background: var(--pending-surface); }
+.atendimento-workspace__approval { color: var(--text-secondary); background: var(--surface-panel); border-color: var(--line-subtle); }
+
+/* Contexto e rascunho usam a mesma superfície da conversa; não existe cor da IA. */
+.atendimento-context-strip { background: var(--surface-sunken); border-color: var(--line-subtle); }
+.atendimento-context-strip__label { color: var(--text-label); }
+.atendimento-context-strip__copy p,
+.atendimento-context-strip__rationale { color: var(--text-secondary); }
+.atendimento-context-strip__action { color: var(--text-secondary); border-color: var(--line-subtle); }
+.atendimento-context-strip__action:hover { color: var(--text-primary); border-color: var(--action); }
+
+html[data-theme='light'] .atendimento-workspace__header,
+html[data-theme='light'] .atendimento-signal { background: var(--surface-panel); border-color: var(--line-subtle); }
+html[data-theme='light'] .atendimento-workspace h1,
+html[data-theme='light'] .atendimento-workspace__tenant strong,
+html[data-theme='light'] .atendimento-signal strong { color: var(--text-primary); }
+html[data-theme='light'] .atendimento-workspace__header p,
+html[data-theme='light'] .atendimento-workspace__tenant span,
+html[data-theme='light'] .atendimento-signal span:not(.atendimento-signal__icon) { color: var(--text-secondary); }
+html[data-theme='light'] .atendimento-context-strip { background: var(--surface-sunken); border-color: var(--line-subtle); }
+html[data-theme='light'] .atendimento-context-strip__label { color: var(--text-label); }
+html[data-theme='light'] .atendimento-context-strip__copy p,
+html[data-theme='light'] .atendimento-context-strip__rationale { color: var(--text-secondary); }
+html[data-theme='light'] .atendimento-context-strip__action { color: var(--text-secondary); border-color: var(--line-subtle); }
