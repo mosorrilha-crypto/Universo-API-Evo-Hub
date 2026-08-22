@@ -1269,7 +1269,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations?archived=true');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adGreetingMatchedAt?: string; unreadCount: number }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adHeadline?: string; adGreetingMatchedAt?: string; unreadCount: number }[] = data.conversations || [];
 
         // Ids que ganharam mensagem nova de CLIENTE nesta rodada (não conta
         // mensagem enviada pelo próprio operador/IA, nem a primeira carga —
@@ -1340,6 +1340,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               muted: !!conv.muted,
               manuallyUnread: !!conv.manuallyUnread,
               aiBlockedAt: conv.aiBlockedAt,
+              adHeadline: conv.adHeadline,
               adGreetingMatchedAt: conv.adGreetingMatchedAt,
               unreadCount: conv.unreadCount ?? 0,
             } as any);
@@ -3477,6 +3478,33 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     Hoje
                   </span>
                 </div>
+
+                {/* A saudação exibida pelo WhatsApp no clique do anúncio é uma
+                    camada nativa do anúncio e não chega como uma mensagem
+                    comum em `messages[]`. Mostramos a atribuição aqui sem
+                    inventar uma bolha enviada pelo agente. `adHeadline` é
+                    referral real; `adGreetingMatchedAt` também pode vir de
+                    gatilho textual ou marcação manual do operador. */}
+                {(selectedLead.adHeadline || selectedLead.adGreetingMatchedAt) && (
+                  <div className="mx-auto w-full max-w-md rounded-xl border border-amber-500/25 bg-amber-950/20 px-3.5 py-3 shadow-sm">
+                    <div className="flex items-start gap-2.5">
+                      <div className="mt-0.5 rounded-lg bg-amber-400/10 p-1.5 text-amber-300">
+                        <Megaphone className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                          {selectedLead.adHeadline ? 'Anúncio do Facebook' : 'Lead marcado como anúncio'}
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-300">
+                          {selectedLead.adHeadline
+                            ? <>Esta conversa veio do anúncio <span className="font-semibold text-amber-100">“{selectedLead.adHeadline}”</span>.</>
+                            : 'Esta conversa foi identificada como lead de anúncio por um gatilho ou por uma marcação do operador.'}
+                        </p>
+                        <p className="mt-1.5 text-[10px] text-slate-500">Origem da conversa · não é uma mensagem enviada pelo agente</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {selectedLead.messages && selectedLead.messages.length > 0 ? (
                   selectedLead.messages.map((msg) => {

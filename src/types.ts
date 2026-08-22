@@ -381,6 +381,10 @@ export interface LeadInfo {
   manuallyUnread?: boolean;
   /** Lead não qualificado/insistente — IA para de responder só pra esse número (ver server/services/conversationStore.ts). */
   aiBlockedAt?: string;
+  /** Título do anúncio Clique para WhatsApp que originou a conversa, quando a Meta enviou referral real. É metadado da conversa, não uma mensagem enviada pelo agente. */
+  adHeadline?: string;
+  /** Marca de conversa identificada como lead de anúncio por gatilho de texto ou ação explícita do operador. */
+  adGreetingMatchedAt?: string;
   /** true = lead vindo do backend real (conversa de WhatsApp e/ou estado de CRM em server/services/crmStore.ts), nunca dado de exemplo local. Ações de CRM (App.tsx handleUpdateLead) persistem de verdade só quando true. */
   isReal?: boolean;
   /** true = existe conversa real de WhatsApp pra esse telefone (ver GET /api/crm/leads) — false quando o lead foi cadastrado manualmente no CRM e ainda não trocou mensagem nenhuma. */
