@@ -3140,12 +3140,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
+      <div className="atendimento-chat-shell relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
         {/* ========================================== */}
-        <div className={`border-r border-slate-800/80 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
+        <div className={`atendimento-queue border-r border-slate-800/80 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
           showRightPanel ? 'lg:col-span-3' : 'lg:col-span-3'
         }`}>
           
@@ -3335,7 +3335,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* ========================================== */}
         {/* COLUMN 2: Conversa principal com rascunho revisável da IA */}
         {/* ========================================== */}
-        <div className={`${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
+        <div className={`atendimento-thread ${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
           showRightPanel ? 'lg:col-span-6' : 'lg:col-span-9'
         }`}>
           {selectedLead ? (
@@ -3427,7 +3427,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver PR #70) */}
                   <button
                     onClick={() => setMobileAnalysisOpen(true)}
-                    className="lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                    className="atendimento-analysis-trigger lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Ver Ficha IA"
                   >
                     <Info className="w-4 h-4" />
@@ -4327,7 +4327,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           // equivalente lá é o painel deslizante controlado por
           // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
           // cabeçalho da conversa.
-          <div className="hidden lg:flex lg:col-span-3 border-l border-slate-800/80 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
+          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/80 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
@@ -4347,7 +4347,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           mesmas props do painel de desktop acima, só a apresentação muda. */}
       {mobileAnalysisOpen && mobileThreadOpen && selectedLead && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          className="atendimento-analysis-drawer lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
           onClick={() => setMobileAnalysisOpen(false)}
         >
           <div
