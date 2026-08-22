@@ -26,7 +26,11 @@ let supabase: ReturnType<typeof createFakeSupabase>;
 
 const fakeAi = {
   models: {
-    generateContent: vi.fn(async () => ({ text: 'Oi! Sobre o pagamento, deu uma diferença aqui, pode conferir?' })),
+    generateContent: vi.fn(async (request: any) => ({
+      text: typeof request?.contents === 'string' && request.contents.includes('REVISOR DE SEGURANÇA')
+        ? JSON.stringify({ approved: true, severity: 'low', reason: 'Rascunho alinhado à orientação humana.' })
+        : 'Oi! Sobre o pagamento, deu uma diferença aqui, pode conferir?',
+    })),
   },
 };
 
@@ -162,7 +166,7 @@ describe('POST /api/escalations/:id/resolve-payment', () => {
     expect(data.appointment.paymentStatus).toBe('rejected');
     expect(data.outcome).toMatchObject({ sent: true, viaTemplate: false });
     expect(getCapturedBody().type).toBe('text');
-    expect(fakeAi.models.generateContent).toHaveBeenCalledTimes(1);
+    expect(fakeAi.models.generateContent).toHaveBeenCalledTimes(2);
 
     const escRow = supabase.__tables.escalations.find((e: any) => e.id === 'esc-1');
     expect(escRow.resolved).toBe(true);

@@ -1,6 +1,6 @@
 /**
  * Achado real em produção (15/08/2026): o buffer de rajada vivia só em
- * memória — um restart de deploy no meio da janela de 6s de silêncio
+ * memória — um restart de deploy no meio da janela de 10s de silêncio
  * perdia a mensagem inteira. Cobre aqui: agrupamento normal (comportamento
  * de sempre), isolamento por tenant (mesmo telefone falando com dois
  * tenants diferentes não deve colidir — bug latente corrigido junto),
@@ -29,7 +29,7 @@ describe('bufferIncomingText', () => {
       const onFlush = vi.fn();
       bufferIncomingText('595981111111', 'Cliente', 'oi', 'msg-1', TENANT_A, onFlush);
       bufferIncomingText('595981111111', 'Cliente', 'tudo bem?', 'msg-2', TENANT_A, onFlush);
-      await vi.advanceTimersByTimeAsync(6000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(onFlush).toHaveBeenCalledTimes(1);
       expect(onFlush).toHaveBeenCalledWith('oi\ntudo bem?', 'Cliente', 'msg-2', 2, TENANT_A);
     } finally {
@@ -44,7 +44,7 @@ describe('bufferIncomingText', () => {
       const onFlushB = vi.fn();
       bufferIncomingText('595981234567', 'Cliente', 'oi tenant A', 'msg-a', TENANT_A, onFlushA);
       bufferIncomingText('595981234567', 'Cliente', 'oi tenant B', 'msg-b', TENANT_B, onFlushB);
-      await vi.advanceTimersByTimeAsync(6000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(onFlushA).toHaveBeenCalledWith('oi tenant A', 'Cliente', 'msg-a', 1, TENANT_A);
       expect(onFlushB).toHaveBeenCalledWith('oi tenant B', 'Cliente', 'msg-b', 1, TENANT_B);
     } finally {
@@ -64,7 +64,7 @@ describe('bufferIncomingText', () => {
     vi.useFakeTimers();
     try {
       bufferIncomingText('595983333333', 'Cliente', 'oi', 'msg-1', TENANT_A, vi.fn());
-      await vi.advanceTimersByTimeAsync(6000);
+      await vi.advanceTimersByTimeAsync(10_000);
     } finally {
       vi.useRealTimers();
     }

@@ -44,4 +44,9 @@
 - [x] Impedir a repetição de respostas automáticas sem nova mensagem do cliente e reduzir mensagens fragmentadas por uma única intenção.
 - [x] Testar a sequência real da Tereza: preço do combo, duração dos três procedimentos e encerramento sem agenda antecipada.
 - [x] Corrigir a simulação de persistência no teste do buffer para validar a remoção atômica sem avisos falsos.
+- [x] Mapear as respostas automáticas e os riscos que exigem bloqueio ou revisão antes do envio.
+- [x] Criar um validador pré-envio para contexto, idioma, repetição, intenção, catálogo, agenda e conteúdo sensível.
+- [x] Escalar respostas reprovadas para revisão humana sem enviar mensagem automática ao cliente.
+- [x] Registrar a decisão do validador para auditoria no painel de escalonamentos.
+- [x] Cobrir aprovação, bloqueio e escalonamento por testes automatizados e publicar a proteção.
 - [ ] Revisar a experiência visual e entregar a atualização no repositório Universo.

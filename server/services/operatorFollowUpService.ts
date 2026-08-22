@@ -21,6 +21,7 @@ import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 import { getConversation, recordOutgoingMessage } from './conversationStore';
 import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage } from './metaSend';
 import { markOperatorGuidanceConsumed, type Escalation } from './escalationStore';
+import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 
 const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -114,6 +115,17 @@ export async function sendOperatorGuidedFollowUp(
   if (!deps.ai) return { sent: false, reason: 'IA indisponível no momento.' };
   const message = await draftFollowUpMessage(tenantId, deps.ai, escalation.operatorReply, escalation.contactName);
   if (!message) return { sent: false, reason: 'IA não conseguiu gerar a mensagem de retomada.' };
+  const conversation = await getConversation(tenantId, escalation.phone);
+  const safety = await reviewAutoReplyBeforeSend({
+    customerMessage: escalation.lastMessage || escalation.operatorReply,
+    draftBubbles: [message],
+    history: conversation?.messages,
+    knowledgeContext: escalation.operatorReply,
+  }, { ai: deps.ai });
+  if (!safety.approved) {
+    console.warn(`🛡️ [Revisor pré-envio] retomada guiada bloqueada para ${escalation.phone}: ${safety.reason}`);
+    return { sent: false, reason: `Revisor pré-envio bloqueou o rascunho (${safety.severity}): ${safety.reason}` };
+  }
 
   await sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, escalation.phone, message);
   await recordOutgoingMessage(

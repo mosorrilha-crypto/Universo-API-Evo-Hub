@@ -26,6 +26,7 @@ import { getAppointmentForPhone, markPaymentPendingVerification } from '../servi
 import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnalysis';
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
+import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
 
@@ -193,6 +194,27 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
           // conversa. Escala silenciosamente: o operador vê no painel e
           // conduz a próxima resposta do zero, sem a IA ter dito nada antes.
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
+          emitAiReplyStatus(tenantId, phone, 'failed');
+          return;
+        }
+        const safety = await reviewAutoReplyBeforeSend({
+          customerMessage: text,
+          draftBubbles: result.bubbles,
+          history,
+          knowledgeContext: kbContext,
+          isBookingFlow: result.agent === 'agendamento',
+          needsHumanConfirmation: result.needsHumanConfirmation,
+        }, { ai: getAi!(), groqApiKey });
+        if (!safety.approved) {
+          const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
+          await logEscalation(
+            tenantId,
+            phone,
+            contactName,
+            `Revisor pré-envio bloqueou a resposta automática (${safety.source}, risco ${safety.severity}): ${safety.reason} Rascunho bloqueado: ${blockedDraft}`,
+            text
+          );
+          console.warn(`🛡️ [Revisor pré-envio] tenant=${tenantId} bloqueou resposta para ${phone}: ${safety.reason}`);
           emitAiReplyStatus(tenantId, phone, 'failed');
           return;
         }

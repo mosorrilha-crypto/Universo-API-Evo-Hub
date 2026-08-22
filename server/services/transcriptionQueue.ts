@@ -13,6 +13,7 @@ import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseS
 import { getTenantSegment } from './tenantProfileStore';
 import { logEscalation, isPaymentRelated, looksLikeHarassment } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
+import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
@@ -197,6 +198,27 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
           );
           if (!result) {
             await logEscalation(tenantId, message.from, message.contactName, 'IA não conseguiu gerar resposta automática pro áudio', outcome.result.transcription);
+            emitAiReplyStatus(tenantId, message.from, 'failed');
+            return;
+          }
+          const safety = await reviewAutoReplyBeforeSend({
+            customerMessage: outcome.result.transcription,
+            draftBubbles: result.bubbles,
+            history,
+            knowledgeContext: kbContext,
+            isBookingFlow: result.agent === 'agendamento',
+            needsHumanConfirmation: result.needsHumanConfirmation,
+          }, { ai: deps.getAi(), groqApiKey: deps.groqApiKey });
+          if (!safety.approved) {
+            const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
+            await logEscalation(
+              tenantId,
+              message.from,
+              message.contactName,
+              `Revisor pré-envio bloqueou a resposta automática de áudio (${safety.source}, risco ${safety.severity}): ${safety.reason} Rascunho bloqueado: ${blockedDraft}`,
+              outcome.result.transcription
+            );
+            console.warn(`🛡️ [Revisor pré-envio] tenant=${tenantId} bloqueou resposta de áudio para ${message.from}: ${safety.reason}`);
             emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
