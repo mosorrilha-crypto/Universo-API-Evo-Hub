@@ -6,7 +6,7 @@
 > está pronto hoje". Este arquivo é o único que se compromete a refletir o estado real do
 > código no momento da última revisão abaixo. Se algo aqui contradiz outro doc, este vence.
 >
-> **Última auditoria (comparado linha a linha com o código real):** 2026-08-19.
+> **Última auditoria (comparado linha a linha com o código real):** 2026-08-22.
 > **Como manter isso confiável:** depois de qualquer mudança estrutural (nova fase concluída,
 > gap novo descoberto, decisão de arquitetura), atualize a seção relevante aqui na mesma PR —
 > não deixe pra uma "sessão de documentação" depois, ela nunca vem.
@@ -91,7 +91,7 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 
 ## Protocolo de sincronização entre agentes
 
-A issue [#290](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/290) é o painel canônico de status e handoff entre Manus.Ai, Claude e outras plataformas. Toda nova conversa de desenvolvimento deve consultar a #290 antes de analisar, editar código, alterar configuração ou escolher uma tarefa. Para gerar um identificador sequencial compartilhado, execute `npm run task:start -- --agent "NomeDaPlataforma" "descrição da tarefa"`; o comando cria um registro `TASK-XXXX` em `docs/task-registry/`. Ao concluir, o agente deve registrar na #290 o identificador, resultado, arquivos/commits, validações e pendências.
+A issue [#290](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/290) é o painel canônico de status e handoff entre Manus.Ai, Claude e outras plataformas. Toda nova conversa de desenvolvimento deve consultar a #290 antes de analisar, editar código, alterar configuração ou escolher uma tarefa. Para gerar um identificador sequencial compartilhado, execute `npm run task:start -- --agent "NomeDaPlataforma" "descrição da tarefa"`; o comando usa um lock local contra colisões, lê o maior `TASK-XXXX` já versionado e cria o próximo registro em `docs/task-registry/`. Ao concluir, o agente deve atualizar esse registro e a #290 com o identificador, resultado, arquivos/commits, validações e pendências. Antes de iniciar outra tarefa, sincronize a `main` para que a sequência permaneça compartilhada pelo Git.
 
 ## Docs relacionados (contexto histórico/profundo, não confie neles pro status atual)
 
