@@ -343,27 +343,44 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         return res.status(400).json({ error: 'O ensaio OGG/Opus exige um canal Meta Cloud API.' });
       }
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
-        const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType, isOggOpusProbe ? 'ogg_opus' : 'mp3');
-        uploadBase64 = transcoded.base64;
-        // mimeType (e filename) do upload/persistência seguem o que a
-        // transcodificação retornou.
-        uploadMimeType = transcoded.mimeType;
-        uploadFilename = uploadMimeType.startsWith('audio/mpeg') ? 'audio.mp3' : 'audio.ogg';
+        // A Meta reconhece nota de voz somente quando o áudio é OGG/Opus mono
+        // e o payload de mensagem contém `audio.voice: true`. MP3 passa a ser
+        // um fallback de entrega, não mais o formato padrão desse canal.
+        const applyTranscode = async (output: 'ogg_opus' | 'mp3') => {
+          const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType, output);
+          uploadBase64 = transcoded.base64;
+          uploadMimeType = transcoded.mimeType;
+          uploadFilename = output === 'ogg_opus' ? 'voice-note.ogg' : 'voice-note.mp3';
+        };
+
+        await applyTranscode(isEvolution ? 'mp3' : 'ogg_opus');
 
         if (isEvolution) {
           await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType, uploadFilename);
         } else {
-          const audioBuffer = Buffer.from(uploadBase64, 'base64');
-          const mediaId = await sendWhatsAppAudioMessage(
-            channel.metaPhoneNumberId,
-            channel.metaAccessToken,
-            req.params.phone,
-            audioBuffer,
-            uploadMimeType,
-            isOggOpusProbe ? 'oggOpusProbe' : undefined
-          );
-          if (isOggOpusProbe) {
-            console.log(`🔬 [oggOpusProbe] to=***${req.params.phone.replace(/\D/g, '').slice(-4)} media_id=${mediaId} mime="${uploadMimeType}" bytes=${audioBuffer.length}`);
+          const sendCurrentAudio = async (diagnosticTag?: string) => {
+            const audioBuffer = Buffer.from(uploadBase64, 'base64');
+            const mediaId = await sendWhatsAppAudioMessage(
+              channel.metaPhoneNumberId,
+              channel.metaAccessToken,
+              req.params.phone,
+              audioBuffer,
+              uploadMimeType,
+              diagnosticTag
+            );
+            if (diagnosticTag) {
+              console.log(`🔬 [${diagnosticTag}] to=***${req.params.phone.replace(/\D/g, '').slice(-4)} media_id=${mediaId} mime="${uploadMimeType}" bytes=${audioBuffer.length}`);
+            }
+          };
+
+          try {
+            await sendCurrentAudio(isOggOpusProbe ? 'oggOpusProbe' : undefined);
+          } catch (error) {
+            // A falha cobre tanto rejeição da Meta quanto uma eventual falha de
+            // codificação OGG local. Só então entregamos MP3 como contingência.
+            console.warn(`🎙️ [audioFallback] ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            await applyTranscode('mp3');
+            await sendCurrentAudio('audioMp3Fallback');
           }
         }
       } else {
