@@ -64,11 +64,21 @@ interface QualityRecommendation {
   kind: QualityReview['kind'];
 }
 
+type AgentRoute = 'triagem' | 'faq' | 'agendamento' | 'reclamacao' | 'unknown';
+
+interface MemoryCorrectionInsights {
+  totalCorrections: number;
+  topFields: Array<{ field: string; count: number }>;
+  byAgentRoute: Array<{ route: AgentRoute; count: number }>;
+  recentCorrections: Array<{ createdAt: string; fields: string[]; agentRoute: AgentRoute }>;
+  reviewCandidates: Array<{ field: string; count: number }>;
+}
+
 interface QualityAuditCenterProps {
   onToast: (message: string) => void;
 }
 
-type CenterTab = 'overview' | 'reviews' | 'bugs' | 'ideas' | 'knowledge' | 'events';
+type CenterTab = 'overview' | 'reviews' | 'bugs' | 'ideas' | 'knowledge' | 'memory' | 'events';
 type ComposerKind = 'bug' | 'operator_idea';
 
 const KIND_LABELS: Record<QualityReview['kind'], string> = {
@@ -126,6 +136,12 @@ function confidenceLabel(confidence: number | null | undefined) {
 }
 
 const AUDIT_FIELD_LABELS: Record<string, string> = {
+  preferredLanguage: 'Idioma',
+  preferredName: 'Nome',
+  currentIntent: 'Intenção',
+  serviceInterest: 'Interesse',
+  objections: 'Objeções',
+  nextBestAction: 'Próximo passo',
   name: 'Nome',
   email: 'E-mail',
   stage: 'Etapa comercial',
@@ -141,6 +157,7 @@ function auditSourceLabel(source: string) {
     operator_panel: 'Painel do operador',
     quality_admin: 'Central de Qualidade',
     operator_payment_review: 'Revisão de pagamento',
+    atendimento_context_panel: 'Contexto supervisionado do Atendimento',
   };
   return labels[source] || 'Operação';
 }
@@ -174,9 +191,34 @@ function auditEventPresentation(event: QualityAuditEvent) {
       return { title: 'Decisão de qualidade atualizada', summary: typeof payload.status === 'string' ? `O item foi marcado como “${STATUS_LABELS[payload.status as QualityReview['status']] || payload.status}”.` : 'O status de um item de qualidade foi atualizado.' };
     case 'operator_feedback':
       return { title: 'Feedback do operador registrado', summary: decision ? `O operador ${decisionLabel[decision] || 'registrou uma decisão sobre'} a sugestão da IA.` : 'O operador registrou feedback sobre uma sugestão da IA.' };
+    case 'contact_memory_corrected':
+      return { title: 'Memória do contato corrigida', summary: changedFields.length ? `Campos corrigidos: ${changedFields.join(', ')}. A alteração permanece sob revisão humana.` : 'Uma memória de contato foi corrigida sob revisão humana.' };
     default:
       return { title: 'Atualização registrada', summary: 'Uma atualização operacional foi registrada nesta linha do tempo.' };
   }
+}
+
+const EMPTY_MEMORY_CORRECTION_INSIGHTS: MemoryCorrectionInsights = {
+  totalCorrections: 0,
+  topFields: [],
+  byAgentRoute: [],
+  recentCorrections: [],
+  reviewCandidates: [],
+};
+
+const AGENT_ROUTE_LABELS: Record<AgentRoute, string> = {
+  triagem: 'Triagem',
+  faq: 'Dúvidas e informações',
+  agendamento: 'Agendamento',
+  reclamacao: 'Reclamação',
+  unknown: 'Sem rota registrada',
+};
+const SAFE_MEMORY_CORRECTION_FIELDS = new Set(['preferredLanguage', 'preferredName', 'currentIntent', 'serviceInterest', 'objections', 'nextBestAction']);
+function isSafeMemoryCorrectionField(value: unknown): value is string {
+  return typeof value === 'string' && SAFE_MEMORY_CORRECTION_FIELDS.has(value);
+}
+function safeAgentRouteLabel(value: unknown): string {
+  return typeof value === 'string' && value in AGENT_ROUTE_LABELS ? AGENT_ROUTE_LABELS[value as AgentRoute] : AGENT_ROUTE_LABELS.unknown;
 }
 
 function conversationReference(phone?: string | null) {
@@ -193,6 +235,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [events, setEvents] = useState<QualityAuditEvent[]>([]);
   const [recommendations, setRecommendations] = useState<QualityRecommendation[]>([]);
   const [metrics, setMetrics] = useState({ totalReviews: 0, pendingCount: 0, correctedCount: 0, rejectedCount: 0, lowConfidenceCount: 0, totalEvents: 0 });
+  const [memoryCorrectionInsights, setMemoryCorrectionInsights] = useState<MemoryCorrectionInsights>(EMPTY_MEMORY_CORRECTION_INSIGHTS);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -216,6 +259,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       setReviews(data.reviews || []);
       setEvents(data.events || []);
       setRecommendations(data.recommendations || []);
+      setMemoryCorrectionInsights(data.memoryCorrectionInsights || EMPTY_MEMORY_CORRECTION_INSIGHTS);
       setMetrics(data.metrics || { totalReviews: 0, pendingCount: 0, correctedCount: 0, rejectedCount: 0, lowConfidenceCount: 0, totalEvents: 0 });
     } catch (error: any) {
       setLoadError(error?.message || 'Não foi possível carregar os dados de auditoria.');
@@ -299,6 +343,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     { id: 'bugs', label: 'Bugs', icon: <BugIcon />, count: reviews.filter((review) => review.kind === 'bug' && !['resolved', 'rejected'].includes(review.status)).length },
     { id: 'ideas', label: isSpanish ? 'Ideas' : 'Ideias', icon: <Lightbulb className="w-4 h-4" />, count: reviews.filter((review) => review.kind === 'operator_idea' && review.status === 'pending').length },
     { id: 'knowledge', label: isSpanish ? 'Conocimiento' : 'Conhecimento', icon: <LockKeyhole className="w-4 h-4" /> },
+    { id: 'memory', label: isSpanish ? 'Memoria' : 'Memória', icon: <Wrench className="w-4 h-4" />, count: memoryCorrectionInsights.totalCorrections },
     { id: 'events', label: isSpanish ? 'Auditoría' : 'Auditoria', icon: <ClipboardCheck className="w-4 h-4" />, count: events.length },
   ];
 
@@ -402,7 +447,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
         </>
       )}
 
-      {activeTab !== 'overview' && activeTab !== 'events' && (
+      {activeTab !== 'overview' && activeTab !== 'events' && activeTab !== 'memory' && (
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
@@ -427,6 +472,10 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === 'memory' && (
+        <MemoryCorrectionPatternsPanel insights={memoryCorrectionInsights} loading={loading} isSpanish={isSpanish} />
       )}
 
       {activeTab === 'events' && (
@@ -499,6 +548,69 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     </section>
   );
 };
+
+export function MemoryCorrectionPatternsPanel({ insights, loading, isSpanish }: { insights: MemoryCorrectionInsights; loading: boolean; isSpanish: boolean }) {
+  if (loading) return <LoadingState />;
+  const visibleTopFields = insights.topFields.filter((item) => isSafeMemoryCorrectionField(item.field));
+  const visibleRoutes = insights.byAgentRoute.filter((item) => typeof item.route === 'string');
+  const visibleRecentCorrections = insights.recentCorrections.map((item) => ({ ...item, fields: item.fields.filter(isSafeMemoryCorrectionField) })).filter((item) => item.fields.length > 0);
+  const visibleReviewCandidates = insights.reviewCandidates.filter((item) => isSafeMemoryCorrectionField(item.field));
+  const topField = visibleTopFields[0] || null;
+  const topRoute = visibleRoutes[0] || null;
+  const fieldLabel = (field: string) => AUDIT_FIELD_LABELS[field] || readableAuditField(field);
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-card border border-sky-500/25 bg-slate-900/70 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-sky-300"><Wrench className="h-4 w-4" /> {isSpanish ? 'Patrones de memoria' : 'Padrões de memória'}</div>
+            <h3 className="mt-2 text-lg font-bold text-white">{isSpanish ? 'Correcciones humanas recurrentes' : 'Correções humanas recorrentes'}</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-400">{isSpanish ? 'Esta vista agrupa sólo los campos corregidos y la ruta del agente. Nunca muestra contactos o valores editados y no cambia al agente automáticamente.' : 'Esta visão agrupa somente os campos corrigidos e a rota do agente. Ela nunca mostra contatos ou valores editados e não altera o agente automaticamente.'}</p>
+          </div>
+          <div className="flex items-start gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-[10px] leading-relaxed text-emerald-100/90 sm:max-w-60"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />{isSpanish ? 'Evidencia para revisión humana; no es una regla automática.' : 'Evidência para revisão humana; não é uma regra automática.'}</div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <MetricCard label={isSpanish ? 'Correcciones' : 'Correções'} value={insights.totalCorrections} tone="sky" icon={<Wrench className="w-4 h-4" />} />
+        <MetricCard label={isSpanish ? 'Campo más corregido' : 'Campo mais corrigido'} value={topField?.count || 0} tone="amber" icon={<ClipboardCheck className="w-4 h-4" />} />
+        <MetricCard label={isSpanish ? 'Ruta más observada' : 'Rota mais observada'} value={topRoute?.count || 0} tone="emerald" icon={<CircleDot className="w-4 h-4" />} />
+      </div>
+
+      {insights.totalCorrections === 0 ? (
+        <EmptyState icon={<Wrench className="w-5 h-5" />} title={isSpanish ? 'Aún no hay correcciones de memoria' : 'Ainda não há correções de memória'} text={isSpanish ? 'Cuando operadores corrijan campos seguros en Atención, los patrones aparecerán aquí sin revelar contenido del contacto.' : 'Quando operadores corrigirem campos seguros no Atendimento, os padrões aparecerão aqui sem revelar conteúdo do contato.'} />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+          <section className="rounded-card border border-slate-800 bg-slate-900/70 p-4">
+            <div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-bold text-white">{isSpanish ? 'Campos que más exigen corrección' : 'Campos que mais exigem correção'}</h4><p className="mt-1 text-[11px] text-slate-500">{isSpanish ? 'Conteo por campo, sin valores ni contactos.' : 'Contagem por campo, sem valores nem contatos.'}</p></div><ClipboardCheck className="h-5 w-5 text-sky-300" /></div>
+            <div className="mt-4 space-y-2">
+              {visibleTopFields.slice(0, 6).map((item) => {
+                const ratio = insights.totalCorrections ? Math.max(8, Math.round((item.count / insights.totalCorrections) * 100)) : 0;
+                return <div key={item.field} className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><div className="flex items-center justify-between gap-3 text-xs"><span className="font-semibold text-slate-200">{fieldLabel(item.field)}</span><span className="font-bold text-sky-300">{item.count}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-sky-400" style={{ width: `${ratio}%` }} /></div></div>;
+              })}
+            </div>
+          </section>
+
+          <section className="rounded-card border border-slate-800 bg-slate-900/70 p-4">
+            <div className="flex items-start justify-between gap-3"><div><h4 className="text-sm font-bold text-white">{isSpanish ? 'Rutas observadas' : 'Rotas observadas'}</h4><p className="mt-1 text-[11px] text-slate-500">{isSpanish ? 'Ruta del último turno antes de la corrección.' : 'Rota do último turno antes da correção.'}</p></div><CircleDot className="h-5 w-5 text-emerald-300" /></div>
+            <div className="mt-4 space-y-2">
+              {visibleRoutes.map((item) => <div key={item.route} className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2.5"><span className="text-xs font-semibold text-slate-200">{safeAgentRouteLabel(item.route)}</span><span className="rounded-pill border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-200">{item.count} {item.count === 1 ? 'correção' : 'correções'}</span></div>)}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {visibleReviewCandidates.length > 0 && (
+        <section className="rounded-card border border-amber-500/25 bg-amber-500/5 p-4"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" /><div><h4 className="text-sm font-bold text-amber-100">{isSpanish ? 'Revisión humana recomendada' : 'Revisão humana recomendada'}</h4><p className="mt-1 text-xs leading-relaxed text-amber-100/75">{isSpanish ? 'Estos campos ya tienen tres o más correcciones. Revise ejemplos y la base de conocimiento antes de proponer cualquier ajuste de prompt o flujo.' : 'Estes campos já somam três ou mais correções. Revise exemplos e a base de conhecimento antes de propor qualquer ajuste de prompt ou fluxo.'}</p><div className="mt-2 flex flex-wrap gap-1.5">{visibleReviewCandidates.map((item) => <span key={item.field} className="rounded-pill border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-100">{fieldLabel(item.field)} · {item.count}</span>)}</div></div></div></section>
+      )}
+
+      {visibleRecentCorrections.length > 0 && (
+        <section className="overflow-hidden rounded-card border border-slate-800 bg-slate-900/70"><div className="border-b border-slate-800 p-4"><h4 className="text-sm font-bold text-white">{isSpanish ? 'Evidencias recientes' : 'Evidências recentes'}</h4><p className="mt-1 text-[11px] text-slate-500">{isSpanish ? 'Secuencia redigida para priorizar revisión; sin datos del contacto.' : 'Sequência redigida para priorizar revisão; sem dados do contato.'}</p></div><div className="divide-y divide-slate-800/80">{visibleRecentCorrections.map((item, index) => <article key={`${item.createdAt}-${index}`} className="p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex flex-wrap items-center gap-1.5">{item.fields.map((field) => <span key={field} className="rounded-pill border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold text-sky-200">{fieldLabel(field)}</span>)}<span className="rounded-pill border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">{safeAgentRouteLabel(item.agentRoute)}</span></div><time className="text-[10px] text-slate-500">{formatDate(item.createdAt)}</time></div></article>)}</div></section>
+      )}
+    </div>
+  );
+}
 
 const toneMap: Record<string, string> = { amber: 'text-amber-300 bg-amber-500/10 border-amber-400/20', sky: 'text-sky-300 bg-sky-500/10 border-sky-400/20', rose: 'text-rose-300 bg-rose-500/10 border-rose-400/20', emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/20', slate: 'text-slate-300 bg-slate-500/10 border-slate-400/20' };
 

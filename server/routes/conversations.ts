@@ -294,6 +294,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     try {
       const memory = await updateContactAgentMemoryByOperator({ tenantId, phone, patch: req.body });
       const changedFields = Object.keys(req.body || {}).sort();
+      const latestTrace = (await listAgentTurnTraces(tenantId, phone, 1))[0] || null;
 
       // Auditável sem registrar o conteúdo editado, que pode incluir dados
       // pessoais do contato. O evento prova quem/quando/quais campos, não guarda
@@ -306,7 +307,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         entityId: `${tenantId}:${phone}`,
         conversationPhone: phone,
         actorId: req.user?.id,
-        payload: { changedFields, updatedBy: 'operator' },
+        payload: { changedFields, updatedBy: 'operator', agentRoute: latestTrace?.router_decision || 'unknown' },
       });
 
       res.json({

@@ -177,6 +177,60 @@ export interface QualityRecommendation {
   kind: QualityReviewKind;
 }
 
+export type AgentRoute = 'triagem' | 'faq' | 'agendamento' | 'reclamacao' | 'unknown';
+
+export interface MemoryCorrectionInsights {
+  totalCorrections: number;
+  topFields: Array<{ field: string; count: number }>;
+  byAgentRoute: Array<{ route: AgentRoute; count: number }>;
+  recentCorrections: Array<{ createdAt: string; fields: string[]; agentRoute: AgentRoute }>;
+  reviewCandidates: Array<{ field: string; count: number }>;
+}
+
+const MEMORY_CORRECTION_FIELDS = new Set(['preferredLanguage', 'preferredName', 'currentIntent', 'serviceInterest', 'objections', 'nextBestAction']);
+const AGENT_ROUTES = new Set<AgentRoute>(['triagem', 'faq', 'agendamento', 'reclamacao', 'unknown']);
+
+function asAgentRoute(value: unknown): AgentRoute {
+  return typeof value === 'string' && AGENT_ROUTES.has(value as AgentRoute) ? value as AgentRoute : 'unknown';
+}
+
+/**
+ * Agrega apenas os metadados redigidos de contact_memory_corrected. Nunca
+ * usa telefone, ator, valores antes/depois ou conteúdo da conversa; a visão
+ * serve para priorizar revisão humana, não para alterar o agente sozinha.
+ */
+export function deriveMemoryCorrectionInsights(events: QualityAuditEvent[]): MemoryCorrectionInsights {
+  const corrections = events
+    .filter((event) => event.event_type === 'contact_memory_corrected')
+    .map((event) => {
+      const rawFields = Array.isArray(event.payload?.changedFields) ? event.payload.changedFields : [];
+      const fields = Array.from(new Set(rawFields.filter((field): field is string => typeof field === 'string' && MEMORY_CORRECTION_FIELDS.has(field))));
+      return { createdAt: event.created_at, fields, agentRoute: asAgentRoute(event.payload?.agentRoute) };
+    })
+    .filter((event) => event.fields.length > 0);
+
+  const fieldCounts = new Map<string, number>();
+  const routeCounts = new Map<AgentRoute, number>();
+  for (const correction of corrections) {
+    correction.fields.forEach((field) => fieldCounts.set(field, (fieldCounts.get(field) || 0) + 1));
+    routeCounts.set(correction.agentRoute, (routeCounts.get(correction.agentRoute) || 0) + 1);
+  }
+  const toSortedEntries = <T extends string>(source: Map<T, number>) => Array.from(source, ([key, count]) => ({ key, count }))
+    .sort((left, right) => right.count - left.count || left.key.localeCompare(right.key));
+  const topFields = toSortedEntries(fieldCounts).map(({ key, count }) => ({ field: key, count }));
+  const byAgentRoute = toSortedEntries(routeCounts).map(({ key, count }) => ({ route: key as AgentRoute, count }));
+
+  return {
+    totalCorrections: corrections.length,
+    topFields,
+    byAgentRoute,
+    recentCorrections: corrections.sort((left, right) => right.createdAt.localeCompare(left.createdAt)).slice(0, 8),
+    // Três ocorrências já são evidência para abrir revisão humana — jamais
+    // para promover uma mudança automática de prompt/regra.
+    reviewCandidates: topFields.filter((item) => item.count >= 3).slice(0, 4),
+  };
+}
+
 export function deriveQualityRecommendations(reviews: QualityReview[]): QualityRecommendation[] {
   const recommendations: QualityRecommendation[] = [];
   const correctedSuggestions = reviews.filter((review) => review.kind === 'ai_suggestion' && review.context?.decision === 'corrected');

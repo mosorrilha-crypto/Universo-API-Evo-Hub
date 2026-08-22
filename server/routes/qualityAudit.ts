@@ -4,6 +4,7 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import { requireRole, resolveTenantId } from '../middleware/rbac';
 import {
   createQualityReview,
+  deriveMemoryCorrectionInsights,
   deriveQualityRecommendations,
   listQualityAuditEvents,
   listQualityReviews,
@@ -52,6 +53,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
       reviews,
       events,
       recommendations: deriveQualityRecommendations(reviews),
+      memoryCorrectionInsights: deriveMemoryCorrectionInsights(events),
       metrics: {
         totalReviews: reviews.length,
         pendingCount,

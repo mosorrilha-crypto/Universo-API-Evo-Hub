@@ -166,7 +166,7 @@ describe('PATCH /api/conversations/:phone/context/memory', () => {
     expect(stored.facts_confirmed).toEqual({ preferredChannel: 'whatsapp' });
     const auditEvent = supabase.__tables.quality_audit_events[0];
     expect(auditEvent).toMatchObject({ tenant_id: TENANT_A, event_type: 'contact_memory_corrected', actor_id: 'op-a' });
-    expect(auditEvent.payload).toEqual({ changedFields: ['objections', 'preferredName'], updatedBy: 'operator' });
+    expect(auditEvent.payload).toEqual({ changedFields: ['objections', 'preferredName'], updatedBy: 'operator', agentRoute: 'agendamento' });
     expect(JSON.stringify(auditEvent)).not.toContain('Ana corrigida');
   });
 
