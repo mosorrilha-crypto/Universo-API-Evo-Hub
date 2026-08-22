@@ -112,8 +112,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
 
   return (
     <section className="space-y-4 animate-page-enter">
-      <div className="relative overflow-hidden rounded-card border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/35 px-4 py-4 sm:px-5 sm:py-5 shadow-xl shadow-slate-950/30">
-        <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-emerald-400/10 blur-3xl" />
+      <div className="operations-hero relative overflow-hidden rounded-card border px-4 py-4 sm:px-5 sm:py-5">
         <div className="relative flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-pill border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-300">

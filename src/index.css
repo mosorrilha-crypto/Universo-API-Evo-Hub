@@ -856,3 +856,40 @@ html[data-theme='dark'] textarea:focus-visible,
 html[data-theme='dark'] select:focus-visible {
   outline-color: var(--action);
 }
+
+
+/* Refinamento de superfícies claras: componentes legados usam variações opacas
+   de slate; todas devem se comportar como cartões neutros fora do modo azul. */
+html[data-theme='light'] .bg-slate-900\/75,
+html[data-theme='light'] .bg-slate-900\/45,
+html[data-theme='light'] .bg-slate-900\/35 {
+  background-color: var(--surface-panel) !important;
+}
+
+html[data-theme='light'] .bg-slate-950\/55,
+html[data-theme='light'] .bg-slate-950\/45,
+html[data-theme='light'] .bg-slate-950\/40,
+html[data-theme='light'] .bg-slate-950\/35 {
+  background-color: var(--surface-sunken) !important;
+}
+
+.operations-hero {
+  background: var(--surface-panel);
+  border-color: var(--border);
+  box-shadow: var(--shadow-premium);
+}
+
+html[data-theme='light'] .operations-hero {
+  background: var(--surface-panel);
+  border-color: var(--border);
+}
+
+html[data-theme='dark'] .operations-hero {
+  background: var(--surface-panel);
+  border-color: var(--border);
+}
+
+html[data-theme='blue'] .operations-hero {
+  background: var(--surface-panel);
+  border-color: var(--border);
+}

@@ -32,6 +32,12 @@ type CalendarEvent = {
   payment?: { amount: number; paymentMethod: PaymentMethod; status: PaymentStatus } | null;
 };
 
+type AppointmentDialogState = {
+  mode: 'new' | 'edit';
+  event?: CalendarEvent;
+  initialDate?: string;
+};
+
 interface AgendaFinanceiroCenterProps {
   transactions: FinancialTransaction[];
   leads: LeadInfo[];
@@ -80,11 +86,12 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   const displayLocale = isSpanish ? 'es-PY' : 'pt-BR';
   const [view, setView] = useState<CenterView>('unified');
   const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [selectedDate, setSelectedDate] = useState(() => dateInputValue(new Date()));
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [period, setPeriod] = useState<'month' | 'all'>('month');
-  const [appointmentDialog, setAppointmentDialog] = useState<{ mode: 'new' | 'edit'; event?: CalendarEvent } | null>(null);
+  const [appointmentDialog, setAppointmentDialog] = useState<AppointmentDialogState | null>(null);
   const [transactionDialog, setTransactionDialog] = useState<'income' | 'expense' | null>(null);
   const [paymentDialog, setPaymentDialog] = useState<CalendarEvent | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -122,7 +129,17 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   const nextAppointments = events.filter((event) => new Date(event.startIso).getTime() >= Date.now() && !event.completed).sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso)).slice(0, 5);
   const hasOperationalData = events.length > 0 || transactions.length > 0;
 
-  const changeMonth = (offset: number) => setCalendarDate((date) => new Date(date.getFullYear(), date.getMonth() + offset, 1));
+  const changeMonth = (offset: number) => {
+    setCalendarDate((date) => {
+      const nextMonth = new Date(date.getFullYear(), date.getMonth() + offset, 1);
+      const today = new Date();
+      const nextSelection = today.getFullYear() === nextMonth.getFullYear() && today.getMonth() === nextMonth.getMonth()
+        ? dateInputValue(today)
+        : dateInputValue(nextMonth);
+      setSelectedDate(nextSelection);
+      return nextMonth;
+    });
+  };
 
   const callEventAction = async (url: string, method: string, body?: object) => {
     const response = await apiFetch(url, {
@@ -277,6 +294,21 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     });
   }, [calendarDate, events]);
 
+  const selectedDateLabel = useMemo(() => new Intl.DateTimeFormat(displayLocale, {
+    weekday: 'long', day: 'numeric', month: 'long',
+  }).format(new Date(`${selectedDate}T12:00:00`)), [displayLocale, selectedDate]);
+
+  const selectedDateEvents = useMemo(
+    () => eventDays.find(({ day }) => dateInputValue(day) == selectedDate)?.appointments || [],
+    [eventDays, selectedDate],
+  );
+
+  const goToToday = () => {
+    const today = new Date();
+    setCalendarDate(new Date(today.getFullYear(), today.getMonth(), 1));
+    setSelectedDate(dateInputValue(today));
+  };
+
   const EventCard = ({ calendarEvent, compact = false }: { calendarEvent: CalendarEvent; compact?: boolean }) => (
     <article className={`group rounded-2xl border border-slate-800 bg-slate-950/55 p-${compact ? '3' : '4'} transition-colors hover:border-emerald-500/35`}>
       <div className="flex items-start gap-3">
@@ -307,7 +339,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
 
   return (
     <div className="space-y-5 animate-page-enter">
-      <section className="overflow-hidden rounded-3xl border border-emerald-500/15 bg-[radial-gradient(circle_at_86%_2%,rgba(16,185,129,0.18),transparent_32%),linear-gradient(125deg,#111827_0%,#0f172a_52%,#101827_100%)] p-6 shadow-2xl shadow-slate-950/35 sm:p-8">
+      <section className="operations-hero overflow-hidden rounded-3xl border p-6 sm:p-8">
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div className="max-w-2xl">
             <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.17em] text-emerald-300"><span className="h-px w-7 bg-emerald-400" />{isSpanish ? 'Operación integrada' : 'Operação integrada'}</div>
@@ -335,9 +367,31 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
       {!hasOperationalData && !loadingEvents && <section className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/45 p-6 text-center"><CircleDollarSign className="mx-auto h-7 w-7 text-emerald-400" /><h2 className="mt-3 font-bold text-white">{isSpanish ? 'La central está lista para recibir datos reales' : 'A central está pronta para receber dados reais'}</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-400">{isSpanish ? 'Todavía no hay atenciones ni registros vinculados en este período. Esto no indica ausencia de ventas; puede reflejar simplemente el inicio de uso del módulo.' : 'Ainda não há atendimentos ou lançamentos vinculados neste período. Isso não indica ausência de vendas; pode apenas refletir o início da adoção do módulo.'}</p></section>}
 
       {(view === 'unified' || view === 'agenda') && <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold text-white">{isSpanish ? 'Agenda operativa' : 'Agenda operacional'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Eventos reales del calendario, cobro y atención en el mismo flujo.' : 'Eventos reais do calendário, cobrança e atendimento no mesmo fluxo.'}</p></div><div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1"><button onClick={() => changeMonth(-1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes anterior' : 'Mês anterior'}><ChevronLeft className="h-4 w-4" /></button><span className="min-w-28 text-center text-xs font-bold capitalize text-slate-200">{monthLabel}</span><button onClick={() => changeMonth(1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes siguiente' : 'Próximo mês'}><ChevronRight className="h-4 w-4" /></button></div></div>
-          {loadingEvents ? <div className="grid grid-cols-7 gap-2 animate-pulse">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-20 rounded-xl bg-slate-800/70" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : <div className="grid grid-cols-7 gap-1.5 sm:gap-2"><div className="col-span-7 grid grid-cols-7 gap-1.5 pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:gap-2">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} />)}{eventDays.map(({ day, appointments }) => <button type="button" key={day.toISOString()} onClick={() => setAppointmentDialog({ mode: 'new' })} className={`min-h-20 rounded-xl border p-2 text-left transition-colors ${appointments.length ? 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'}`}><div className="flex justify-between"><span className={`text-xs font-bold ${day.toDateString() === new Date().toDateString() ? 'text-emerald-300' : 'text-slate-300'}`}>{day.getDate()}</span>{appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[9px] font-black text-slate-950">{appointments.length}</span>}</div><div className="mt-2 space-y-1">{appointments.slice(0, 2).map((event) => <span key={event.id} className="block truncate rounded bg-slate-900 px-1.5 py-1 text-[9px] font-medium text-slate-300">{new Date(event.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })} {event.summary.replace(/^\[[^\]]+\]\s*/, '')}</span>)}</div></button>)}</div>}
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg sm:p-5">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-bold text-white">{isSpanish ? 'Agenda operativa' : 'Agenda operacional'}</h2>
+              <p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Eventos reales del calendario, cobro y atención en el mismo flujo.' : 'Eventos reais do calendário, cobrança e atendimento no mesmo fluxo.'}</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1">
+              <button onClick={() => changeMonth(-1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes anterior' : 'Mês anterior'}><ChevronLeft className="h-4 w-4" /></button>
+              <div className="min-w-36 px-1 text-center">
+                <p className="text-xs font-bold capitalize text-slate-200">{monthLabel}</p>
+                <p className="mt-0.5 truncate text-[10px] font-medium text-emerald-300">{selectedDateLabel}</p>
+              </div>
+              <button onClick={() => changeMonth(1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes siguiente' : 'Próximo mês'}><ChevronRight className="h-4 w-4" /></button>
+            </div>
+          </div>
+
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300">{isSpanish ? 'Día seleccionado' : 'Dia selecionado'}</p>
+              <p className="truncate text-xs font-semibold text-slate-200">{selectedDateLabel} · {selectedDateEvents.length === 1 ? (isSpanish ? '1 cita' : '1 compromisso') : `${selectedDateEvents.length} ${isSpanish ? 'citas' : 'compromissos'}`}{selectedDate === dateInputValue(new Date()) ? ` · ${isSpanish ? 'hoy' : 'hoje'}` : ''}</p>
+            </div>
+            <button type="button" onClick={goToToday} className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/15">{isSpanish ? 'Ir a hoy' : 'Ir para hoje'}</button>
+          </div>
+
+          {loadingEvents ? <div className="grid grid-cols-7 gap-1.5 animate-pulse sm:gap-2">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-14 rounded-xl bg-slate-800/70 sm:h-16" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : <div className="grid grid-cols-7 gap-1 sm:gap-1.5"><div className="col-span-7 grid grid-cols-7 gap-1 pb-1 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1.5 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} />)}{eventDays.map(({ day, appointments }) => { const dayKey = dateInputValue(day); const isToday = dayKey === dateInputValue(new Date()); const isSelected = dayKey === selectedDate; return                   <button type="button" key={day.toISOString()} onClick={() => { setSelectedDate(dayKey); setAppointmentDialog({ mode: 'new', initialDate: dayKey }); }} aria-label={`${isToday ? (isSpanish ? 'Hoy, ' : 'Hoje, ') : ''}${day.getDate()} ${monthLabel}`} aria-pressed={isSelected} className={`min-h-14 rounded-lg border p-1 text-left transition-colors sm:min-h-16 sm:rounded-xl sm:p-1.5 ${isSelected ? 'border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-400/45' : appointments.length ? 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'}`}><div className="flex items-center justify-between gap-1"><span className={`flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold ${isToday ? 'bg-emerald-400 px-1 text-slate-950' : isSelected ? 'bg-emerald-500/15 px-1 text-emerald-200' : 'text-slate-300'}`}>{day.getDate()}</span>{appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[8px] font-black text-slate-950">{appointments.length}</span>}</div><div className="mt-1 space-y-0.5">{appointments.slice(0, 1).map((event) => <span key={event.id} className="block truncate rounded bg-slate-900 px-1 py-0.5 text-[8px] font-medium text-slate-300 sm:text-[9px]">{new Date(event.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })} {event.summary.replace(/^\[[^\]]+\]\s*/, '')}</span>)}{appointments.length > 1 && <span className="block text-[8px] font-semibold text-emerald-300">+{appointments.length - 1}</span>}</div></button>; })}</div>}
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-white">{isSpanish ? 'Próximos compromisos' : 'Próximos compromissos'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Acciones que requieren atención a continuación.' : 'Ações que exigem atenção na sequência.'}</p></div><button type="button" onClick={refreshEvents} className="text-xs font-bold text-emerald-300 hover:text-emerald-200">{isSpanish ? 'Actualizar' : 'Atualizar'}</button></div><div className="space-y-3">{nextAppointments.length ? nextAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'No se encontraron compromisos futuros este mes.' : 'Nenhum compromisso futuro encontrado neste mês.'}</p>}</div></div>
       </section>}
@@ -363,8 +417,8 @@ function DialogShell({ title, description, children, onClose }: { title: string;
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-xs font-semibold text-slate-300"><span className="mb-1.5 block">{label}</span>{children}</label>; }
 const inputClass = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition-colors placeholder:text-slate-600 focus:border-emerald-400';
 
-function AppointmentDialog({ dialog, leads, currency, isSpanish, onClose, onSubmit, submitting }: { dialog: { mode: 'new' | 'edit'; event?: CalendarEvent }; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
-  const eventDate = dialog.event ? new Date(dialog.event.startIso) : new Date();
+function AppointmentDialog({ dialog, leads, currency, isSpanish, onClose, onSubmit, submitting }: { dialog: AppointmentDialogState; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
+  const eventDate = dialog.event ? new Date(dialog.event.startIso) : dialog.initialDate ? new Date(`${dialog.initialDate}T12:00:00`) : new Date();
   const cleanSummary = dialog.event?.summary.replace(/^\[[^\]]+\]\s*/, '') || '';
   return <DialogShell title={dialog.mode === 'new' ? (isSpanish ? 'Nuevo agendamiento' : 'Novo agendamento') : (isSpanish ? 'Editar agendamiento' : 'Editar agendamento')} description={isSpanish ? 'El servicio, la agenda y el cobro quedan vinculados en el mismo flujo.' : 'O serviço, a agenda e a cobrança ficam vinculados ao mesmo fluxo.'} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label={isSpanish ? 'Cliente del CRM' : 'Cliente do CRM'}><select name="clientId" defaultValue="" className={inputClass} disabled={dialog.mode === 'edit'}><option value="">{isSpanish ? 'Seleccionar cliente' : 'Selecionar cliente'}</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field><Field label={isSpanish ? 'Teléfono para cliente sin registro' : 'Telefone para cliente avulso'}><input name="clientPhone" disabled={dialog.mode === 'edit'} placeholder="Ej.: 595 981 123456" className={inputClass} /></Field></div><Field label={isSpanish ? 'Nombre de la clienta (opcional)' : 'Nome do cliente (opcional)'}><input name="clientName" placeholder={isSpanish ? 'Usado para identificar el registro sin cuenta' : 'Usado para identificar o cadastro avulso'} className={inputClass} disabled={dialog.mode === 'edit'} /></Field><Field label={isSpanish ? 'Servicio' : 'Serviço'}><input name="service" required defaultValue={cleanSummary} placeholder={isSpanish ? 'Ej.: Diseño de cejas' : 'Ex.: Design de sobrancelhas'} className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label={isSpanish ? 'Fecha' : 'Data'}><input name="date" type="date" required defaultValue={dateInputValue(eventDate)} className={inputClass} /></Field><Field label={isSpanish ? 'Hora' : 'Hora'}><input name="time" type="time" required defaultValue={timeInputValue(eventDate)} className={inputClass} /></Field></div><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor del cobro' : 'Valor da cobrança'} (${currency})`}><input name="amount" type="number" min="0" step="0.01" defaultValue={dialog.event?.payment?.amount ?? ''} disabled={dialog.mode === 'edit'} placeholder="0" className={inputClass} /></Field><Field label={isSpanish ? 'Origen' : 'Origem'}><select name="source" defaultValue="unknown" className={inputClass}><option value="unknown">{isSpanish ? 'Sin origen identificado' : 'Sem origem identificada'}</option><option value="ads">Ads</option><option value="referral">{isSpanish ? 'Recomendación' : 'Indicação'}</option><option value="organic">{isSpanish ? 'Orgánico' : 'Orgânico'}</option></select></Field></div><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 transition-opacity disabled:opacity-50">{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : dialog.mode === 'new' ? (isSpanish ? 'Crear agendamiento y cobro' : 'Criar agendamento e cobrança') : (isSpanish ? 'Guardar cambios' : 'Salvar alterações')}</button></form></DialogShell>;
 }
