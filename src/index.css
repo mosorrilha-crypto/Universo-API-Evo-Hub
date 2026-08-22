@@ -1313,3 +1313,116 @@ html[data-theme='light'] .quality-workspace__persistence-alert .text-amber-100\/
     display: flex !important;
   }
 }
+
+
+/* Central de Qualidade: auditoria compreensível e contrastada em todos os temas. */
+.quality-workspace__timeline {
+  background: var(--surface-panel) !important;
+  border-color: var(--border) !important;
+}
+
+.quality-workspace__timeline-header {
+  border-color: var(--border) !important;
+}
+
+.quality-workspace__timeline-header h3,
+.quality-workspace__event-title {
+  color: var(--text-primary) !important;
+}
+
+.quality-workspace__timeline-header p,
+.quality-workspace__event-time,
+.quality-workspace__event-meta {
+  color: var(--text-secondary) !important;
+}
+
+.quality-workspace__event {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  background: var(--surface-panel);
+}
+
+.quality-workspace__event + .quality-workspace__event {
+  border-top: 1px solid var(--border);
+}
+
+.quality-workspace__event-icon {
+  display: flex;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--action) 32%, var(--border));
+  border-radius: .65rem;
+  color: var(--action);
+  background: color-mix(in srgb, var(--action) 10%, var(--surface-panel));
+}
+
+.quality-workspace__event-title {
+  font-size: .82rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.quality-workspace__event-time {
+  font-size: .67rem;
+  white-space: nowrap;
+}
+
+.quality-workspace__event-summary {
+  margin-top: .3rem;
+  color: var(--text-primary);
+  font-size: .76rem;
+  line-height: 1.5;
+}
+
+.quality-workspace__event-meta {
+  margin-top: .35rem;
+  font-size: .68rem;
+}
+
+.quality-workspace__event-details {
+  margin-top: .65rem;
+  border: 1px solid var(--border);
+  border-radius: .65rem;
+  background: var(--surface-sunken);
+}
+
+.quality-workspace__event-details summary {
+  padding: .55rem .65rem;
+  color: var(--text-secondary);
+  font-size: .68rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.quality-workspace__event-details pre {
+  overflow: auto;
+  max-height: 14rem;
+  margin: 0;
+  padding: .65rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
+  font: 500 .68rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .quality-workspace__event {
+    gap: .6rem;
+    padding: .85rem;
+  }
+
+  .quality-workspace__event-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: .55rem;
+  }
+
+  .quality-workspace__event-time {
+    flex-basis: 100%;
+  }
+}

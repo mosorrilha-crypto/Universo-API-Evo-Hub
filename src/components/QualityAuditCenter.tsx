@@ -125,6 +125,66 @@ function confidenceLabel(confidence: number | null | undefined) {
   return `${Math.round(confidence * 100)}%`;
 }
 
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  name: 'Nome',
+  email: 'E-mail',
+  stage: 'Etapa comercial',
+  dealValue: 'Valor da oportunidade',
+  assignedOperator: 'Responsável',
+  notes: 'Anotações',
+  tasks: 'Tarefas',
+};
+
+function auditSourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    crm_panel: 'CRM',
+    operator_panel: 'Painel do operador',
+    quality_admin: 'Central de Qualidade',
+    operator_payment_review: 'Revisão de pagamento',
+  };
+  return labels[source] || 'Operação';
+}
+
+function readableAuditField(value: unknown) {
+  const key = typeof value === 'string' ? value : '';
+  return AUDIT_FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').replaceAll('_', ' ').trim() || 'Dados do cadastro';
+}
+
+function auditEventPresentation(event: QualityAuditEvent) {
+  const payload = event.payload || {};
+  const changedFields = Array.isArray(payload.changedFields) ? payload.changedFields.map(readableAuditField).filter(Boolean) : [];
+  const decision = typeof payload.decision === 'string' ? payload.decision : '';
+  const decisionLabel: Record<string, string> = { accepted: 'aceitou', corrected: 'corrigiu', rejected: 'rejeitou', uncertain: 'marcou como incerta', verified: 'aprovou', rejected_payment: 'rejeitou' };
+
+  switch (event.event_type) {
+    case 'crm_lead_updated':
+      return {
+        title: 'Dados do lead atualizados',
+        summary: changedFields.length ? `Foram atualizados: ${changedFields.join(', ')}.` : 'O cadastro do lead foi atualizado.',
+      };
+    case 'conversation_label_added':
+      return { title: 'Etiqueta adicionada à conversa', summary: typeof payload.label === 'string' ? `A etiqueta “${payload.label}” foi adicionada.` : 'Uma etiqueta foi adicionada à conversa.' };
+    case 'conversation_label_removed':
+      return { title: 'Etiqueta removida da conversa', summary: typeof payload.label === 'string' ? `A etiqueta “${payload.label}” foi removida.` : 'Uma etiqueta foi removida da conversa.' };
+    case 'payment_receipt_reviewed':
+      return { title: 'Comprovante de pagamento revisado', summary: decision === 'verified' ? 'O comprovante foi aprovado e não requer nova revisão.' : 'O comprovante foi recusado e requer acompanhamento.' };
+    case 'quality_review_created':
+      return { title: 'Item enviado para revisão', summary: typeof payload.title === 'string' ? `“${payload.title}” foi adicionado à Central de Qualidade.` : 'Um novo item foi enviado para revisão.' };
+    case 'quality_review_updated':
+      return { title: 'Decisão de qualidade atualizada', summary: typeof payload.status === 'string' ? `O item foi marcado como “${STATUS_LABELS[payload.status as QualityReview['status']] || payload.status}”.` : 'O status de um item de qualidade foi atualizado.' };
+    case 'operator_feedback':
+      return { title: 'Feedback do operador registrado', summary: decision ? `O operador ${decisionLabel[decision] || 'registrou uma decisão sobre'} a sugestão da IA.` : 'O operador registrou feedback sobre uma sugestão da IA.' };
+    default:
+      return { title: 'Atualização registrada', summary: 'Uma atualização operacional foi registrada nesta linha do tempo.' };
+  }
+}
+
+function conversationReference(phone?: string | null) {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 4 ? `Conversa final ${digits.slice(-4)}` : 'Conversa vinculada';
+}
+
 export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast }) => {
   const { language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -247,10 +307,10 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-violet-300 text-xs font-semibold uppercase tracking-[0.18em]">
-            <ShieldCheck className="w-4 h-4" /> {isSpanish ? 'Gobernanza de la operación' : 'Governança da operação'}
+            <ShieldCheck className="w-4 h-4" /> {isSpanish ? 'Mejoras de la operación' : 'Melhorias da operação'}
           </div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white mt-2">{isSpanish ? 'Central de Calidad y Aprendizaje' : 'Central de Qualidade & Aprendizado'}</h2>
-          <p className="text-sm text-slate-400 mt-2 max-w-3xl">{isSpanish ? 'La IA sugiere. El operador corrige. El administrador decide qué puede convertirse en regla, siempre con historial y posibilidad de reversión.' : 'A IA sugere. O operador corrige. O administrador decide o que pode virar regra, sempre com histórico e possibilidade de reversão.'}</p>
+          <h2 className="text-2xl sm:text-3xl font-bold text-white mt-2">{isSpanish ? 'Mejoras del servicio' : 'Melhorias do atendimento'}</h2>
+          <p className="text-sm text-slate-400 mt-2 max-w-3xl">{isSpanish ? 'Acompañá sugerencias, problemas y decisiones que ayudan a mejorar la atención.' : 'Acompanhe sugestões, problemas e decisões que ajudam a melhorar o atendimento.'}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 rounded-control border border-slate-700 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition-colors" disabled={loading}>
@@ -370,26 +430,39 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       )}
 
       {activeTab === 'events' && (
-        <div className="bg-slate-900/70 border border-slate-800 rounded-card overflow-hidden">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
+        <div className="quality-workspace__timeline bg-slate-900/70 border border-slate-800 rounded-card overflow-hidden">
+          <div className="quality-workspace__timeline-header p-4 border-b border-slate-800 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-white">Linha do tempo de auditoria</h3>
-              <p className="text-xs text-slate-500 mt-1">O que aconteceu, de onde veio e qual resultado foi salvo.</p>
+              <h3 className="text-sm font-bold text-white">Histórico de mudanças</h3>
+              <p className="text-xs text-slate-500 mt-1">Veja o que foi alterado e por quem, em linguagem simples.</p>
             </div>
             <ClipboardCheck className="w-5 h-5 text-sky-300" />
           </div>
           {loading ? <LoadingState /> : events.length === 0 ? <EmptyState icon={<ClipboardCheck className="w-5 h-5" />} title="Nenhum evento registrado" text="As decisões e alterações aparecerão nesta linha do tempo." /> : (
             <div className="divide-y divide-slate-800/80">
-              {events.map((event) => (
-                <div key={event.id} className="p-4 flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-control bg-sky-500/10 border border-sky-400/20 flex items-center justify-center flex-shrink-0"><ClipboardCheck className="w-4 h-4 text-sky-300" /></div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-slate-100">{event.event_type.replaceAll('_', ' ')}</span><span className="text-[10px] text-slate-500">{formatDate(event.created_at)}</span></div>
-                    <p className="text-[11px] text-slate-400 mt-1">Origem: {event.source}{event.conversation_phone ? ` • conversa ${event.conversation_phone}` : ''}</p>
-                    {Object.keys(event.payload || {}).length > 0 && <pre className="mt-2 text-[10px] text-slate-500 whitespace-pre-wrap break-words bg-slate-950/60 border border-slate-800 rounded-control p-2">{JSON.stringify(event.payload, null, 2)}</pre>}
-                  </div>
-                </div>
-              ))}
+              {events.map((event) => {
+                const presentation = auditEventPresentation(event);
+                const conversation = conversationReference(event.conversation_phone);
+                return (
+                  <article key={event.id} className="quality-workspace__event p-4">
+                    <div className="quality-workspace__event-icon"><ClipboardCheck className="w-4 h-4" /></div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <h4 className="quality-workspace__event-title">{presentation.title}</h4>
+                        <span className="quality-workspace__event-time">{formatDate(event.created_at)}</span>
+                      </div>
+                      <p className="quality-workspace__event-summary">{presentation.summary}</p>
+                      <p className="quality-workspace__event-meta">Registrado por {auditSourceLabel(event.source)}{conversation ? ` • ${conversation}` : ''}</p>
+                      {Object.keys(event.payload || {}).length > 0 && (
+                        <details className="quality-workspace__event-details">
+                          <summary>Ver detalhes técnicos</summary>
+                          <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                        </details>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
         </div>
