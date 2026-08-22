@@ -95,11 +95,11 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
             {lastMsg ? (
               <>
                 {lastMsg.sender === 'agent' && (
-                  <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb] mr-1 flex-shrink-0" />
+                  <CheckCheck className="w-3.5 h-3.5 text-[var(--action)] mr-1 flex-shrink-0" />
                 )}
-                {lastMsg.type === 'audio' && <Mic className="w-3 h-3 text-emerald-400 mr-1 flex-shrink-0" />}
-                {lastMsg.type === 'image' && <ImageIcon className="w-3 h-3 text-blue-400 mr-1 flex-shrink-0" />}
-                {lastMsg.type === 'file' && <FileText className="w-3 h-3 text-purple-400 mr-1 flex-shrink-0" />}
+                {lastMsg.type === 'audio' && <Mic className="w-3 h-3 text-[var(--action)] mr-1 flex-shrink-0" />}
+                {lastMsg.type === 'image' && <ImageIcon className="w-3 h-3 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
+                {lastMsg.type === 'file' && <FileText className="w-3 h-3 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 <span className="truncate">
                   {lastMsg.type === 'audio'
                     ? 'Áudio do WhatsApp'
@@ -155,7 +155,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           />
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-2 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in"
+            className="absolute right-2 top-10 z-50 w-52 bg-[var(--surface-raised)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in"
           >
             <button
               onClick={() => { onCloseMenu(); onRename(); }}
