@@ -1,0 +1,231 @@
+import type { TrackedAppointment } from './appointmentStore';
+import type { Escalation } from './escalationStore';
+import type { ContactAgentMemory, ContactAgentMemoryPatch, ContactMemoryOpenLoop } from './contactAgentMemoryStore';
+import { getAppointmentForPhone } from './appointmentStore';
+import { getContactAgentMemory } from './contactAgentMemoryStore';
+import { getOpenEscalationForPhone } from './escalationStore';
+
+export const CONTEXT_PACK_VERSION = 'contact-context-v1';
+
+export type ContextAgent = 'triagem' | 'faq' | 'agendamento' | 'reclamacao';
+
+export interface AgentContextPack {
+  version: typeof CONTEXT_PACK_VERSION;
+  memory: ContactAgentMemory | null;
+  liveState: {
+    appointment: Pick<TrackedAppointment, 'paymentStatus' | 'heldUntil' | 'eventId'> | null;
+    appointmentAvailable: boolean;
+    escalation: Pick<Escalation, 'id' | 'kind' | 'resolved'> | null;
+    escalationAvailable: boolean;
+  };
+  selectedFacts: Record<string, unknown>;
+  promptSection: string;
+}
+
+export interface LoadAgentContextPackResult {
+  contextPack: AgentContextPack;
+  issues: Array<'memory' | 'appointment' | 'escalation'>;
+}
+
+export interface DeriveContactMemoryInput {
+  existingMemory: ContactAgentMemory | null;
+  agent: ContextAgent;
+  text: string;
+  capturedClientName?: string;
+  pendingOwnerReview?: string;
+  awaitingCustomerChoice?: string;
+  needsHumanConfirmation: boolean;
+  liveState: AgentContextPack['liveState'];
+}
+
+function compactText(value: string | null | undefined, maxLength = 180): string | null {
+  if (!value) return null;
+  const compacted = value.replace(/\s+/g, ' ').trim();
+  return compacted ? compacted.slice(0, maxLength) : null;
+}
+
+function formatPaymentStatus(status: TrackedAppointment['paymentStatus'] | undefined): string | null {
+  switch (status) {
+    case 'awaiting_payment': return 'aguardando comprovante; não está confirmado';
+    case 'pending_verification': return 'comprovante em verificação humana; não está confirmado';
+    case 'rejected': return 'comprovante rejeitado; requer orientação humana';
+    case 'verified': return 'pagamento verificado; a confirmação final segue o fluxo vigente';
+    case 'confirmed': return 'confirmado no registro operacional';
+    default: return null;
+  }
+}
+
+function renderMemory(memory: ContactAgentMemory | null): string[] {
+  if (!memory) return ['- Nenhuma memória estruturada disponível ainda para este contato.'];
+  const lines: string[] = [];
+  if (memory.preferred_language) lines.push(`- Idioma preferido registrado: ${memory.preferred_language}.`);
+  if (memory.preferred_name) lines.push(`- Nome preferido registrado: ${memory.preferred_name}.`);
+  if (memory.current_intent) lines.push(`- Interesse/intent anterior: ${memory.current_intent}.`);
+  if (memory.service_interest) lines.push(`- Serviço de interesse explícito: ${memory.service_interest}.`);
+  if (memory.objections.length) lines.push(`- Pontos de atenção já explicitados: ${memory.objections.join('; ')}.`);
+  if (memory.open_loops.length) lines.push(`- Pendências de conversa: ${memory.open_loops.map((loop) => `${loop.kind}: ${loop.summary}`).join(' | ')}.`);
+  if (memory.next_best_action) lines.push(`- Próximo passo sugerido: ${memory.next_best_action}.`);
+  return lines.length ? lines : ['- Nenhum fato operacional estruturado registrado ainda.'];
+}
+
+function renderLiveState(liveState: AgentContextPack['liveState']): string[] {
+  const lines: string[] = [];
+  if (!liveState.appointmentAvailable) {
+    lines.push('- Agenda/pagamento: estado vivo indisponível neste turno; não confirme horário ou pagamento sem as ferramentas e gates vigentes.');
+  } else if (liveState.appointment) {
+    const payment = formatPaymentStatus(liveState.appointment.paymentStatus);
+    lines.push(payment
+      ? `- Agenda/pagamento (fonte de verdade atual): existe registro ativo; status: ${payment}.`
+      : '- Agenda/pagamento (fonte de verdade atual): existe registro ativo; consulte as ferramentas e gates existentes antes de prometer qualquer confirmação.');
+  } else {
+    lines.push('- Agenda/pagamento (fonte de verdade atual): não há registro ativo encontrado neste momento; não confirme horário nem pagamento sem as ferramentas/gates vigentes.');
+  }
+  if (!liveState.escalationAvailable) {
+    lines.push('- Escalonamentos: estado vivo indisponível neste turno; preserve o tratamento conservador de casos sensíveis.');
+  } else if (liveState.escalation) {
+    lines.push(`- Escalonamento humano aberto (${liveState.escalation.kind}): mantenha a decisão sob revisão humana; não prometa resolução, reembolso ou exceção.`);
+  }
+  return lines;
+}
+
+export function buildAgentContextPack(input: {
+  memory: ContactAgentMemory | null;
+  appointment?: Pick<TrackedAppointment, 'paymentStatus' | 'heldUntil' | 'eventId'> | null;
+  appointmentAvailable?: boolean;
+  escalation?: Pick<Escalation, 'id' | 'kind' | 'resolved'> | null;
+  escalationAvailable?: boolean;
+}): AgentContextPack {
+  const liveState = {
+    appointment: input.appointment || null,
+    appointmentAvailable: input.appointmentAvailable !== false,
+    escalation: input.escalation || null,
+    escalationAvailable: input.escalationAvailable !== false,
+  };
+  const selectedFacts = {
+    memoryAvailable: !!input.memory,
+    preferredLanguage: input.memory?.preferred_language || undefined,
+    currentIntent: input.memory?.current_intent || undefined,
+    serviceInterest: input.memory?.service_interest || undefined,
+    openLoopKinds: input.memory?.open_loops.map((loop) => loop.kind) || [],
+    appointmentStateAvailable: liveState.appointmentAvailable,
+    hasActiveAppointment: !!liveState.appointment,
+    paymentStatus: liveState.appointment?.paymentStatus || undefined,
+    escalationStateAvailable: liveState.escalationAvailable,
+    hasOpenEscalation: !!liveState.escalation,
+    escalationKind: liveState.escalation?.kind || undefined,
+  };
+  const promptSection = [
+    'Contexto operacional do contato (dados compactos e auditáveis):',
+    'Use estes dados somente como apoio. Estados de agenda, pagamento e escalonamento abaixo são a fonte de verdade deste turno; nunca os substitua por memória e nunca flexibilize os gates humanos.',
+    'Memória estruturada:',
+    ...renderMemory(input.memory),
+    'Estado vivo:',
+    ...renderLiveState(liveState),
+  ].join('\n');
+
+  return { version: CONTEXT_PACK_VERSION, memory: input.memory, liveState, selectedFacts, promptSection };
+}
+
+/** Carrega cada fonte de forma independente: uma migration atrasada de memória não bloqueia os dados vivos nem a resposta. */
+export async function loadAgentContextPack(
+  tenantId: string,
+  phone: string,
+  options: { includeAppointment?: boolean } = {}
+): Promise<LoadAgentContextPackResult> {
+  const includeAppointment = options.includeAppointment !== false;
+  const [memoryResult, appointmentResult, escalationResult] = await Promise.allSettled([
+    getContactAgentMemory(tenantId, phone),
+    includeAppointment ? getAppointmentForPhone(tenantId, phone) : Promise.resolve(null),
+    getOpenEscalationForPhone(tenantId, phone),
+  ]);
+  const issues: LoadAgentContextPackResult['issues'] = [];
+  if (memoryResult.status === 'rejected') issues.push('memory');
+  if (includeAppointment && appointmentResult.status === 'rejected') issues.push('appointment');
+  if (escalationResult.status === 'rejected') issues.push('escalation');
+
+  return {
+    contextPack: buildAgentContextPack({
+      memory: memoryResult.status === 'fulfilled' ? memoryResult.value : null,
+      appointment: appointmentResult.status === 'fulfilled' ? appointmentResult.value : null,
+      appointmentAvailable: includeAppointment && appointmentResult.status === 'fulfilled',
+      escalation: escalationResult.status === 'fulfilled' ? escalationResult.value : null,
+      escalationAvailable: escalationResult.status === 'fulfilled',
+    }),
+    issues,
+  };
+}
+
+function detectExplicitLanguage(text: string): string | undefined {
+  const normalized = text.toLocaleLowerCase('pt-BR');
+  const portugueseSignals = /(olá|obrigad|voc[eê]|quero|agendar|horário|pagamento|comprovante)/.test(normalized);
+  const spanishSignals = /(hola|buenas|gracias|quiero|precio|turno|pestañ|ceja|comprobante|horario)/.test(normalized);
+  if (portugueseSignals && !spanishSignals) return 'pt-BR';
+  if (spanishSignals && !portugueseSignals) return 'es-PY';
+  return undefined;
+}
+
+function inferServiceInterest(text: string): string | undefined {
+  const normalized = text.toLocaleLowerCase('pt-BR');
+  if (/(pestañ|lash|extens[õo]es)/.test(normalized)) return 'pestañas/extensiones';
+  if (/(ceja|sobrancelha|brow|microblading|micropigment)/.test(normalized)) return 'cejas/sobrancelhas';
+  if (/(labio|lábio|lip)/.test(normalized)) return 'lábios';
+  return undefined;
+}
+
+function buildOpenLoops(input: DeriveContactMemoryInput): ContactMemoryOpenLoop[] {
+  const loops: ContactMemoryOpenLoop[] = [];
+  const paymentStatus = input.liveState.appointment?.paymentStatus;
+  if (paymentStatus === 'awaiting_payment') {
+    loops.push({ kind: 'payment', summary: 'Aguardando comprovante de pagamento.', status: 'awaiting_customer' });
+  } else if (paymentStatus === 'pending_verification' || paymentStatus === 'rejected') {
+    loops.push({ kind: 'payment', summary: 'Pagamento requer revisão humana.', status: 'awaiting_human' });
+  }
+  if (input.liveState.escalation) {
+    loops.push({ kind: 'escalation', summary: 'Caso em escalonamento humano.', status: 'awaiting_human' });
+  }
+  if (input.needsHumanConfirmation && input.agent === 'agendamento') {
+    loops.push({ kind: 'agenda', summary: 'Agendamento exige confirmação humana.', status: 'awaiting_human' });
+  } else if (input.awaitingCustomerChoice) {
+    loops.push({ kind: 'agenda', summary: compactText(input.awaitingCustomerChoice, 200) || 'Aguardando escolha do cliente.', status: 'awaiting_customer' });
+  } else if (input.pendingOwnerReview) {
+    loops.push({ kind: 'follow_up', summary: compactText(input.pendingOwnerReview, 200) || 'Aguardando avaliação humana.', status: 'awaiting_human' });
+  }
+  return loops;
+}
+
+function deriveNextBestAction(input: DeriveContactMemoryInput): string | undefined {
+  if (input.liveState.escalation) return 'Aguardar tratamento humano antes de qualquer confirmação sensível.';
+  const paymentStatus = input.liveState.appointment?.paymentStatus;
+  if (paymentStatus === 'awaiting_payment') return 'Aguardar comprovante antes de avançar a confirmação.';
+  if (paymentStatus === 'pending_verification' || paymentStatus === 'rejected') return 'Aguardar revisão humana do pagamento.';
+  if (input.needsHumanConfirmation) return 'Encaminhar para confirmação humana.';
+  if (input.awaitingCustomerChoice) return 'Aguardar a escolha solicitada ao cliente.';
+  if (input.agent === 'triagem') return 'Entender o serviço de interesse antes de oferecer próximos passos.';
+  if (input.agent === 'agendamento') return 'Coletar ou confirmar os dados necessários para consultar disponibilidade.';
+  return undefined;
+}
+
+/**
+ * Atualização P0, sem chamada extra de LLM: usa somente o router, campos já
+ * validados da resposta estruturada e estados vivos. Não copia estados de
+ * agenda/pagamento/escalonamento para facts_confirmed.
+ */
+export function deriveContactMemoryPatch(input: DeriveContactMemoryInput): ContactAgentMemoryPatch {
+  const serviceInterest = input.existingMemory?.service_interest || inferServiceInterest(input.text);
+  const nextBestAction = deriveNextBestAction(input);
+  const conversationSummary = [
+    serviceInterest ? `Interesse: ${serviceInterest}.` : null,
+    nextBestAction ? `Próximo passo: ${nextBestAction}` : null,
+  ].filter(Boolean).join(' ') || undefined;
+
+  return {
+    preferredLanguage: input.existingMemory?.preferred_language || detectExplicitLanguage(input.text),
+    preferredName: input.capturedClientName || input.existingMemory?.preferred_name || undefined,
+    currentIntent: input.agent,
+    serviceInterest,
+    openLoops: buildOpenLoops(input),
+    nextBestAction,
+    conversationSummary,
+    updatedBy: 'system',
+  };
+}

@@ -155,6 +155,22 @@ export async function listEscalations(tenantId: string): Promise<Escalation[]> {
     });
 }
 
+/** Escalonamento em aberto mais recente para um contato específico, sem consultar dados de outros contatos/tenants. */
+export async function getOpenEscalationForPhone(tenantId: string, phone: string): Promise<Escalation | undefined> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('escalations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone)
+    .eq('resolved', false)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const latest = ((data as EscalationRow[]) || [])
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  return latest ? toEscalation(latest) : undefined;
+}
+
 export async function resolveEscalation(tenantId: string, id: string): Promise<Escalation | undefined> {
   const db = getDb();
   const { data, error } = await db.from('escalations').update({ resolved: true }).eq('tenant_id', tenantId).eq('id', id).select('*').maybeSingle();

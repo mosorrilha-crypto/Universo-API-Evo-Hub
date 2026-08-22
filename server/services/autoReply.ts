@@ -7,7 +7,7 @@ import {
   findWeeklyAvailability,
   type CalendarConfig,
 } from './googleCalendar';
-import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold } from './appointmentStore';
+import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold, type TrackedAppointment } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
@@ -24,6 +24,9 @@ import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
 import { callGroqJsonCompletion } from './groqClient';
 import { withStructuredLog } from './structuredLog';
+import { buildAgentContextPack, deriveContactMemoryPatch, loadAgentContextPack, type AgentContextPack } from './agentContextPack';
+import { upsertContactAgentMemory } from './contactAgentMemoryStore';
+import { recordAgentTurnTrace } from './agentTurnTraceStore';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -454,6 +457,7 @@ async function generateSpecialistReply(
   knowledgeBaseContext?: string,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   extraContext?: string,
+  contextPack?: AgentContextPack,
   adContext?: string,
   isBurst?: boolean
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string } | null> {
@@ -470,7 +474,7 @@ async function generateSpecialistReply(
   // exatamente como sempre funcionou.
   const cachedContentName = await getCachedSystemInstruction(ai, specialistModel, `especialista:${agent}:${tenantId}`, systemInstruction);
 
-  const contextPreamble = `${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`;
+  const contextPreamble = `${contextPack ? `${contextPack.promptSection}\n\n` : ''}${extraContext ? `Ações reais já executadas nesta mensagem:\n${extraContext}\n\n` : ''}${adContext ? `${adContext}\n\n` : ''}${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`;
 
   // Estrutural, não só textual (18/08/2026): messageBuffer.ts agrupa
   // mensagens de rajada do cliente (dentro da janela de 6s de silêncio) num
@@ -1150,7 +1154,7 @@ async function runAgendamentoTools(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   contactName?: string,
   messageId?: string
-): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[]; businessHoursStatus?: string }> {
+): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[]; businessHoursStatus?: string; currentAppointment?: TrackedAppointment }> {
   const { naive, weekday, weekdayNum } = getNowLocalNaive(BUSINESS_TIMEZONE);
   // Best-effort: uma falha aqui é só um enriquecimento de prompt (aviso de
   // horário de funcionamento) — nunca pode derrubar o fluxo real de agenda.
@@ -1170,7 +1174,7 @@ async function runAgendamentoTools(
 
   const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
-    return { actionsSummary: [], hadError: false, confirmedTimes: confirmedTimesFromExisting, businessHoursStatus };
+    return { actionsSummary: [], hadError: false, confirmedTimes: confirmedTimesFromExisting, businessHoursStatus, currentAppointment: existing };
   }
 
   const historyText = buildHistoryText(history);
@@ -1276,7 +1280,7 @@ Regras:
     contents.push({ role: 'user', parts: responseParts });
   }
 
-  return { actionsSummary, hadError, confirmedTimes, businessHoursStatus };
+  return { actionsSummary, hadError, confirmedTimes, businessHoursStatus, currentAppointment: existing };
 }
 
 const FOTO_TOOLS: FunctionDeclaration[] = [
@@ -1636,6 +1640,24 @@ export async function generateAutoReplyForText(
     const agent = isFirstCampaignContact ? 'triagem' : routedAgent;
     const routerElapsedMs = Date.now() - routerStart;
 
+    // O Context Pack é deliberadamente best-effort. Se a migration ainda não
+    // chegou ao banco, ou uma fonte dinâmica falhar, o atendimento conserva o
+    // fluxo atual e os gates existentes; nunca deixa de responder por isso.
+    let contextPack: AgentContextPack | undefined;
+    if (phone) {
+      try {
+        const loadedContext = await loadAgentContextPack(tenantId, phone, { includeAppointment: agent !== 'agendamento' });
+        contextPack = loadedContext.contextPack;
+        if (loadedContext.issues.length) {
+          console.warn(`⚠️  [Context Pack] tenant=${tenantId} contexto parcial (${loadedContext.issues.join(',')}); fluxo seguro preservado.`);
+        }
+      } catch (err) {
+        console.warn(`⚠️  [Context Pack] tenant=${tenantId} indisponível; fluxo seguro preservado:`, (err as Error).message);
+      }
+    }
+    let latestAppointment = contextPack?.liveState.appointment || null;
+    let appointmentStateAvailable = contextPack?.liveState.appointmentAvailable || false;
+
     let extraContext: string | undefined;
     let forcedHumanConfirmation = false;
     let stopAutoReply = false;
@@ -1677,6 +1699,19 @@ export async function generateAutoReplyForText(
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
       agendamentoToolsRan = result.actionsSummary.length > 0;
+      // A rotina de agenda já leu a fonte de verdade antes de decidir se o
+      // calendário está conectado; entrega esse mesmo dado ao especialista.
+      latestAppointment = result.currentAppointment || null;
+      appointmentStateAvailable = true;
+      if (contextPack) {
+        contextPack = buildAgentContextPack({
+          memory: contextPack.memory,
+          appointment: latestAppointment,
+          appointmentAvailable: true,
+          escalation: contextPack.liveState.escalation,
+          escalationAvailable: contextPack.liveState.escalationAvailable,
+        });
+      }
     }
 
     if (phone && hasMediaSendConfig(mediaConfig)) {
@@ -1716,7 +1751,7 @@ export async function generateAutoReplyForText(
     // divergir do valor real sem aviso nenhum.
     const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
     const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, adContext, isBurst);
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, contextPack, adContext, isBurst);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
@@ -1829,7 +1864,17 @@ export async function generateAutoReplyForText(
     // cenário legítimo de "confirmado"/"reservado" ser verdade — corrige
     // sempre, não só quando o pagamento está pendente.
     if (agent === 'agendamento' && phone) {
-      const currentAppointment = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
+      // Se nenhuma ferramenta de agenda rodou, o estado vivo carregado no
+      // Context Pack pertence a este mesmo turno e evita uma segunda leitura
+      // desnecessária. Depois de qualquer ferramenta, consulta de novo porque
+      // uma reserva/evento pode ter sido criado, alterado ou removido agora.
+      const currentAppointment = !agendamentoToolsRan && appointmentStateAvailable
+        ? latestAppointment || undefined
+        : await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
+      // Reaproveita a mesma leitura autoritativa já usada pelo gate para que o
+      // Context Pack final nunca grave na memória uma suposição desatualizada.
+      latestAppointment = currentAppointment || null;
+      appointmentStateAvailable = true;
       const paymentUnresolved = currentAppointment && (
         currentAppointment.paymentStatus === 'awaiting_payment'
         || currentAppointment.paymentStatus === 'pending_verification'
@@ -1865,6 +1910,57 @@ export async function generateAutoReplyForText(
     // conta própria), então needsHumanConfirmation é sempre true aqui,
     // independente do que o modelo tenha marcado.
     const needsHumanConfirmation = agent === 'reclamacao' ? true : specialist.needsHumanConfirmation || forcedHumanConfirmation;
+
+    // Persistência vem somente DEPOIS dos gates determinísticos. A memória não
+    // participa de nenhuma decisão autorizativa e o trace é redigido; falhas
+    // nessas escritas nunca impedem a resposta que já passou pelos guardas.
+    if (phone && contextPack) {
+      const finalContextPack = buildAgentContextPack({
+        memory: contextPack.memory,
+        appointment: latestAppointment,
+        appointmentAvailable: appointmentStateAvailable,
+        escalation: contextPack.liveState.escalation,
+        escalationAvailable: contextPack.liveState.escalationAvailable,
+      });
+      const memoryPatch = deriveContactMemoryPatch({
+        existingMemory: contextPack.memory,
+        agent,
+        text,
+        capturedClientName: specialist.capturedClientName,
+        pendingOwnerReview: specialist.pendingOwnerReview,
+        awaitingCustomerChoice: specialist.awaitingCustomerChoice,
+        needsHumanConfirmation,
+        liveState: finalContextPack.liveState,
+      });
+      const traceOutcome = stopAutoReply
+        ? 'auto_reply_blocked'
+        : needsHumanConfirmation
+          ? 'human_confirmation_required'
+          : 'reply_ready';
+      await Promise.all([
+        upsertContactAgentMemory({ tenantId, phone, patch: memoryPatch }).catch((err) =>
+          console.warn(`⚠️  [Contact Memory] tenant=${tenantId} falha não bloqueante ao atualizar memória:`, (err as Error).message)
+        ),
+        recordAgentTurnTrace({
+          tenantId,
+          phone,
+          messageId,
+          routerDecision: agent,
+          reasoningSummary: `Roteado para ${agent}; ${needsHumanConfirmation ? 'gate humano ativo' : 'sem gate humano adicional'}.`,
+          contextPackVersion: finalContextPack.version,
+          selectedFacts: finalContextPack.selectedFacts,
+          toolSummaries: contextParts,
+          needsHumanConfirmation,
+          escalationId: finalContextPack.liveState.escalation?.id,
+          provider: 'gemini',
+          model: 'gemini-3.6-flash',
+          latencyMs: routerElapsedMs,
+          outcome: traceOutcome,
+        }).catch((err) =>
+          console.warn(`⚠️  [Agent Trace] tenant=${tenantId} falha não bloqueante ao registrar decisão:`, (err as Error).message)
+        ),
+      ]);
+    }
 
     return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions };
   } catch (err) {
