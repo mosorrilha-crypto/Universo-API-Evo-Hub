@@ -924,6 +924,7 @@ export const App: React.FC = () => {
         </div>
 
         {activeTab === 'crm' && (
+          <OperationsModuleFrame title="CRM e Vendas" eyebrow="Relacionamento comercial" description="Acompanhe oportunidades, clientes e próximas ações em uma visão conectada ao atendimento." accent="blue">
           <OperatorCRM
             leads={leads}
             onUpdateLead={handleUpdateLead}
@@ -933,10 +934,10 @@ export const App: React.FC = () => {
               showToast('Leads limpos do CRM');
             }}
             currentUser={currentUser || GUEST_USER}
-            onNavigateToFinancial={handleNavigateToFinancial}
+                        onNavigateToFinancial={handleNavigateToFinancial}
           />
+          </OperationsModuleFrame>
         )}
-
         {activeTab === 'agenda_financeiro' && canSeeFinancial && (
           <OperationsModuleFrame
             title="Agenda & Financeiro"
@@ -1041,6 +1042,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'escalations' && (
+          <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green">
           <EscalationsPanel
             escalations={escalations}
             onResolve={handleResolveEscalation}
@@ -1051,15 +1053,18 @@ export const App: React.FC = () => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
               setActiveTab('whatsapp');
             }}
-          />
+                    />
+          </OperationsModuleFrame>
         )}
-
-        {activeTab === 'integration' && canSeeAdminTools && (
-          <WhatsAppGuide />
+                {activeTab === 'integration' && canSeeAdminTools && (
+          <OperationsModuleFrame title="Integrações" eyebrow="Canais e conexões" description="Mantenha os canais e serviços conectados para que a operação siga sem interrupções." accent="blue">
+            <WhatsAppGuide />
+          </OperationsModuleFrame>
         )}
-
         {activeTab === 'quality' && canSeeAdminTools && (
-          <QualityAuditCenter onToast={showToast} />
+          <OperationsModuleFrame title="Qualidade da IA" eyebrow="Aprendizado operacional" description="Transforme revisões humanas em regras e melhorias consistentes para o atendimento." accent="green">
+            <QualityAuditCenter onToast={showToast} />
+          </OperationsModuleFrame>
         )}
 
       </main>
