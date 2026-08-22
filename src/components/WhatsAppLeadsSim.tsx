@@ -407,7 +407,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // (saas_admin) e atualizar a página podia mostrar, por um instante,
   // contatos reais de OUTRO tenant (chave própria + por tenant corrige).
   const whatsappLeadsCacheKey = (tenantId: string) => `saas_whatsapp_leads_${tenantId}`;
-  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis })[]>(() => {
+  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis; historyLoaded?: boolean; historyLoading?: boolean; lastMessageId?: string })[]>(() => {
     const saved = localStorage.getItem(whatsappLeadsCacheKey(activeTenant.id));
     return saved ? JSON.parse(saved) : [];
   });
@@ -1246,14 +1246,42 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
-  // Última contagem de mensagens vista por lead — bookkeeping simples fora
-  // do estado do React (ref, não state) pra detectar "chegou mensagem nova"
-  // de forma síncrona e confiável. Guardar esse cálculo dentro do updater
-  // funcional do setLeads (lendo/escrevendo uma variável de closure ali) não
-  // funciona: React não garante que a função updater rode de forma síncrona
-  // logo após a chamada de setLeads, então o código que lia o resultado
-  // logo em seguida via a lista sempre vazia.
-  const lastMessageCountRef = useRef<Map<string, number>>(new Map());
+  // A lista resumida devolve apenas a última mensagem. Um ID estável detecta
+  // novidade sem transportar o histórico inteiro em cada polling.
+  const lastMessageIdRef = useRef<Map<string, string | null>>(new Map());
+  const activeLeadPhoneRef = useRef<string | null>(null);
+  const historyRequestsInFlightRef = useRef<Set<string>>(new Set());
+
+  const loadRealConversationHistory = async (phone: string, leadId: string) => {
+    if (historyRequestsInFlightRef.current.has(phone)) return;
+    historyRequestsInFlightRef.current.add(phone);
+    setLeads((prev) => prev.map((lead) => lead.id === leadId ? { ...lead, historyLoading: true } : lead));
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.conversation) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      const messages: ChatMessage[] = (data.conversation.messages || []).map((message: ChatMessage) => ({
+        ...message,
+        timestamp: new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      }));
+      const lastMessage = messages[messages.length - 1];
+      setLeads((prev) => prev.map((lead) => lead.id === leadId ? {
+        ...lead,
+        messages,
+        textContent: lastMessage?.text || lead.textContent,
+        historyLoaded: true,
+        historyLoading: false,
+        lastMessageId: lastMessage?.id,
+      } : lead));
+    } catch (err: any) {
+      setLeads((prev) => prev.map((lead) => lead.id === leadId ? { ...lead, historyLoading: false } : lead));
+      setErrorMsg(err?.message || 'Não foi possível carregar o histórico desta conversa.');
+    } finally {
+      historyRequestsInFlightRef.current.delete(phone);
+    }
+  };
 
   // Busca conversas reais de WhatsApp (recebidas via webhook) e mescla na
   // lista — sem substituir os leads de exemplo/simulados que já existirem.
@@ -1262,7 +1290,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // Zera a contagem anterior a cada (re)início do efeito — inclui a troca
     // de tenant, pra não arriscar comparar a contagem de mensagens de um
     // telefone contra o valor guardado de um tenant diferente.
-    lastMessageCountRef.current = new Map();
+    lastMessageIdRef.current = new Map();
+    activeLeadPhoneRef.current = null;
     // Troca de tenant: carrega o cache do tenant novo (ou começa vazio) na
     // hora, em vez de deixar a lista do tenant anterior visível até
     // fetchRealConversations() terminar logo abaixo.
@@ -1277,7 +1306,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations?archived=true');
         if (!response.ok || cancelled) return;
         const data = await response.json();
-        const realConversations: { phone: string; name?: string; messages: ChatMessage[]; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adHeadline?: string; adGreetingMatchedAt?: string; unreadCount: number }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages?: ChatMessage[]; lastMessageId?: string; lastMessageSender?: ChatMessage['sender']; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adHeadline?: string; adGreetingMatchedAt?: string; unreadCount: number }[] = data.conversations || [];
 
         // Ids que ganharam mensagem nova de CLIENTE nesta rodada (não conta
         // mensagem enviada pelo próprio operador/IA, nem a primeira carga —
@@ -1285,12 +1314,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const newlyArrivedIds: string[] = [];
         for (const conv of realConversations) {
           const id = `real-${conv.phone}`;
-          const prevCount = lastMessageCountRef.current.get(id);
-          const lastIncoming = conv.messages[conv.messages.length - 1];
-          if (prevCount !== undefined && conv.messages.length > prevCount && lastIncoming?.sender === 'lead') {
+          const currentLastMessageId = conv.lastMessageId || conv.messages?.[0]?.id || null;
+          const hadPrevious = lastMessageIdRef.current.has(id);
+          const previousLastMessageId = lastMessageIdRef.current.get(id);
+          const lastIncomingSender = conv.lastMessageSender || conv.messages?.[0]?.sender;
+          if (hadPrevious && previousLastMessageId !== currentLastMessageId && lastIncomingSender === 'lead') {
             newlyArrivedIds.push(id);
           }
-          lastMessageCountRef.current.set(id, conv.messages.length);
+          lastMessageIdRef.current.set(id, currentLastMessageId);
         }
 
         // Ids de conversa real que o servidor confirmou existir AGORA, pro
@@ -1309,7 +1340,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           for (const conv of realConversations) {
             const id = `real-${conv.phone}`;
             const existing = byId.get(id);
-            const lastText = conv.messages[conv.messages.length - 1]?.text || '';
+            const previewMessages = conv.messages || [];
+            const lastText = previewMessages[previewMessages.length - 1]?.text || '';
             byId.set(id, {
               ...(existing as any || {}),
               id,
@@ -1332,10 +1364,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               // da conversa — msg.timestamp vem de created_at (Postgres) sem
               // nenhuma formatação, diferente das mensagens mock/locais que
               // já nascem formatadas via toLocaleTimeString.
-              messages: conv.messages.map((m) => ({
-                ...m,
-                timestamp: new Date(m.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-              })),
+              // O polling não deve apagar o histórico completo já aberto nem
+              // baixá-lo novamente; para leads ainda fechados, mantém somente
+              // a última mensagem da prévia.
+              messages: (existing as any)?.historyLoaded
+                ? ((existing as any).messages || [])
+                : previewMessages.map((m) => ({
+                    ...m,
+                    timestamp: new Date(m.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                  })),
+              historyLoaded: Boolean((existing as any)?.historyLoaded),
+              historyLoading: Boolean((existing as any)?.historyLoading),
+              lastMessageId: conv.lastMessageId,
               isReal: true,
               geoRestriction: conv.geoRestriction,
               // Etiquetas e estado de organização vêm sempre do servidor
@@ -1405,6 +1445,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         try {
           const payload = JSON.parse(event.data);
           const phone: string | undefined = payload?.phone;
+          if (phone && phone === activeLeadPhoneRef.current) {
+            void loadRealConversationHistory(phone, `real-${phone}`);
+          }
           const status: 'generating' | 'sent' | 'failed' | undefined = payload?.aiReplyStatus;
           if (!phone || !status) return;
           if (status === 'generating') {
@@ -1882,7 +1925,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setActiveLeadId(lead.id);
     setMobileThreadOpen(true);
     setIsHeaderMenuOpen(false);
+    activeLeadPhoneRef.current = (lead as any).isReal ? lead.phone : null;
     if ((lead as any).isReal) {
+      if (!(lead as any).historyLoaded && !(lead as any).historyLoading) {
+        void loadRealConversationHistory(lead.phone, lead.id);
+      }
       if ((lead as any).manuallyUnread) {
         handleUpdateConversationState(lead.id, { unread: false });
       }
@@ -3573,7 +3620,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
-                {selectedLead.messages && selectedLead.messages.length > 0 ? (
+                {(selectedLead as any).historyLoading ? (
+                  <div className="flex min-h-32 items-center justify-center text-xs text-slate-500">
+                    Carregando histórico completo desta conversa...
+                  </div>
+                ) : selectedLead.messages && selectedLead.messages.length > 0 ? (
                   selectedLead.messages.map((msg) => {
                     const isLead = msg.sender === 'lead';
                     const quotedMessage = msg.replyToMessageId

@@ -65,6 +65,8 @@ export interface StoredConversation {
   aiBlockedAt?: string;
   /** Quantidade de mensagens do lead recebidas depois da última vez que o operador abriu esta conversa (ver markConversationRead). Não confundir com manuallyUnread (override manual do operador) — o painel trata a conversa como não lida quando qualquer um dos dois é verdadeiro. */
   unreadCount: number;
+  /** Só na resposta resumida da lista: identifica mudança sem transportar todo o histórico. */
+  lastMessageId?: string;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -91,6 +93,19 @@ type ConversationRow = {
   ad_greeting_matched_at: string | null;
   last_read_at: string;
   messages?: MessageRow[];
+};
+
+type ConversationSummaryRow = Omit<ConversationRow, 'messages'> & {
+  last_message_id: string | null;
+  last_message_sender: MessageRow['sender'] | null;
+  last_message_type: MessageRow['type'] | null;
+  last_message_text: string | null;
+  last_message_created_at: string | null;
+  last_message_reply_to_message_id: string | null;
+  last_message_forwarded_from_message_id: string | null;
+  last_message_reactions: MessageReaction[] | null;
+  last_message_sent_by: MessageRow['sent_by'] | null;
+  unread_count: number | null;
 };
 
 type MessageRow = {
@@ -142,6 +157,44 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
 }
 
 const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by)';
+
+// A lista é atualizada por SSE + polling de segurança. Não deve transportar o
+// histórico inteiro de todas as conversas a cada rodada: a view 0041 devolve
+// apenas metadados, a última mensagem e a contagem de não lidas. O histórico
+// completo continua no endpoint getConversation, chamado quando o operador abre
+// um atendimento.
+const CONVERSATION_LIST_SUMMARY = '*';
+
+function toStoredConversationSummary(row: ConversationSummaryRow): StoredConversation {
+  const preview = row.last_message_id && row.last_message_sender && row.last_message_type && row.last_message_created_at
+    ? [{
+        id: row.last_message_id,
+        sender: row.last_message_sender,
+        type: row.last_message_type,
+        text: row.last_message_text || undefined,
+        timestamp: row.last_message_created_at,
+        replyToMessageId: row.last_message_reply_to_message_id || undefined,
+        forwardedFromMessageId: row.last_message_forwarded_from_message_id || undefined,
+        reactions: row.last_message_reactions && row.last_message_reactions.length ? row.last_message_reactions : undefined,
+        sentBy: row.last_message_sent_by || undefined,
+      } satisfies StoredMessage]
+    : [];
+
+  const conversation = toStoredConversation({ ...row, messages: preview.map((message) => ({
+    id: message.id,
+    sender: message.sender,
+    type: message.type,
+    text: message.text || null,
+    created_at: message.timestamp,
+    reply_to_message_id: message.replyToMessageId || null,
+    forwarded_from_message_id: message.forwardedFromMessageId || null,
+    reactions: message.reactions || null,
+    sent_by: message.sentBy || null,
+  })) });
+  conversation.unreadCount = row.unread_count || 0;
+  conversation.lastMessageId = row.last_message_id || undefined;
+  return conversation;
+}
 
 /** Resolve o telefone da conversa a partir do id (usado por mutações que só têm o id da mensagem, não o telefone) e dispara o evento. */
 async function emitUpdatedByConversationId(tenantId: string, conversationId: string): Promise<void> {
@@ -463,17 +516,50 @@ function sortConversations(a: StoredConversation, b: StoredConversation): number
  */
 export async function listConversations(tenantId: string, opts: { includeArchived?: boolean } = {}): Promise<StoredConversation[]> {
   const db = getDb();
-  const { data, error } = await db
-    .from('conversations')
-    .select(CONVERSATION_WITH_MESSAGES)
+  let data: any[] | null;
+  let error: any;
+  ({ data, error } = await db
+    .from('conversation_list_summaries')
+    .select(CONVERSATION_LIST_SUMMARY)
     .eq('tenant_id', tenantId)
-    .order('updated_at', { ascending: false });
-  if (error) throw error;
-  const rows = data as unknown as ConversationRow[];
+    .order('updated_at', { ascending: false }));
+
+  let rowsWithIds: Array<{ rowId: string; conversation: StoredConversation }>;
+  const missingSummaryView = error && (
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    String(error.message || '').includes('conversation_list_summaries')
+  );
+  if (missingSummaryView) {
+    // Compatibilidade durante a janela entre deploy e aplicação da migration.
+    // Assim a aplicação continua funcionando, mas volta temporariamente ao
+    // caminho caro até a view 0041 existir no Supabase.
+    const fallback = await db
+      .from('conversations')
+      .select(CONVERSATION_WITH_MESSAGES)
+      .eq('tenant_id', tenantId)
+      .order('updated_at', { ascending: false });
+    if (fallback.error) throw fallback.error;
+    rowsWithIds = (fallback.data as unknown as ConversationRow[]).map((row) => ({
+      rowId: row.id,
+      conversation: toStoredConversation(row),
+    }));
+  } else {
+    if (error) throw error;
+    const rows = (data || []) as unknown as ConversationSummaryRow[];
+    rowsWithIds = rows.map((row) => ({
+      rowId: row.id,
+      conversation: toStoredConversationSummary(row),
+    }));
+  }
+
   // Uma query só pras etiquetas de todas as conversas do tenant, em vez de
   // N+1 (uma por conversa) — agrupa por conversation_id em memória.
   const labelsByConversationId = await listLabelsByConversationId(tenantId);
-  const all = rows.map((row) => ({ ...toStoredConversation(row), labels: labelsByConversationId.get(row.id) || [] }));
+  const all = rowsWithIds.map(({ rowId, conversation }) => ({
+    ...conversation,
+    labels: labelsByConversationId.get(rowId) || [],
+  }));
   const visible = opts.includeArchived ? all : all.filter((c) => !c.archivedAt);
   return visible.sort(sortConversations);
 }

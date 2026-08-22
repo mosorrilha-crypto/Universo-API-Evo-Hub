@@ -168,10 +168,24 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
   // Imagem real recebida de um cliente (ex: comprovante de pagamento) —
   // nunca pública, só acessível autenticado (pode conter dado sensível).
-  router.get('/api/media/:messageId', authenticateToken, asyncHandler(async (req, res) => {
+  router.get('/api/media/:messageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    // A mídia é privada e o id é opaco, mas ainda assim validamos o tenant
+    // antes de buscar o objeto para impedir acesso cruzado por id conhecido.
+    const { data: message } = await getDb()
+      .from('messages')
+      .select('id')
+      .eq('tenant_id', tenantOf(req))
+      .eq('id', req.params.messageId)
+      .maybeSingle();
+    if (!message) return res.status(404).json({ error: 'Imagem não encontrada.' });
+
     const media = await getMediaImage(supabaseUrl, supabaseKey, req.params.messageId);
     if (!media) return res.status(404).json({ error: 'Imagem não encontrada.' });
     res.setHeader('Content-Type', media.contentType);
+    // Imagens e comprovantes são gravados sob um messageId estável. Cache
+    // privado reduz reaberturas repetidas sem tornar o comprovante público.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Vary', 'Authorization');
     res.send(media.buffer);
   }));
 
