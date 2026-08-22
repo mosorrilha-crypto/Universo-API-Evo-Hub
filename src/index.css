@@ -1426,3 +1426,58 @@ html[data-theme='light'] .quality-workspace__persistence-alert .text-amber-100\/
     flex-basis: 100%;
   }
 }
+
+
+/* CRM em largura intermediária: a leitura continua sequencial até haver espaço
+   real para as seis etapas. Evita o retorno prematuro à grade desktop. */
+@media (min-width: 641px) and (max-width: 1023px) {
+  .crm-workspace__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: .75rem;
+  }
+
+  .crm-workspace__filters {
+    align-items: stretch;
+    gap: .75rem;
+  }
+
+  .crm-workspace__filters > div:first-child {
+    width: 100%;
+  }
+
+  .crm-workspace__filters > div:last-child {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .crm-workspace__kanban {
+    display: flex !important;
+    gap: .75rem;
+    margin-right: -1.5rem;
+    padding-right: 1.5rem;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .crm-workspace__kanban > * {
+    flex: 0 0 min(58vw, 22rem);
+    scroll-snap-align: start;
+  }
+}
+
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .crm-workspace__kanban {
+    display: flex !important;
+    gap: .85rem;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .crm-workspace__kanban > * {
+    flex: 0 0 min(31vw, 20rem);
+    scroll-snap-align: start;
+  }
+}
