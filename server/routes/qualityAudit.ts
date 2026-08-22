@@ -13,6 +13,7 @@ import {
   type QualityReviewKind,
   type QualityReviewStatus,
 } from '../services/qualityAuditStore';
+import { calculateControlledExperimentResult } from '../services/controlledExperimentResults';
 import {
   createControlledExperiment,
   getMandatoryStopConditions,
@@ -123,6 +124,14 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
       },
     });
     res.status(201).json({ experiment });
+  }));
+
+  router.get('/api/quality-audit/controlled-experiments/:id/results', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const experiment = (await listControlledExperiments(tenantId)).find((item) => item.id === req.params.id);
+    if (!experiment) return res.status(404).json({ error: 'Experimento não encontrado.' });
+    const result = await calculateControlledExperimentResult({ tenantId, experiment });
+    res.json({ result });
   }));
 
   router.patch('/api/quality-audit/controlled-experiments/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {

@@ -47,6 +47,8 @@ beforeEach(() => {
     quality_reviews: [testingReview('review-a', TENANT_A), testingReview('review-b', TENANT_B)],
     quality_audit_events: [],
     controlled_quality_experiments: [],
+    escalations: [],
+    conversations: [],
     memory_pattern_reviews: [],
   });
   initDb(supabase);
@@ -101,5 +103,25 @@ describe('experimentos controlados de Qualidade', () => {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'published' }),
     });
     expect(invalid.status).toBe(400);
+  });
+});
+
+
+describe('resultado redigido do experimento', () => {
+  it('retorna somente métricas agregadas do experimento pertencente ao tenant autenticado', async () => {
+    supabase.__tables.controlled_quality_experiments.push({
+      id: 'result-a', tenant_id: TENANT_A, quality_review_id: 'review-a', status: 'running', hypothesis: 'NÃO DEVOLVER', variation_summary: 'NÃO DEVOLVER', scope_routes: ['faq'], sample_limit: 5, success_criteria: ['NÃO DEVOLVER'], stop_conditions: ['NÃO DEVOLVER'], started_at: '2026-08-22T10:00:00.000Z', ended_at: '2026-08-22T12:00:00.000Z', created_at: '2026-08-22T09:00:00.000Z', updated_at: '2026-08-22T12:00:00.000Z',
+    });
+    supabase.__tables.escalations.push({ id: 'esc-a', tenant_id: TENANT_A, phone: '595981111111', created_at: '2026-08-22T11:00:00.000Z' });
+
+    const response = await fetch(`${baseUrl}/api/quality-audit/controlled-experiments/result-a/results`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result).toMatchObject({ experimentId: 'result-a', availability: 'available' });
+    expect(JSON.stringify(body)).not.toContain('595981111111');
+    expect(JSON.stringify(body)).not.toContain('NÃO DEVOLVER');
+
+    const foreign = await fetch(`${baseUrl}/api/quality-audit/controlled-experiments/result-b/results`);
+    expect(foreign.status).toBe(404);
   });
 });

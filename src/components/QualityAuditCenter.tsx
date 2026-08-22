@@ -106,6 +106,18 @@ interface ControlledExperiment {
   updated_at: string;
 }
 
+interface ControlledExperimentResult {
+  experimentId: string;
+  availability: 'not_started' | 'insufficient_data' | 'available';
+  baselineStart: string | null;
+  baselineEnd: string | null;
+  observationStart: string | null;
+  observationEnd: string | null;
+  windowHours: number;
+  metrics: Array<{ key: 'human_corrections' | 'escalations' | 'blocked_responses'; label: string; before: number; after: number; delta: number; interpretation: 'improved' | 'worsened' | 'stable' }>;
+  limitations: string[];
+}
+
 interface QualityAuditCenterProps {
   onToast: (message: string) => void;
 }
@@ -281,6 +293,8 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [mandatoryExperimentStops, setMandatoryExperimentStops] = useState<string[]>([]);
   const [submittingExperiment, setSubmittingExperiment] = useState(false);
   const [transitioningExperimentId, setTransitioningExperimentId] = useState<string | null>(null);
+  const [experimentResults, setExperimentResults] = useState<Record<string, ControlledExperimentResult>>({});
+  const [loadingExperimentResultId, setLoadingExperimentResultId] = useState<string | null>(null);
   const [syncingMemoryPatternQueue, setSyncingMemoryPatternQueue] = useState(false);
   const [decidingMemoryPatternId, setDecidingMemoryPatternId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -448,6 +462,20 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       onToast(error?.message || 'Não foi possível registrar a transição do experimento.');
     } finally {
       setTransitioningExperimentId(null);
+    }
+  };
+
+  const loadControlledExperimentResult = async (experimentId: string) => {
+    setLoadingExperimentResultId(experimentId);
+    try {
+      const response = await apiFetch(`/api/quality-audit/controlled-experiments/${encodeURIComponent(experimentId)}/results`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível calcular o resultado do experimento.');
+      if (data?.result) setExperimentResults((current) => ({ ...current, [experimentId]: data.result }));
+    } catch (error: any) {
+      onToast(error?.message || 'Não foi possível calcular o resultado do experimento.');
+    } finally {
+      setLoadingExperimentResultId(null);
     }
   };
 
@@ -635,8 +663,11 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
           loading={loading}
           isSubmitting={submittingExperiment}
           transitioningExperimentId={transitioningExperimentId}
+          experimentResults={experimentResults}
+          loadingExperimentResultId={loadingExperimentResultId}
           onCreate={(payload) => void createControlledExperiment(payload)}
           onTransition={(experimentId, status, note, outcome) => void transitionControlledExperiment(experimentId, status, note, outcome)}
+          onLoadResult={(experimentId) => void loadControlledExperimentResult(experimentId)}
         />
       )}
 
@@ -908,8 +939,11 @@ export function ControlledExperimentsPanel({
   loading,
   isSubmitting,
   transitioningExperimentId,
+  experimentResults,
+  loadingExperimentResultId,
   onCreate,
   onTransition,
+  onLoadResult,
 }: {
   testingReviews: QualityReview[];
   experiments: ControlledExperiment[];
@@ -917,8 +951,11 @@ export function ControlledExperimentsPanel({
   loading: boolean;
   isSubmitting: boolean;
   transitioningExperimentId: string | null;
+  experimentResults: Record<string, ControlledExperimentResult>;
+  loadingExperimentResultId: string | null;
   onCreate: (payload: { qualityReviewId: string; hypothesis: string; variationSummary: string; scopeRoutes: string[]; sampleLimit: number; successCriteria: string[]; stopConditions: string[] }) => void;
   onTransition: (experimentId: string, status: ControlledExperiment['status'], decisionNote?: string, outcomeSummary?: string) => void;
+  onLoadResult: (experimentId: string) => void;
 }) {
   const experimentsByReview = new Set(experiments.map((experiment) => experiment.quality_review_id));
   const availableReviews = testingReviews.filter((review) => !experimentsByReview.has(review.id));
@@ -964,17 +1001,29 @@ export function ControlledExperimentsPanel({
 
         <section className="overflow-hidden rounded-card border border-slate-800 bg-slate-900/70"><div className="border-b border-slate-800 p-4"><h4 className="text-sm font-bold text-white">Acompanhamento administrativo</h4><p className="mt-1 text-[11px] text-slate-500">Registre o protocolo e a decisão; a aplicação prática continua manual e submetida aos gates existentes.</p></div>{experiments.length === 0 ? <div className="p-5"><EmptyState icon={<Clock3 className="h-5 w-5" />} title="Nenhum experimento registrado" text="Crie um rascunho a partir de um item de Qualidade em teste." /></div> : <div className="divide-y divide-slate-800/80">{experiments.map((experiment) => {
           const linkedReview = testingReviews.find((review) => review.id === experiment.quality_review_id);
+          const result = experimentResults[experiment.id];
+          const isLoadingResult = loadingExperimentResultId === experiment.id;
           const isTransitioning = transitioningExperimentId === experiment.id;
           const canReady = experiment.status === 'draft' || experiment.status === 'paused';
           const canRun = experiment.status === 'ready';
           const canPause = experiment.status === 'ready' || experiment.status === 'running';
           const canComplete = experiment.status === 'running' || experiment.status === 'paused';
           const terminal = experiment.status === 'completed' || experiment.status === 'rejected';
-          return <article key={experiment.id} className="p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h5 className="text-sm font-bold text-white">{linkedReview?.title || 'Item de Qualidade vinculado'}</h5><span className={`rounded-pill border px-2 py-0.5 text-[10px] font-bold ${statusClass(experiment.status)}`}>{EXPERIMENT_STATUS_LABELS[experiment.status]}</span></div><p className="mt-1 text-[11px] text-slate-500">Amostra máxima: {experiment.sample_limit} • rotas: {experiment.scope_routes.map(safeAgentRouteLabel).join(', ')}</p></div><time className="text-[10px] text-slate-500">{formatDate(experiment.updated_at)}</time></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><div className="rounded-panel border border-slate-800 bg-slate-950/45 p-2.5"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Hipótese</p><p className="mt-1 text-xs leading-relaxed text-slate-300">{experiment.hypothesis}</p></div><div className="rounded-panel border border-slate-800 bg-slate-950/45 p-2.5"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Critérios</p><p className="mt-1 text-xs leading-relaxed text-slate-300">{experiment.success_criteria.join(' • ')}</p></div></div>{!terminal && <div className="mt-3 rounded-panel border border-slate-800 bg-slate-950/45 p-3"><textarea value={notes[experiment.id] || ''} onChange={(event) => setNotes((current) => ({ ...current, [experiment.id]: event.target.value }))} maxLength={600} rows={2} placeholder="Nota administrativa da transição (opcional)..." className="w-full resize-none rounded-control border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" />{canComplete && <textarea value={outcomes[experiment.id] || ''} onChange={(event) => setOutcomes((current) => ({ ...current, [experiment.id]: event.target.value }))} maxLength={800} rows={2} placeholder="Resumo do resultado obrigatório ao concluir..." className="mt-2 w-full resize-none rounded-control border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" />}<div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{canReady && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'ready', notes[experiment.id])} className="rounded-control border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[10px] font-bold text-amber-200 disabled:opacity-50">Revisar desenho</button>}{canRun && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'running', notes[experiment.id])} className="rounded-control border border-sky-500/30 bg-sky-500/10 px-2 py-2 text-[10px] font-bold text-sky-200 disabled:opacity-50">Iniciar acompanhamento</button>}{canPause && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'paused', notes[experiment.id])} className="rounded-control border border-orange-500/30 bg-orange-500/10 px-2 py-2 text-[10px] font-bold text-orange-200 disabled:opacity-50">Pausar</button>}{canComplete && <button type="button" disabled={isTransitioning || !(outcomes[experiment.id] || '').trim()} onClick={() => onTransition(experiment.id, 'completed', notes[experiment.id], outcomes[experiment.id])} className="rounded-control border border-emerald-500/30 bg-emerald-500/10 px-2 py-2 text-[10px] font-bold text-emerald-200 disabled:opacity-50">Concluir</button>}<button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'rejected', notes[experiment.id])} className="rounded-control border border-rose-500/30 bg-rose-500/10 px-2 py-2 text-[10px] font-bold text-rose-200 disabled:opacity-50">Encerrar</button></div></div>}{terminal && <div className="mt-3 flex items-start gap-1.5 rounded-panel border border-slate-800 bg-slate-950/45 p-2.5 text-[11px] leading-relaxed text-slate-400"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" /><span>{experiment.outcome_summary || experiment.decision_note || 'Experimento encerrado; nenhuma publicação foi promovida automaticamente.'}</span></div>}</article>;
+          return <article key={experiment.id} className="p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h5 className="text-sm font-bold text-white">{linkedReview?.title || 'Item de Qualidade vinculado'}</h5><span className={`rounded-pill border px-2 py-0.5 text-[10px] font-bold ${statusClass(experiment.status)}`}>{EXPERIMENT_STATUS_LABELS[experiment.status]}</span></div><p className="mt-1 text-[11px] text-slate-500">Amostra máxima: {experiment.sample_limit} • rotas: {experiment.scope_routes.map(safeAgentRouteLabel).join(', ')}</p></div><time className="text-[10px] text-slate-500">{formatDate(experiment.updated_at)}</time></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><div className="rounded-panel border border-slate-800 bg-slate-950/45 p-2.5"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Hipótese</p><p className="mt-1 text-xs leading-relaxed text-slate-300">{experiment.hypothesis}</p></div><div className="rounded-panel border border-slate-800 bg-slate-950/45 p-2.5"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Critérios</p><p className="mt-1 text-xs leading-relaxed text-slate-300">{experiment.success_criteria.join(' • ')}</p></div></div><ExperimentResultsPanel result={result} isLoading={isLoadingResult} canLoad={!!experiment.started_at} onLoad={() => onLoadResult(experiment.id)} />{!terminal && <div className="mt-3 rounded-panel border border-slate-800 bg-slate-950/45 p-3"><textarea value={notes[experiment.id] || ''} onChange={(event) => setNotes((current) => ({ ...current, [experiment.id]: event.target.value }))} maxLength={600} rows={2} placeholder="Nota administrativa da transição (opcional)..." className="w-full resize-none rounded-control border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" />{canComplete && <textarea value={outcomes[experiment.id] || ''} onChange={(event) => setOutcomes((current) => ({ ...current, [experiment.id]: event.target.value }))} maxLength={800} rows={2} placeholder="Resumo do resultado obrigatório ao concluir..." className="mt-2 w-full resize-none rounded-control border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" />}<div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{canReady && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'ready', notes[experiment.id])} className="rounded-control border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[10px] font-bold text-amber-200 disabled:opacity-50">Revisar desenho</button>}{canRun && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'running', notes[experiment.id])} className="rounded-control border border-sky-500/30 bg-sky-500/10 px-2 py-2 text-[10px] font-bold text-sky-200 disabled:opacity-50">Iniciar acompanhamento</button>}{canPause && <button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'paused', notes[experiment.id])} className="rounded-control border border-orange-500/30 bg-orange-500/10 px-2 py-2 text-[10px] font-bold text-orange-200 disabled:opacity-50">Pausar</button>}{canComplete && <button type="button" disabled={isTransitioning || !(outcomes[experiment.id] || '').trim()} onClick={() => onTransition(experiment.id, 'completed', notes[experiment.id], outcomes[experiment.id])} className="rounded-control border border-emerald-500/30 bg-emerald-500/10 px-2 py-2 text-[10px] font-bold text-emerald-200 disabled:opacity-50">Concluir</button>}<button type="button" disabled={isTransitioning} onClick={() => onTransition(experiment.id, 'rejected', notes[experiment.id])} className="rounded-control border border-rose-500/30 bg-rose-500/10 px-2 py-2 text-[10px] font-bold text-rose-200 disabled:opacity-50">Encerrar</button></div></div>}{terminal && <div className="mt-3 flex items-start gap-1.5 rounded-panel border border-slate-800 bg-slate-950/45 p-2.5 text-[11px] leading-relaxed text-slate-400"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" /><span>{experiment.outcome_summary || experiment.decision_note || 'Experimento encerrado; nenhuma publicação foi promovida automaticamente.'}</span></div>}</article>;
         })}</div>}</section>
       </div>
     </div>
   );
+}
+
+function ExperimentResultsPanel({ result, isLoading, canLoad, onLoad }: { result?: ControlledExperimentResult; isLoading: boolean; canLoad: boolean; onLoad: () => void }) {
+  const signalStyle: Record<ControlledExperimentResult['metrics'][number]['interpretation'], string> = {
+    improved: 'border-emerald-500/25 bg-emerald-500/5 text-emerald-200',
+    worsened: 'border-rose-500/25 bg-rose-500/5 text-rose-200',
+    stable: 'border-slate-700 bg-slate-800/50 text-slate-200',
+  };
+  const signalLabel: Record<ControlledExperimentResult['metrics'][number]['interpretation'], string> = { improved: 'Sinal favorável', worsened: 'Atenção', stable: 'Estável' };
+  return <section className="mt-3 rounded-panel border border-sky-500/20 bg-sky-500/[0.035] p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-sky-300"><FileSearch className="h-3.5 w-3.5" /> Evidências antes/depois</div><p className="mt-1 text-[11px] leading-relaxed text-slate-400">Leitura agregada do tenant em janelas equivalentes. É apoio à revisão humana, não prova causalidade nem publicação automática.</p></div><button type="button" disabled={!canLoad || isLoading} onClick={onLoad} className="inline-flex min-h-8 shrink-0 items-center justify-center gap-1.5 rounded-control border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-[10px] font-bold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />{isLoading ? 'Calculando...' : 'Atualizar leitura'}</button></div>{!canLoad && <p className="mt-2 rounded-control border border-slate-700 bg-slate-950/50 p-2 text-[11px] text-slate-400">O resultado fica disponível após registrar o início do acompanhamento manual.</p>}{result?.availability === 'not_started' && <p className="mt-2 rounded-control border border-slate-700 bg-slate-950/50 p-2 text-[11px] text-slate-400">Ainda não há janela pós-experimento para comparar.</p>}{result?.availability === 'insufficient_data' && <p className="mt-2 rounded-control border border-amber-500/25 bg-amber-500/5 p-2 text-[11px] text-amber-100">A janela de observação ainda é insuficiente. Aguarde evidência adicional antes de concluir.</p>}{result?.availability === 'available' && <><div className="mt-3 grid gap-2 sm:grid-cols-3">{result.metrics.map((item) => <div key={item.key} className={`rounded-control border p-2.5 ${signalStyle[item.interpretation]}`}><div className="flex items-start justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-wide opacity-80">{item.label}</p><span className="rounded-pill border border-current/20 px-1.5 py-0.5 text-[9px] font-bold">{signalLabel[item.interpretation]}</span></div><div className="mt-2 flex items-end gap-2"><div><p className="text-[9px] uppercase text-slate-500">Antes</p><p className="text-lg font-bold">{item.before}</p></div><span className="mb-1 text-slate-500">→</span><div><p className="text-[9px] uppercase text-slate-500">Depois</p><p className="text-lg font-bold">{item.after}</p></div><span className="mb-1 text-[10px] font-bold">{item.delta > 0 ? '+' : ''}{item.delta}</span></div></div>)}</div><p className="mt-2 text-[10px] text-slate-500">Janela comparada: {result.windowHours}h antes de {result.observationStart ? formatDate(result.observationStart) : '—'} e {result.windowHours}h depois.</p><div className="mt-2 border-t border-slate-800 pt-2"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Limites da leitura</p><ul className="mt-1 space-y-1 text-[10px] leading-relaxed text-slate-500">{result.limitations.map((limitation) => <li key={limitation}>• {limitation}</li>)}</ul></div></>}</section>;
 }
 
 const toneMap: Record<string, string> = { amber: 'text-amber-300 bg-amber-500/10 border-amber-400/20', sky: 'text-sky-300 bg-sky-500/10 border-sky-400/20', rose: 'text-rose-300 bg-rose-500/10 border-rose-400/20', emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/20', slate: 'text-slate-300 bg-slate-500/10 border-slate-400/20' };
