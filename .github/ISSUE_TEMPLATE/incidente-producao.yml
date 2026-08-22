@@ -1,0 +1,54 @@
+name: Incidente de produção
+description: Registre uma falha ou degradação que afeta o ambiente real.
+title: "[INCIDENTE] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Se houver risco de segurança, não publique detalhes técnicos aqui. Use o canal privado descrito em `SECURITY.md`. Não inclua tokens, credenciais, telefones ou dados de clientes.
+
+  - type: dropdown
+    id: severidade
+    attributes:
+      label: Severidade observada
+      options:
+        - Crítica — atendimento, mensagens ou pagamentos indisponíveis
+        - Alta — parte relevante da operação afetada
+        - Média — impacto limitado com alternativa disponível
+        - Baixa — degradação sem impacto imediato relevante
+    validations:
+      required: true
+
+  - type: textarea
+    id: impacto
+    attributes:
+      label: Impacto atual
+      description: Descreva o que está falhando, quem é afetado e desde quando.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidencias
+    attributes:
+      label: Evidências sanitizadas
+      description: Inclua horários, códigos de erro e IDs anonimizados; nunca inclua segredos ou dados pessoais.
+    validations:
+      required: true
+
+  - type: textarea
+    id: mitigacao
+    attributes:
+      label: Mitigação já realizada
+      description: Informe ações seguras já tomadas ou escreva Não realizada.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: seguranca
+    attributes:
+      label: Segurança dos dados
+      options:
+        - label: Confirmei que não incluí dados reais, segredos ou credenciais neste relato.
+          required: true

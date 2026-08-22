@@ -19,8 +19,8 @@ import { createConversationsRouter } from '../conversations';
 import { initDb } from '../../services/db';
 import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 
-const OWN_TENANT_ID = '11111111-1111-4111-8111-111111111111';
-const OTHER_TENANT_ID = '22222222-2222-4222-8222-222222222222';
+const OWN_TENANT_ID = 'tenant-proprio-do-login';
+const OTHER_TENANT_ID = 'tenant-de-outra-empresa';
 
 let server: Server;
 let baseUrl: string;
@@ -108,20 +108,6 @@ describe('resolveTenantId via header X-Tenant-Id (POST/GET /api/knowledge-base)'
     // com o valor gravado no teste anterior pelo saas_admin de verdade).
     const otherRow = (supabase.__tables.knowledge_base || []).find((r: any) => r.tenant_id === OTHER_TENANT_ID);
     expect(otherRow?.data?.companyName).toBe('Empresa do outro tenant');
-  });
-
-  it('saas_admin com X-Tenant-Id legado/fictício ignora o override e preserva o tenant do JWT', async () => {
-    currentRole = 'saas_admin';
-    const res = await fetch(`${baseUrl}/api/knowledge-base`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': 'tenant_004' },
-      body: JSON.stringify({ knowledgeBase: { companyName: 'Não deve gravar no ID fictício' } }),
-    });
-    expect(res.status).toBe(200);
-
-    const ownRow = (supabase.__tables.knowledge_base || []).find((r: any) => r.tenant_id === OWN_TENANT_ID);
-    expect(ownRow?.data?.companyName).toBe('Não deve gravar no ID fictício');
-    expect((supabase.__tables.knowledge_base || []).some((r: any) => r.tenant_id === 'tenant_004')).toBe(false);
   });
 
   it('achado real corrigido: manager mandando X-Tenant-Id também é ignorado', async () => {

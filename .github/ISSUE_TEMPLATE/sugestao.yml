@@ -1,0 +1,56 @@
+name: Sugestão de melhoria
+description: Proponha uma melhoria de produto, processo ou experiência.
+title: "[SUGESTÃO] "
+labels:
+  - enhancement
+  - backlog
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema ou oportunidade
+      description: Que dificuldade existe hoje ou que oportunidade merece ser explorada?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposta
+    attributes:
+      label: Proposta
+      description: Descreva a solução desejada, sem exigir uma implementação específica.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área do produto
+      options:
+        - WhatsApp e atendimento
+        - Agendamento e Google Calendar
+        - CRM
+        - Financeiro e comprovantes
+        - Base de conhecimento e IA
+        - Autenticação e permissões
+        - Interface
+        - Infraestrutura e deploy
+        - Processo de desenvolvimento
+        - Outra
+    validations:
+      required: true
+
+  - type: textarea
+    id: valor
+    attributes:
+      label: Valor esperado
+      description: Como essa melhoria reduziria trabalho, risco ou custo, ou aumentaria a qualidade?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: dados
+    attributes:
+      label: Dados compartilhados
+      options:
+        - label: Confirmei que não incluí dados reais, segredos ou credenciais neste relato.
+          required: true
