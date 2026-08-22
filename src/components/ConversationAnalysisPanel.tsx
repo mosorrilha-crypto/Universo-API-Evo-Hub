@@ -1,5 +1,6 @@
 import React from 'react';
-import { FullConversationAnalysis } from '../types';
+import { FullConversationAnalysis, type ContactAgentContext } from '../types';
+import { ContactContextPanel } from './ContactContextPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   AlertCircle,
@@ -54,6 +55,10 @@ interface ConversationAnalysisPanelProps {
   onSendCAPIEvent?: (eventName: 'Lead' | 'Contact' | 'QualifiedLead' | 'Schedule' | 'PurchaseIntention' | 'Purchase') => void;
   onGenerateReplyFromHint?: (hint: string) => Promise<HintReplyResult>;
   onAskAi?: (question: string) => Promise<AskAiResult>;
+  /** Leitura redigida de memória e decisão; informa o operador, sem conceder ações. */
+  contactContext?: ContactAgentContext | null;
+  isContactContextLoading?: boolean;
+  onRefreshContactContext?: () => void;
 }
 
 /** Atalhos que descrevem o objetivo de negócio, não uma fórmula vaga de texto. */
@@ -123,6 +128,9 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   onSendCAPIEvent,
   onGenerateReplyFromHint,
   onAskAi,
+  contactContext = null,
+  isContactContextLoading = false,
+  onRefreshContactContext,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const [hintDraft, setHintDraft] = React.useState('');
@@ -299,6 +307,14 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
           </section>
         </>
       )}
+
+      <ContactContextPanel
+        context={contactContext}
+        isLoading={isContactContextLoading}
+        isSpanish={false}
+        variant="detail"
+        onRetry={onRefreshContactContext}
+      />
 
       <section className="rounded-xl border border-sky-500/25 bg-slate-950 p-3 space-y-3">
         <div className="flex items-start justify-between gap-2">

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
+import { ContactContextPanel } from './ContactContextPanel';
 import { ForwardMessageModal } from './chat/ForwardMessageModal';
 import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
@@ -431,6 +432,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // da conversa, sem mexer no showRightPanel (que continua controlando só a
   // coluna fixa do desktop).
   const [mobileAnalysisOpen, setMobileAnalysisOpen] = useState(false);
+  // Contexto operacional redigido: leitura exclusiva, tenant-scoped e sem
+  // poder de ação. O painel nunca usa memória para confirmar agenda/pagamento.
+  const [contactContext, setContactContext] = useState<ContactAgentContext | null>(null);
+  const [contactContextPhone, setContactContextPhone] = useState<string | null>(null);
+  const [contactContextTenantId, setContactContextTenantId] = useState<string | null>(null);
+  const [isContactContextLoading, setIsContactContextLoading] = useState(false);
+  const contactContextRequestRef = useRef(0);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -1644,6 +1652,45 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const selectedLead = leads.find((l) => l.id === activeLeadId) || leads[0];
+
+  const refreshContactContext = React.useCallback(async () => {
+    const phone = selectedLead?.phone;
+    const tenantId = activeTenant?.id;
+    const isRealConversation = Boolean((selectedLead as any)?.isReal);
+    const requestId = ++contactContextRequestRef.current;
+    if (!phone || !tenantId || !isRealConversation) {
+      setContactContext(null);
+      setContactContextPhone(null);
+      setContactContextTenantId(null);
+      setIsContactContextLoading(false);
+      return;
+    }
+
+    // Vincula o estado ao telefone E tenant antes do request. Durante a troca
+    // de lead/empresa, o render nunca pode reaproveitar a memória anterior.
+    setContactContextPhone(phone);
+    setContactContextTenantId(tenantId);
+    setContactContext(null);
+    setIsContactContextLoading(true);
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/context`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || typeof data.available !== 'boolean') throw new Error(data?.error || `HTTP ${response.status}`);
+      if (requestId === contactContextRequestRef.current) setContactContext(data as ContactAgentContext);
+    } catch {
+      if (requestId === contactContextRequestRef.current) {
+        setContactContext({ available: false, unavailable: { memory: true, trace: true }, memory: null, latestDecision: null });
+      }
+    } finally {
+      if (requestId === contactContextRequestRef.current) setIsContactContextLoading(false);
+    }
+  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  useEffect(() => {
+    void refreshContactContext();
+  }, [refreshContactContext]);
+
+  const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
 
   const openOperatorFeedback = (kind: 'bug' | 'operator_idea') => {
     setOperatorFeedbackKind(kind);
@@ -3661,21 +3708,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
               </div>
 
-              {/* Context strip from the canonical design: the essential AI summary
-                  stays in the conversation, while the full panel remains optional. */}
-              {selectedLead.fullAnalysis && (
-                <div className="atendimento-context-strip">
-                  <div className="atendimento-context-strip__copy">
-                    <span className="atendimento-context-strip__label">CONTEXTO</span>
-                    <p>
-                      {selectedLead.fullAnalysis.actionObjective || selectedLead.fullAnalysis.conversationSummary}
-                      {selectedLead.fullAnalysis.actionRationale && <span className="atendimento-context-strip__rationale"> · {selectedLead.fullAnalysis.actionRationale}</span>}
-                    </p>
-                  </div>
-                  <button type="button" onClick={() => setShowRightPanel(true)} className="atendimento-context-strip__action">
-                    {isSpanish ? 'Ver ficha' : 'Ver ficha completa'}
-                  </button>
-                </div>
+              {/* Contexto compactado acompanha a conversa real. A ficha completa
+                  continua opcional e apenas informa o operador: nunca autoriza
+                  confirmação de agenda, pagamento ou qualquer exceção. */}
+              {(selectedLead as any)?.isReal && (
+                <ContactContextPanel
+                  context={visibleContactContext}
+                  isLoading={isContactContextLoading}
+                  isSpanish={isSpanish}
+                  variant="compact"
+                  onRetry={() => void refreshContactContext()}
+                  onOpenDetails={() => {
+                    if (window.innerWidth >= 1024) setShowRightPanel(true);
+                    else setMobileAnalysisOpen(true);
+                  }}
+                />
               )}
 
               {/* Real-time Analyzing Banner */}
@@ -4337,6 +4384,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onSendCAPIEvent={handleDirectCAPI}
               onGenerateReplyFromHint={handleGenerateReplyFromHint}
               onAskAi={handleAskAi}
+              contactContext={visibleContactContext}
+              isContactContextLoading={isContactContextLoading}
+              onRefreshContactContext={() => void refreshContactContext()}
             />
           </div>
         )}

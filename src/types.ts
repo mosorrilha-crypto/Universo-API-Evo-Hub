@@ -343,6 +343,40 @@ export interface FullConversationAnalysis {
   source?: 'gemini' | 'fallback'; // 'fallback' = Gemini indisponível, resposta simulada
 }
 
+export interface ContactContextOpenLoop {
+  kind: 'agenda' | 'payment' | 'escalation' | 'follow_up';
+  summary: string;
+  status?: 'open' | 'awaiting_customer' | 'awaiting_human';
+}
+
+/** Payload redigido de GET /api/conversations/:phone/context. Não inclui mensagens, prompts, mídias, comprovantes ou credenciais. */
+export interface ContactAgentContext {
+  available: boolean;
+  unavailable: { memory: boolean; trace: boolean };
+  memory: {
+    preferredLanguage: string | null;
+    preferredName: string | null;
+    currentIntent: string | null;
+    serviceInterest: string | null;
+    objections: string[];
+    openLoops: ContactContextOpenLoop[];
+    nextBestAction: string | null;
+    conversationSummary: string | null;
+    updatedAt: string;
+    updatedBy: 'system' | 'operator';
+  } | null;
+  latestDecision: {
+    createdAt: string;
+    routerDecision: string;
+    reasoningSummary: string | null;
+    contextPackVersion: string;
+    selectedFacts: Record<string, unknown>;
+    toolSummaries: string[];
+    needsHumanConfirmation: boolean;
+    outcome: string | null;
+  } | null;
+}
+
 export interface LeadInfo {
   id: string;
   tenantId?: string;

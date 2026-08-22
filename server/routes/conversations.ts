@@ -31,6 +31,8 @@ import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorRep
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
+import { getContactAgentMemory } from '../services/contactAgentMemoryStore';
+import { listAgentTurnTraces } from '../services/agentTurnTraceStore';
 import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
 import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
@@ -227,6 +229,57 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/conversations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const includeArchived = req.query.archived === 'true';
     res.json({ conversations: await listConversations(tenantOf(req), { includeArchived }) });
+  }));
+
+  /**
+   * Contexto supervisionado do contato. Retorna apenas a memória operacional
+   * compacta e a última decisão já redigida do agente; nunca devolve prompt,
+   * histórico/mensagens, comprovantes, mídias, credenciais ou o telefone
+   * duplicado dentro do payload. Toda busca é obrigatoriamente tenant-scoped.
+   */
+  router.get('/api/conversations/:phone/context', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const [memoryResult, traceResult] = await Promise.allSettled([
+      getContactAgentMemory(tenantId, phone),
+      listAgentTurnTraces(tenantId, phone, 1),
+    ]);
+    const memory = memoryResult.status === 'fulfilled' ? memoryResult.value : null;
+    const latestTrace = traceResult.status === 'fulfilled' ? traceResult.value[0] || null : null;
+    const unavailable = {
+      memory: memoryResult.status === 'rejected',
+      trace: traceResult.status === 'rejected',
+    };
+    if (unavailable.memory || unavailable.trace) {
+      console.warn(`⚠️  [Conversation Context] tenant=${tenantId} leitura parcial de contexto (memory=${unavailable.memory}, trace=${unavailable.trace}); painel continua em modo seguro.`);
+    }
+
+    res.json({
+      available: !unavailable.memory && !unavailable.trace,
+      unavailable,
+      memory: memory ? {
+        preferredLanguage: memory.preferred_language,
+        preferredName: memory.preferred_name,
+        currentIntent: memory.current_intent,
+        serviceInterest: memory.service_interest,
+        objections: memory.objections,
+        openLoops: memory.open_loops,
+        nextBestAction: memory.next_best_action,
+        conversationSummary: memory.conversation_summary,
+        updatedAt: memory.updated_at,
+        updatedBy: memory.updated_by,
+      } : null,
+      latestDecision: latestTrace ? {
+        createdAt: latestTrace.created_at,
+        routerDecision: latestTrace.router_decision,
+        reasoningSummary: latestTrace.reasoning_summary,
+        contextPackVersion: latestTrace.context_pack_version,
+        selectedFacts: latestTrace.selected_facts,
+        toolSummaries: latestTrace.tool_summaries,
+        needsHumanConfirmation: latestTrace.needs_human_confirmation,
+        outcome: latestTrace.outcome,
+      } : null,
+    });
   }));
 
   router.get('/api/conversations/:phone', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
