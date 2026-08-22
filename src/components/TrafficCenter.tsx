@@ -275,7 +275,19 @@ export const TrafficCenter: React.FC = () => {
       {error && (
         <div className="p-4 rounded-xl bg-rose-950/50 border border-rose-500/40 text-rose-100 text-sm flex gap-3">
           <AlertCircle className="w-5 h-5 shrink-0 text-rose-300" />
-          <p>{error}</p>
+          <div className="space-y-2">
+            <p>{error}</p>
+            {error.includes('ads_read') && (
+              <a
+                href="https://developers.facebook.com/tools/explorer/"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex font-semibold text-rose-200 underline decoration-rose-300/70 underline-offset-4 hover:text-white"
+              >
+                Gerar token de leitura na Meta
+              </a>
+            )}
+          </div>
         </div>
       )}
       {notice && (
