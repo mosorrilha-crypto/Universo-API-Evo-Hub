@@ -243,7 +243,8 @@ export async function uploadWhatsAppMedia(
   accessToken: string | undefined,
   mediaBuffer: Buffer,
   mimeType: string,
-  filename: string
+  filename: string,
+  diagnosticTag?: string
 ): Promise<string> {
   if (!phoneNumberId) throw new Error('META_PHONE_NUMBER_ID ausente — não é possível fazer upload de mídia.');
   if (!accessToken) throw new Error('META_ACCESS_TOKEN ausente — não é possível fazer upload de mídia.');
@@ -270,6 +271,9 @@ export async function uploadWhatsAppMedia(
   }
   if (!data.id) {
     throw new Error('Resposta da Meta não retornou um media_id válido após o upload.');
+  }
+  if (diagnosticTag) {
+    console.log(`🔬 [${diagnosticTag}] meta_upload_response=${JSON.stringify(data)}`);
   }
 
   // Diagnóstico temporário (erro 131053 "however on processing it is of
@@ -306,7 +310,8 @@ export async function sendWhatsAppMediaMessage(
   to: string,
   mediaId: string,
   mimeType: string,
-  caption?: string
+  caption?: string,
+  diagnosticTag?: string
 ): Promise<void> {
   if (!phoneNumberId) throw new Error('META_PHONE_NUMBER_ID ausente — não é possível enviar mensagem de mídia.');
   if (!accessToken) throw new Error('META_ACCESS_TOKEN ausente — não é possível enviar mensagem de mídia.');
@@ -337,6 +342,10 @@ export async function sendWhatsAppMediaMessage(
   if (!res.ok) {
     await throwMetaError(res, 'Falha ao enviar mídia via Meta Cloud API');
   }
+  if (diagnosticTag) {
+    const data = await res.json().catch(() => ({}));
+    console.log(`🔬 [${diagnosticTag}] meta_message_response=${JSON.stringify(data)}`);
+  }
 }
 
 /**
@@ -348,7 +357,8 @@ export async function sendWhatsAppAudioMessage(
   accessToken: string | undefined,
   to: string,
   audioBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  diagnosticTag?: string
 ): Promise<string> {
   // 1. Validar parâmetros
   if (!phoneNumberId) throw new Error('phoneNumberId ausente');
@@ -359,10 +369,10 @@ export async function sendWhatsAppAudioMessage(
 
   // 2. Fazer upload do arquivo de áudio no endpoint de mídia
   const filename = mimeType.startsWith('audio/ogg') ? 'voice-note.ogg' : mimeType.startsWith('audio/mpeg') ? 'voice-note.mp3' : 'voice-note';
-  const mediaId = await uploadWhatsAppMedia(phoneNumberId, accessToken, audioBuffer, mimeType, filename);
+  const mediaId = await uploadWhatsAppMedia(phoneNumberId, accessToken, audioBuffer, mimeType, filename, diagnosticTag);
 
   // 3. Enviar a mensagem final com type: "audio" e o media_id obtido
-  await sendWhatsAppMediaMessage(phoneNumberId, accessToken, to, mediaId, mimeType);
+  await sendWhatsAppMediaMessage(phoneNumberId, accessToken, to, mediaId, mimeType, undefined, diagnosticTag);
 
   return mediaId;
 }

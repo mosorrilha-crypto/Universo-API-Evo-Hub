@@ -317,11 +317,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
   // Envio de arquivo/foto real (upload do dispositivo do operador, via painel)
   router.post('/api/conversations/:phone/send-media', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { base64, mimeType, filename, caption } = req.body || {};
+    const { base64, mimeType, filename, caption, deliveryMode } = req.body || {};
     if (!base64 || !mimeType) {
       return res.status(400).json({ error: 'Campos "base64" e "mimeType" são obrigatórios.' });
     }
     const tenantId = tenantOf(req);
+    // OGG/Opus fica disponível apenas no ensaio técnico autenticado. O caminho
+    // normal de produção continua usando MP3 até a conclusão da prova.
+    const isOggOpusProbe = deliveryMode === 'ogg_opus_probe';
+    if (isOggOpusProbe && process.env.META_OGG_OPUS_PROBE_ENABLED !== 'true') {
+      return res.status(403).json({ error: 'Ensaio OGG/Opus não está habilitado neste ambiente.' });
+    }
 
     try {
       let uploadBase64 = base64;
@@ -333,8 +339,11 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
       const isEvolution = channel.provider === 'evolution';
+      if (isOggOpusProbe && isEvolution) {
+        return res.status(400).json({ error: 'O ensaio OGG/Opus exige um canal Meta Cloud API.' });
+      }
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
-        const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
+        const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType, isOggOpusProbe ? 'ogg_opus' : 'mp3');
         uploadBase64 = transcoded.base64;
         // mimeType (e filename) do upload/persistência seguem o que a
         // transcodificação retornou.
@@ -345,7 +354,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType, uploadFilename);
         } else {
           const audioBuffer = Buffer.from(uploadBase64, 'base64');
-          await sendWhatsAppAudioMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, audioBuffer, uploadMimeType);
+          const mediaId = await sendWhatsAppAudioMessage(
+            channel.metaPhoneNumberId,
+            channel.metaAccessToken,
+            req.params.phone,
+            audioBuffer,
+            uploadMimeType,
+            isOggOpusProbe ? 'oggOpusProbe' : undefined
+          );
+          if (isOggOpusProbe) {
+            console.log(`🔬 [oggOpusProbe] to=***${req.params.phone.replace(/\D/g, '').slice(-4)} media_id=${mediaId} mime="${uploadMimeType}" bytes=${audioBuffer.length}`);
+          }
         }
       } else {
         const cleanBase64 = uploadBase64.replace(/^data:[^;]+;base64,/, '');
