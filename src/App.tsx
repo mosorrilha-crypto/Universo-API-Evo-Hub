@@ -19,7 +19,6 @@ import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
-import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { OperationsCenter } from './components/OperationsCenter';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { LoginModal } from './components/LoginModal';
