@@ -228,14 +228,15 @@ export async function sendWhatsAppTemplateMessage(
  * ffmpeg gera um Ogg/Opus genuinamente válido, confirmado com "file"
  * (libmagic) reconhecendo corretamente "Ogg data, Opus audio, ... 16000 Hz";
  * (b) montagem do multipart — testado tanto à mão quanto com FormData/Blob
- * nativos do Node, resultado idêntico. O que sobra: a lista de tipos de
- * áudio documentados pela Meta usa o valor literal "audio/ogg" (sem
- * parâmetro de codec) — só o texto da doc esclarece "codecs=opus" como
- * requisito do CONTAINER, não como parte do MIME type a enviar. Todas as
- * tentativas anteriores mandaram "; codecs=opus" em pelo menos um dos dois
- * lugares (campo "type" do multipart e/ou Content-Type da parte "file").
- * Aqui os dois usam o MIME type base, sem parâmetro — combinação ainda não
- * testada nas rodadas anteriores.
+ * nativos do Node, resultado idêntico. A documentação atual da Meta explicita
+ * que, para OGG, o MIME base `audio/ogg` não é suportado: o arquivo precisa
+ * ser Ogg codificado em OPUS e mono. Portanto, não normalizamos mais o MIME
+ * removendo `; codecs=opus`: o mesmo valor completo precisa seguir tanto no
+ * campo `type` quanto no Content-Type da parte `file` do multipart.
+ *
+ * O fallback MP3 de produção continua sendo escolhido antes deste método.
+ * Esta preservação permite que o ensaio controlado OGG/Opus chegue à Meta sem
+ * perder a informação de codec necessária para a validação.
  */
 export async function uploadWhatsAppMedia(
   phoneNumberId: string | undefined,
@@ -249,11 +250,13 @@ export async function uploadWhatsAppMedia(
   if (!mediaBuffer || mediaBuffer.length === 0) throw new Error('Buffer da mídia ausente ou vazio.');
   if (!mimeType) throw new Error('MIME type da mídia ausente.');
 
-  const cleanMimeType = mimeType.split(';')[0].trim();
+  const uploadMimeType = mimeType.trim();
   const form = new FormData();
   form.append('messaging_product', 'whatsapp');
-  form.append('type', cleanMimeType);
-  form.append('file', new Blob([mediaBuffer], { type: cleanMimeType }), filename);
+  // Para OGG/Opus, `audio/ogg` sem o parâmetro de codec não é suportado pela
+  // Meta. Use o mesmo MIME integral no campo `type` e na parte do arquivo.
+  form.append('type', uploadMimeType);
+  form.append('file', new Blob([mediaBuffer], { type: uploadMimeType }), filename);
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/media`, {
     method: 'POST',
