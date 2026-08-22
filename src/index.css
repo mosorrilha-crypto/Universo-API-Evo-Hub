@@ -1481,3 +1481,87 @@ html[data-theme='light'] .quality-workspace__persistence-alert .text-amber-100\/
     scroll-snap-align: start;
   }
 }
+
+
+/* Base de Conhecimento: diagnóstico e prioridades legíveis no modo claro. */
+.knowledge-workspace__audit {
+  background: var(--surface-panel) !important;
+  border-color: color-mix(in srgb, var(--action) 28%, var(--border)) !important;
+}
+
+.knowledge-workspace__audit > div:first-child > div:first-child > div,
+.knowledge-workspace__audit > div:first-child > div:first-child > p,
+.knowledge-workspace__audit > div:nth-child(3) > div:first-child > span {
+  color: var(--text-primary);
+}
+
+.knowledge-workspace__audit-metric {
+  background: var(--surface-raised) !important;
+  border-color: var(--border) !important;
+}
+
+.knowledge-workspace__audit-metric p:first-child {
+  color: var(--text-secondary) !important;
+}
+
+.knowledge-workspace__finding {
+  background: var(--surface-raised) !important;
+  border-color: var(--border) !important;
+}
+
+.knowledge-workspace__finding-title {
+  color: var(--text-primary) !important;
+}
+
+.knowledge-workspace__finding-description {
+  color: var(--text-secondary) !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__audit {
+  background: #ffffff !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__audit-metric {
+  background: #f7fbfa !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__finding {
+  background: #f7fbfa !important;
+}
+
+
+/* Aviso de comprovante: alerta de atenção legível também no modo claro. */
+.atendimento-payment-verification {
+  color: #FFE7A8;
+}
+
+.atendimento-payment-verification__hint {
+  color: #FFD66B !important;
+}
+
+.atendimento-payment-verification__action {
+  color: #FFFFFF !important;
+  background: #B45309 !important;
+  border: 1px solid #92400E;
+}
+
+.atendimento-payment-verification__action:hover {
+  background: #92400E !important;
+}
+
+html[data-theme='light'] .atendimento-payment-verification {
+  color: #5F3B00 !important;
+  background: #FFF4D8 !important;
+  border-color: #E7BC58 !important;
+}
+
+html[data-theme='light'] .atendimento-payment-verification .text-amber-400,
+html[data-theme='light'] .atendimento-payment-verification__hint {
+  color: #8A5700 !important;
+}
+
+html[data-theme='light'] .atendimento-payment-verification__action {
+  color: #FFFFFF !important;
+  background: #A84E00 !important;
+  border-color: #873F00 !important;
+}

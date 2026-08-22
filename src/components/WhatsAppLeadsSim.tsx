@@ -3083,7 +3083,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           Ação em si mora só no card de escalonamento (kind: 'payment_proof')
           desde a unificação — aqui é só o aviso, com atalho pra decidir. */}
       {paymentAppointment?.paymentStatus === 'pending_verification' && (
-        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3 flex-wrap">
+        <div className="atendimento-payment-verification p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-start space-x-2">
             <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div>
@@ -3096,7 +3096,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   pergunta real do dono do produto: hoje o sistema não olhava
                   o conteúdo da foto, só o contexto). */}
               {paymentAppointment.paymentReceiptHint && (
-                <p className="text-amber-300/80 mt-1 flex items-start gap-1">
+                <p className="atendimento-payment-verification__hint text-amber-300/80 mt-1 flex items-start gap-1">
                   <Sparkles className="w-3 h-3 mt-0.5 flex-shrink-0" />
                   <span>IA: "{paymentAppointment.paymentReceiptHint}"</span>
                 </p>
@@ -3106,7 +3106,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {onGoToEscalations && (
             <button
               onClick={onGoToEscalations}
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer flex-shrink-0"
+              className="atendimento-payment-verification__action px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer flex-shrink-0"
             >
               <AlertTriangle className="w-3 h-3" />
               <span>Confirmar/rejeitar em Escalonamentos</span>

@@ -84,7 +84,7 @@ function AuditMetric({ label, value, tone }: { label: string; value: string | nu
     rose: 'border-rose-500/20 bg-rose-500/5 text-rose-200',
     slate: 'border-slate-700 bg-slate-950/70 text-slate-300',
   };
-  return <div className={`rounded-xl border p-2.5 ${styles[tone]}`}><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>;
+  return <div className={`knowledge-workspace__audit-metric rounded-xl border p-2.5 ${styles[tone]}`}><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>;
 }
 
 /**
@@ -1390,7 +1390,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       </div>
 
-      <section className="rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
+      <section className="knowledge-workspace__audit rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-white">
@@ -1420,7 +1420,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <div className="mt-4 border-t border-slate-800 pt-3">
             <div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Prioridades encontradas</span><span className="text-[10px] text-slate-500">Exibindo as 4 primeiras</span></div>
             <div className="grid gap-2 md:grid-cols-2">
-              {knowledgeAudit.findings.slice(0, 4).map((finding) => <div key={finding.id} className="rounded-xl border border-slate-800 bg-slate-950/65 p-2.5"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${finding.severity === 'critical' ? 'bg-rose-400' : finding.severity === 'attention' ? 'bg-amber-300' : 'bg-sky-400'}`} /><p className="truncate text-[11px] font-bold text-slate-200">{finding.title}</p></div><p className="mt-1 pl-3.5 text-[10px] leading-4 text-slate-500">{finding.description}</p></div>)}
+              {knowledgeAudit.findings.slice(0, 4).map((finding) => <div key={finding.id} className="knowledge-workspace__finding rounded-xl border border-slate-800 bg-slate-950/65 p-2.5"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${finding.severity === 'critical' ? 'bg-rose-400' : finding.severity === 'attention' ? 'bg-amber-300' : 'bg-sky-400'}`} /><p className="knowledge-workspace__finding-title truncate text-[11px] font-bold text-slate-200">{finding.title}</p></div><p className="knowledge-workspace__finding-description mt-1 pl-3.5 text-[10px] leading-4 text-slate-500">{finding.description}</p></div>)}
             </div>
           </div>
         ) : <p className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3 text-xs text-emerald-200">A estrutura principal está completa para o agente usar dados reais desta empresa.</p>}
