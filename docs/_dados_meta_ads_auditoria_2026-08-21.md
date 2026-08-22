@@ -107,3 +107,65 @@ A origem do aviso foi finalmente identificada ao abrir a aba de posicionamentos 
 A usuária confirmou expressamente a publicação nessa condição. A revisão global mostra somente **um objeto novo**, a primeira cópia aprovada, e o botão final **Publicar** está disponível. A próxima ação enviará exclusivamente essa variação para publicação nos posicionamentos elegíveis.
 
 A publicação global foi concluída com a confirmação da Meta: **“1 anúncio foi publicado”**. A lista passou a exibir **A1 - TÉCNICA BRASILEÑA — Cópia** com estado **Em processamento**, que é o status inicial esperado enquanto a Meta avalia e prepara a entrega. Não há rascunhos pendentes. A campanha original, os demais anúncios e o orçamento não foram alterados.
+
+Uma captura posterior confirma a transição normal do novo anúncio para **Em análise**. Na mesma tabela, **A1 - TÉCNICA BRASILEÑA** e **COMBO-CEJAS-LABIOS - Antes-Depois** aparecem ativos, enquanto **A2 - OBJECIONES** e **A3 - PRACTICIDAD** permanecem desativados. Portanto, a cópia não substitui o A1 original; após a aprovação, ambos poderão veicular dentro do mesmo orçamento do conjunto.
+
+Em outra campanha, a interface mostra o modelo de mensagem **“Iniciar conversas 20/8/2026”**, com mensagem de boas-vindas sobre Micropigmentación de Labios e perguntas frequentes de serviço, preço e horários. Esse modelo é uma configuração do anúncio de mensagens daquela campanha; ele não prova que a mesma mensagem esteja associada ao A1 de Luque e não foi alterado nesta operação.
+
+Foi iniciado o mapeamento do ecossistema na campanha **Micro em Assunção**, que contém dois anúncios ativos. A próxima etapa é verificar, em modo de leitura, qual modelo de mensagem está ligado a cada um e compará-los com o fluxo de Luque antes de propor uma atualização unificada.
+
+A tabela identifica dois anúncios com o mesmo nome visível **Assunção Full Face 1200**. O primeiro (ID `120255150945920221`) registra uma conversa por mensagem iniciada, Cost per result de R$ 10,43 e Amount spent de R$ 10,43. O segundo registra 12 conversas por mensagem iniciadas, Cost per result de R$ 2,71 e Amount spent de R$ 32,54. A diferença confirma que as configurações devem ser mapeadas por anúncio, não apenas pelo nome exibido.
+
+O primeiro anúncio pertence ao conjunto **Teste - Combo Full Face Assunção 01**. Na aba de destino, a prévia de WhatsApp confirma a mensagem de boas-vindas observada na captura: agradece o contato, diz que o contato veio do anúncio de Micropigmentación de Labios com Monique Sorrilha e pergunta o que a pessoa gostaria de saber. Ela oferece perguntas sobre o serviço, o valor e os horários. Nenhum texto foi alterado durante essa inspeção.
+
+O segundo anúncio pertence ao conjunto **Combo Full Face Assunção 01** (ID `120255146125290221`). Ele usa um modelo paralelo, específico para o Combo Full Face: agradece o contato, informa que o contato veio do anúncio do combo e pergunta o que a pessoa gostaria de saber. As perguntas rápidas são sobre o combo, o valor e os horários. Os dois modelos compartilham estrutura e tom, mas nenhum se apresenta como **Ana**, e ambos induzem a pergunta por horários cedo demais para a regra aprovada de interesse inicial.
+
+Após a confirmação de atualização, a sessão de edição foi reaberta diretamente no anúncio de Combo Full Face. Nenhuma mudança foi salva; a próxima ação é localizar o controle específico do modelo de WhatsApp no formulário antes de inserir os textos aprovados.
+
+A inspeção inicial confirma que o formulário visível não expõe o modelo de mensagem, embora a prévia carregue o texto atual do Combo Full Face. A legenda vigente ainda contém “consultar disponibilidad” e “Agendá tu evaluación”, que conflitam com a estratégia de interesse inicial; elas foram registradas para uma etapa posterior e não serão alteradas sob a confirmação atual, que cobre somente os dois modelos de WhatsApp.
+
+A rolagem do formulário revelou cinco variações de texto principal do criativo, além do título e da descrição. O modelo de mensagem ainda não apareceu nesse trecho; portanto nenhuma variação de texto, título, descrição, mídia ou CTA foi alterada. A busca continuará apenas até localizar a configuração específica do modelo de WhatsApp.
+
+O controle foi localizado na seção **Conversas**: o anúncio de Combo Full Face usa o modelo salvo **Iniciar conversas 14/8/2026**, com ações de editar, duplicar ou criar modelo. A usuária confirmou a atualização e a publicação dos dois modelos; a edição será limitada aos textos aprovados na matriz unificada.
+
+A edição do modelo foi aberta. Os campos identificados são uma saudação e três perguntas rápidas, sem respostas automáticas preenchidas. O texto original confirma o desvio mapeado: fala em Monique, pergunta sobre o combo e usa “consultar los turnos disponibles”. A atualização substituirá somente esses quatro campos; o nome do modelo, a mídia, o criativo, a CTA e todos os demais controles permanecerão intactos.
+
+A saudação foi atualizada para apresentar Ana e enquadrar o contato como orientação sobre conteúdo, valor e funcionamento da reserva. O painel registrou a edição como não publicada. As três perguntas rápidas ainda exibem os textos anteriores e serão atualizadas em uma nova abertura do editor do modelo antes da publicação.
+
+A usuária concluiu manualmente a edição do modelo de **Micropigmentación de Labios** no navegador. A prévia confirma as três perguntas alinhadas: informação sobre micropigmentación de labios, valor e escopo, e funcionamento da reserva. As respostas automáticas permanecem em branco. O painel mostra edições não publicadas, que serão enviadas somente junto da atualização equivalente do Combo Full Face.
+
+O anúncio de **Combo Full Face** foi reaberto na mesma campanha e preserva as edições pendentes. Ele usa o modelo salvo identificado anteriormente como **Iniciar conversas 14/8/2026**. A publicação permanece suspensa até que as três perguntas rápidas desse modelo sejam atualizadas no mesmo padrão.
+
+A verificação posterior revelou uma associação inesperada: o anúncio de **Combo Full Face** está exibindo o modelo **Pergunta gatilho Iniciar conversas 21/8/2026**, cuja saudação e perguntas rápidas são de **Micropigmentación de Labios**. Essa incompatibilidade de serviço não deve ser publicada. A publicação foi mantida suspensa até selecionar ou criar o modelo correto do Combo Full Face e conferir sua prévia.
+
+Com confirmação da usuária, foi iniciado o fluxo para criar um modelo exclusivo de **Combo Full Face**. A criação começa com uma saudação padrão que pede agendamento e não inclui perguntas; ela será substituída pela matriz aprovada. Para Micropigmentación de Labios, a usuária aprovou a forma curta “Quiero saber cómo es la micropigmentación”, pois a saudação e o anúncio já informam que se trata de lábios e o campo tem limite de 80 caracteres.
+
+No novo modelo exclusivo de Combo Full Face, a saudação foi substituída por Ana, assistente de Monique Sorrilha, e passou a oferecer orientação sobre escopo, valor e funcionamento da reserva. A próxima ação é selecionar perguntas frequentes e inserir as três perguntas aprovadas, sem respostas automáticas.
+
+A opção de perguntas frequentes foi selecionada. O formulário gerou três exemplos em português e um nome automático. Esses quatro campos foram identificados para substituição: as perguntas serão específicas para o Combo Full Face em espanhol, e o nome do modelo será descritivo para impedir nova associação equivocada entre serviços.
+
+As três perguntas foram substituídas e a prévia confirma o conteúdo correto: o que inclui o Combo Full Face, valor do combo e funcionamento da reserva. As respostas automáticas continuam em branco. Falta apenas substituir o nome automático do modelo, salvar e verificar a vinculação exclusiva ao anúncio de Combo Full Face.
+
+O modelo foi salvo como **Combo Full Face - interesse inicial**. A prévia exibida no próprio anúncio confirma a saudação da Ana e as três perguntas do Combo Full Face, sem menção a Micropigmentación de Labios. A edição continua pendente de publicação; antes do envio final será conferido que o anúncio de Micropigmentación mantém um modelo próprio.
+
+A verificação do anúncio de Micropigmentación confirma que ele está novamente associado ao seu próprio modelo e que as perguntas 2 e 3 estão alinhadas. A saudação ainda menciona somente Monique, sem apresentar Ana, e a pergunta 1 ficou com construção incompleta ao trazer “micropigmentación labios”. Antes da publicação, esses dois campos serão corrigidos para a saudação aprovada da Ana e para a forma curta e gramatical “Quiero saber cómo es la micropigmentación”.
+
+A saudação de Micropigmentación foi atualizada para apresentar Ana e indicar procedimento, valor e funcionamento da reserva. A prévia confirma a saudação correta. Falta apenas substituir a primeira pergunta pelo texto curto aprovado, removendo a palavra “labios” que ficou em posição inadequada.
+
+A primeira pergunta foi corrigida para “Quiero saber cómo es la micropigmentación” e o modelo de Micropigmentación foi salvo. A prévia final confirma que o anúncio de Micropigmentación usa seu próprio modelo, com saudação da Ana e três perguntas sobre procedimento, valor e reserva. O anúncio de Combo Full Face usa o modelo separado “Combo Full Face - interesse inicial”, também com saudação da Ana e perguntas específicas do combo. Ambos permanecem como edições não publicadas, aguardando confirmação final para o único envio de publicação.
+
+A publicação do anúncio de Micropigmentación foi concluída e o Gerenciador de Anúncios exibiu a confirmação “Anúncio atualizado”. A tabela ainda mostra **uma** edição não publicada, correspondente ao anúncio de Combo Full Face; ela será enviada pelo fluxo global de publicação já autorizado pela usuária, sem novas alterações de configuração.
+
+Antes de enviar a edição pendente do Combo Full Face, a usuária solicitou uma validação integral de propósito: criativo, CTA, orçamento, público e geografia. A publicação foi mantida suspensa durante essa conferência, para evitar que a decisão de entrega seja tomada sem revisar os elementos que compõem a conversão.
+
+No conjunto **Combo Full Face Assunção 01**, foram confirmados: início em 20/08/2026, orçamento diário no nível de campanha Advantage+ de **R$ 35,00**, sem data de término e público amplo. O painel sugere que a audiência Advantage+ pode reduzir em 9,7% o custo por resultado, mas ainda não exibe idade e geografia no trecho carregado. A verificação desses critérios segue pendente antes de uma conclusão sobre adequação integral.
+
+Também foram confirmados: objetivo de otimização **Maximizar o número de conversas**, destino de mensagem exclusivamente em **WhatsApp** no número da Monique, e Messenger/Instagram desmarcados. Para o objetivo de atendimento no WhatsApp, essa arquitetura de destino está correta e evita fragmentar conversas em canais sem o mesmo fluxo de agente.
+
+O conjunto não possui meta manual de custo por resultado, o que é adequado enquanto ainda há pouco histórico de Assunção. As respostas da **Meta Business Agent** estão desativadas; isso é correto, porque evita que uma automação adicional concorra com Ana e com o fluxo de WhatsApp já aprovado. O aviso do painel indica que o teste A/B de público de Assunção está em andamento, portanto mudanças de orçamento ou público não devem ser introduzidas antes de haver amostra suficiente.
+
+A seção de público confirma: localização incluída **Assunção, Paraguai**; localização excluída em cidades vizinhas, incluindo **Luque**; mulheres de **25 a 55 anos**, com idade desconhecida no WhatsApp incluída; nenhum público personalizado; e direcionamento detalhado baseado em interesses de cosméticos/cuidados pessoais. A audiência Advantage+ está ativa, podendo ampliar a entrega dentro dos controles de localização, idade e gênero. Assim, a estrutura é coerente para separar Assunção de Luque e iniciar o teste, mas deve ser julgada apenas após a janela mínima do teste A/B.
+
+Ao retornar à lista, o Gerenciador de Anúncios passou a indicar **duas** alterações pendentes, embora a tabela visível mostre apenas o anúncio de Combo Full Face com edição não publicada. Antes de publicar, a revisão global será aberta para identificar os dois objetos e confirmar que ambos pertencem exclusivamente à atualização de mensagem já autorizada.
+
+A revisão global confirmou que os dois objetos eram o conjunto-pai e um único anúncio **Assunção Full Face 1200**, com alteração classificada pela Meta como criativo — a classificação normal para o modelo de mensagem. Nenhuma alteração de orçamento, público, geografia, mídia ou CTA foi exibida. Após a confirmação da usuária, a publicação foi enviada e a lista retornou sem itens pendentes. O anúncio de Combo Full Face passou ao status **Em processamento**, que é a etapa normal de revisão/atualização da Meta.
