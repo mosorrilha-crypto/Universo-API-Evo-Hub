@@ -302,13 +302,13 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   );
 
   return (
-    <div className="space-y-5 animate-page-enter">
+    <div className="space-y-6 animate-fade-in">
       <section className="overflow-hidden rounded-3xl border border-emerald-500/15 bg-[radial-gradient(circle_at_86%_2%,rgba(16,185,129,0.18),transparent_32%),linear-gradient(125deg,#111827_0%,#0f172a_52%,#101827_100%)] p-6 shadow-2xl shadow-slate-950/35 sm:p-8">
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div className="max-w-2xl">
             <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.17em] text-emerald-300"><span className="h-px w-7 bg-emerald-400" />Operação integrada</div>
-            <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Agenda &amp; Caixa</h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">Organize horários, confirme recebimentos e mantenha o caixa conectado a cada atendimento — sem duplicar lançamentos.</p>
+            <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">Agenda &amp; Financeiro</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">Uma central para programar atendimentos, acompanhar recebimentos e manter o caixa conectado à operação — sem repetir lançamentos.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setTransactionDialog('expense')} className="rounded-xl border border-slate-700 bg-slate-900/70 px-3.5 py-2.5 text-xs font-bold text-slate-200 transition-colors hover:border-rose-400/50 hover:bg-rose-500/10"><ArrowDownRight className="mr-1.5 inline h-4 w-4 text-rose-300" />Nova despesa</button>

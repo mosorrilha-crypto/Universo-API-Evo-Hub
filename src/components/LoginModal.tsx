@@ -3,7 +3,6 @@ import { UserProfile } from '../types';
 import { ShieldCheck, Lock, LogIn, User, AlertCircle } from 'lucide-react';
 import { loginWithGoogle } from '../lib/firebase';
 import { apiFetch } from '../lib/apiClient';
-import { useAppPreferences } from '../contexts/AppPreferencesContext';
 
 interface LoginModalProps {
   onLogin: (user: UserProfile, token?: string) => void;
@@ -18,7 +17,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onClose,
   isForcedLogin = false,
 }) => {
-  const { t } = useAppPreferences();
   const [password, setPassword] = useState<string>('');
   const [customEmail, setCustomEmail] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -31,11 +29,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setErrorMsg(null);
 
     if (!password || password.trim().length === 0) {
-      setErrorMsg(t('passwordRequired'));
+      setErrorMsg('Por favor, informe a sua senha de acesso.');
       return;
     }
     if (!customEmail || !customEmail.trim()) {
-      setErrorMsg(t('emailRequired'));
+      setErrorMsg('Por favor, informe o seu e-mail de acesso.');
       return;
     }
 
@@ -52,7 +50,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || t('loginFailed'));
+        throw new Error(data.error || 'Falha na autenticação');
       }
       const authenticatedUser: UserProfile = {
         id: data.operator.email,
@@ -65,7 +63,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       };
       onLogin(authenticatedUser, data.token);
     } catch (err: any) {
-      setErrorMsg(err.message || t('loginError'));
+      setErrorMsg(err.message || 'Erro ao fazer login.');
     } finally {
       setIsSubmitting(false);
     }
@@ -82,13 +80,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                {t('secureAccess')}
+                Acesso Seguro à Plataforma
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
                   Autenticação v2.0
                 </span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                {t('loginDescription')}
+                Digite o e-mail e a senha do operador cadastrado para prosseguir
               </p>
             </div>
           </div>
@@ -107,7 +105,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">
-              {t('emailLabel')}
+              1. Digite o seu E-mail:
             </label>
             <div className="relative">
               <input
@@ -130,7 +128,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <form onSubmit={handleSubmit} className="space-y-4 pt-2 border-t border-slate-800">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                {t('passwordLabel')}
+                2. Digite a Senha do Operador:
               </label>
               <div className="relative">
                 <input
@@ -140,7 +138,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setPassword(e.target.value);
                     setErrorMsg(null);
                   }}
-                  placeholder={t('passwordPlaceholder')}
+                  placeholder="Digite sua senha"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 pl-9"
                   autoComplete="current-password"
                 />
@@ -154,7 +152,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-950/40 transition-all flex items-center justify-center space-x-2 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
-              <span>{isSubmitting ? t('checking') : t('validateAndAccess')}</span>
+              <span>{isSubmitting ? 'Verificando...' : 'Validar Senha e Acessar Painel'}</span>
             </button>
           </form>
 
@@ -202,7 +200,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15s.7 5.3 1.9 7.7l3.7-2.9z" />
                 <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.2-6.4-5.2L1.9 16C3.7 19.7 7.5 22.3 12 23z" />
               </svg>
-              <span>{t('loginWithGoogle')}</span>
+              <span>Autenticar com Conta do Google (Firebase)</span>
             </button>
           </div>
         </div>
@@ -210,14 +208,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {/* Modal Footer */}
         <div className="bg-slate-950 px-6 py-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
           <span className="flex items-center gap-1">
-            <Lock className="w-3 h-3 text-emerald-400" /> {t('secureAuthentication')}
+            <Lock className="w-3 h-3 text-emerald-400" /> Autenticação Segura de Usuário
           </span>
           {!isForcedLogin && onClose && (
             <button
               onClick={onClose}
               className="text-slate-400 hover:text-white underline cursor-pointer"
             >
-              {t('cancel')}
+              Cancelar
             </button>
           )}
         </div>

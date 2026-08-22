@@ -15,7 +15,6 @@ import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { ContractModal } from './contracts/ContractModal';
-import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
   Play,
   Sparkles,
@@ -396,7 +395,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   openLeadPhone,
   openLeadRequestId,
 }) => {
-  const { t } = useAppPreferences();
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
@@ -2730,7 +2728,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto animate-page-enter">
+    <div className="space-y-4 max-w-7xl mx-auto">
       {/* Controls Bar — achado real em produção: as duas barras acima disso
           (seletor "Ambiente" produção/sandbox e o card "Instância Online" /
           "Motor: Z-API Managed" / "Failover Ativo" / botões "Número Real &
@@ -2744,7 +2742,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
           Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className="relative p-3 rounded-card bg-slate-900/85 border border-slate-800 shadow-xl shadow-slate-950/25 space-y-2.5">
+      <div className="relative p-3 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl space-y-2.5">
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -2759,10 +2757,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <button
               onClick={onGoToEscalations}
               className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/60 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
-              title={t('pending')}
+              title="Ir para a fila de Escalonamentos"
             >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>{t('pending')}</span>
+              <span>Escalonamentos</span>
               {escalationsPendingCount > 0 && (
                 <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
                   {escalationsPendingCount}
@@ -2787,7 +2785,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
-            <span>{showRightPanel ? t('hideAssistant') : t('showAssistant')}</span>
+            <span>{showRightPanel ? 'Ocultar Ficha IA' : 'Ver Ficha IA'}</span>
           </button>
 
           {/* Status e Arquivadas saíram desta fileira (14/08/2026, pedido
@@ -2817,7 +2815,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
-            <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
+            <span>{adsOnly ? 'Só Anúncios' : 'Todos os Contatos'}</span>
           </button>
 
           {/* Gatilhos de texto pro modo "somente anúncios" (achado real,
@@ -2833,7 +2831,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               className="flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white"
             >
               <Settings className="w-3.5 h-3.5" />
-              <span>Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}</span>
+              <span>Gatilhos de Anúncio{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}</span>
             </button>
           )}
 
@@ -2851,7 +2849,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <CalendarIcon className="w-3.5 h-3.5" />
-            <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
+            <span>{googleCalendarConnected === null ? 'Verificando...' : googleCalendarConnected ? 'Agenda' : 'Conectar Calendar'}</span>
           </button>
 
           {/* Configurações pontuais (Auto IA, notificações, limpar testes,
@@ -2869,7 +2867,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             }`}
           >
             <Settings className="w-3.5 h-3.5" />
-            <span>{t('moreOptions')}</span>
+            <span>Configurações</span>
           </button>
         </div>
 
@@ -3064,7 +3062,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
+      <div className="relative bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[85dvh] lg:h-[720px]">
 
         {/* ========================================== */}
         {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}
@@ -3089,13 +3087,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Pausado) fica à direita dela (pedido direto), busca em si mais
               curta (flex-1 dividindo a linha com o status, em vez de w-full
               sozinha). */}
-          <div className="p-2 bg-[#111b21] border-b border-slate-800/60">
+          <div className="p-2.5 bg-[#111b21] border-b border-slate-800/60">
             <div className="flex items-center gap-2">
               <div className="relative flex items-center flex-1 min-w-0">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder={t('searchConversation')}
+                  placeholder="Pesquisar ou começar uma nova conversa"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -3167,7 +3165,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {t('all')} ({leads.length - archivedLeads.length})
+                Tudo ({leads.length - archivedLeads.length})
               </button>
               <button
                 onClick={() => setActiveTabFilter('unread')}
@@ -3177,7 +3175,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                {t('unread')} ({unreadLeadsCount})
+                Não lidos ({unreadLeadsCount})
               </button>
 
               {/* Status — só aparece pra números conectados via Evolution API
@@ -3242,7 +3240,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               filteredLeads.map((lead) => renderLeadRow(lead))
             ) : (
               <div className="p-8 text-center text-xs text-slate-500">
-                {t('selectConversation')}
+                Nenhuma conversa encontrada com os filtros selecionados.
               </div>
             )}
           </div>
@@ -3252,12 +3250,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* COLUMN 2: Interactive WhatsApp Chat Thread */}
         {/* ========================================== */}
         <div className={`${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
-          showRightPanel ? 'lg:col-span-6' : 'lg:col-span-8'
+          showRightPanel ? 'lg:col-span-5' : 'lg:col-span-8'
         }`}>
           {selectedLead ? (
             <>
               {/* WhatsApp Web Chat Header */}
-              <div className="px-3 py-2.5 bg-[#202c33] border-b border-slate-800 flex items-center justify-between gap-2 z-10 shadow-md">
+              <div className="p-3 bg-[#202c33] border-b border-slate-800 flex items-center justify-between gap-2 z-10 shadow-md">
                 {/* min-w-0 é o que deixa esta metade encolher/truncar de
                     verdade — sem isso, um nome de lead comprido (achado ao
                     vivo: nome tipo e-mail sem espaço nenhum pra quebrar,
@@ -4209,7 +4207,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </>
           ) : (
             <div className="bg-[#0b141a] p-12 text-center text-slate-500 text-xs">
-              {t('selectConversation')}
+              Selecione uma conversa para visualizar no WhatsApp Web.
             </div>
           )}
         </div>
@@ -4226,7 +4224,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           // equivalente lá é o painel deslizante controlado por
           // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
           // cabeçalho da conversa.
-          <div className="hidden lg:flex lg:col-span-3 border-l border-slate-800/80 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
+          <div className="hidden lg:flex lg:col-span-4 border-l border-slate-800/80 bg-[#111b21] flex-col p-3 space-y-3 overflow-y-auto max-h-[720px] scrollbar-thin">
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
