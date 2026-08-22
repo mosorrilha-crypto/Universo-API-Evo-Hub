@@ -7,7 +7,7 @@ import { loadConfig } from './server/config';
 import { createSupabaseClientFromConfig } from './server/supabaseClient';
 import { getGeminiClient } from './server/gemini';
 import { createAuthenticateToken } from './server/middleware/auth';
-import { aiRateLimiter } from './server/middleware/rateLimit';
+import { aiRateLimiter, spaFallbackRateLimiter } from './server/middleware/rateLimit';
 import { createAuthRouter } from './server/routes/auth';
 import { createAiRouter } from './server/routes/ai';
 import { createTelemetryRouter } from './server/routes/telemetry';
@@ -249,7 +249,10 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    // Express 5/path-to-regexp não aceita mais o wildcard literal `*`.
+    // A expressão regular mantém o fallback GET da SPA sem depender da sintaxe
+    // específica do parser de rotas.
+    app.get(/.*/, spaFallbackRateLimiter, (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
