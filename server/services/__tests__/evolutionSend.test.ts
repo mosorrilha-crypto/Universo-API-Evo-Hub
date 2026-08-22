@@ -53,10 +53,20 @@ describe('sendEvolutionVoiceMessage', () => {
     expect((options as any).headers.apikey).toBe('key-1');
     expect(JSON.parse((options as any).body)).toEqual({
       number: '595981234567',
-      audio: 'data:audio/ogg; codecs=opus;base64,T2dnUw==',
+      audio: 'data:audio/ogg;base64,T2dnUw==',
       encoding: true,
       delay: 1200,
     });
+  });
+
+  it('remove parâmetros adicionais do MIME sem alterar o Base64 enviado à Evolution', async () => {
+    const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as any;
+
+    await sendEvolutionVoiceMessage('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'data:audio/ogg; codecs=opus;base64,T2dnUw==', 'audio/ogg; codecs=opus');
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse((options as any).body).audio).toBe('data:audio/ogg;base64,T2dnUw==');
   });
 
   it('propaga uma falha do endpoint PTT', async () => {
