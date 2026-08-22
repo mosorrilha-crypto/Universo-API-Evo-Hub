@@ -742,6 +742,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
   const knowledgeAudit = useMemo(() => auditKnowledgeBase(formData, hoursForm), [formData, hoursForm]);
 
+  // Indicadores puramente visuais do catálogo: não alteram o modelo, filtros ou persistência.
+  const productStats = useMemo(() => {
+    const active = formData.products.filter((p) => p.active !== false).length;
+    const withVariants = formData.products.filter((p) => !!p.variants?.length).length;
+    const withMedia = formData.products.filter((p) => !!p.exampleImageBase64 || !!p.exampleVideoId).length;
+    return { active, withVariants, withMedia, pending: knowledgeAudit.actionableProductIds.size };
+  }, [formData.products, knowledgeAudit.actionableProductIds]);
+
   // Variantes de tamanho/modelo dentro de um produto unificado (ex: "Piscina Fapac
   // Maresias" cobrindo 4x2.20m/5x2.60m/6x2.80m/7x3m, cada tamanho com preço próprio) —
   // permite 1 foto/vídeo só pro produto em vez de 1 produto por tamanho, evitando que
@@ -1858,6 +1866,34 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 <Plus className="w-3.5 h-3.5" />
                 <span>Criar item</span>
               </button>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.08] via-slate-950 to-slate-950 p-4 shadow-[0_12px_30px_rgba(16,185,129,0.06)]">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300"><Sparkles className="h-3.5 w-3.5" /></span>
+                    <div>
+                      <p className="text-xs font-bold text-white">Catálogo pronto para a operação</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">A IA usa somente itens ativos e aprovados para responder, cotar e agendar.</p>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setProductQualityFilter(productStats.pending > 0 ? 'pending' : 'all')}
+                  className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2.5 py-1.5 text-[10px] font-bold text-amber-200 transition-colors hover:bg-amber-400/15"
+                >
+                  <ShieldAlert className="h-3 w-3" />
+                  {productStats.pending > 0 ? `Revisar ${productStats.pending} pendência(s)` : 'Catálogo revisado'}
+                </button>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Itens ativos</p><p className="mt-0.5 text-lg font-extrabold text-emerald-300">{productStats.active}<span className="ml-1 text-[10px] font-medium text-slate-500">/ {formData.products.length}</span></p></div>
+                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Categorias</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productCategories.length}</p></div>
+                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com variantes</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productStats.withVariants}</p></div>
+                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com mídia</p><p className="mt-0.5 text-lg font-extrabold text-violet-300">{productStats.withMedia}</p></div>
+              </div>
             </div>
 
             {/* Busca + filtro por categoria — client-side, só filtra o que
