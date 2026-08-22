@@ -1,6 +1,6 @@
 import React from 'react';
 import { FullConversationAnalysis, type ContactAgentContext } from '../types';
-import { ContactContextPanel } from './ContactContextPanel';
+import { ContactContextPanel, type OperatorMemoryEditPayload } from './ContactContextPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   AlertCircle,
@@ -59,6 +59,7 @@ interface ConversationAnalysisPanelProps {
   contactContext?: ContactAgentContext | null;
   isContactContextLoading?: boolean;
   onRefreshContactContext?: () => void;
+  onSaveContactMemory?: (patch: Partial<OperatorMemoryEditPayload>) => Promise<void>;
 }
 
 /** Atalhos que descrevem o objetivo de negócio, não uma fórmula vaga de texto. */
@@ -131,6 +132,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
   contactContext = null,
   isContactContextLoading = false,
   onRefreshContactContext,
+  onSaveContactMemory,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const [hintDraft, setHintDraft] = React.useState('');
@@ -314,6 +316,7 @@ export const ConversationAnalysisPanel: React.FC<ConversationAnalysisPanelProps>
         isSpanish={false}
         variant="detail"
         onRetry={onRefreshContactContext}
+        onSaveMemory={onSaveContactMemory}
       />
 
       <section className="rounded-xl border border-sky-500/25 bg-slate-950 p-3 space-y-3">

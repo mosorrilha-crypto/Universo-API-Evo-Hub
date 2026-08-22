@@ -33,6 +33,8 @@ export interface ContactAgentMemoryPatch {
   currentIntent?: string | null;
   serviceInterest?: string | null;
   objections?: string[];
+  /** Uso interno: uma correção humana substitui a lista, enquanto a inferência do agente acrescenta fatos explícitos. */
+  replaceObjections?: boolean;
   factsConfirmed?: ContactMemoryFacts;
   openLoops?: ContactMemoryOpenLoop[];
   nextBestAction?: string | null;
@@ -40,9 +42,27 @@ export interface ContactAgentMemoryPatch {
   updatedBy?: AgentMemoryUpdatedBy;
 }
 
+/** Campos que um operador pode corrigir sem alterar fontes de verdade vivas. */
+export class OperatorContactMemoryValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OperatorContactMemoryValidationError';
+  }
+}
+
+export interface OperatorContactMemoryPatch {
+  preferredLanguage?: string | null;
+  preferredName?: string | null;
+  currentIntent?: string | null;
+  serviceInterest?: string | null;
+  objections?: string[];
+  nextBestAction?: string | null;
+}
+
 const MAX_TEXT_LENGTH = 240;
 const MAX_SUMMARY_LENGTH = 900;
 const MAX_LIST_ITEMS = 8;
+const OPERATOR_EDITABLE_MEMORY_FIELDS = new Set(['preferredLanguage', 'preferredName', 'currentIntent', 'serviceInterest', 'objections', 'nextBestAction']);
 // Estados vivos são sempre resolvidos dos stores próprios a cada turno; memória
 // jamais pode virar uma cópia autorizativa de pagamento, agenda ou escalonamento.
 const DISALLOWED_FACT_KEY = /(?:token|secret|password|base64|media|receipt|comprovante|document|prompt|history|message|phone|email|payment|pagamento|appointment|agenda|booking|calendar|escalation|escalonamento)/i;
@@ -67,6 +87,44 @@ function normalizeStringList(value: unknown): string[] {
     if (result.length >= MAX_LIST_ITEMS) break;
   }
   return result;
+}
+
+/**
+ * Converte e valida a edição humana antes de persistir. O contrato é
+ * intencionalmente pequeno: não aceita fatos confirmados, pendências nem
+ * resumo, pois poderiam competir com agenda, pagamento e escalonamentos vivos.
+ */
+export function normalizeOperatorContactMemoryPatch(value: unknown): OperatorContactMemoryPatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new OperatorContactMemoryValidationError('Correção de memória inválida.');
+  }
+  const input = value as Record<string, unknown>;
+  const unknownFields = Object.keys(input).filter((key) => !OPERATOR_EDITABLE_MEMORY_FIELDS.has(key));
+  if (unknownFields.length) {
+    throw new OperatorContactMemoryValidationError(`Campos não permitidos na correção de memória: ${unknownFields.join(', ')}.`);
+  }
+  if (!Object.keys(input).length) throw new OperatorContactMemoryValidationError('Informe ao menos um campo para corrigir.');
+
+  const readNullableText = (key: string, maxLength: number): string | null | undefined => {
+    if (!(key in input)) return undefined;
+    if (input[key] !== null && typeof input[key] !== 'string') throw new OperatorContactMemoryValidationError(`Campo "${key}" deve ser texto ou nulo.`);
+    return input[key] === null ? null : normalizeNullableText(input[key], maxLength);
+  };
+
+  let objections: string[] | undefined;
+  if ('objections' in input) {
+    if (!Array.isArray(input.objections)) throw new OperatorContactMemoryValidationError('Campo "objections" deve ser uma lista.');
+    objections = normalizeStringList(input.objections);
+  }
+
+  return {
+    preferredLanguage: readNullableText('preferredLanguage', 32),
+    preferredName: readNullableText('preferredName', 120),
+    currentIntent: readNullableText('currentIntent', 80),
+    serviceInterest: readNullableText('serviceInterest', 160),
+    objections,
+    nextBestAction: readNullableText('nextBestAction', MAX_TEXT_LENGTH),
+  };
 }
 
 export function normalizeMemoryFacts(value: unknown): ContactMemoryFacts {
@@ -150,7 +208,9 @@ export function mergeContactAgentMemory(current: ContactAgentMemory | null, patc
   };
   const mergedObjections = patch.objections === undefined
     ? (current?.objections || [])
-    : normalizeStringList([...(current?.objections || []), ...patch.objections]);
+    : patch.replaceObjections
+      ? normalizeStringList(patch.objections)
+      : normalizeStringList([...(current?.objections || []), ...patch.objections]);
   const mergedOpenLoops = patch.openLoops === undefined
     ? (current?.open_loops || [])
     : normalizeOpenLoops(patch.openLoops);
@@ -185,6 +245,15 @@ export async function getContactAgentMemory(tenantId: string, phone: string): Pr
     .maybeSingle();
   if (error) throw error;
   return data ? normalizeContactAgentMemory(data as unknown as Partial<ContactAgentMemory> & Record<string, unknown>) : null;
+}
+
+export async function updateContactAgentMemoryByOperator(input: { tenantId: string; phone: string; patch: unknown }): Promise<ContactAgentMemory> {
+  const patch = normalizeOperatorContactMemoryPatch(input.patch);
+  return upsertContactAgentMemory({
+    tenantId: input.tenantId,
+    phone: input.phone,
+    patch: { ...patch, replaceObjections: true, updatedBy: 'operator' },
+  });
 }
 
 export async function upsertContactAgentMemory(input: { tenantId: string; phone: string; patch: ContactAgentMemoryPatch }): Promise<ContactAgentMemory> {

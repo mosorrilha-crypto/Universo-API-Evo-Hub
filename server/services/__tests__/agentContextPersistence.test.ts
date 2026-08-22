@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
-import { getContactAgentMemory, normalizeMemoryFacts, upsertContactAgentMemory } from '../contactAgentMemoryStore';
+import { getContactAgentMemory, normalizeMemoryFacts, normalizeOperatorContactMemoryPatch, updateContactAgentMemoryByOperator, upsertContactAgentMemory } from '../contactAgentMemoryStore';
 import { listAgentTurnTraces, recordAgentTurnTrace } from '../agentTurnTraceStore';
 import { createFakeSupabase } from './fakeSupabase';
 
@@ -53,6 +53,36 @@ describe('memória de contexto e traces do agente', () => {
       appointmentId: 'event-123',
       escalationId: 'esc-123',
     })).toEqual({ preferredTone: 'direto' });
+  });
+
+  it('aceita apenas a allowlist de correção humana, substitui objeções e preserva estados vivos', async () => {
+    await upsertContactAgentMemory({
+      tenantId: TENANT_A,
+      phone: PHONE,
+      patch: {
+        preferredName: 'Nome anterior',
+        objections: ['Objeção antiga'],
+        factsConfirmed: { preferredTone: 'direto' },
+        openLoops: [{ kind: 'payment', summary: 'Comprovante aguardando verificação.', status: 'awaiting_human' }],
+        conversationSummary: 'Resumo do sistema.',
+      },
+    });
+
+    const updated = await updateContactAgentMemoryByOperator({
+      tenantId: TENANT_A,
+      phone: PHONE,
+      patch: { preferredName: 'Ana corrigida', objections: ['Perguntou sobre duração'], nextBestAction: 'Responder a dúvida antes de avançar.' },
+    });
+
+    expect(updated.preferred_name).toBe('Ana corrigida');
+    expect(updated.objections).toEqual(['Perguntou sobre duração']);
+    expect(updated.updated_by).toBe('operator');
+    expect(updated.open_loops).toEqual([{ kind: 'payment', summary: 'Comprovante aguardando verificação.', status: 'awaiting_human' }]);
+    expect(updated.facts_confirmed).toEqual({ preferredTone: 'direto' });
+    expect(updated.conversation_summary).toBe('Resumo do sistema.');
+    expect(() => normalizeOperatorContactMemoryPatch({ paymentStatus: 'verified' })).toThrow('Campos não permitidos');
+    expect(() => normalizeOperatorContactMemoryPatch({ openLoops: [] })).toThrow('Campos não permitidos');
+    expect(() => normalizeOperatorContactMemoryPatch({ preferredName: 123 })).toThrow('deve ser texto ou nulo');
   });
 
   it('redige payload sensível no trace e registra a flag de confirmação humana', async () => {

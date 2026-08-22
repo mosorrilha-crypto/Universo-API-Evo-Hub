@@ -5,7 +5,7 @@ import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
-import { ContactContextPanel } from './ContactContextPanel';
+import { ContactContextPanel, type OperatorMemoryEditPayload } from './ContactContextPanel';
 import { ForwardMessageModal } from './chat/ForwardMessageModal';
 import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
@@ -1691,6 +1691,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [refreshContactContext]);
 
   const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
+
+  const handleSaveContactMemory = React.useCallback(async (patch: Partial<OperatorMemoryEditPayload>) => {
+    const phone = selectedLead?.phone;
+    if (!phone || !(selectedLead as any)?.isReal) throw new Error('Selecione uma conversa real para corrigir a memória.');
+    const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/context/memory`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Não foi possível salvar a correção de memória.');
+    await refreshContactContext();
+  }, [refreshContactContext, selectedLead?.phone, (selectedLead as any)?.isReal]);
 
   const openOperatorFeedback = (kind: 'bug' | 'operator_idea') => {
     setOperatorFeedbackKind(kind);
@@ -4387,6 +4400,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               contactContext={visibleContactContext}
               isContactContextLoading={isContactContextLoading}
               onRefreshContactContext={() => void refreshContactContext()}
+              onSaveContactMemory={handleSaveContactMemory}
             />
           </div>
         )}
@@ -4423,6 +4437,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onSendCAPIEvent={handleDirectCAPI}
                 onGenerateReplyFromHint={handleGenerateReplyFromHint}
                 onAskAi={handleAskAi}
+                contactContext={visibleContactContext}
+                isContactContextLoading={isContactContextLoading}
+                onRefreshContactContext={() => void refreshContactContext()}
+                onSaveContactMemory={handleSaveContactMemory}
               />
             </div>
           </div>

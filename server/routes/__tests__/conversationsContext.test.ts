@@ -11,6 +11,7 @@ const PHONE = '595981111111';
 
 let server: Server;
 let baseUrl: string;
+let supabase: ReturnType<typeof createFakeSupabase>;
 
 function fakeAuthenticateToken(req: any, _res: any, next: any) {
   req.user = { id: 'op-a', tenantId: TENANT_A, role: 'operator' };
@@ -34,7 +35,7 @@ beforeAll(async () => {
 afterAll(() => server.close());
 
 beforeEach(() => {
-  initDb(createFakeSupabase({
+  supabase = createFakeSupabase({
     contact_agent_memory: [
       {
         tenant_id: TENANT_A,
@@ -111,7 +112,9 @@ beforeEach(() => {
         created_at: '2026-08-22T10:06:00.000Z',
       },
     ],
-  }));
+    quality_audit_events: [],
+  });
+  initDb(supabase);
 });
 
 describe('GET /api/conversations/:phone/context', () => {
@@ -142,5 +145,40 @@ describe('GET /api/conversations/:phone/context', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toMatchObject({ available: true, memory: null, latestDecision: null });
+  });
+});
+
+
+describe('PATCH /api/conversations/:phone/context/memory', () => {
+  it('corrige somente a memória permitida e registra um evento auditável sem valores pessoais', async () => {
+    const response = await fetch(`${baseUrl}/api/conversations/${PHONE}/context/memory`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferredName: 'Ana corrigida', objections: ['Dúvida sobre a duração'] }),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ success: true, changedFields: ['objections', 'preferredName'] });
+    expect(body.memory).toMatchObject({ preferredName: 'Ana corrigida', updatedBy: 'operator', objections: ['Dúvida sobre a duração'] });
+
+    const stored = supabase.__tables.contact_agent_memory.find((row: any) => row.tenant_id === TENANT_A && row.phone === PHONE);
+    expect(stored.open_loops).toEqual([{ kind: 'agenda', summary: 'Aguardando confirmação humana.', status: 'awaiting_human' }]);
+    expect(stored.facts_confirmed).toEqual({ preferredChannel: 'whatsapp' });
+    const auditEvent = supabase.__tables.quality_audit_events[0];
+    expect(auditEvent).toMatchObject({ tenant_id: TENANT_A, event_type: 'contact_memory_corrected', actor_id: 'op-a' });
+    expect(auditEvent.payload).toEqual({ changedFields: ['objections', 'preferredName'], updatedBy: 'operator' });
+    expect(JSON.stringify(auditEvent)).not.toContain('Ana corrigida');
+  });
+
+  it('recusa tentativas de editar status vivo de pagamento, agenda ou escalonamento', async () => {
+    const response = await fetch(`${baseUrl}/api/conversations/${PHONE}/context/memory`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentStatus: 'verified', openLoops: [] }),
+    });
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain('Campos não permitidos');
+    expect(supabase.__tables.quality_audit_events).toHaveLength(0);
   });
 });

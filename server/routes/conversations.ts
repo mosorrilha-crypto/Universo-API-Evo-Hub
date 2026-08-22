@@ -31,7 +31,7 @@ import { listEscalations, resolveEscalation, deleteEscalation, submitOperatorRep
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
-import { getContactAgentMemory } from '../services/contactAgentMemoryStore';
+import { getContactAgentMemory, OperatorContactMemoryValidationError, updateContactAgentMemoryByOperator } from '../services/contactAgentMemoryStore';
 import { listAgentTurnTraces } from '../services/agentTurnTraceStore';
 import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
 import bcrypt from 'bcrypt';
@@ -280,6 +280,55 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         outcome: latestTrace.outcome,
       } : null,
     });
+  }));
+
+  /**
+   * Correção humana de memória. O contrato é uma allowlist deliberadamente
+   * pequena: idioma, nome, intenção, interesse, objeções e próximo passo.
+   * Pagamento, agenda, escalonamento, fatos vivos e resumo do agente não são
+   * editáveis por esta rota nem aceitos silenciosamente no body.
+   */
+  router.patch('/api/conversations/:phone/context/memory', authenticateToken, requireRole('operator'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    try {
+      const memory = await updateContactAgentMemoryByOperator({ tenantId, phone, patch: req.body });
+      const changedFields = Object.keys(req.body || {}).sort();
+
+      // Auditável sem registrar o conteúdo editado, que pode incluir dados
+      // pessoais do contato. O evento prova quem/quando/quais campos, não guarda
+      // a conversa, prompts, comprovantes ou valores antes/depois.
+      await recordQualityAuditEvent({
+        tenantId,
+        eventType: 'contact_memory_corrected',
+        source: 'atendimento_context_panel',
+        entityType: 'contact_agent_memory',
+        entityId: `${tenantId}:${phone}`,
+        conversationPhone: phone,
+        actorId: req.user?.id,
+        payload: { changedFields, updatedBy: 'operator' },
+      });
+
+      res.json({
+        success: true,
+        changedFields,
+        memory: {
+          preferredLanguage: memory.preferred_language,
+          preferredName: memory.preferred_name,
+          currentIntent: memory.current_intent,
+          serviceInterest: memory.service_interest,
+          objections: memory.objections,
+          nextBestAction: memory.next_best_action,
+          updatedAt: memory.updated_at,
+          updatedBy: memory.updated_by,
+        },
+      });
+    } catch (error) {
+      if (error instanceof OperatorContactMemoryValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      throw error;
+    }
   }));
 
   router.get('/api/conversations/:phone', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {

@@ -54,3 +54,15 @@ describe('ContactContextPanel', () => {
     expect(html).toContain('As proteções humanas continuam ativas.');
   });
 });
+
+
+it('oferece a correção humana supervisionada sem criar controles para estados vivos', () => {
+  const html = renderToStaticMarkup(
+    <ContactContextPanel context={context} isLoading={false} variant="detail" onSaveMemory={async () => undefined} />,
+  );
+
+  expect(html).toContain('Corrigir');
+  expect(html).not.toContain('name="paymentStatus"');
+  expect(html).not.toContain('name="appointment"');
+  expect(html).not.toContain('name="openLoops"');
+});
