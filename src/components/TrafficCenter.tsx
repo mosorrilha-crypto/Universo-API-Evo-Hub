@@ -158,6 +158,7 @@ export const TrafficCenter: React.FC = () => {
   const [isLoadingConnection, setIsLoadingConnection] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isEditingConnection, setIsEditingConnection] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [adAccountId, setAdAccountId] = useState('');
@@ -217,6 +218,7 @@ export const TrafficCenter: React.FC = () => {
       if (!response.ok) throw new Error(data.error || 'Não foi possível salvar a conexão Meta Ads.');
       setConnection(data.connection);
       setAccessToken('');
+      setIsEditingConnection(false);
       setNotice('Conexão protegida salva. Agora você pode atualizar as métricas.');
       await refreshMetrics();
     } catch (requestError: any) {
@@ -249,14 +251,23 @@ export const TrafficCenter: React.FC = () => {
             </p>
           </div>
           {isConfigured && (
-            <button
-              onClick={() => void refreshMetrics()}
-              disabled={isRefreshing}
-              className="shrink-0 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all"
-            >
-              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-              {isRefreshing ? 'Atualizando dados reais…' : 'Atualizar métricas'}
-            </button>
+            <div className="shrink-0 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => void refreshMetrics()}
+                disabled={isRefreshing}
+                className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Atualizando dados reais…' : 'Atualizar métricas'}
+              </button>
+              <button
+                onClick={() => { setIsEditingConnection(true); setError(null); setNotice(null); }}
+                className="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
+              >
+                <Settings2 className="w-4 h-4 text-emerald-400" />
+                Configurar acesso
+              </button>
+            </div>
           )}
         </div>
       </section>
@@ -274,13 +285,13 @@ export const TrafficCenter: React.FC = () => {
         </div>
       )}
 
-      {!isConfigured ? (
+      {(!isConfigured || isEditingConnection) ? (
         <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-3xl space-y-5">
           <div className="flex gap-3">
             <span className="p-2.5 h-fit rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300"><Settings2 className="w-5 h-5" /></span>
             <div>
-              <h3 className="text-lg font-bold text-white">Conectar a leitura de campanhas</h3>
-              <p className="mt-1 text-sm leading-relaxed text-slate-400">Informe uma única vez a conta de anúncios e um token da Marketing API com permissão de leitura de anúncios. O token é salvo apenas no servidor, nunca aparece novamente no painel e não será usado para criar, pausar ou editar campanhas.</p>
+              <h3 className="text-lg font-bold text-white">{isConfigured ? 'Atualizar acesso de leitura' : 'Conectar a leitura de campanhas'}</h3>
+              <p className="mt-1 text-sm leading-relaxed text-slate-400">Informe a conta de anúncios e um token da Marketing API com permissão de leitura de anúncios. O token é salvo apenas no servidor, nunca aparece novamente no painel e não será usado para criar, pausar ou editar campanhas.</p>
             </div>
           </div>
           <form onSubmit={saveConnection} className="space-y-4">
@@ -290,13 +301,16 @@ export const TrafficCenter: React.FC = () => {
             </div>
             <div>
               <label className="block mb-1.5 text-xs font-semibold text-slate-300">Token da Marketing API com permissão de leitura</label>
-              <input type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="EAAG…" required={!connection?.accessTokenSet} autoComplete="new-password" className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 font-mono text-sm focus:outline-none focus:border-emerald-500" />
+              <input type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="EAAG…" required={!connection?.accessTokenSet || isEditingConnection} autoComplete="new-password" className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 font-mono text-sm focus:outline-none focus:border-emerald-500" />
               <p className="mt-1.5 text-[11px] text-slate-500">A permissão necessária é <strong className="text-slate-300">ads_read</strong>. Se o mesmo token da CAPI já tiver essa permissão, ele pode ser reutilizado.</p>
             </div>
-            <button type="submit" disabled={isSaving} className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2 transition-all">
-              {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-              {isSaving ? 'Salvando conexão…' : 'Salvar conexão protegida'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button type="submit" disabled={isSaving} className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold flex items-center gap-2 transition-all">
+                {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                {isSaving ? 'Salvando conexão…' : 'Salvar conexão protegida'}
+              </button>
+              {isConfigured && <button type="button" onClick={() => { setIsEditingConnection(false); setAccessToken(''); setError(null); }} className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-sm font-semibold transition-all">Cancelar</button>}
+            </div>
           </form>
         </section>
       ) : (

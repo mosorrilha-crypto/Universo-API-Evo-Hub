@@ -190,6 +190,13 @@ function extractMessagingConversationCost(stats: GraphActionStat[] | undefined, 
 
 function safeMetaMessage(payload: any, status: number): string {
   const message = payload?.error?.error_user_msg || payload?.error?.message;
+  const code = Number(payload?.error?.code);
+  // O token da CAPI pode enviar conversões, mas não necessariamente possui
+  // ads_read. Traduzir o erro #200 evita mostrar um detalhe técnico inútil no
+  // painel e aponta a ação segura: salvar um token dedicado de leitura.
+  if (code === 200 || /ads_management|ads_read/i.test(String(message || ''))) {
+    return 'O token atual consegue enviar eventos pela CAPI, mas não tem permissão para ler campanhas. Em “Configurar acesso”, salve um token da Marketing API com a permissão ads_read.';
+  }
   if (typeof message === 'string' && message.trim()) return message.trim().slice(0, 500);
   return `A Meta não concluiu a consulta de métricas (HTTP ${status}).`;
 }
