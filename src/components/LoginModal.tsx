@@ -18,7 +18,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onClose,
   isForcedLogin = false,
 }) => {
-  const { t } = useAppPreferences();
+  const { t, language } = useAppPreferences();
+  const isSpanish = language === 'es';
   const [password, setPassword] = useState<string>('');
   const [customEmail, setCustomEmail] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -84,7 +85,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 {t('secureAccess')}
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                  Autenticação v2.0
+                  {isSpanish ? 'Autenticación v2.0' : 'Autenticação v2.0'}
                 </span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
@@ -117,7 +118,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   setCustomEmail(e.target.value);
                   setErrorMsg(null);
                 }}
-                placeholder="seu-email@exemplo.com"
+                placeholder={isSpanish ? 'tu-correo@ejemplo.com' : 'seu-email@exemplo.com'}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 pl-9"
                 autoFocus
                 autoComplete="username"

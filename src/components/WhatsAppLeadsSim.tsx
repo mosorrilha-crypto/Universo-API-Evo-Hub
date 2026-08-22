@@ -396,7 +396,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   openLeadPhone,
   openLeadRequestId,
 }) => {
-  const { t } = useAppPreferences();
+  const { t, language } = useAppPreferences();
+  const isSpanish = language === 'es';
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
@@ -475,7 +476,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [tenantLabelSuggestions, setTenantLabelSuggestions] = useState<string[]>([]);
   const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
-  // Tela "Gerenciar etiquetas" (pedido real, 20/08/2026) — renomear/apagar
+  // Tela "{isSpanish ? 'Gestionar etiquetas' : 'Gerenciar etiquetas'}" (pedido real, 20/08/2026) — renomear/apagar
   // uma etiqueta em todas as conversas do tenant de uma vez (ver
   // ManageLabelsModal e as rotas PATCH/DELETE /api/conversation-labels/:label).
   const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
@@ -3378,7 +3379,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <button
                       onClick={() => setIsHeaderMenuOpen((open) => !open)}
                       className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
-                      title="Mais opções"
+                      title={t('moreOptions')}
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
@@ -3399,7 +3400,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               title="A IA para de responder automaticamente só pra esse número (manual ou automático, ex: falha de agenda) — o resto do atendimento continua normal"
                             >
                               <Ban className="w-3.5 h-3.5" />
-                              <span>{isAiBlocked ? 'Reativar IA pra esse lead' : 'Bloquear IA pra esse lead'}</span>
+                              <span>{isAiBlocked ? (isSpanish ? 'Reactivar IA para este lead' : 'Reativar IA para este lead') : (isSpanish ? 'Bloquear IA para este lead' : 'Bloquear IA para este lead')}</span>
                             </button>
                             {!isAdLead && (
                               <button
@@ -3412,7 +3413,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 title='Libera a IA para as próximas mensagens deste lead e lê o histórico completo para preparar um rascunho contextual no compositor. O rascunho nunca é enviado sem revisão humana.'
                               >
                                 <Megaphone className="w-3.5 h-3.5" />
-                                <span>Ativar IA e preparar rascunho</span>
+                                <span>{isSpanish ? 'Activar IA y preparar borrador' : 'Ativar IA e preparar rascunho'}</span>
                               </button>
                             )}
                             <div className="border-t border-slate-700" />
@@ -3422,7 +3423,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               title="Enviar uma melhoria contextual para a Central de Qualidade"
                             >
                               <Sparkles className="w-3.5 h-3.5" />
-                              <span>Sugerir melhoria</span>
+                              <span>{isSpanish ? 'Sugerir mejora' : 'Sugerir melhoria'}</span>
                             </button>
                             <button
                               onClick={() => openOperatorFeedback('bug')}
@@ -3430,7 +3431,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               title="Registrar um comportamento inesperado nesta conversa"
                             >
                               <AlertTriangle className="w-3.5 h-3.5" />
-                              <span>Reportar bug</span>
+                              <span>{isSpanish ? 'Reportar bug' : 'Reportar bug'}</span>
                             </button>
                             <div className="border-t border-slate-700" />
                             <button
@@ -3438,28 +3439,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
-                              <span>{isPinned ? 'Desafixar conversa' : 'Fixar conversa'}</span>
+                              <span>{isPinned ? (isSpanish ? 'Desfijar conversación' : 'Desafixar conversa') : (isSpanish ? 'Fijar conversación' : 'Fixar conversa')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { unread: !isManuallyUnread }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               <Mail className="w-3.5 h-3.5" />
-                              <span>{isManuallyUnread ? 'Marcar como lida' : 'Marcar como não lida'}</span>
+                              <span>{isManuallyUnread ? (isSpanish ? 'Marcar como leída' : 'Marcar como lida') : (isSpanish ? 'Marcar como no leída' : 'Marcar como não lida')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-                              <span>{isMuted ? 'Ativar notificações' : 'Silenciar notificações'}</span>
+                              <span>{isMuted ? (isSpanish ? 'Activar notificaciones' : 'Ativar notificações') : (isSpanish ? 'Silenciar notificaciones' : 'Silenciar notificações')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setIsHeaderMenuOpen(false); setMobileThreadOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
-                              <span>{isArchived ? 'Desarquivar conversa' : 'Arquivar conversa'}</span>
+                              <span>{isArchived ? (isSpanish ? 'Desarchivar conversación' : 'Desarquivar conversa') : (isSpanish ? 'Archivar conversación' : 'Arquivar conversa')}</span>
                             </button>
                             <div className="border-t border-slate-700" />
                             <button
@@ -3468,7 +3469,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               title="Apaga as mensagens desta conversa, mantendo o contato"
                             >
                               <RefreshCw className="w-3.5 h-3.5" />
-                              <span>Limpar histórico de mensagens</span>
+                              <span>{isSpanish ? 'Limpiar historial de mensajes' : 'Limpar histórico de mensagens'}</span>
                             </button>
                             <button
                               onClick={() => { setIsHeaderMenuOpen(false); handleDeleteConversation(selectedLead.id, selectedLead.name); }}
@@ -3476,7 +3477,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               title="Exclui a conversa e o contato permanentemente"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>Excluir conversa permanentemente</span>
+                              <span>{isSpanish ? 'Eliminar conversación permanentemente' : 'Excluir conversa permanentemente'}</span>
                             </button>
                           </div>
                         </>
@@ -3498,7 +3499,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <button
                       onClick={() => handleRemoveLabel(selectedLead.id, label)}
                       className="hover:opacity-70 cursor-pointer"
-                      title="Remover etiqueta"
+                      title={isSpanish ? 'Quitar etiqueta' : 'Remover etiqueta'}
                     >
                       <X className="w-2.5 h-2.5" />
                     </button>
@@ -3509,7 +3510,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition-colors flex items-center gap-1 cursor-pointer"
                 >
                   <Plus className="w-2.5 h-2.5" />
-                  Etiqueta
+                  {isSpanish ? 'Etiqueta' : 'Etiqueta'}
                 </button>
 
                 {isLabelPickerOpen && (
@@ -3531,14 +3532,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           type="text"
                           value={newLabelInput}
                           onChange={(e) => setNewLabelInput(e.target.value)}
-                          placeholder="Nova etiqueta..."
+                          placeholder={isSpanish ? 'Nueva etiqueta...' : 'Nova etiqueta...'}
                           autoFocus
                           className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
                         />
                         <button
                           type="submit"
                           className="p-1.5 bg-[#00a884] hover:bg-emerald-500 text-slate-950 rounded-lg cursor-pointer flex-shrink-0"
-                          title="Adicionar"
+                          title={isSpanish ? 'Agregar' : 'Adicionar'}
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
@@ -3570,7 +3571,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         className="w-full flex items-center justify-center gap-1.5 text-[10px] text-slate-400 hover:text-white pt-2 mt-1 border-t border-slate-700 cursor-pointer"
                       >
                         <Settings className="w-3 h-3" />
-                        Gerenciar etiquetas
+                        {isSpanish ? 'Gestionar etiquetas' : 'Gerenciar etiquetas'}
                       </button>
                     </div>
                   </>
@@ -3581,7 +3582,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               {isAnalyzingConversation && (
                 <div className="bg-emerald-950/90 border-b border-emerald-500/40 px-3 py-1.5 text-center text-[11px] font-semibold text-emerald-300 flex items-center justify-center space-x-2 animate-pulse z-10">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                  <span>Gemini analisando contexto da conversa e idioma em tempo real...</span>
+                  <span>{isSpanish ? 'Gemini está analizando el contexto y el idioma de la conversación en tiempo real...' : 'Gemini analisando contexto da conversa e idioma em tempo real...'}</span>
                 </div>
               )}
 
@@ -3591,7 +3592,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 {/* WhatsApp Floating Date Badge */}
                 <div className="flex justify-center my-2">
                   <span className="px-3 py-1 rounded-lg bg-[#182229] text-[10px] font-bold text-slate-400 shadow-sm uppercase tracking-wider">
-                    Hoje
+                    {isSpanish ? 'Hoy' : 'Hoje'}
                   </span>
                 </div>
 
@@ -3624,7 +3625,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
                 {(selectedLead as any).historyLoading ? (
                   <div className="flex min-h-32 items-center justify-center text-xs text-slate-500">
-                    Carregando histórico completo desta conversa...
+                    {isSpanish ? 'Cargando el historial completo de esta conversación...' : 'Carregando histórico completo desta conversa...'}
                   </div>
                 ) : selectedLead.messages && selectedLead.messages.length > 0 ? (
                   selectedLead.messages.map((msg) => {
@@ -3682,7 +3683,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             className={`p-1 rounded-full bg-[#233138] border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 shadow-lg transition-opacity cursor-pointer ${
                               openMessageMenuFor === msg.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                             }`}
-                            title="Mais opções"
+                            title={t('moreOptions')}
                           >
                             <MoreVertical className="w-3.5 h-3.5" />
                           </button>
@@ -3697,7 +3698,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 >
                                   <Reply className="w-3.5 h-3.5" />
-                                  <span>Responder</span>
+                                  <span>{isSpanish ? 'Responder' : 'Responder'}</span>
                                 </button>
                                 {msg.text && (
                                   <button
@@ -3706,7 +3707,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                     className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                   >
                                     <Copy className="w-3.5 h-3.5" />
-                                    <span>Copiar</span>
+                                    <span>{isSpanish ? 'Copiar' : 'Copiar'}</span>
                                   </button>
                                 )}
                                 <button
@@ -3715,7 +3716,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 >
                                   <Forward className="w-3.5 h-3.5" />
-                                  <span>Encaminhar</span>
+                                  <span>{isSpanish ? 'Reenviar' : 'Encaminhar'}</span>
                                 </button>
                                 <button
                                   type="button"
@@ -3723,7 +3724,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 >
                                   <Smile className="w-3.5 h-3.5" />
-                                  <span>Reagir</span>
+                                  <span>{isSpanish ? 'Reaccionar' : 'Reagir'}</span>
                                 </button>
                                 <div className="border-t border-slate-700" />
                                 <button
@@ -3733,7 +3734,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   title="Apagar esta mensagem"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
-                                  <span>Apagar</span>
+                                  <span>{isSpanish ? 'Eliminar' : 'Apagar'}</span>
                                 </button>
                               </div>
                             </>
@@ -3787,7 +3788,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
                               {msg.forwardedFromMessageId && (
                                 <div className="flex items-center gap-1 text-[9px] italic opacity-60">
-                                  <Forward className="w-2.5 h-2.5" /> Encaminhada
+                                  <Forward className="w-2.5 h-2.5" /> {isSpanish ? 'Reenviada' : 'Encaminhada'}
                                 </div>
                               )}
 
@@ -3800,7 +3801,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   }`}
                                 >
                                   <div className="text-[9px] font-bold text-emerald-400 truncate">
-                                    {quotedMessage.sender === 'lead' ? selectedLead.name : 'Você'}
+                                    {quotedMessage.sender === 'lead' ? selectedLead.name : (isSpanish ? 'Vos' : 'Você')}
                                   </div>
                                   <div className="text-[10px] opacity-80 truncate">
                                     {quotedMessage.text ||
@@ -3827,7 +3828,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 </button>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex justify-between text-[10px] font-bold text-emerald-200">
-                                    <span>Mensagem de voz</span>
+                                    <span>{isSpanish ? 'Mensaje de voz' : 'Mensagem de voz'}</span>
                                     <span>{msg.audioDuration || 15}s</span>
                                   </div>
                                   <div className="w-full bg-slate-700/60 h-1.5 rounded-full mt-1 overflow-hidden">
@@ -3868,7 +3869,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 >
                                   <img
                                     src={msg.mediaUrl}
-                                    alt="Imagem do lead"
+                                    alt={isSpanish ? 'Imagen del lead' : 'Imagem do lead'}
                                     className="w-full h-44 object-cover group-hover:scale-105 transition-transform duration-300"
                                   />
                                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold">
@@ -3958,7 +3959,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   })
                 ) : (
                   <div className="text-center py-12 text-slate-500 text-xs">
-                    Nenhuma mensagem registrada nesta conversa.
+                    {isSpanish ? 'No hay mensajes registrados en esta conversación.' : 'Nenhuma mensagem registrada nesta conversa.'}
                   </div>
                 )}
                 <div ref={messagesEndRef} />
@@ -3977,7 +3978,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       a operadora usa todo dia. */}
                   {!(selectedLead as any)?.isReal ? (
                     <div className="flex items-center space-x-1 bg-[#111b21] p-1 rounded-xl border border-slate-800">
-                      <span className="text-[10px] text-slate-400 font-bold px-1">Enviar como:</span>
+                      <span className="text-[10px] text-slate-400 font-bold px-1">{isSpanish ? 'Enviar como:' : 'Enviar como:'}</span>
                       <button
                         type="button"
                         onClick={() => setSenderRole('lead')}
@@ -3986,7 +3987,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         }`}
                       >
                         <User className="w-3 h-3 inline mr-1" />
-                        Cliente
+                        {isSpanish ? 'Cliente' : 'Cliente'}
                       </button>
                       <button
                         type="button"
@@ -4056,7 +4057,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
                         defaultValue=""
                         className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-blue-400 text-[10px] font-semibold cursor-pointer"
-                        title="Enviar foto de exemplo de um serviço"
+                        title={isSpanish ? 'Enviar foto de ejemplo de un servicio' : 'Enviar foto de exemplo de um serviço'}
                       >
                         <option value="" disabled>📷 Foto do serviço...</option>
                         {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
@@ -4070,7 +4071,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
                         defaultValue=""
                         className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-emerald-400 text-[10px] font-semibold cursor-pointer"
-                        title="Enviar vídeo de exemplo de um serviço"
+                        title={isSpanish ? 'Enviar video de ejemplo de un servicio' : 'Enviar vídeo de exemplo de um serviço'}
                       >
                         <option value="" disabled>🎥 Vídeo do serviço...</option>
                         {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
@@ -4189,7 +4190,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     type="text"
                     placeholder={
                       senderRole === 'lead'
-                        ? `Mensagem de ${selectedLead.name}...`
+                        ? (isSpanish ? `Mensaje de ${selectedLead.name}...` : `Mensagem de ${selectedLead.name}...`)
                         : 'Digitar resposta...'
                     }
                     value={inputMessage}
@@ -4404,7 +4405,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 disabled={isSavingAdTriggers}
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 shadow-md shadow-sky-950 cursor-pointer"
               >
-                {isSavingAdTriggers ? 'Salvando...' : 'Salvar'}
+                {isSavingAdTriggers ? (isSpanish ? 'Guardando...' : 'Salvando...') : (isSpanish ? 'Guardar' : 'Salvar')}
               </button>
             </div>
           </div>
@@ -4418,7 +4419,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <div>
                 <p className={`text-[10px] uppercase tracking-wider font-bold ${operatorFeedbackKind === 'bug' ? 'text-rose-300' : 'text-amber-300'}`}>Feedback supervisionado</p>
                 <h3 className="text-lg font-bold text-white mt-1">{operatorFeedbackKind === 'bug' ? 'Reportar bug' : 'Sugerir melhoria'}</h3>
-                <p className="text-xs text-slate-500 mt-1">Conversa: {selectedLead?.name || selectedLead?.phone || 'não selecionada'}</p>
+                <p className="text-xs text-slate-500 mt-1">{isSpanish ? 'Conversación:' : 'Conversa:'} {selectedLead?.name || selectedLead?.phone || (isSpanish ? 'no seleccionada' : 'não selecionada')}</p>
               </div>
               <button type="button" onClick={() => setOperatorFeedbackKind(null)} className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
@@ -4433,8 +4434,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <div className="flex items-center justify-between gap-3 pt-1">
               <p className="text-[10px] text-slate-500">A decisão de publicar qualquer ajuste continua com o administrador.</p>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <button type="button" onClick={() => setOperatorFeedbackKind(null)} className="px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white cursor-pointer">Cancelar</button>
-                <button type="submit" disabled={isSubmittingOperatorFeedback} className={`px-3.5 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-50 cursor-pointer ${operatorFeedbackKind === 'bug' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-amber-600 hover:bg-amber-500'}`}>{isSubmittingOperatorFeedback ? 'Enviando...' : 'Enviar para revisão'}</button>
+                <button type="button" onClick={() => setOperatorFeedbackKind(null)} className="px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white cursor-pointer">{isSpanish ? 'Cancelar' : 'Cancelar'}</button>
+                <button type="submit" disabled={isSubmittingOperatorFeedback} className={`px-3.5 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-50 cursor-pointer ${operatorFeedbackKind === 'bug' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-amber-600 hover:bg-amber-500'}`}>{isSubmittingOperatorFeedback ? (isSpanish ? 'Enviando...' : 'Enviando...') : (isSpanish ? 'Enviar para revisión' : 'Enviar para revisão')}</button>
               </div>
             </div>
           </form>

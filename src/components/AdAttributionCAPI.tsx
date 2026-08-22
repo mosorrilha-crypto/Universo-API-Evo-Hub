@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LeadInfo, CAPIConfig, MetaCAPIEvent } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { TrafficCenter } from './TrafficCenter';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import { 
   BarChart3, 
   Target, 
@@ -45,6 +46,8 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   onTriggerCAPIEvent,
   onAddNewAttributedLead,
 }) => {
+  const { language } = useAppPreferences();
+  const isSpanish = language === 'es';
   const leads = propLeads || [];
   const [activeTab, setActiveTab] = useState<'traffic_center' | 'overview' | 'ai_insights' | 'capi_settings' | 'utm_simulator'>('traffic_center');
 
@@ -315,11 +318,11 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <Target className="w-6 h-6" />
               </div>
               <h2 className="text-2xl font-bold text-white tracking-tight">
-                Crescimento
+                {isSpanish ? 'Crecimiento' : 'Crescimento'}
               </h2>
             </div>
             <p className="text-sm text-slate-300 max-w-3xl leading-relaxed">
-              Acompanhe as campanhas, entenda a origem dos contatos e devolva conversões reais para a Meta — tudo em um único lugar.
+              {isSpanish ? 'Acompañá las campañas, entendé el origen de los contactos y devolvé conversiones reales a Meta, todo en un solo lugar.' : 'Acompanhe as campanhas, entenda a origem dos contatos e devolva conversões reais para a Meta — tudo em um único lugar.'}
             </p>
           </div>
 
@@ -332,12 +335,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               {isGeneratingReport ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Gerando Diagnóstico IA...</span>
+                  <span>{isSpanish ? 'Generando diagnóstico de IA...' : 'Gerando diagnóstico de IA...'}</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-emerald-300" />
-                  <span>Analisar com IA</span>
+                  <span>{isSpanish ? 'Analizar con IA' : 'Analisar com IA'}</span>
                 </>
               )}
             </button>
@@ -347,7 +350,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-2 transition-all"
             >
               <Key className="w-4 h-4 text-emerald-400" />
-              <span>Configurar conexões</span>
+              <span>{isSpanish ? 'Configurar conexiones' : 'Configurar conexões'}</span>
             </button>
           </div>
         </div>
@@ -363,7 +366,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <BarChart3 className="w-4 h-4 text-emerald-400" />
-            <span>Central de Tráfego</span>
+            <span>{isSpanish ? 'Central de Tráfico' : 'Central de Tráfego'}</span>
           </button>
 
           <button
@@ -375,7 +378,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <BarChart3 className="w-4 h-4" />
-            <span>Origem dos leads</span>
+            <span>{isSpanish ? 'Origen de los leads' : 'Origem dos leads'}</span>
           </button>
 
           <button
@@ -387,7 +390,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <Bot className="w-4 h-4 text-purple-400" />
-            <span>Diagnóstico IA</span>
+            <span>{isSpanish ? 'Diagnóstico de IA' : 'Diagnóstico IA'}</span>
           </button>
 
           <button
@@ -399,9 +402,9 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <Send className="w-4 h-4 text-blue-400" />
-            <span>Eventos CAPI</span>
+            <span>{isSpanish ? 'Eventos CAPI' : 'Eventos CAPI'}</span>
             <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30">
-              {capiEventsLog.length} Eventos
+              {capiEventsLog.length} {isSpanish ? 'eventos' : 'eventos'}
             </span>
           </button>
 
@@ -414,7 +417,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             }`}
           >
             <Smartphone className="w-4 h-4 text-amber-400" />
-            <span>Simular entrada UTM</span>
+            <span>{isSpanish ? 'Simular entrada UTM' : 'Simular entrada UTM'}</span>
           </button>
         </div>
       </div>
@@ -427,13 +430,13 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
         
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-medium">Total Leads de Anúncios</span>
+            <span className="text-xs font-medium">{isSpanish ? 'Total de leads de anuncios' : 'Total de leads de anúncios'}</span>
             <Target className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="flex items-baseline space-x-2">
             <span className="text-2xl font-bold text-white">{totalAdsLeads}</span>
             <span className="text-xs font-semibold text-emerald-400">
-              ({Math.round((totalAdsLeads / (leads.length || 1)) * 100)}% do total)
+              ({Math.round((totalAdsLeads / (leads.length || 1)) * 100)}% {isSpanish ? 'del total' : 'do total'})
             </span>
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
@@ -443,7 +446,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-medium">Eventos Meta CAPI Enviados</span>
+            <span className="text-xs font-medium">{isSpanish ? 'Eventos Meta CAPI enviados' : 'Eventos Meta CAPI enviados'}</span>
             <Activity className="w-4 h-4 text-blue-400" />
           </div>
           <div className="flex items-baseline space-x-2">
@@ -451,7 +454,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             <span className="text-xs font-semibold text-blue-400">Status 200 OK</span>
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Disparos com Hashed SHA256 Data
+            {isSpanish ? 'Envíos con datos SHA256 cifrados' : 'Disparos com dados SHA256 criptografados'}
           </p>
         </div>
 
@@ -479,7 +482,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-medium">Tráfego Orgânico & Direto</span>
+            <span className="text-xs font-medium">{isSpanish ? 'Tráfico orgánico y directo' : 'Tráfego orgânico e direto'}</span>
             <Globe className="w-4 h-4 text-purple-400" />
           </div>
           <div className="flex items-baseline space-x-2">
@@ -489,7 +492,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             </span>
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Instagram Bio & Busca Orgânica
+            {isSpanish ? 'Biografía de Instagram y búsqueda orgánica' : 'Bio do Instagram e busca orgânica'}
           </p>
         </div>
 
@@ -505,15 +508,15 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center space-x-2">
                   <PieChart className="w-5 h-5 text-emerald-400" />
-                  <span>Distribuição de Leads por Canal de Origem</span>
+                  <span>{isSpanish ? 'Distribución de leads por canal de origen' : 'Distribuição de leads por canal de origem'}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Mapeamento de atribuição exata de onde cada conversa no WhatsApp se iniciou
+                  {isSpanish ? 'Mapa de atribución exacta de dónde se inició cada conversación de WhatsApp.' : 'Mapeamento de atribuição exata de onde cada conversa no WhatsApp se iniciou'}
                 </p>
               </div>
 
               <span className="px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300">
-                {leads.length} Leads Monitorados
+                {leads.length} {isSpanish ? 'leads monitoreados' : 'leads monitorados'}
               </span>
             </div>
 
@@ -532,12 +535,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div 
                 style={{ width: `${(instagramOrgCount / (leads.length || 1)) * 100}%` }} 
                 className="bg-purple-500 h-full transition-all"
-                title={`Instagram Orgânico: ${instagramOrgCount}`}
+                title={`${isSpanish ? 'Instagram orgánico' : 'Instagram orgânico'}: ${instagramOrgCount}`}
               />
               <div 
                 style={{ width: `${(directCount / (leads.length || 1)) * 100}%` }} 
                 className="bg-slate-600 h-full rounded-r-full transition-all"
-                title={`Direto / Outros: ${directCount}`}
+                title={`${isSpanish ? 'Directo / otros' : 'Direto / outros'}: ${directCount}`}
               />
             </div>
 
@@ -555,12 +558,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               </div>
               <div className="flex items-center space-x-2 text-xs">
                 <span className="w-3 h-3 rounded-full bg-purple-500 inline-block" />
-                <span className="text-slate-300 font-medium">Instagram Orgânico</span>
+                <span className="text-slate-300 font-medium">{isSpanish ? 'Instagram orgánico' : 'Instagram orgânico'}</span>
                 <span className="text-slate-500 font-bold">({instagramOrgCount})</span>
               </div>
               <div className="flex items-center space-x-2 text-xs">
                 <span className="w-3 h-3 rounded-full bg-slate-600 inline-block" />
-                <span className="text-slate-300 font-medium">Direto / WhatsApp</span>
+                <span className="text-slate-300 font-medium">{isSpanish ? 'Directo / WhatsApp' : 'Direto / WhatsApp'}</span>
                 <span className="text-slate-500 font-bold">({directCount})</span>
               </div>
             </div>
@@ -572,10 +575,10 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center space-x-2">
                   <Layers className="w-5 h-5 text-emerald-400" />
-                  <span>Rastreamento Detalhado por Lead e Campanha</span>
+                  <span>{isSpanish ? 'Seguimiento detallado por lead y campaña' : 'Rastreamento detalhado por lead e campanha'}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Associação de parâmetros UTM, FBCLID e probabilidade de conversão identificada pela IA
+                  {isSpanish ? 'Asociación de parámetros UTM, FBCLID y probabilidad de conversión identificada por la IA.' : 'Associação de parâmetros UTM, FBCLID e probabilidade de conversão identificada pela IA'}
                 </p>
               </div>
 
@@ -585,7 +588,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                   className="px-3.5 py-1.5 bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-medium hover:bg-emerald-600/30 transition-all flex items-center space-x-1.5"
                 >
                   <Smartphone className="w-3.5 h-3.5" />
-                  <span>Simular Entrada por UTM</span>
+                  <span>{isSpanish ? 'Simular entrada por UTM' : 'Simular entrada por UTM'}</span>
                 </button>
               </div>
             </div>
@@ -595,11 +598,11 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider">
                     <th className="pb-3 pl-2">Lead</th>
-                    <th className="pb-3">Canal de Origem</th>
-                    <th className="pb-3">Campanha & Anúncio</th>
-                    <th className="pb-3">Rastreamento (UTM / FBCLID)</th>
-                    <th className="pb-3 text-center">Probabilidade IA</th>
-                    <th className="pb-3 text-right pr-2">Ação CAPI Meta</th>
+                    <th className="pb-3">{isSpanish ? 'Canal de origen' : 'Canal de origem'}</th>
+                    <th className="pb-3">{isSpanish ? 'Campaña y anuncio' : 'Campanha y anúncio'}</th>
+                    <th className="pb-3">{isSpanish ? 'Seguimiento (UTM / FBCLID)' : 'Rastreamento (UTM / FBCLID)'}</th>
+                    <th className="pb-3 text-center">{isSpanish ? 'Probabilidad de IA' : 'Probabilidade da IA'}</th>
+                    <th className="pb-3 text-right pr-2">{isSpanish ? 'Acción CAPI de Meta' : 'Ação CAPI da Meta'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -640,14 +643,14 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                               ? 'bg-purple-950/80 text-purple-300 border-purple-800/80'
                               : 'bg-slate-800 text-slate-300 border-slate-700'
                           }`}>
-                            {lead.attribution?.channelLabel || 'Direto / WhatsApp'}
+                            {lead.attribution?.channelLabel || (isSpanish ? 'Directo / WhatsApp' : 'Direto / WhatsApp')}
                           </span>
                         </td>
 
                         {/* Campaign */}
                         <td className="py-3.5">
                           <p className="font-medium text-slate-200">
-                            {lead.attribution?.campaignName || 'Orgânico sem campanha'}
+                            {lead.attribution?.campaignName || (isSpanish ? 'Orgánico sin campaña' : 'Orgânico sem campanha')}
                           </p>
                           <p className="text-[11px] text-slate-400">
                             {lead.attribution?.adName || '—'}
@@ -692,7 +695,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                             className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-medium transition-all inline-flex items-center space-x-1 shadow-sm"
                           >
                             <Send className="w-3 h-3" />
-                            <span>Enviar CAPI</span>
+                            <span>{isSpanish ? 'Enviar CAPI' : 'Enviar CAPI'}</span>
                           </button>
                         </td>
 
@@ -716,11 +719,11 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <div className="flex items-center space-x-2">
                   <Bot className="w-6 h-6 text-purple-400" />
                   <h3 className="text-xl font-bold text-white">
-                    Estudo de Performance de Anúncios com Gemini IA
+                    {isSpanish ? 'Estudio de rendimiento de anuncios con IA' : 'Estudo de performance de anúncios com IA'}
                   </h3>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  Análise inteligente cruzando interações no WhatsApp, origem dos anúncios e objeções para tomada de decisão
+                  {isSpanish ? 'Análisis inteligente que cruza interacciones de WhatsApp, origen de anuncios y objeciones para tomar decisiones.' : 'Análise inteligente cruzando interações no WhatsApp, origem dos anúncios e objeções para tomada de decisão'}
                 </p>
               </div>
 
@@ -732,12 +735,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 {isGeneratingReport ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Processando Relatório...</span>
+                    <span>{isSpanish ? 'Procesando informe...' : 'Processando relatório...'}</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-purple-200" />
-                    <span>Recalcular Análise IA</span>
+                    <span>{isSpanish ? 'Recalcular análisis de IA' : 'Recalcular análise de IA'}</span>
                   </>
                 )}
               </button>
@@ -754,7 +757,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                   </div>
                   <div>
                     <span className="text-[11px] font-bold uppercase tracking-wider text-purple-400">
-                      Canal com Maior Retorno de Vendas
+                      {isSpanish ? 'Canal con mayor retorno de ventas' : 'Canal com maior retorno de vendas'}
                     </span>
                     <h4 className="text-lg font-bold text-white mt-0.5">
                       {aiReport.topPerformingChannel || 'Meta Ads (Instagram Feed)'}
@@ -766,7 +769,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <div className="space-y-3">
                   <h4 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
                     <Layers className="w-4 h-4 text-emerald-400" />
-                    <span>Comparativo por Canal de Anúncio</span>
+                    <span>{isSpanish ? 'Comparativo por canal de anuncio' : 'Comparativo por canal de anúncio'}</span>
                   </h4>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -775,12 +778,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                           <span className="font-bold text-slate-100 text-sm">{ch.channel}</span>
                           <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                            Qualidade: {ch.conversionQuality}
+                            {isSpanish ? 'Calidad' : 'Qualidade'}: {ch.conversionQuality}
                           </span>
                         </div>
 
                         <div className="space-y-1 text-xs">
-                          <p className="text-slate-400 font-medium">Objeções Recorrentes:</p>
+                          <p className="text-slate-400 font-medium">{isSpanish ? 'Objeciones recurrentes:' : 'Objeções recorrentes:'}</p>
                           <div className="flex flex-wrap gap-1">
                             {(ch.keyObjections || []).map((obj: string, i: number) => (
                               <span key={i} className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">
@@ -791,7 +794,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                         </div>
 
                         <p className="text-xs text-slate-300 bg-slate-900 p-2.5 rounded-lg border border-slate-800">
-                          <span className="font-semibold text-emerald-400">Avaliação CPL/ROI: </span>
+                          <span className="font-semibold text-emerald-400">{isSpanish ? 'Evaluación CPL/ROI: ' : 'Avaliação CPL/ROI: '}</span>
                           {ch.cplAssessment}
                         </p>
                       </div>
@@ -803,7 +806,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <div className="space-y-3 bg-slate-950/60 border border-slate-800 p-5 rounded-xl">
                   <h4 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
                     <Sparkles className="w-4 h-4 text-purple-400" />
-                    <span>Recomendações de Tráfego Pago & CAPI do Gemini</span>
+                    <span>{isSpanish ? 'Recomendaciones de tráfico pago y CAPI' : 'Recomendações de tráfego pago e CAPI'}</span>
                   </h4>
 
                   <div className="space-y-2 text-xs text-slate-300 leading-relaxed">
@@ -817,7 +820,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
                   {aiReport.recommendedCAPIStrategy && (
                     <div className="mt-4 pt-3 border-t border-slate-800">
-                      <p className="text-xs font-semibold text-blue-400 mb-1">Estratégia Recomendada para Meta CAPI:</p>
+                      <p className="text-xs font-semibold text-blue-400 mb-1">{isSpanish ? 'Estrategia recomendada para Meta CAPI:' : 'Estratégia recomendada para Meta CAPI:'}</p>
                       <p className="text-xs text-slate-300">{aiReport.recommendedCAPIStrategy}</p>
                     </div>
                   )}
@@ -828,7 +831,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div className="text-center py-12 space-y-3">
                 <Bot className="w-12 h-12 text-slate-600 mx-auto" />
                 <p className="text-sm text-slate-300 font-medium">
-                  Clique no botão acima para gerar a análise inteligente de tráfego baseada em todas as conversas do WhatsApp!
+                  {isSpanish ? 'Hacé clic en el botón de arriba para generar el análisis inteligente de tráfico basado en todas las conversaciones de WhatsApp.' : 'Clique no botão acima para gerar a análise inteligente de tráfego baseada em todas as conversas do WhatsApp!'}
                 </p>
               </div>
             )}
@@ -847,10 +850,10 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div className="border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center space-x-2">
                   <Key className="w-5 h-5 text-emerald-400" />
-                  <span>Configurações do Meta Pixel & CAPI</span>
+                  <span>{isSpanish ? 'Configuraciones de Meta Pixel y CAPI' : 'Configurações de Meta Pixel e CAPI'}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Credenciais da API de Conversões do Meta Ads
+                  {isSpanish ? 'Credenciales de la API de conversiones de Meta Ads' : 'Credenciais da API de conversões do Meta Ads'}
                 </p>
               </div>
 
@@ -899,7 +902,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                     type="submit"
                     className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold transition-all shadow-md"
                   >
-                    Salvar Credenciais CAPI
+                    {isSpanish ? 'Guardar credenciales CAPI' : 'Salvar credenciais CAPI'}
                   </button>
                 </div>
               </form>
@@ -910,17 +913,17 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div className="border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center space-x-2">
                   <Send className="w-5 h-5 text-blue-400" />
-                  <span>Disparo de Evento CAPI Manual para Testes</span>
+                  <span>{isSpanish ? 'Envío manual de evento CAPI para pruebas' : 'Disparo de evento CAPI manual para testes'}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Selecione um lead e envie imediatamente qualquer evento de conversão para a Meta
+                  {isSpanish ? 'Seleccioná un lead y enviá de inmediato cualquier evento de conversión a Meta.' : 'Selecione um lead e envie imediatamente qualquer evento de conversão para a Meta'}
                 </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Selecione o Lead:</label>
+                  <label className="block text-slate-300 font-semibold mb-1">{isSpanish ? 'Seleccioná el lead:' : 'Selecione o lead:'}</label>
                   <select
                     value={selectedLeadForManualCAPI}
                     onChange={(e) => setSelectedLeadForManualCAPI(e.target.value)}
@@ -935,7 +938,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Nome do Evento Meta:</label>
+                  <label className="block text-slate-300 font-semibold mb-1">{isSpanish ? 'Nombre del evento de Meta:' : 'Nome do evento Meta:'}</label>
                   <select
                     value={manualEventName}
                     onChange={(e) => setManualEventName(e.target.value as any)}
@@ -951,7 +954,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Valor Estimado (R$):</label>
+                  <label className="block text-slate-300 font-semibold mb-1">{isSpanish ? 'Valor estimado (Gs.):' : 'Valor estimado (Gs.):'}</label>
                   <input
                     type="number"
                     value={manualEventValue}
@@ -971,12 +974,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                   {isSendingCAPI ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Enviando para Meta Graph API...</span>
+                      <span>{isSpanish ? 'Enviando a Meta Graph API...' : 'Enviando para Meta Graph API...'}</span>
                     </>
                   ) : (
                     <>
                       <Send className="w-4 h-4" />
-                      <span>Disparar Evento CAPI Agora</span>
+                      <span>{isSpanish ? 'Enviar evento CAPI ahora' : 'Disparar evento CAPI agora'}</span>
                     </>
                   )}
                 </button>
@@ -991,17 +994,17 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div>
                 <h3 className="text-base font-bold text-white flex items-center space-x-2">
                   <Database className="w-5 h-5 text-emerald-400" />
-                  <span>Histórico de Eventos CAPI Disparados</span>
+                  <span>{isSpanish ? 'Historial de eventos CAPI enviados' : 'Histórico de eventos CAPI disparados'}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Registro em tempo real de payloads e códigos SHA256 transmitidos para o Pixel
+                  {isSpanish ? 'Registro en tiempo real de payloads y códigos SHA256 enviados al Pixel.' : 'Registro em tempo real de payloads e códigos SHA256 transmitidos para o Pixel'}
                 </p>
               </div>
 
               <span className="text-xs font-semibold text-emerald-400 bg-emerald-950 px-3 py-1 rounded-lg border border-emerald-800">
                 {avgMatchQualityScore !== null
                   ? `Match Score: ${avgMatchQualityScore.toFixed(1)} / 10`
-                  : 'Match Score indisponível (Meta não retorna score síncrono via API)'}
+                  : isSpanish ? 'Match Score no disponible (Meta no devuelve un score síncrono por API)' : 'Match Score indisponível (Meta não retorna score síncrono via API)'}
               </span>
             </div>
 
@@ -1009,12 +1012,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider">
-                    <th className="pb-3 pl-2">Data/Hora</th>
+                    <th className="pb-3 pl-2">{isSpanish ? 'Fecha/hora' : 'Data/hora'}</th>
                     <th className="pb-3">Lead</th>
                     <th className="pb-3">Evento CAPI</th>
                     <th className="pb-3">SHA256 User Hashes</th>
                     <th className="pb-3 text-center">Status</th>
-                    <th className="pb-3 text-right pr-2">Ação</th>
+                    <th className="pb-3 text-right pr-2">{isSpanish ? 'Acción' : 'Ação'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -1038,12 +1041,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                         {log.status === 'error' ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-300 border border-rose-800">
                             <AlertCircle className="w-3 h-3 mr-1" />
-                            Falhou
+                            {isSpanish ? 'Falló' : 'Falhou'}
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
                             <CheckCheck className="w-3 h-3 mr-1" />
-                            {log.status === 'simulated_ok' ? 'Simulado' : '200 OK'}
+                            {log.status === 'simulated_ok' ? (isSpanish ? 'Simulado' : 'Simulado') : '200 OK'}
                           </span>
                         )}
                       </td>
@@ -1052,7 +1055,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                           onClick={() => setSelectedLogItem(log)}
                           className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium transition-all"
                         >
-                          Ver JSON
+                          {isSpanish ? 'Ver JSON' : 'Ver JSON'}
                         </button>
                       </td>
                     </tr>
@@ -1071,10 +1074,10 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
           <div>
             <h3 className="text-lg font-bold text-white flex items-center space-x-2">
               <Smartphone className="w-5 h-5 text-amber-400" />
-              <span>Simulador de Rastreamento de Anúncios (UTM & Link WhatsApp)</span>
+              <span>{isSpanish ? 'Simulador de seguimiento de anuncios (UTM y enlace de WhatsApp)' : 'Simulador de rastreamento de anúncios (UTM e link de WhatsApp)'}</span>
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              Test do fluxo completo: Um usuário clica em um anúncio com UTMs e FBCLID no Instagram/Google, inicia conversa no WhatsApp e o sistema captura os parâmetros automaticamente!
+              {isSpanish ? 'Prueba del flujo completo: una persona hace clic en un anuncio con UTMs y FBCLID en Instagram o Google, inicia una conversación en WhatsApp y el sistema captura los parámetros automáticamente.' : 'Teste do fluxo completo: um usuário clica em um anúncio com UTMs e FBCLID no Instagram/Google, inicia conversa no WhatsApp e o sistema captura os parâmetros automaticamente!'}
             </p>
           </div>
 
@@ -1090,7 +1093,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  URL Parametrizada de Origem do Anúncio:
+                  {isSpanish ? 'URL parametrizada de origen del anuncio:' : 'URL parametrizada de origem do anúncio:'}
                 </label>
                 <textarea
                   rows={3}
@@ -1102,7 +1105,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Nome do Lead Fictício:
+                  {isSpanish ? 'Nombre del lead de prueba:' : 'Nome do lead de teste:'}
                 </label>
                 <input
                   type="text"
@@ -1114,7 +1117,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Telefone WhatsApp:
+                  {isSpanish ? 'Teléfono de WhatsApp:' : 'Telefone WhatsApp:'}
                 </label>
                 <input
                   type="text"
@@ -1126,7 +1129,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Mensagem Inicial Enviada pelo Lead:
+                  {isSpanish ? 'Mensaje inicial enviado por el lead:' : 'Mensagem inicial enviada pelo lead:'}
                 </label>
                 <input
                   type="text"
@@ -1144,12 +1147,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 {isSimulatingLink ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Processando Clique & CAPI...</span>
+                    <span>{isSpanish ? 'Procesando clic y CAPI...' : 'Processando clique e CAPI...'}</span>
                   </>
                 ) : (
                   <>
                     <Zap className="w-4 h-4" />
-                    <span>Simular Clique do Anúncio & Criar Lead Atribuído</span>
+                    <span>{isSpanish ? 'Simular clic del anuncio y crear lead atribuido' : 'Simular clique do anúncio e criar lead atribuído'}</span>
                   </>
                 )}
               </button>
@@ -1158,7 +1161,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             <div className="bg-slate-950/80 border border-slate-800 p-5 rounded-xl space-y-3">
               <h4 className="font-bold text-slate-200 text-sm flex items-center space-x-2">
                 <Code className="w-4 h-4 text-amber-400" />
-                <span>Parâmetros Extraídos do Rastreamento</span>
+                <span>{isSpanish ? 'Parámetros extraídos del seguimiento' : 'Parâmetros extraídos do rastreamento'}</span>
               </h4>
 
               <div className="space-y-2 text-slate-300 font-mono text-[11px]">
@@ -1177,7 +1180,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               </div>
 
               <p className="text-slate-400 text-xs pt-2">
-                O sistema vincula esse rastreamento diretamente ao lead no simulador do WhatsApp e já dispara o evento <strong className="text-emerald-400">Meta CAPI Lead</strong> em background!
+                {isSpanish ? <>El sistema vincula este seguimiento directamente al lead en el simulador de WhatsApp y ya envía el evento <strong className="text-emerald-400">Meta CAPI Lead</strong> en segundo plano.</> : <>O sistema vincula esse rastreamento diretamente ao lead no simulador do WhatsApp e já dispara o evento <strong className="text-emerald-400">Meta CAPI Lead</strong> em segundo plano.</>}
               </p>
             </div>
 
@@ -1191,7 +1194,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 space-y-4 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-white text-sm">
-                Payload Transmitido ao Meta CAPI - {selectedLogItem.eventName}
+                {isSpanish ? 'Payload enviado a Meta CAPI' : 'Payload transmitido ao Meta CAPI'} - {selectedLogItem.eventName}
               </h3>
               <button
                 onClick={() => setSelectedLogItem(null)}
@@ -1210,7 +1213,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 onClick={() => setSelectedLogItem(null)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-xl font-semibold"
               >
-                Fechar
+                {isSpanish ? 'Cerrar' : 'Fechar'}
               </button>
             </div>
           </div>

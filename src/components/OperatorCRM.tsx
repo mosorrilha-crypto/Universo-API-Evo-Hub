@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { LeadInfo, CRMStage, UserProfile, CRMOperatorNote, CRMTask, LeadSourceChannel } from '../types';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
   Kanban,
   List,
@@ -41,7 +42,7 @@ interface OperatorCRMProps {
   onNavigateToFinancial?: (lead: LeadInfo) => void;
 }
 
-const STAGES: { id: CRMStage; label: string; color: string; badge: string }[] = [
+const STAGES_BASE: { id: CRMStage; label: string; color: string; badge: string }[] = [
   { id: 'novo', label: 'Novo Lead', color: 'border-blue-500/50 bg-blue-950/20 text-blue-300', badge: 'bg-blue-500/20 text-blue-300' },
   { id: 'contato', label: 'Contato Realizado', color: 'border-yellow-500/50 bg-yellow-950/20 text-yellow-300', badge: 'bg-yellow-500/20 text-yellow-300' },
   { id: 'proposta', label: 'Proposta Enviada', color: 'border-purple-500/50 bg-purple-950/20 text-purple-300', badge: 'bg-purple-500/20 text-purple-300' },
@@ -59,6 +60,18 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   currentOperator,
   onNavigateToFinancial,
 }) => {
+  const { language } = useAppPreferences();
+  const isSpanish = language === 'es';
+  const locale = isSpanish ? 'es-PY' : 'pt-BR';
+  const STAGES: { id: CRMStage; label: string; color: string; badge: string }[] = isSpanish ? [
+    { id: 'novo', label: 'Lead nuevo', color: 'border-blue-500/50 bg-blue-950/20 text-blue-300', badge: 'bg-blue-500/20 text-blue-300' },
+    { id: 'contato', label: 'Contacto realizado', color: 'border-yellow-500/50 bg-yellow-950/20 text-yellow-300', badge: 'bg-yellow-500/20 text-yellow-300' },
+    { id: 'proposta', label: 'Propuesta enviada', color: 'border-purple-500/50 bg-purple-950/20 text-purple-300', badge: 'bg-purple-500/20 text-purple-300' },
+    { id: 'negociacao', label: 'En negociación', color: 'border-amber-500/50 bg-amber-950/20 text-amber-300', badge: 'bg-amber-500/20 text-amber-300' },
+    { id: 'ganho', label: 'Cerrado / ganado', color: 'border-emerald-500/50 bg-emerald-950/20 text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-300' },
+    { id: 'perdido', label: 'Perdido', color: 'border-rose-500/50 bg-rose-950/20 text-rose-300', badge: 'bg-rose-500/20 text-rose-300' },
+  ] : STAGES_BASE;
+  const formatAmount = (value: number) => `Gs. ${value.toLocaleString(locale)}`;
   const leads = propLeads || [];
   const currentUser = propCurrentUser || currentOperator || { name: 'Operador Admin', id: 'op_1' };
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
@@ -94,7 +107,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       id: `real-${leadPhone.trim()}`,
       name: leadName.trim(),
       phone: leadPhone.trim(),
-      timestamp: 'Hoje, ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: (isSpanish ? 'Hoy, ' : 'Hoje, ') + new Date().toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
       audioDuration: 0,
       status: 'pending',
       isReal: true,
@@ -117,7 +130,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
         id: `note_${Date.now()}`,
         authorName: currentUser.name,
         text: leadNotes.trim(),
-        createdAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        createdAt: new Date().toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
       }] : [],
     };
 
@@ -197,7 +210,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       id: `note_${Date.now()}`,
       authorName: currentUser.name,
       text: newNoteText.trim(),
-      createdAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date().toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
     };
 
     const updated: LeadInfo = {
@@ -217,7 +230,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     const task: CRMTask = {
       id: `task_${Date.now()}`,
       title: newTaskTitle.trim(),
-      dueDate: 'Amanhã 14:00',
+      dueDate: isSpanish ? 'Mañana 14:00' : 'Amanhã 14:00',
       completed: false,
       assignedOperator: currentUser.name,
     };
@@ -265,14 +278,14 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
           <div className="flex items-center space-x-2">
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
               <Kanban className="w-5 h-5 text-emerald-400" />
-              Vendas
+              {isSpanish ? 'Ventas' : 'Vendas'}
             </h1>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
-Em atendimento: {currentUser.name}
+{isSpanish ? `En atención: ${currentUser.name}` : `Em atendimento: ${currentUser.name}`}
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-Conduza cada oportunidade até a próxima ação certa, sem perder o histórico nem o contexto da conversa.
+{isSpanish ? 'Llevá cada oportunidad hacia la próxima acción correcta, sin perder el historial ni el contexto de la conversación.' : 'Conduza cada oportunidade até a próxima ação certa, sem perder o histórico nem o contexto da conversa.'}
           </p>
         </div>
 
@@ -285,7 +298,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
             className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl flex items-center space-x-1.5 shadow transition-all"
           >
             <UserPlus className="w-4 h-4" />
-            <span>Novo lead</span>
+            <span>{isSpanish ? 'Nuevo lead' : 'Novo lead'}</span>
           </button>
 
           {/* Apaga TODOS os leads do CRM, reais inclusive (onClearAllLeads chama
@@ -297,15 +310,15 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
           {onClearAllLeads && leads.length > 0 && (
             <button
               onClick={() => {
-                if (window.confirm(`Tem certeza que deseja apagar TODOS os ${leads.length} leads? Isso não pode ser desfeito.`)) {
+                if (window.confirm(isSpanish ? `¿Seguro que querés eliminar TODOS los ${leads.length} leads? Esta acción no se puede deshacer.` : `Tem certeza que deseja apagar TODOS os ${leads.length} leads? Isso não pode ser desfeito.`)) {
                   onClearAllLeads();
                 }
               }}
               className="px-3 py-2 bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-800/60 font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
-              title="Apaga todos os leads do CRM — ação irreversível"
+              title={isSpanish ? 'Elimina todos los leads del CRM — acción irreversible' : 'Apaga todos os leads do CRM — ação irreversível'}
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Limpar Todos</span>
+              <span className="hidden sm:inline">{isSpanish ? 'Limpiar todos' : 'Limpar todos'}</span>
             </button>
           )}
 
@@ -330,7 +343,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
               }`}
             >
               <List className="w-3.5 h-3.5" />
-              <span>Lista</span>
+              <span>{isSpanish ? 'Lista' : 'Lista'}</span>
             </button>
           </div>
         </div>
@@ -340,47 +353,47 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-slate-900/90 border border-slate-800/80 p-4 rounded-xl">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Pipeline Em Aberto</span>
+            <span>{isSpanish ? 'Embudo abierto' : 'Pipeline em aberto'}</span>
             <DollarSign className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-lg font-bold text-white">
-            R$ {totalPipelineValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            {formatAmount(totalPipelineValue)}
           </div>
           <p className="text-[10px] text-slate-500 mt-1">
-            {filteredLeads.length} Oportunidades ativas
+            {isSpanish ? `${filteredLeads.length} oportunidades activas` : `${filteredLeads.length} oportunidades ativas`}
             {leadsWithKnownValue.length < filteredLeads.length && (
-              <> · {leadsWithKnownValue.length} com valor estimado</>
+              <>{isSpanish ? ` · ${leadsWithKnownValue.length} con valor informado` : ` · ${leadsWithKnownValue.length} com valor estimado`}</>
             )}
           </p>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800/80 p-4 rounded-xl">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Vendas Fechadas</span>
+            <span>{isSpanish ? 'Ventas cerradas' : 'Vendas fechadas'}</span>
             <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-lg font-bold text-emerald-400">
-            R$ {wonValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            {formatAmount(wonValue)}
           </div>
-          <p className="text-[10px] text-slate-500 mt-1">{wonLeads.length} Negócios concluídos</p>
+          <p className="text-[10px] text-slate-500 mt-1">{isSpanish ? `${wonLeads.length} negocios concluidos` : `${wonLeads.length} negócios concluídos`}</p>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800/80 p-4 rounded-xl">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Taxa de Conversão</span>
+            <span>{isSpanish ? 'Tasa de conversión' : 'Taxa de conversão'}</span>
             <CheckCircle2 className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-lg font-bold text-white">{conversionRate}%</div>
-          <p className="text-[10px] text-slate-500 mt-1">Leads qualificados convertidos</p>
+          <p className="text-[10px] text-slate-500 mt-1">{isSpanish ? 'Leads calificados convertidos' : 'Leads qualificados convertidos'}</p>
         </div>
 
         <div className="bg-slate-900/90 border border-slate-800/80 p-4 rounded-xl">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Operador Conectado</span>
+            <span>{isSpanish ? 'Operador conectado' : 'Operador conectado'}</span>
             <User className="w-4 h-4 text-purple-400" />
           </div>
           <div className="text-sm font-bold text-white truncate">{currentUser.name}</div>
-          <p className="text-[10px] text-emerald-400 mt-1">Sessão Ativa ({currentUser.department})</p>
+          <p className="text-[10px] text-emerald-400 mt-1">{isSpanish ? `Sesión activa (${currentUser.department})` : `Sessão ativa (${currentUser.department})`}</p>
         </div>
       </div>
 
@@ -391,7 +404,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por nome, telefone ou resumo..."
+            placeholder={isSpanish ? 'Buscá por nombre, teléfono o resumen...' : 'Buscar por nome, telefone ou resumo...'}
             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 pl-9"
           />
           <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
@@ -399,13 +412,13 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
 
         <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
           <Filter className="w-3.5 h-3.5 text-slate-400" />
-          <span className="text-xs text-slate-400 font-medium">Estágio:</span>
+          <span className="text-xs text-slate-400 font-medium">{isSpanish ? 'Etapa:' : 'Estágio:'}</span>
           <select
             value={stageFilter}
             onChange={(e) => setStageFilter(e.target.value)}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
           >
-            <option value="all">Todos os Estágios</option>
+            <option value="all">{isSpanish ? 'Todas las etapas' : 'Todos os estágios'}</option>
             {STAGES.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.label}
@@ -432,7 +445,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   <div>
                     <h3 className="text-xs font-bold">{stage.label}</h3>
                     <p className="text-[10px] opacity-80 mt-0.5">
-                      R$ {columnTotal.toLocaleString('pt-BR')}
+                      {formatAmount(columnTotal)}
                     </p>
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${stage.badge}`}>
@@ -444,7 +457,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                 <div className="p-2 space-y-2.5 overflow-y-auto flex-1">
                   {columnLeads.length === 0 ? (
                     <div className="py-8 text-center text-slate-600 text-xs italic">
-                      Nenhum lead aqui
+                      {isSpanish ? 'No hay leads acá' : 'Nenhum lead aqui'}
                     </div>
                   ) : (
                     columnLeads.map((lead) => {
@@ -467,20 +480,20 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                             </span>
                             <div className="flex items-center space-x-1">
                               <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
-                                {val !== undefined ? `R$ ${val.toLocaleString('pt-BR')}` : 'Sem valor'}
+                                {val !== undefined ? formatAmount(val) : (isSpanish ? 'Sin valor' : 'Sem valor')}
                               </span>
                               {onDeleteLead && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    if (window.confirm(`Tem certeza que deseja excluir o lead "${lead.name}" do CRM?`)) {
+                                    if (window.confirm(isSpanish ? `¿Seguro que querés eliminar el lead "${lead.name}" del CRM?` : `Tem certeza que deseja excluir o lead "${lead.name}" do CRM?`)) {
                                       onDeleteLead(lead.id);
                                       if (selectedLead?.id === lead.id) setSelectedLead(null);
                                     }
                                   }}
                                   className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/80 rounded transition-colors cursor-pointer"
-                                  title="Excluir Lead"
+                                  title={isSpanish ? 'Eliminar lead' : 'Excluir lead'}
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -496,7 +509,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                           {/* Sentiment / Probability Badge */}
                           <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700/40 text-[10px]">
                             <span className="text-slate-400">
-                              Prob: <strong className="text-slate-200">{lead.fullAnalysis?.dealProbability || 50}%</strong>
+                              {isSpanish ? 'Prob.:' : 'Prob.:'} <strong className="text-slate-200">{lead.fullAnalysis?.dealProbability || 50}%</strong>
                             </span>
                             {lead.attribution && (
                               <span className="text-emerald-300 font-medium truncate max-w-[100px]">
@@ -510,7 +523,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                               Perdido) atrás da aba lateral, obrigando abrir o drawer só
                               pra marcar um lead como perdido. Select cobre todos os 6. */}
                           <div className="mt-2 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400 gap-1.5">
-                            <span className="shrink-0">Mover para:</span>
+                            <span className="shrink-0">{isSpanish ? 'Mover a:' : 'Mover para:'}</span>
                             <select
                               value={stage.id}
                               onClick={(e) => e.stopPropagation()}
@@ -543,13 +556,13 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
                 <tr>
-                  <th className="p-3.5">Lead / Contato</th>
-                  <th className="p-3.5">Estágio Comercial</th>
-                  <th className="p-3.5">Valor Est. (R$)</th>
-                  <th className="p-3.5">Canal de Origem</th>
-                  <th className="p-3.5">Análise de IA</th>
-                  <th className="p-3.5">Operador</th>
-                  <th className="p-3.5 text-right">Ação</th>
+                  <th className="p-3.5">{isSpanish ? 'Lead / contacto' : 'Lead / contato'}</th>
+                  <th className="p-3.5">{isSpanish ? 'Etapa comercial' : 'Estágio comercial'}</th>
+                  <th className="p-3.5">{isSpanish ? 'Valor estimado (Gs.)' : 'Valor estimado (Gs.)'}</th>
+                  <th className="p-3.5">{isSpanish ? 'Canal de origen' : 'Canal de origem'}</th>
+                  <th className="p-3.5">{isSpanish ? 'Análisis de IA' : 'Análise de IA'}</th>
+                  <th className="p-3.5">{isSpanish ? 'Operador' : 'Operador'}</th>
+                  <th className="p-3.5 text-right">{isSpanish ? 'Acción' : 'Ação'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
@@ -574,15 +587,15 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                       </td>
 
                       <td className="p-3.5 font-bold text-emerald-400">
-                        {getLeadValue(lead) !== undefined ? `R$ ${getLeadValue(lead)!.toLocaleString('pt-BR')}` : <span className="text-slate-500 font-normal">Sem valor</span>}
+                        {getLeadValue(lead) !== undefined ? formatAmount(getLeadValue(lead)!) : <span className="text-slate-500 font-normal">{isSpanish ? 'Sin valor' : 'Sem valor'}</span>}
                       </td>
 
                       <td className="p-3.5 text-slate-300">
-                        {lead.attribution?.channelLabel || 'WhatsApp Direto'}
+                        {lead.attribution?.channelLabel || (isSpanish ? 'WhatsApp directo' : 'WhatsApp direto')}
                       </td>
 
                       <td className="p-3.5 max-w-xs truncate text-slate-400">
-                        {lead.fullAnalysis?.conversationSummary || 'Aguardando transcrição...'}
+                        {lead.fullAnalysis?.conversationSummary || (isSpanish ? 'Esperando transcripción...' : 'Aguardando transcrição...')}
                       </td>
 
                       <td className="p-3.5 text-slate-300">
@@ -598,20 +611,20 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                           }}
                           className="px-2.5 py-1 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800 rounded-lg font-medium transition-all cursor-pointer"
                         >
-                          Detalhes
+                          {isSpanish ? 'Detalles' : 'Detalhes'}
                         </button>
                         {onDeleteLead && (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (window.confirm(`Tem certeza que deseja excluir o lead "${lead.name}" do CRM?`)) {
+                              if (window.confirm(isSpanish ? `¿Seguro que querés eliminar el lead "${lead.name}" del CRM?` : `Tem certeza que deseja excluir o lead "${lead.name}" do CRM?`)) {
                                 onDeleteLead(lead.id);
                                 if (selectedLead?.id === lead.id) setSelectedLead(null);
                               }
                             }}
                             className="p-1.5 bg-rose-950/40 hover:bg-rose-900 border border-rose-800/60 text-rose-300 rounded-lg transition-colors inline-flex items-center cursor-pointer"
-                            title="Excluir Lead"
+                            title={isSpanish ? 'Eliminar lead' : 'Excluir lead'}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -661,7 +674,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center space-x-2 transition-all shadow"
                 >
                   <MessageSquare className="w-4 h-4" />
-                  <span>Abrir WhatsApp</span>
+                  <span>{isSpanish ? 'Abrir WhatsApp' : 'Abrir WhatsApp'}</span>
                 </a>
 
                 {onNavigateToFinancial && (
@@ -671,7 +684,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                     className="py-2 px-3 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center space-x-2 transition-all shadow"
                   >
                     <DollarSign className="w-4 h-4" />
-                    <span>Gerar Fatura</span>
+                    <span>{isSpanish ? 'Generar factura' : 'Gerar fatura'}</span>
                   </button>
                 )}
               </div>
@@ -681,7 +694,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1">
-                      Mover Estágio Comercial:
+                      {isSpanish ? 'Mover etapa comercial:' : 'Mover estágio comercial:'}
                     </label>
                     <select
                       value={getLeadStage(selectedLead)}
@@ -698,12 +711,12 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1">
-                      Valor Negociado (R$):
+                      {isSpanish ? 'Valor negociado (Gs.):' : 'Valor negociado (Gs.):'}
                     </label>
                     <input
                       type="number"
                       value={getLeadValue(selectedLead) ?? ''}
-                      placeholder="Sem valor estimado ainda"
+                      placeholder={isSpanish ? 'Todavía sin valor estimado' : 'Sem valor estimado ainda'}
                       onChange={(e) => handleUpdateDealValue(Number(e.target.value))}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
                     />
@@ -711,7 +724,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
-                  <span>Operador Responsável:</span>
+                  <span>{isSpanish ? 'Operador responsable:' : 'Operador responsável:'}</span>
                   <span className="font-semibold text-white">{selectedLead.assignedOperator || currentUser.name}</span>
                 </div>
               </div>
@@ -721,7 +734,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                 <div className="mt-6 p-4 bg-slate-950/60 border border-slate-800 rounded-xl space-y-3">
                   <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold">
                     <Sparkles className="w-4 h-4" />
-                    <span>Inteligência de Vendas (Gemini AI)</span>
+                    <span>{isSpanish ? 'Inteligencia de ventas' : 'Inteligência de vendas'}</span>
                   </div>
 
                   <p className="text-xs text-slate-300 leading-relaxed">
@@ -730,18 +743,18 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
 
                   <div className="grid grid-cols-2 gap-2 text-[11px] pt-2 border-t border-slate-800">
                     <div>
-                      <span className="text-slate-500">Probabilidade de Fechamento:</span>
+                      <span className="text-slate-500">{isSpanish ? 'Probabilidad de cierre:' : 'Probabilidade de fechamento:'}</span>
                       <p className="font-bold text-emerald-400">{selectedLead.fullAnalysis.dealProbability}%</p>
                     </div>
                     <div>
-                      <span className="text-slate-500">Sentimento Predominante:</span>
+                      <span className="text-slate-500">{isSpanish ? 'Sentimiento predominante:' : 'Sentimento predominante:'}</span>
                       <p className="font-bold text-white">{selectedLead.fullAnalysis.overallSentiment}</p>
                     </div>
                   </div>
 
                   {selectedLead.fullAnalysis.recommendedNextAction && (
                     <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/60 rounded-lg text-xs text-emerald-200">
-                      <strong>Recomendação do Agente:</strong> {selectedLead.fullAnalysis.recommendedNextAction}
+                      <strong>{isSpanish ? 'Recomendación del agente:' : 'Recomendação do agente:'}</strong> {selectedLead.fullAnalysis.recommendedNextAction}
                     </div>
                   )}
                 </div>
@@ -751,7 +764,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
               <div className="mt-6 space-y-3">
                 <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  Tarefas e Lembretes do Operador
+                  {isSpanish ? 'Tareas y recordatorios del operador' : 'Tarefas e lembretes do operador'}
                 </h3>
 
                 <form onSubmit={handleAddTask} className="flex gap-2">
@@ -759,7 +772,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                     type="text"
                     value={newTaskTitle}
                     onChange={(e) => setNewTaskTitle(e.target.value)}
-                    placeholder="Adicionar tarefa (ex: Ligar às 15h, enviar proposta)..."
+                    placeholder={isSpanish ? 'Agregar tarea (ej.: llamar a las 15 h, enviar propuesta)...' : 'Adicionar tarefa (ex.: ligar às 15h, enviar proposta)...'}
                     className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
                   />
                   <button
@@ -767,13 +780,13 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                     className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl flex items-center space-x-1"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>Add</span>
+                    <span>{isSpanish ? 'Agregar' : 'Adicionar'}</span>
                   </button>
                 </form>
 
                 <div className="space-y-1.5 max-h-40 overflow-y-auto">
                   {(selectedLead.crmTasks || []).length === 0 ? (
-                    <p className="text-[11px] text-slate-500 italic">Nenhuma tarefa agendada.</p>
+                    <p className="text-[11px] text-slate-500 italic">{isSpanish ? 'No hay tareas programadas.' : 'Nenhuma tarefa agendada.'}</p>
                   ) : (
                     (selectedLead.crmTasks || []).map((t) => (
                       <div
@@ -804,7 +817,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
               <div className="mt-6 space-y-3">
                 <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                   <FileText className="w-4 h-4 text-purple-400" />
-                  Notas Internas e Histórico do Operador
+                  {isSpanish ? 'Notas internas e historial del operador' : 'Notas internas e histórico do operador'}
                 </h3>
 
                 <form onSubmit={handleAddNote} className="space-y-2">
@@ -812,7 +825,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                     minRows={2}
                     value={newNoteText}
                     onChange={(e) => setNewNoteText(e.target.value)}
-                    placeholder="Registrar observação interna (ex: Cliente gostou da proposta do plano anual)..."
+                    placeholder={isSpanish ? 'Registrá una observación interna (ej.: a la clienta le gustó la propuesta)...' : 'Registrar observação interna (ex.: cliente gostou da proposta)...'}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
                   />
                   <div className="flex justify-end">
@@ -821,7 +834,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                       className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
                     >
                       <Send className="w-3.5 h-3.5 mr-1" />
-                      <span>Salvar Nota</span>
+                      <span>{isSpanish ? 'Guardar nota' : 'Salvar nota'}</span>
                     </button>
                   </div>
                 </form>
@@ -848,13 +861,13 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   onClick={() => setSelectedLead(null)}
                   className="py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl"
                 >
-                  Fechar
+                  {isSpanish ? 'Cerrar' : 'Fechar'}
                 </button>
                 {onDeleteLead && (
                   <button
                     type="button"
                     onClick={() => {
-                      if (window.confirm(`Excluir o lead "${selectedLead.name}" do CRM?`)) {
+                      if (window.confirm(isSpanish ? `¿Querés eliminar el lead "${selectedLead.name}" del CRM?` : `Excluir o lead "${selectedLead.name}" do CRM?`)) {
                         onDeleteLead(selectedLead.id);
                         setSelectedLead(null);
                       }
@@ -862,11 +875,11 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                     className="py-2 px-3 bg-rose-950/40 hover:bg-rose-900 border border-rose-800/60 text-rose-300 text-xs font-semibold rounded-xl flex items-center space-x-1 transition-all"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Excluir Lead</span>
+                    <span>{isSpanish ? 'Eliminar lead' : 'Excluir lead'}</span>
                   </button>
                 )}
               </div>
-              <span className="text-[10px] text-slate-500">CRM de Operação Conectado</span>
+              <span className="text-[10px] text-slate-500">{isSpanish ? 'CRM operativo conectado' : 'CRM de operação conectado'}</span>
             </div>
           </div>
         </div>
@@ -882,8 +895,8 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   <UserPlus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-white">Cadastrar Novo Lead Real</h2>
-                  <p className="text-xs text-slate-400">Inserção manual no CRM do Operador</p>
+                  <h2 className="text-base font-bold text-white">{isSpanish ? 'Registrar nuevo lead' : 'Cadastrar novo lead'}</h2>
+                  <p className="text-xs text-slate-400">{isSpanish ? 'Carga manual en el CRM del operador' : 'Inserção manual no CRM do operador'}</p>
                 </div>
               </div>
               <button
@@ -897,11 +910,11 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
 
             <form onSubmit={handleCreateNewLead} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-bold mb-1">Nome Completo do Cliente / Lead *</label>
+                <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Nombre completo de la clienta / lead *' : 'Nome completo do cliente / lead *'}</label>
                 <input
                   type="text"
                   required
-                  placeholder="ex: Dr. Henrique Vasconcelos"
+                  placeholder={isSpanish ? 'Ej.: María González' : 'Ex.: Maria Silva'}
                   value={leadName}
                   onChange={(e) => setLeadName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 focus:outline-none focus:border-emerald-500"
@@ -910,7 +923,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Telefone WhatsApp *</label>
+                  <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Teléfono de WhatsApp *' : 'Telefone WhatsApp *'}</label>
                   <input
                     type="text"
                     required
@@ -921,7 +934,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">E-mail (Opcional)</label>
+                  <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Correo (opcional)' : 'E-mail (opcional)'}</label>
                   <input
                     type="email"
                     placeholder="cliente@empresa.com"
@@ -934,7 +947,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Valor do Negócio (R$)</label>
+                  <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Valor del negocio (Gs.)' : 'Valor do negócio (Gs.)'}</label>
                   <input
                     type="number"
                     min="0"
@@ -945,7 +958,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Estágio Inicial do Funil</label>
+                  <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Etapa inicial del embudo' : 'Estágio inicial do funil'}</label>
                   <select
                     value={leadStage}
                     onChange={(e) => setLeadStage(e.target.value as CRMStage)}
@@ -960,7 +973,7 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Canal de Origem</label>
+                  <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Canal de origen' : 'Canal de origem'}</label>
                   <select
                     value={leadChannel}
                     onChange={(e) => setLeadChannel(e.target.value as LeadSourceChannel)}
@@ -968,15 +981,15 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   >
                     <option value="meta_ads">Meta Ads (Instagram / FB)</option>
                     <option value="google_ads">Google Ads (Search)</option>
-                    <option value="whatsapp_direct">WhatsApp Direto</option>
-                    <option value="instagram_organic">Instagram Orgânico / Link Bio</option>
+                    <option value="whatsapp_direct">{isSpanish ? 'WhatsApp directo' : 'WhatsApp direto'}</option>
+                    <option value="instagram_organic">{isSpanish ? 'Instagram orgánico / enlace de la bio' : 'Instagram orgânico / link da bio'}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">Segmento / Assunto</label>
+                  <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Segmento / asunto' : 'Segmento / assunto'}</label>
                   <input
                     type="text"
-                    placeholder="ex: Contratação Plano Enterprise"
+                    placeholder={isSpanish ? 'Ej.: Servicio de cejas' : 'Ex.: Serviço de sobrancelhas'}
                     value={leadSegment}
                     onChange={(e) => setLeadSegment(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 focus:outline-none focus:border-emerald-500"
@@ -985,10 +998,10 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
               </div>
 
               <div>
-                <label className="block text-slate-300 font-bold mb-1">Nota / Observação Inicial</label>
+                <label className="block text-slate-300 font-bold mb-1">{isSpanish ? 'Nota / observación inicial' : 'Nota / observação inicial'}</label>
                 <AutoResizeTextarea
                   minRows={2}
-                  placeholder="Descreva o primeiro contato ou pedido do cliente..."
+                  placeholder={isSpanish ? 'Describí el primer contacto o pedido de la clienta...' : 'Descreva o primeiro contato ou pedido do cliente...'}
                   value={leadNotes}
                   onChange={(e) => setLeadNotes(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 focus:outline-none focus:border-emerald-500"
@@ -1001,14 +1014,14 @@ Conduza cada oportunidade até a próxima ação certa, sem perder o histórico 
                   onClick={() => setIsNewLeadModalOpen(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl"
                 >
-                  Cancelar
+                  {isSpanish ? 'Cancelar' : 'Cancelar'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl flex items-center space-x-1.5 shadow"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>Cadastrar Lead</span>
+                  <span>{isSpanish ? 'Registrar lead' : 'Cadastrar lead'}</span>
                 </button>
               </div>
             </form>

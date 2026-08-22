@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
 
 interface QualityReview {
   id: string;
@@ -125,6 +126,8 @@ function confidenceLabel(confidence: number | null | undefined) {
 }
 
 export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast }) => {
+  const { language } = useAppPreferences();
+  const isSpanish = language === 'es';
   const [activeTab, setActiveTab] = useState<CenterTab>('overview');
   const [reviews, setReviews] = useState<QualityReview[]>([]);
   const [events, setEvents] = useState<QualityAuditEvent[]>([]);
@@ -231,12 +234,12 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   };
 
   const tabs: Array<{ id: CenterTab; label: string; icon: React.ReactNode; count?: number }> = [
-    { id: 'overview', label: 'Visão geral', icon: <ShieldCheck className="w-4 h-4" /> },
-    { id: 'reviews', label: 'Revisão da IA', icon: <Sparkles className="w-4 h-4" />, count: reviews.filter((review) => review.kind === 'ai_suggestion' && review.status === 'pending').length },
+    { id: 'overview', label: isSpanish ? 'Vista general' : 'Visão geral', icon: <ShieldCheck className="w-4 h-4" /> },
+    { id: 'reviews', label: isSpanish ? 'Revisión de IA' : 'Revisão da IA', icon: <Sparkles className="w-4 h-4" />, count: reviews.filter((review) => review.kind === 'ai_suggestion' && review.status === 'pending').length },
     { id: 'bugs', label: 'Bugs', icon: <BugIcon />, count: reviews.filter((review) => review.kind === 'bug' && !['resolved', 'rejected'].includes(review.status)).length },
-    { id: 'ideas', label: 'Ideias', icon: <Lightbulb className="w-4 h-4" />, count: reviews.filter((review) => review.kind === 'operator_idea' && review.status === 'pending').length },
-    { id: 'knowledge', label: 'Conhecimento', icon: <LockKeyhole className="w-4 h-4" /> },
-    { id: 'events', label: 'Auditoria', icon: <ClipboardCheck className="w-4 h-4" />, count: events.length },
+    { id: 'ideas', label: isSpanish ? 'Ideas' : 'Ideias', icon: <Lightbulb className="w-4 h-4" />, count: reviews.filter((review) => review.kind === 'operator_idea' && review.status === 'pending').length },
+    { id: 'knowledge', label: isSpanish ? 'Conocimiento' : 'Conhecimento', icon: <LockKeyhole className="w-4 h-4" /> },
+    { id: 'events', label: isSpanish ? 'Auditoría' : 'Auditoria', icon: <ClipboardCheck className="w-4 h-4" />, count: events.length },
   ];
 
   return (
@@ -244,17 +247,17 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-violet-300 text-xs font-semibold uppercase tracking-[0.18em]">
-            <ShieldCheck className="w-4 h-4" /> Governança da operação
+            <ShieldCheck className="w-4 h-4" /> {isSpanish ? 'Gobernanza de la operación' : 'Governança da operação'}
           </div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white mt-2">Central de Qualidade &amp; Aprendizado</h2>
-          <p className="text-sm text-slate-400 mt-2 max-w-3xl">A IA sugere. O operador corrige. O administrador decide o que pode virar regra, sempre com histórico e possibilidade de reversão.</p>
+          <h2 className="text-2xl sm:text-3xl font-bold text-white mt-2">{isSpanish ? 'Central de Calidad y Aprendizaje' : 'Central de Qualidade & Aprendizado'}</h2>
+          <p className="text-sm text-slate-400 mt-2 max-w-3xl">{isSpanish ? 'La IA sugiere. El operador corrige. El administrador decide qué puede convertirse en regla, siempre con historial y posibilidad de reversión.' : 'A IA sugere. O operador corrige. O administrador decide o que pode virar regra, sempre com histórico e possibilidade de reversão.'}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={loadData} className="inline-flex items-center gap-2 px-3 py-2 rounded-control border border-slate-700 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition-colors" disabled={loading}>
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> {isSpanish ? 'Actualizar' : 'Atualizar'}
           </button>
           <button onClick={() => setShowComposer(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-control bg-violet-500 text-white text-xs font-bold hover:bg-violet-400 transition-colors">
-            <Send className="w-3.5 h-3.5" /> Registrar item
+            <Send className="w-3.5 h-3.5" /> {isSpanish ? 'Registrar ítem' : 'Registrar item'}
           </button>
         </div>
       </div>
@@ -263,7 +266,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
         <div className="rounded-card border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-300 mt-0.5 flex-shrink-0" />
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-amber-200">Central ainda não conseguiu consultar a persistência</p>
+            <p className="text-sm font-semibold text-amber-200">{isSpanish ? 'La central todavía no pudo consultar la persistencia' : 'Central ainda não conseguiu consultar a persistência'}</p>
             <p className="text-xs text-amber-100/70 mt-1">{loadError} Se a migration 0040 ainda não foi aplicada no banco, a interface já está pronta, mas os registros só aparecerão depois da aplicação.</p>
           </div>
         </div>
@@ -282,11 +285,11 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       {activeTab === 'overview' && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-            <MetricCard label="Pendentes" value={metrics.pendingCount} tone="amber" icon={<Clock3 className="w-4 h-4" />} />
-            <MetricCard label="Corrigidas" value={metrics.correctedCount} tone="sky" icon={<Wrench className="w-4 h-4" />} />
-            <MetricCard label="Rejeitadas" value={metrics.rejectedCount} tone="rose" icon={<ThumbsDown className="w-4 h-4" />} />
-            <MetricCard label="Baixa confiança" value={metrics.lowConfidenceCount} tone="violet" icon={<CircleDot className="w-4 h-4" />} />
-            <MetricCard label="Itens revisados" value={metrics.totalReviews} tone="emerald" icon={<CheckCircle2 className="w-4 h-4" />} />
+            <MetricCard label={isSpanish ? 'Pendientes' : 'Pendentes'} value={metrics.pendingCount} tone="amber" icon={<Clock3 className="w-4 h-4" />} />
+            <MetricCard label={isSpanish ? 'Corregidas' : 'Corrigidas'} value={metrics.correctedCount} tone="sky" icon={<Wrench className="w-4 h-4" />} />
+            <MetricCard label={isSpanish ? 'Rechazadas' : 'Rejeitadas'} value={metrics.rejectedCount} tone="rose" icon={<ThumbsDown className="w-4 h-4" />} />
+            <MetricCard label={isSpanish ? 'Baja confianza' : 'Baixa confiança'} value={metrics.lowConfidenceCount} tone="violet" icon={<CircleDot className="w-4 h-4" />} />
+            <MetricCard label={isSpanish ? 'Ítems revisados' : 'Itens revisados'} value={metrics.totalReviews} tone="emerald" icon={<CheckCircle2 className="w-4 h-4" />} />
             <MetricCard label="Eventos" value={metrics.totalEvents} tone="slate" icon={<ClipboardCheck className="w-4 h-4" />} />
           </div>
 
@@ -294,8 +297,8 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             <div className="bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
-                  <h3 className="text-sm font-bold text-white">Sugestões automáticas para o admin</h3>
-                  <p className="text-xs text-slate-500 mt-1">Padrões observados nos registros revisados.</p>
+                  <h3 className="text-sm font-bold text-white">{isSpanish ? 'Sugerencias automáticas para el administrador' : 'Sugestões automáticas para o admin'}</h3>
+                  <p className="text-xs text-slate-500 mt-1">{isSpanish ? 'Patrones observados en los registros revisados.' : 'Padrões observados nos registros revisados.'}</p>
                 </div>
                 <Sparkles className="w-5 h-5 text-violet-300" />
               </div>
@@ -320,8 +323,8 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             <div className="bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
-                  <h3 className="text-sm font-bold text-white">Princípio de controle</h3>
-                  <p className="text-xs text-slate-500 mt-1">Ações críticas exigem confirmação humana.</p>
+                  <h3 className="text-sm font-bold text-white">{isSpanish ? 'Principio de control' : 'Princípio de controle'}</h3>
+                  <p className="text-xs text-slate-500 mt-1">{isSpanish ? 'Las acciones críticas requieren confirmación humana.' : 'Ações críticas exigem confirmação humana.'}</p>
                 </div>
                 <LockKeyhole className="w-5 h-5 text-emerald-300" />
               </div>
@@ -344,13 +347,13 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por título, descrição ou observação..." className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-control text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-400/50" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={isSpanish ? 'Buscá por título, descripción u observación...' : 'Buscar por título, descrição ou observação...'} className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-control text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-400/50" />
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Filter className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="appearance-none pl-8 pr-8 py-2.5 bg-slate-900 border border-slate-800 rounded-control text-xs text-slate-300 focus:outline-none focus:border-violet-400/50">
-                  <option value="all">Todos os estados</option>
+                  <option value="all">{isSpanish ? 'Todos los estados' : 'Todos os estados'}</option>
                   {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
                 <ChevronDown className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
@@ -358,7 +361,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
               <span className="text-[11px] text-slate-500 whitespace-nowrap">{filteredReviews.length} item(ns)</span>
             </div>
           </div>
-          {loading ? <LoadingState /> : filteredReviews.length === 0 ? <EmptyState icon={<FileSearch className="w-5 h-5" />} title="Nenhum item encontrado" text="Quando houver sugestões, bugs ou ideias, eles aparecerão aqui para revisão." /> : (
+          {loading ? <LoadingState /> : filteredReviews.length === 0 ? <EmptyState icon={<FileSearch className="w-5 h-5" />} title={isSpanish ? 'No se encontró ningún ítem' : 'Nenhum item encontrado'} text="Quando houver sugestões, bugs ou ideias, eles aparecerão aqui para revisão." /> : (
             <div className="grid xl:grid-cols-2 gap-3">
               {filteredReviews.map((review) => <ReviewCard key={review.id} review={review} onOpen={() => { setSelectedReviewId(review.id); setReviewNote(review.review_note || ''); }} />)}
             </div>
