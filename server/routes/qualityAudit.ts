@@ -13,6 +13,12 @@ import {
   type QualityReviewKind,
   type QualityReviewStatus,
 } from '../services/qualityAuditStore';
+import {
+  decideMemoryPatternReview,
+  listMemoryPatternReviews,
+  syncMemoryPatternReviewCandidates,
+  type MemoryPatternReviewStatus,
+} from '../services/memoryPatternReviewStore';
 
 interface QualityAuditRouterDeps {
   authenticateToken: RequestHandler;
@@ -41,9 +47,11 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
   router.get('/api/quality-audit', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const kind = parseKind(req.query.kind);
     const status = parseStatus(req.query.status);
-    const [reviews, events] = await Promise.all([
-      listQualityReviews(tenantOf(req), { kind, status }),
-      listQualityAuditEvents(tenantOf(req)),
+    const tenantId = tenantOf(req);
+    const [reviews, events, memoryPatternReviews] = await Promise.all([
+      listQualityReviews(tenantId, { kind, status }),
+      listQualityAuditEvents(tenantId),
+      listMemoryPatternReviews(tenantId),
     ]);
     const pendingCount = reviews.filter((item) => item.status === 'pending').length;
     const correctedCount = reviews.filter((item) => item.context?.decision === 'corrected').length;
@@ -54,6 +62,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
       events,
       recommendations: deriveQualityRecommendations(reviews),
       memoryCorrectionInsights: deriveMemoryCorrectionInsights(events),
+      memoryPatternReviews,
       metrics: {
         totalReviews: reviews.length,
         pendingCount,
@@ -63,6 +72,90 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
         totalEvents: events.length,
       },
     });
+  }));
+
+  /** Materializa na fila apenas candidatos recorrentes; não muda prompt, KB ou agente. */
+  router.post('/api/quality-audit/memory-pattern-reviews/sync', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const events = await listQualityAuditEvents(tenantId);
+    const insights = deriveMemoryCorrectionInsights(events);
+    const reviews = await syncMemoryPatternReviewCandidates({
+      tenantId,
+      candidates: insights.reviewCandidates,
+      agentRoutes: insights.byAgentRoute.map((item) => item.route),
+      createdBy: req.user?.id || null,
+    });
+    await recordQualityAuditEvent({
+      tenantId,
+      eventType: 'memory_pattern_queue_synced',
+      source: 'quality_admin',
+      entityType: 'memory_pattern_review_queue',
+      actorId: req.user?.id,
+      payload: { patternKeys: reviews.map((review) => review.pattern_key), count: reviews.length },
+    });
+    res.json({ reviews });
+  }));
+
+  /**
+   * Registra uma decisão humana sobre um padrão. Somente as decisões explícitas
+   * knowledge_draft e prompt_test criam um item de Qualidade para continuidade;
+   * nenhuma delas publica conteúdo nem altera o agente automaticamente.
+   */
+  router.patch('/api/quality-audit/memory-pattern-reviews/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const requestedStatus = req.body?.status;
+    const allowedStatuses: MemoryPatternReviewStatus[] = ['observed', 'knowledge_draft', 'prompt_test', 'dismissed'];
+    if (!allowedStatuses.includes(requestedStatus)) return res.status(400).json({ error: 'Decisão de padrão inválida.' });
+
+    const tenantId = tenantOf(req);
+    const existing = (await listMemoryPatternReviews(tenantId)).find((review) => review.id === req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Padrão não encontrado.' });
+
+    let linkedQualityReviewId = existing.linked_quality_review_id;
+    if (!linkedQualityReviewId && (requestedStatus === 'knowledge_draft' || requestedStatus === 'prompt_test')) {
+      const kind = requestedStatus === 'knowledge_draft' ? 'knowledge' : 'ai_suggestion';
+      const followUp = await createQualityReview({
+        tenantId,
+        kind,
+        status: requestedStatus === 'prompt_test' ? 'testing' : 'pending',
+        title: requestedStatus === 'knowledge_draft'
+          ? `Revisar conhecimento para padrão: ${existing.pattern_key}`
+          : `Teste controlado para padrão: ${existing.pattern_key}`,
+        description: `Origem: ${existing.evidence_count} correções humanas agregadas. Revise evidências redigidas antes de qualquer alteração publicada.`,
+        context: {
+          source: 'memory_pattern_review',
+          patternKey: existing.pattern_key,
+          evidenceCount: existing.evidence_count,
+          agentRoutes: existing.agent_routes,
+        },
+        createdBy: req.user?.id || null,
+      });
+      linkedQualityReviewId = followUp.id;
+    }
+
+    const review = await decideMemoryPatternReview({
+      tenantId,
+      reviewId: existing.id,
+      status: requestedStatus,
+      reviewNote: req.body?.reviewNote,
+      decidedBy: req.user?.id || null,
+      linkedQualityReviewId,
+    });
+    if (!review) return res.status(404).json({ error: 'Padrão não encontrado.' });
+    await recordQualityAuditEvent({
+      tenantId,
+      eventType: 'memory_pattern_review_decided',
+      source: 'quality_admin',
+      entityType: 'memory_pattern_review',
+      entityId: review.id,
+      actorId: req.user?.id,
+      payload: {
+        patternKey: review.pattern_key,
+        decision: review.status,
+        evidenceCount: review.evidence_count,
+        linkedQualityReview: !!review.linked_quality_review_id,
+      },
+    });
+    res.json({ review });
   }));
 
   // Operadores podem sugerir melhorias e reportar bugs, mas não podem publicar

@@ -74,6 +74,20 @@ interface MemoryCorrectionInsights {
   reviewCandidates: Array<{ field: string; count: number }>;
 }
 
+type MemoryPatternReviewStatus = 'pending' | 'observed' | 'knowledge_draft' | 'prompt_test' | 'dismissed';
+
+interface MemoryPatternReview {
+  id: string;
+  pattern_key: string;
+  evidence_count: number;
+  agent_routes: AgentRoute[];
+  status: MemoryPatternReviewStatus;
+  review_note: string | null;
+  linked_quality_review_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface QualityAuditCenterProps {
   onToast: (message: string) => void;
 }
@@ -193,6 +207,10 @@ function auditEventPresentation(event: QualityAuditEvent) {
       return { title: 'Feedback do operador registrado', summary: decision ? `O operador ${decisionLabel[decision] || 'registrou uma decisão sobre'} a sugestão da IA.` : 'O operador registrou feedback sobre uma sugestão da IA.' };
     case 'contact_memory_corrected':
       return { title: 'Memória do contato corrigida', summary: changedFields.length ? `Campos corrigidos: ${changedFields.join(', ')}. A alteração permanece sob revisão humana.` : 'Uma memória de contato foi corrigida sob revisão humana.' };
+    case 'memory_pattern_queue_synced':
+      return { title: 'Fila de padrões atualizada', summary: typeof payload.count === 'number' && payload.count > 0 ? `${payload.count} padrão(ões) recorrente(s) foram preparados para decisão humana.` : 'Não havia evidência recorrente suficiente para criar novos itens na fila.' };
+    case 'memory_pattern_review_decided':
+      return { title: 'Decisão sobre padrão registrada', summary: typeof payload.patternKey === 'string' ? `O padrão “${readableAuditField(payload.patternKey)}” recebeu uma decisão administrativa; nenhuma mudança automática foi aplicada.` : 'Uma decisão administrativa sobre padrão foi registrada.' };
     default:
       return { title: 'Atualização registrada', summary: 'Uma atualização operacional foi registrada nesta linha do tempo.' };
   }
@@ -236,6 +254,9 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [recommendations, setRecommendations] = useState<QualityRecommendation[]>([]);
   const [metrics, setMetrics] = useState({ totalReviews: 0, pendingCount: 0, correctedCount: 0, rejectedCount: 0, lowConfidenceCount: 0, totalEvents: 0 });
   const [memoryCorrectionInsights, setMemoryCorrectionInsights] = useState<MemoryCorrectionInsights>(EMPTY_MEMORY_CORRECTION_INSIGHTS);
+  const [memoryPatternReviews, setMemoryPatternReviews] = useState<MemoryPatternReview[]>([]);
+  const [syncingMemoryPatternQueue, setSyncingMemoryPatternQueue] = useState(false);
+  const [decidingMemoryPatternId, setDecidingMemoryPatternId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -260,6 +281,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       setEvents(data.events || []);
       setRecommendations(data.recommendations || []);
       setMemoryCorrectionInsights(data.memoryCorrectionInsights || EMPTY_MEMORY_CORRECTION_INSIGHTS);
+      setMemoryPatternReviews(data.memoryPatternReviews || []);
       setMetrics(data.metrics || { totalReviews: 0, pendingCount: 0, correctedCount: 0, rejectedCount: 0, lowConfidenceCount: 0, totalEvents: 0 });
     } catch (error: any) {
       setLoadError(error?.message || 'Não foi possível carregar os dados de auditoria.');
@@ -312,6 +334,46 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     }
   };
 
+  const syncMemoryPatternQueue = async () => {
+    setSyncingMemoryPatternQueue(true);
+    try {
+      const response = await apiFetch('/api/quality-audit/memory-pattern-reviews/sync', { method: 'POST' });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível atualizar a fila de padrões.');
+      onToast(data?.reviews?.length ? 'Fila de padrões atualizada para revisão humana.' : 'Ainda não há padrão recorrente suficiente para a fila.');
+      await loadData();
+    } catch (error: any) {
+      onToast(error?.message || 'Não foi possível atualizar a fila de padrões.');
+    } finally {
+      setSyncingMemoryPatternQueue(false);
+    }
+  };
+
+  const decideMemoryPattern = async (reviewId: string, status: Exclude<MemoryPatternReviewStatus, 'pending'>, reviewNote?: string) => {
+    setDecidingMemoryPatternId(reviewId);
+    try {
+      const response = await apiFetch(`/api/quality-audit/memory-pattern-reviews/${encodeURIComponent(reviewId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, reviewNote }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível registrar a decisão do padrão.');
+      const labels: Record<Exclude<MemoryPatternReviewStatus, 'pending'>, string> = {
+        observed: 'mantido em observação',
+        knowledge_draft: 'encaminhado para rascunho de conhecimento',
+        prompt_test: 'encaminhado para teste controlado',
+        dismissed: 'dispensado',
+      };
+      onToast(`Padrão ${labels[status]}. Nenhuma mudança foi aplicada ao agente automaticamente.`);
+      await loadData();
+    } catch (error: any) {
+      onToast(error?.message || 'Não foi possível registrar a decisão do padrão.');
+    } finally {
+      setDecidingMemoryPatternId(null);
+    }
+  };
+
   const submitComposer = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!composerTitle.trim() || !composerDescription.trim()) return;
@@ -343,7 +405,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     { id: 'bugs', label: 'Bugs', icon: <BugIcon />, count: reviews.filter((review) => review.kind === 'bug' && !['resolved', 'rejected'].includes(review.status)).length },
     { id: 'ideas', label: isSpanish ? 'Ideas' : 'Ideias', icon: <Lightbulb className="w-4 h-4" />, count: reviews.filter((review) => review.kind === 'operator_idea' && review.status === 'pending').length },
     { id: 'knowledge', label: isSpanish ? 'Conocimiento' : 'Conhecimento', icon: <LockKeyhole className="w-4 h-4" /> },
-    { id: 'memory', label: isSpanish ? 'Memoria' : 'Memória', icon: <Wrench className="w-4 h-4" />, count: memoryCorrectionInsights.totalCorrections },
+    { id: 'memory', label: isSpanish ? 'Memoria' : 'Memória', icon: <Wrench className="w-4 h-4" />, count: memoryPatternReviews.filter((review) => review.status === 'pending').length || memoryCorrectionInsights.totalCorrections },
     { id: 'events', label: isSpanish ? 'Auditoría' : 'Auditoria', icon: <ClipboardCheck className="w-4 h-4" />, count: events.length },
   ];
 
@@ -475,7 +537,16 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       )}
 
       {activeTab === 'memory' && (
-        <MemoryCorrectionPatternsPanel insights={memoryCorrectionInsights} loading={loading} isSpanish={isSpanish} />
+        <MemoryCorrectionPatternsPanel
+          insights={memoryCorrectionInsights}
+          reviews={memoryPatternReviews}
+          loading={loading}
+          isSpanish={isSpanish}
+          isSyncing={syncingMemoryPatternQueue}
+          decidingReviewId={decidingMemoryPatternId}
+          onSyncQueue={() => void syncMemoryPatternQueue()}
+          onDecide={(reviewId, status, note) => void decideMemoryPattern(reviewId, status, note)}
+        />
       )}
 
       {activeTab === 'events' && (
@@ -549,7 +620,25 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   );
 };
 
-export function MemoryCorrectionPatternsPanel({ insights, loading, isSpanish }: { insights: MemoryCorrectionInsights; loading: boolean; isSpanish: boolean }) {
+export function MemoryCorrectionPatternsPanel({
+  insights,
+  reviews = [],
+  loading,
+  isSpanish,
+  isSyncing = false,
+  decidingReviewId = null,
+  onSyncQueue,
+  onDecide,
+}: {
+  insights: MemoryCorrectionInsights;
+  reviews?: MemoryPatternReview[];
+  loading: boolean;
+  isSpanish: boolean;
+  isSyncing?: boolean;
+  decidingReviewId?: string | null;
+  onSyncQueue?: () => void;
+  onDecide?: (reviewId: string, status: Exclude<MemoryPatternReviewStatus, 'pending'>, note?: string) => void;
+}) {
   if (loading) return <LoadingState />;
   const visibleTopFields = insights.topFields.filter((item) => isSafeMemoryCorrectionField(item.field));
   const visibleRoutes = insights.byAgentRoute.filter((item) => typeof item.route === 'string');
@@ -605,10 +694,110 @@ export function MemoryCorrectionPatternsPanel({ insights, loading, isSpanish }: 
         <section className="rounded-card border border-amber-500/25 bg-amber-500/5 p-4"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" /><div><h4 className="text-sm font-bold text-amber-100">{isSpanish ? 'Revisión humana recomendada' : 'Revisão humana recomendada'}</h4><p className="mt-1 text-xs leading-relaxed text-amber-100/75">{isSpanish ? 'Estos campos ya tienen tres o más correcciones. Revise ejemplos y la base de conocimiento antes de proponer cualquier ajuste de prompt o flujo.' : 'Estes campos já somam três ou mais correções. Revise exemplos e a base de conhecimento antes de propor qualquer ajuste de prompt ou fluxo.'}</p><div className="mt-2 flex flex-wrap gap-1.5">{visibleReviewCandidates.map((item) => <span key={item.field} className="rounded-pill border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-100">{fieldLabel(item.field)} · {item.count}</span>)}</div></div></div></section>
       )}
 
+      <MemoryPatternReviewQueue
+        reviews={reviews}
+        candidates={visibleReviewCandidates}
+        isSpanish={isSpanish}
+        isSyncing={isSyncing}
+        decidingReviewId={decidingReviewId}
+        onSyncQueue={onSyncQueue}
+        onDecide={onDecide}
+      />
+
       {visibleRecentCorrections.length > 0 && (
         <section className="overflow-hidden rounded-card border border-slate-800 bg-slate-900/70"><div className="border-b border-slate-800 p-4"><h4 className="text-sm font-bold text-white">{isSpanish ? 'Evidencias recientes' : 'Evidências recentes'}</h4><p className="mt-1 text-[11px] text-slate-500">{isSpanish ? 'Secuencia redigida para priorizar revisión; sin datos del contacto.' : 'Sequência redigida para priorizar revisão; sem dados do contato.'}</p></div><div className="divide-y divide-slate-800/80">{visibleRecentCorrections.map((item, index) => <article key={`${item.createdAt}-${index}`} className="p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div className="flex flex-wrap items-center gap-1.5">{item.fields.map((field) => <span key={field} className="rounded-pill border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold text-sky-200">{fieldLabel(field)}</span>)}<span className="rounded-pill border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">{safeAgentRouteLabel(item.agentRoute)}</span></div><time className="text-[10px] text-slate-500">{formatDate(item.createdAt)}</time></div></article>)}</div></section>
       )}
     </div>
+  );
+}
+
+const MEMORY_PATTERN_STATUS_LABELS: Record<MemoryPatternReviewStatus, string> = {
+  pending: 'Aguardando decisão',
+  observed: 'Manter em observação',
+  knowledge_draft: 'Rascunho de conhecimento',
+  prompt_test: 'Teste controlado',
+  dismissed: 'Dispensado',
+};
+
+export function MemoryPatternReviewQueue({
+  reviews,
+  candidates,
+  isSpanish,
+  isSyncing,
+  decidingReviewId,
+  onSyncQueue,
+  onDecide,
+}: {
+  reviews: MemoryPatternReview[];
+  candidates: Array<{ field: string; count: number }>;
+  isSpanish: boolean;
+  isSyncing: boolean;
+  decidingReviewId: string | null;
+  onSyncQueue?: () => void;
+  onDecide?: (reviewId: string, status: Exclude<MemoryPatternReviewStatus, 'pending'>, note?: string) => void;
+}) {
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const visibleReviews = reviews.filter((review) => isSafeMemoryCorrectionField(review.pattern_key));
+  const pendingCount = visibleReviews.filter((review) => review.status === 'pending').length;
+  const orderedReviews = [...visibleReviews].sort((left, right) => {
+    const leftPending = left.status === 'pending';
+    const rightPending = right.status === 'pending';
+    if (leftPending === rightPending) return right.updated_at.localeCompare(left.updated_at);
+    return leftPending ? -1 : 1;
+  });
+  const fieldLabel = (field: string) => AUDIT_FIELD_LABELS[field] || readableAuditField(field);
+
+  return (
+    <section className="overflow-hidden rounded-card border border-slate-800 bg-slate-900/70">
+      <div className="flex flex-col gap-3 border-b border-slate-800 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-sky-300"><ClipboardCheck className="h-3.5 w-3.5" /> {isSpanish ? 'Fila supervisada' : 'Fila supervisionada'}</div>
+          <h4 className="mt-1 text-sm font-bold text-white">{isSpanish ? 'Decisiones sobre patrones recurrentes' : 'Decisões sobre padrões recorrentes'}</h4>
+          <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-400">{isSpanish ? 'Cada decisión es administrativa. Crear conocimiento o prueba controlada solo abre un ítem de Calidad; no publica ni cambia el agente.' : 'Cada decisão é administrativa. Criar conhecimento ou teste controlado apenas abre um item de Qualidade; não publica nem altera o agente.'}</p>
+        </div>
+        {onSyncQueue && <button type="button" onClick={onSyncQueue} disabled={isSyncing || candidates.length === 0} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-control border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] font-bold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />{isSyncing ? (isSpanish ? 'Actualizando...' : 'Atualizando...') : (isSpanish ? 'Actualizar fila' : 'Atualizar fila')}</button>}
+      </div>
+
+      {visibleReviews.length === 0 ? (
+        <div className="p-5">
+          <EmptyState icon={<ClipboardCheck className="h-5 w-5" />} title={candidates.length ? (isSpanish ? 'Patrones listos para entrar en la fila' : 'Padrões prontos para entrar na fila') : (isSpanish ? 'Sin patrones para revisar' : 'Nenhum padrão para revisar')} text={candidates.length ? (isSpanish ? 'Actualice la fila para materializar estos candidatos y decidir uno por uno.' : 'Atualize a fila para materializar estes candidatos e decidir um por um.') : (isSpanish ? 'La fila se abre cuando un mismo campo alcanza evidencia recurrente.' : 'A fila é aberta quando um mesmo campo alcança evidência recorrente.')} />
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-800/80">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/35 px-4 py-2 text-[10px] text-slate-400"><span>{pendingCount ? `${pendingCount} ${pendingCount === 1 ? 'decisão pendente' : 'decisões pendentes'}` : 'Todas as decisões foram registradas.'}</span><span>Sem conteúdo de contato, mensagens ou valores corrigidos.</span></div>
+          {orderedReviews.map((review) => {
+            const isPending = review.status === 'pending';
+            const isDeciding = decidingReviewId === review.id;
+            return (
+              <article key={review.id} className="p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2"><h5 className="text-sm font-bold text-white">{fieldLabel(review.pattern_key)}</h5><span className={`rounded-pill border px-2 py-0.5 text-[10px] font-bold ${isPending ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : review.status === 'dismissed' ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200'}`}>{MEMORY_PATTERN_STATUS_LABELS[review.status]}</span></div>
+                    <p className="mt-1 text-xs text-slate-400">{review.evidence_count} {review.evidence_count === 1 ? 'correção agregada' : 'correções agregadas'} • atualizado em {formatDate(review.updated_at)}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">{review.agent_routes.map((route) => <span key={route} className="rounded-pill border border-slate-700 bg-slate-950/60 px-2 py-0.5 text-[10px] text-slate-300">{safeAgentRouteLabel(route)}</span>)}</div>
+                  </div>
+                  {review.linked_quality_review_id && <span className="inline-flex items-center gap-1 rounded-pill border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-[10px] font-bold text-sky-200"><ArrowRight className="h-3 w-3" /> Item de Qualidade criado</span>}
+                </div>
+
+                {isPending ? (
+                  <div className="mt-3 rounded-panel border border-slate-800 bg-slate-950/45 p-3">
+                    <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">{isSpanish ? 'Nota administrativa opcional' : 'Nota administrativa opcional'}<textarea value={notes[review.id] || ''} onChange={(event) => setNotes((current) => ({ ...current, [review.id]: event.target.value }))} maxLength={600} rows={2} placeholder={isSpanish ? 'Justifique la decisión para la próxima revisión...' : 'Justifique a decisão para a próxima revisão...'} className="mt-1.5 w-full resize-none rounded-control border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-400/50 focus:outline-none" /></label>
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      <button type="button" onClick={() => onDecide?.(review.id, 'observed', notes[review.id])} disabled={!onDecide || isDeciding} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-slate-700 bg-slate-800 px-3 py-2 text-[11px] font-bold text-slate-200 hover:bg-slate-700 disabled:opacity-50"><CheckCircle2 className="h-3.5 w-3.5" />Manter observação</button>
+                      <button type="button" onClick={() => onDecide?.(review.id, 'knowledge_draft', notes[review.id])} disabled={!onDecide || isDeciding} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"><LockKeyhole className="h-3.5 w-3.5" />Rascunho de conhecimento</button>
+                      <button type="button" onClick={() => onDecide?.(review.id, 'prompt_test', notes[review.id])} disabled={!onDecide || isDeciding} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-[11px] font-bold text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"><Wrench className="h-3.5 w-3.5" />Teste controlado</button>
+                      <button type="button" onClick={() => onDecide?.(review.id, 'dismissed', notes[review.id])} disabled={!onDecide || isDeciding} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] font-bold text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"><ThumbsDown className="h-3.5 w-3.5" />Dispensar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex items-start gap-1.5 rounded-panel border border-slate-800 bg-slate-950/45 p-2.5 text-[11px] leading-relaxed text-slate-400"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" /><span>{review.review_note || 'Decisão registrada sem promover alteração automática no agente.'}</span></div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
