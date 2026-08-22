@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { AppLanguage, interpolate, TranslationKey, translations } from '../i18n/translations';
 
-export type AppTheme = 'dark' | 'light';
+export type AppTheme = 'dark' | 'light' | 'blue';
 
 type Translate = (key: TranslationKey, values?: Record<string, string | number>) => string;
 
@@ -30,7 +30,7 @@ function readPreference<T extends string>(key: string, allowed: readonly T[], fa
 
 export const AppPreferencesProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   const [language, setLanguageState] = useState<AppLanguage>(() => readPreference<AppLanguage>(LANGUAGE_STORAGE_KEY, ['pt', 'es'], 'pt'));
-  const [theme, setThemeState] = useState<AppTheme>(() => readPreference<AppTheme>(THEME_STORAGE_KEY, ['dark', 'light'], 'dark'));
+  const [theme, setThemeState] = useState<AppTheme>(() => readPreference<AppTheme>(THEME_STORAGE_KEY, ['dark', 'light', 'blue'], 'dark'));
 
   useEffect(() => {
     document.documentElement.lang = language === 'es' ? 'es-PY' : 'pt-BR';

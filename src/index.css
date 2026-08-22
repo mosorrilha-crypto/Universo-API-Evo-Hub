@@ -330,3 +330,66 @@ html[data-theme='light'] .custom-scrollbar::-webkit-scrollbar-thumb {
   background: #0f9f88;
   box-shadow: none;
 }
+
+/* Modo azul operacional — inspirado em sistemas ERP e na referência enviada. */
+html[data-theme='blue'] {
+  color-scheme: dark;
+  --surface-deep: #071b2d;
+  --surface-panel: rgba(10, 43, 70, 0.9);
+  --surface-raised: rgba(16, 75, 116, 0.78);
+  --line-subtle: rgba(125, 211, 252, 0.2);
+  --shadow-premium: 0 20px 50px -32px rgba(2, 18, 39, 0.85);
+}
+
+html[data-theme='blue'] body {
+  color: #e8f4ff;
+  background:
+    radial-gradient(circle at 8% -8%, rgba(14, 165, 233, 0.22), transparent 30rem),
+    radial-gradient(circle at 94% 4%, rgba(37, 99, 235, 0.2), transparent 28rem),
+    var(--surface-deep);
+}
+
+html[data-theme='blue'] .bg-slate-950,
+html[data-theme='blue'] .bg-slate-950\/90,
+html[data-theme='blue'] .bg-slate-950\/80,
+html[data-theme='blue'] .bg-slate-950\/50 { background-color: #06182a !important; }
+
+html[data-theme='blue'] .bg-slate-900,
+html[data-theme='blue'] .bg-slate-900\/90,
+html[data-theme='blue'] .bg-slate-900\/80,
+html[data-theme='blue'] .bg-slate-900\/70,
+html[data-theme='blue'] .bg-slate-900\/65 { background-color: #0b2b47 !important; }
+
+html[data-theme='blue'] .bg-slate-800,
+html[data-theme='blue'] .bg-slate-800\/65,
+html[data-theme='blue'] .bg-slate-800\/70,
+html[data-theme='blue'] .bg-slate-800\/90 { background-color: #123e62 !important; }
+
+html[data-theme='blue'] .border-slate-800,
+html[data-theme='blue'] .border-slate-800\/80,
+html[data-theme='blue'] .border-slate-800\/60,
+html[data-theme='blue'] .border-slate-700,
+html[data-theme='blue'] .border-slate-700\/80 { border-color: #215276 !important; }
+
+html[data-theme='blue'] .text-white,
+html[data-theme='blue'] .text-slate-100,
+html[data-theme='blue'] .text-slate-200,
+html[data-theme='blue'] .text-slate-300,
+html[data-theme='blue'] .text-\[\#e9edef\] { color: #e8f4ff !important; }
+
+html[data-theme='blue'] .text-slate-400,
+html[data-theme='blue'] .text-slate-500,
+html[data-theme='blue'] .text-slate-600,
+html[data-theme='blue'] .placeholder-slate-400 { color: #9fc1da !important; }
+
+html[data-theme='blue'] .custom-scrollbar { scrollbar-color: #1688c7 #0b2b47; }
+html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-track { background: #0b2b47; border-color: #215276; }
+html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-thumb { background: #1688c7; box-shadow: none; }
+html[data-theme='blue'] .bg-emerald-500 { background-color: #0b78b5 !important; }
+html[data-theme='blue'] .text-emerald-400,
+html[data-theme='blue'] .text-emerald-300 { color: #69d0ff !important; }
+html[data-theme='blue'] .border-emerald-500\/25,
+html[data-theme='blue'] .border-emerald-400\/25 { border-color: rgba(56, 189, 248, 0.42) !important; }
+html[data-theme='blue'] .bg-emerald-500\/10,
+html[data-theme='blue'] .bg-emerald-500\/15 { background-color: rgba(14, 165, 233, 0.16) !important; }
+html[data-theme='blue'] .hover\:bg-emerald-500:hover { background-color: #1596d0 !important; }

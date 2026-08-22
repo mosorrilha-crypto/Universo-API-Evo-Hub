@@ -59,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTenant,
   onSelectTenant,
 }) => {
-  const { language, setLanguage, theme, toggleTheme, t } = useAppPreferences();
+  const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const [isInstalledApp] = useState(() => isStandalonePwa());
   const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
   const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
@@ -141,14 +141,24 @@ export const Header: React.FC<HeaderProps> = ({
           ))}
         </div>
       </div>
-      <button
-        onClick={toggleTheme}
-        title={theme === 'dark' ? t('lightMode') : t('darkMode')}
-        aria-label={theme === 'dark' ? t('lightMode') : t('darkMode')}
-        className="rounded-control border border-slate-700 bg-slate-950/50 p-1.5 text-emerald-400 transition-colors hover:border-emerald-500/35 hover:bg-emerald-500/10"
-      >
-        {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-      </button>
+      <div className="flex items-center gap-0.5 rounded-control border border-slate-700 bg-slate-950/50 p-0.5" role="group" aria-label="Modo visual">
+        {([
+          { id: 'dark' as const, label: 'Escuro', icon: Moon },
+          { id: 'light' as const, label: 'Claro', icon: Sun },
+          { id: 'blue' as const, label: 'Azul', icon: Layers },
+        ]).map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTheme(id)}
+            title={`Modo ${label}`}
+            aria-label={`Modo ${label}`}
+            aria-pressed={theme === id}
+            className={`rounded px-1.5 py-1 transition-colors ${theme === id ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-slate-100'}`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+          </button>
+        ))}
+      </div>
     </div>
   );
 
