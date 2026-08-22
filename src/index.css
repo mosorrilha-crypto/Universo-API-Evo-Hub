@@ -1565,3 +1565,47 @@ html[data-theme='light'] .atendimento-payment-verification__action {
   background: #A84E00 !important;
   border-color: #873F00 !important;
 }
+
+
+/* Qualidade da IA: princípio de controle e estados sempre legíveis no claro. */
+.quality-workspace__control-card,
+.quality-workspace__control-quote,
+.quality-workspace__control-pill {
+  color: var(--text-primary);
+}
+
+html[data-theme='light'] .quality-workspace__control-card {
+  background: #FFFFFF !important;
+  border-color: #D8E5E1 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-card h3 {
+  color: #173B37 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-card > div:first-child p {
+  color: #52706B !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-quote {
+  background: #ECF8F2 !important;
+  border-color: #9FD6BE !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-quote p {
+  color: #1F5B43 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-pill {
+  background: #F7FBFA !important;
+  border-color: #D8E5E1 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-pill > p:first-child {
+  color: #52706B !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-pill--violet > p:last-child { color: #6D28D9 !important; }
+html[data-theme='light'] .quality-workspace__control-pill--sky > p:last-child { color: #036B91 !important; }
+html[data-theme='light'] .quality-workspace__control-pill--amber > p:last-child { color: #8A5700 !important; }
+html[data-theme='light'] .quality-workspace__control-pill--emerald > p:last-child { color: #09734B !important; }

@@ -380,7 +380,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
               )}
             </div>
 
-            <div className="bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
+            <div className="quality-workspace__control-card bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
                   <h3 className="text-sm font-bold text-white">{isSpanish ? 'Principio de control' : 'Princípio de controle'}</h3>
@@ -388,7 +388,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
                 </div>
                 <LockKeyhole className="w-5 h-5 text-emerald-300" />
               </div>
-              <div className="rounded-panel border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <div className="quality-workspace__control-quote rounded-panel border border-emerald-500/20 bg-emerald-500/5 p-4">
                 <p className="text-sm leading-relaxed text-emerald-100">“A IA pode classificar um comprovante e sugerir uma cobrança, mas nunca confirmar o pagamento sozinha.”</p>
               </div>
               <div className="grid grid-cols-2 gap-2 mt-3">
@@ -507,7 +507,7 @@ function MetricCard({ label, value, tone, icon }: { label: string; value: number
 }
 
 function ControlPill({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return <div className="rounded-control border border-slate-800 bg-slate-950/60 p-2"><p className="text-[10px] text-slate-500">{label}</p><p className={`text-[11px] font-semibold mt-0.5 ${tone === 'emerald' ? 'text-emerald-300' : tone === 'amber' ? 'text-amber-300' : tone === 'sky' ? 'text-sky-300' : 'text-violet-300'}`}>{value}</p></div>;
+  return <div className={`quality-workspace__control-pill quality-workspace__control-pill--${tone} rounded-control border border-slate-800 bg-slate-950/60 p-2`}><p className="text-[10px] text-slate-500">{label}</p><p className={`text-[11px] font-semibold mt-0.5 ${tone === 'emerald' ? 'text-emerald-300' : tone === 'amber' ? 'text-amber-300' : tone === 'sky' ? 'text-sky-300' : 'text-violet-300'}`}>{value}</p></div>;
 }
 
 const ReviewCard: React.FC<{ review: QualityReview; onOpen: () => void }> = ({ review, onOpen }) => {
