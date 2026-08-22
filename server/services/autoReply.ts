@@ -1128,7 +1128,9 @@ async function executeCalendarTool(
         return { response: { erro: `Ferramenta desconhecida: ${name}` }, summary: `Tentou chamar uma ferramenta desconhecida (${name}).` };
     }
   } catch (err: any) {
-    return { response: { erro: err.message }, summary: `Erro ao executar ${name}: ${err.message}` };
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.warn(`⚠️  [Calendar] Falha na ferramenta "${name}" (tenant=${tenantId}, phone=${phone}, messageId=${messageId ?? '-'}) — ${errorMessage}`, err);
+    return { response: { erro: errorMessage }, summary: `Erro ao executar ${name}: ${errorMessage}` };
   }
 }
 
