@@ -2832,6 +2832,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               de filtros ao lado de "Tudo"/"Não lidos" — mais perto de onde
               afetam (a lista de conversas), sem duplicar espaço aqui. */}
 
+          {/* No mobile, agenda e filtro de contatos ficam no menu contextual para
+              a barra priorizar pendências sem remover recursos recorrentes. */}
+          <div className="hidden sm:contents">
           {/* Modo "somente anúncios" (pedido real, 14/08/2026): a Monique tem
               dois números ligados hoje — o pessoal dela (conectado
               temporariamente pra não perder mensagem) e o dedicado do agente.
@@ -2891,14 +2894,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
           </button>
 
-          {/* Configurações pontuais (Auto IA, notificações, limpar testes,
-              desconectar Calendar) — mexidas uma vez e esquecidas, não no
-              dia a dia. Ficam atrás deste botão em vez de sempre visíveis,
-              pra barra não quebrar em 3-4 linhas no mobile. */}
+          </div>
+
+          {/* Configurações pontuais e ações secundárias no mobile — a ação de
+              pendências continua como prioridade visível na barra de trabalho. */}
           <button
             type="button"
             onClick={() => setIsToolbarSettingsOpen((v) => !v)}
-            title="Configurações (Auto IA, notificações, limpar testes)"
+            title="Configurações e ações secundárias"
             className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               isToolbarSettingsOpen
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
@@ -2912,6 +2915,42 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
         {isToolbarSettingsOpen && (
           <div className="w-full flex flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
+            {/* Ações diárias preservadas dentro do menu no mobile; no desktop,
+                permanecem na barra principal para acesso imediato. */}
+            <div className="flex w-full flex-wrap items-center gap-2 sm:hidden">
+              <button
+                onClick={handleToggleAdsOnly}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+                  adsOnly
+                    ? 'bg-[var(--action)] border-[var(--action)] text-[var(--action-contrast)]'
+                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Filter className="w-3.5 h-3.5" />
+                <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
+              </button>
+              <button
+                onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+                  googleCalendarConnected
+                    ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
+                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <CalendarIcon className="w-3.5 h-3.5" />
+                <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
+              </button>
+              {adsOnly && (
+                <button
+                  type="button"
+                  onClick={openAdTriggersModal}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-800 bg-slate-950/80 text-[11px] font-semibold text-slate-300 hover:text-white"
+                >
+                  Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}
+                </button>
+              )}
+            </div>
+
             {/* Reconectar WhatsApp via QR Code — só faz sentido pra tenant
                 conectado via Evolution API (statusAvailable) e só aparece
                 pra quem tem permissão de admin+ (canManageWhatsAppConnection,
@@ -3152,17 +3191,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   destacado por padrão mesmo com o backend em outro estado,
                   passando confiança falsa pro operador de que a IA estava
                   respondendo. */}
-              {agentStatusLoadFailed && (
-                <button
-                  type="button"
-                  onClick={loadAgentStatus}
-                  title="Não foi possível confirmar o status real do agente no servidor — os pills abaixo podem não refletir a verdade. Clique pra tentar de novo."
-                  className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-all cursor-pointer"
-                >
-                  <AlertCircle className="w-3 h-3" />
-                  <span>Status incerto — recarregar</span>
-                </button>
-              )}
               <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
                 {(['active', 'restricted', 'paused'] as const).map((status) => (
                   <button
@@ -3184,6 +3212,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
                   </button>
                 ))}
+                {agentStatusLoadFailed && (
+                  <button
+                    type="button"
+                    onClick={loadAgentStatus}
+                    title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+                    className="ml-0.5 inline-flex items-center gap-1 rounded-lg border-l border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    <span>Erro</span>
+                    <span className="sr-only">Status incerto — recarregar</span>
+                  </button>
+                )}
               </div>
             </div>
 
