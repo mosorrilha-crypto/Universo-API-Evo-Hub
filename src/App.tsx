@@ -21,6 +21,7 @@ import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { OperationsCenter } from './components/OperationsCenter';
+import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { isStandalonePwa } from './lib/pwa';
@@ -846,11 +847,11 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="min-w-0 flex-1 w-full p-4 sm:p-6 lg:p-8 xl:p-10 space-y-6">
+      <main className="min-w-0 flex-1 w-full p-3 sm:p-4 lg:p-5 xl:p-6 space-y-4">
         
         {/* Toast Alert */}
         {toastMsg && (
-          <div className="fixed top-20 right-6 z-50 bg-emerald-600 text-slate-950 font-bold px-4 py-2.5 rounded-xl shadow-xl animate-fade-in border border-emerald-400 text-xs flex items-center gap-2">
+          <div className="fixed top-4 right-4 z-50 bg-emerald-600 text-slate-950 font-bold px-3 py-2 rounded-xl shadow-xl animate-fade-in border border-emerald-400 text-xs flex items-center gap-2">
             <span>{toastMsg}</span>
           </div>
         )}

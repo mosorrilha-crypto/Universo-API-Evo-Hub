@@ -109,43 +109,43 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   ].filter((action) => action.visible);
 
   return (
-    <section className="space-y-6 animate-page-enter">
-      <div className="relative overflow-hidden rounded-card border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/35 px-5 py-6 sm:px-7 sm:py-8 shadow-xl shadow-slate-950/30">
-        <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-emerald-400/10 blur-3xl" />
-        <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+    <section className="space-y-4 animate-page-enter">
+      <div className="relative overflow-hidden rounded-card border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/35 px-4 py-4 sm:px-5 sm:py-5 shadow-xl shadow-slate-950/30">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-emerald-400/10 blur-3xl" />
+        <div className="relative flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-pill border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-300">
+            <div className="inline-flex items-center gap-1.5 rounded-pill border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-300">
               <Sparkles className="h-3.5 w-3.5" /> Operação do dia
             </div>
-            <h1 className="mt-4 text-2xl font-bold tracking-tight text-white sm:text-3xl">Bom dia, {firstName(currentUser?.name)}.</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
+            <h1 className="mt-2.5 text-xl font-bold tracking-tight text-white sm:text-2xl">Bom dia, {firstName(currentUser?.name)}.</h1>
+            <p className="mt-1.5 max-w-2xl text-[13px] leading-5 text-slate-300">
               {priorityCount > 0
                 ? `Existem ${priorityCount} ponto(s) que merecem sua atenção antes de seguir com a rotina.`
                 : 'Sua operação está organizada. Use esta central para acompanhar o que acontece ao longo do dia.'}
             </p>
           </div>
-          <div className="rounded-panel border border-white/8 bg-slate-950/35 px-4 py-3 text-left xl:text-right">
+          <div className="rounded-panel border border-white/8 bg-slate-950/35 px-3 py-2 text-left xl:text-right">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Empresa ativa</p>
-            <p className="mt-1 text-sm font-bold text-white">{activeTenant.name}</p>
-            <p className="mt-1 text-xs capitalize text-slate-400">{formatShortDate(new Date().toISOString())}</p>
+            <p className="mt-0.5 text-[13px] font-bold text-white">{activeTenant.name}</p>
+            <p className="mt-0.5 text-[11px] capitalize text-slate-400">{formatShortDate(new Date().toISOString())}</p>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Pendências humanas" value={summary.unresolved.length} detail="Comprovantes e conversas que precisam de decisão" icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
         <MetricCard label="Leads em andamento" value={summary.openLeads.length} detail="Oportunidades que ainda podem virar venda" icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
         <MetricCard label="Próximas ações" value={summary.uncompletedTasks.length} detail="Tarefas comerciais ainda abertas" icon={<Clock3 className="h-4 w-4" />} tone="violet" onClick={() => onNavigate('crm')} />
         <MetricCard label="Recebido no período" value={currency(summary.paidRevenue, activeTenant)} detail="Registros pagos já confirmados" icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('agenda_financeiro')} disabled={!canSeeFinancial} />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(290px,0.8fr)]">
-        <section className="rounded-card border border-slate-800 bg-slate-900/80 p-5 shadow-lg shadow-slate-950/20 sm:p-6">
+      <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1.45fr)_minmax(270px,0.8fr)]">
+        <section className="rounded-card border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">Fila inteligente</p>
-              <h2 className="mt-1 text-lg font-bold text-white">O que merece atenção agora</h2>
-              <p className="mt-1 text-sm text-slate-400">Ações reais organizadas pela prioridade da operação.</p>
+              <h2 className="mt-1 text-base font-bold text-white">O que merece atenção agora</h2>
+              <p className="mt-0.5 text-xs text-slate-400">Ações reais organizadas pela prioridade da operação.</p>
             </div>
             {summary.unresolved.length > 0 && (
               <button onClick={() => onNavigate('escalations')} className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-300 transition-colors hover:text-emerald-100">
@@ -177,24 +177,24 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
               })}
             </div>
           ) : (
-            <div className="mt-5 rounded-panel border border-dashed border-emerald-500/25 bg-emerald-500/5 px-5 py-9 text-center">
-              <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-400" />
-              <h3 className="mt-3 text-sm font-bold text-slate-100">Nenhuma pendência crítica agora</h3>
+            <div className="mt-3 rounded-panel border border-dashed border-emerald-500/25 bg-emerald-500/5 px-4 py-5 text-center">
+              <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
+              <h3 className="mt-2 text-sm font-bold text-slate-100">Nenhuma pendência crítica agora</h3>
               <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-slate-400">As validações e acompanhamentos em aberto aparecerão aqui assim que precisarem de uma ação humana.</p>
             </div>
           )}
         </section>
 
-        <aside className="rounded-card border border-slate-800 bg-slate-900/80 p-5 shadow-lg shadow-slate-950/20 sm:p-6">
+        <aside className="rounded-card border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">Acessos rápidos</p>
-          <h2 className="mt-1 text-lg font-bold text-white">Siga sua rotina</h2>
-          <div className="mt-4 space-y-2">
+          <h2 className="mt-1 text-base font-bold text-white">Siga sua rotina</h2>
+          <div className="mt-3 space-y-1.5">
             {quickActions.map((action) => {
               const Icon = action.icon;
               return (
-                <button key={action.label} onClick={() => onNavigate(action.tab)} className="group flex w-full items-center gap-3 rounded-panel border border-slate-800 bg-slate-950/35 px-3 py-3 text-left transition-all hover:border-emerald-500/35 hover:bg-emerald-500/8">
-                  <span className="rounded-control border border-slate-700 bg-slate-800 p-2 text-emerald-400 group-hover:border-emerald-500/30 group-hover:bg-emerald-500/10"><Icon className="h-4 w-4" /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-100">{action.label}</span><span className="mt-0.5 block truncate text-[11px] text-slate-500">{action.description}</span></span>
+                <button key={action.label} onClick={() => onNavigate(action.tab)} className="group flex w-full items-center gap-2.5 rounded-panel border border-slate-800 bg-slate-950/35 px-2.5 py-2 text-left transition-all hover:border-emerald-500/35 hover:bg-emerald-500/8">
+                  <span className="rounded-control border border-slate-700 bg-slate-800 p-1.5 text-emerald-400 group-hover:border-emerald-500/30 group-hover:bg-emerald-500/10"><Icon className="h-3.5 w-3.5" /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-xs font-bold text-slate-100">{action.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{action.description}</span></span>
                   <ArrowRight className="h-4 w-4 text-slate-600 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-300" />
                 </button>
               );
@@ -220,10 +220,10 @@ const MetricCard: React.FC<{ label: string; value: string | number; detail: stri
     blue: 'border-sky-500/20 bg-sky-500/10 text-sky-300',
   };
   return (
-    <button disabled={disabled} onClick={onClick} className="group rounded-card border border-slate-800 bg-slate-900/80 p-4 text-left shadow-md shadow-slate-950/15 transition-all hover:-translate-y-0.5 hover:border-slate-700 disabled:cursor-default disabled:hover:translate-y-0">
-      <span className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-slate-400">{label}</span><span className={`rounded-control border p-2 ${tones[tone]}`}>{icon}</span></span>
-      <span className="mt-4 block text-2xl font-bold tracking-tight text-white">{value}</span>
-      <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">{detail}</span>
+    <button disabled={disabled} onClick={onClick} className="group rounded-card border border-slate-800 bg-slate-900/80 p-3 text-left shadow-md shadow-slate-950/15 transition-all hover:-translate-y-0.5 hover:border-slate-700 disabled:cursor-default disabled:hover:translate-y-0">
+      <span className="flex items-center justify-between gap-3"><span className="text-[11px] font-semibold text-slate-400">{label}</span><span className={`rounded-control border p-1.5 ${tones[tone]}`}>{icon}</span></span>
+      <span className="mt-2.5 block text-xl font-bold tracking-tight text-white">{value}</span>
+      <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{detail}</span>
     </button>
   );
 };

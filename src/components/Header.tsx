@@ -111,7 +111,7 @@ export const Header: React.FC<HeaderProps> = ({
     if (!visibleItems.length) return null;
     return (
       <div className="space-y-1">
-        {label && <p className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{label}</p>}
+        {label && <p className="px-2.5 pb-1 pt-3 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">{label}</p>}
         {visibleItems.map((item) => (
           <NavigationButton key={item.id} item={item} active={activeTab === item.id} onClick={() => navigate(item.id)} />
         ))}
@@ -167,30 +167,30 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   const sidePanel = (mobile = false) => (
-    <div className={`flex h-full flex-col ${mobile ? 'p-4' : 'p-3'}`}>
-      <div className="flex items-center gap-3 px-2 py-2">
-        <span className="flex h-9 w-9 items-center justify-center rounded-panel border border-emerald-400/25 bg-emerald-400/10 text-emerald-300 shadow-inner shadow-emerald-950/30"><MessageSquare className="h-4.5 w-4.5" /></span>
-        <span className="min-w-0 flex-1"><span className="block text-sm font-bold tracking-tight text-white">Universo</span><span className="block truncate text-[10px] font-medium text-slate-500">Operação de atendimento</span></span>
+    <div className={`flex h-full flex-col ${mobile ? 'p-4' : 'p-2.5'}`}>
+      <div className="flex items-center gap-2.5 px-1.5 py-1.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-panel border border-emerald-400/25 bg-emerald-400/10 text-emerald-300 shadow-inner shadow-emerald-950/30"><MessageSquare className="h-4 w-4" /></span>
+        <span className="min-w-0 flex-1"><span className="block text-[13px] font-bold tracking-tight text-white">Universo</span><span className="block truncate text-[9px] font-medium text-slate-500">Operação de atendimento</span></span>
         {mobile && <button onClick={() => setIsMobileOpen(false)} className="rounded-control p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>}
       </div>
 
-      <div className="mt-5 rounded-panel border border-slate-800 bg-slate-900/70 px-3 py-2.5">
+      <div className="mt-3 rounded-panel border border-slate-800 bg-slate-900/70 px-2.5 py-2">
         <div className="flex items-center gap-2"><span className="flex h-5 w-5 items-center justify-center rounded-control bg-emerald-500/10 text-emerald-400"><Building2 className="h-3 w-3" /></span><span className="truncate text-[11px] font-bold text-slate-200">{activeTenant.name}</span></div>
       </div>
 
-      <nav className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+      <nav className="mt-2.5 min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
         {navigationBlock(primaryNavigation)}
         {navigationBlock(growthNavigation, 'Desempenho')}
         {navigationBlock(settingsNavigation, 'Administração')}
         {canSeeSaasMaster && (
           <div className="space-y-1">
-            <p className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Plataforma</p>
+            <p className="px-2.5 pb-1 pt-3 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">Plataforma</p>
             <NavigationButton item={{ id: 'saas', label: 'Empresas', description: 'Gestão multi-tenant', icon: Layers, visible: true }} active={activeTab === 'saas'} onClick={() => navigate('saas')} />
           </div>
         )}
       </nav>
 
-      <div className="mt-3 rounded-panel border border-slate-800 bg-slate-950/50 px-3 py-2 text-[10px] text-slate-500">
+      <div className="mt-2 rounded-panel border border-slate-800 bg-slate-950/50 px-2.5 py-1.5 text-[9px] text-slate-500">
         <span className="font-semibold text-slate-400">{savedCount}</span> histórico(s) de atendimento
       </div>
       {profilePanel}
@@ -199,7 +199,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <aside className="hidden h-screen w-[244px] shrink-0 border-r border-slate-800/80 bg-slate-950/90 lg:sticky lg:top-0 lg:flex">
+      <aside className="hidden h-screen w-[228px] shrink-0 border-r border-slate-800/80 bg-slate-950/90 lg:sticky lg:top-0 lg:flex">
         {sidePanel()}
       </aside>
 
@@ -222,9 +222,9 @@ export const Header: React.FC<HeaderProps> = ({
 const NavigationButton: React.FC<{ item: NavigationItem; active: boolean; onClick: () => void }> = ({ item, active, onClick }) => {
   const Icon = item.icon;
   return (
-    <button onClick={onClick} className={`group flex w-full items-center gap-3 rounded-panel px-3 py-2.5 text-left transition-all ${active ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-950/30' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100'}`}>
-      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-control ${active ? 'bg-slate-950/12' : 'bg-slate-800/65 text-emerald-400 group-hover:bg-slate-800'}`}><Icon className="h-3.5 w-3.5" /></span>
-      <span className="min-w-0 flex-1"><span className="block text-xs font-bold">{item.label}</span><span className={`mt-0.5 block truncate text-[10px] ${active ? 'text-slate-900/70' : 'text-slate-500'}`}>{item.description}</span></span>
+    <button onClick={onClick} className={`group flex w-full items-center gap-2.5 rounded-panel px-2.5 py-2 text-left transition-all ${active ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-950/30' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-100'}`}>
+      <span className={`flex h-6.5 w-6.5 shrink-0 items-center justify-center rounded-control ${active ? 'bg-slate-950/12' : 'bg-slate-800/65 text-emerald-400 group-hover:bg-slate-800'}`}><Icon className="h-3.5 w-3.5" /></span>
+      <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold">{item.label}</span><span className={`mt-0.5 block truncate text-[9px] ${active ? 'text-slate-900/70' : 'text-slate-500'}`}>{item.description}</span></span>
       <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${active ? 'text-slate-900/65' : 'text-slate-700 group-hover:translate-x-0.5 group-hover:text-slate-400'}`} />
     </button>
   );

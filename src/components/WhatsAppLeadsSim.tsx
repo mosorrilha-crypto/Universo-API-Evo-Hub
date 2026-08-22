@@ -3062,7 +3062,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="relative bg-[#111b21] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[85dvh] lg:h-[720px]">
+      <div className="relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
 
         {/* ========================================== */}
         {/* COLUMN 1: WhatsApp Sidebar / Inbox (4 cols or 3 cols depending on right panel) */}
@@ -3087,7 +3087,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Pausado) fica à direita dela (pedido direto), busca em si mais
               curta (flex-1 dividindo a linha com o status, em vez de w-full
               sozinha). */}
-          <div className="p-2.5 bg-[#111b21] border-b border-slate-800/60">
+          <div className="p-2 bg-[#111b21] border-b border-slate-800/60">
             <div className="flex items-center gap-2">
               <div className="relative flex items-center flex-1 min-w-0">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
@@ -3250,12 +3250,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* COLUMN 2: Interactive WhatsApp Chat Thread */}
         {/* ========================================== */}
         <div className={`${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
-          showRightPanel ? 'lg:col-span-5' : 'lg:col-span-8'
+          showRightPanel ? 'lg:col-span-6' : 'lg:col-span-8'
         }`}>
           {selectedLead ? (
             <>
               {/* WhatsApp Web Chat Header */}
-              <div className="p-3 bg-[#202c33] border-b border-slate-800 flex items-center justify-between gap-2 z-10 shadow-md">
+              <div className="px-3 py-2.5 bg-[#202c33] border-b border-slate-800 flex items-center justify-between gap-2 z-10 shadow-md">
                 {/* min-w-0 é o que deixa esta metade encolher/truncar de
                     verdade — sem isso, um nome de lead comprido (achado ao
                     vivo: nome tipo e-mail sem espaço nenhum pra quebrar,
@@ -4224,7 +4224,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           // equivalente lá é o painel deslizante controlado por
           // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
           // cabeçalho da conversa.
-          <div className="hidden lg:flex lg:col-span-4 border-l border-slate-800/80 bg-[#111b21] flex-col p-3 space-y-3 overflow-y-auto max-h-[720px] scrollbar-thin">
+          <div className="hidden lg:flex lg:col-span-3 border-l border-slate-800/80 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
