@@ -3,6 +3,7 @@ import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullCo
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
+import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
 import { ContactContextPanel, type OperatorMemoryEditPayload } from './ContactContextPanel';
@@ -3892,13 +3893,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 className="h-full min-h-0 p-4 overflow-y-auto space-y-3 bg-[#0b141a] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] scrollbar-thin"
               >
                 
-                {/* WhatsApp Floating Date Badge */}
-                <div className="flex justify-center my-2">
-                  <span className="px-3 py-1 rounded-lg bg-[#182229] text-[10px] font-bold text-slate-400 shadow-sm uppercase tracking-wider">
-                    {isSpanish ? 'Hoy' : 'Hoje'}
-                  </span>
-                </div>
-
                 {/* A saudação exibida pelo WhatsApp no clique do anúncio é uma
                     camada nativa do anúncio e não chega como uma mensagem
                     comum em `messages[]`. Mostramos a atribuição aqui sem
@@ -3931,7 +3925,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     {isSpanish ? 'Cargando el historial completo de esta conversación...' : 'Carregando histórico completo desta conversa...'}
                   </div>
                 ) : selectedLead.messages && selectedLead.messages.length > 0 ? (
-                  selectedLead.messages.map((msg) => {
+                  selectedLead.messages.map((msg, messageIndex) => {
+                    const previousMessage = messageIndex > 0 ? selectedLead.messages?.[messageIndex - 1] : undefined;
+                    const shouldShowDateSeparator = messageIndex === 0
+                      || isNewChatDateGroup(msg.timestamp, previousMessage?.timestamp);
+                    const dateLabel = formatChatDateLabel(msg.timestamp, isSpanish);
                     const isLead = msg.sender === 'lead';
                     const quotedMessage = msg.replyToMessageId
                       ? selectedLead.messages?.find((m) => m.id === msg.replyToMessageId)
@@ -3966,11 +3964,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       </span>
                     );
                     return (
-                      <div
-                        key={msg.id}
-                        id={`msg-anchor-${msg.id}`}
-                        className={`group relative flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
-                      >
+                      <React.Fragment key={msg.id}>
+                        {shouldShowDateSeparator && dateLabel && (
+                          <div className="flex justify-center py-1" role="separator" aria-label={dateLabel}>
+                            <span className="rounded-full bg-[#202c33]/90 px-3 py-1 text-[10px] font-semibold text-slate-400 backdrop-blur-sm">
+                              {dateLabel}
+                            </span>
+                          </div>
+                        )}
+                        <div
+                          id={`msg-anchor-${msg.id}`}
+                          className={`group relative flex flex-col ${isLead ? 'items-start' : 'items-end'}`}
+                        >
                         {/* Menu de ações da mensagem — gatilho único "⋮" que abre um
                             menu discreto (Responder/Copiar/Encaminhar/Reagir/
                             Apagar), igual ao menu nativo do WhatsApp (print de
@@ -4257,7 +4262,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </div>
                           )}
                         </div>
-                      </div>
+                        </div>
+                      </React.Fragment>
                     );
                   })
                 ) : (
