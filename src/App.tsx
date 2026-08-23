@@ -20,8 +20,8 @@ import { EscalationsPanel } from './components/EscalationsPanel';
 import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
-import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { OperationsCenter } from './components/OperationsCenter';
+import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
@@ -1136,7 +1136,7 @@ export const App: React.FC = () => {
                     />
           </OperationsModuleFrame>
         )}
-                {activeTab === 'integration' && canSeeAdminTools && (
+        {activeTab === 'integration' && canSeeAdminTools && (
           <OperationsModuleFrame title="Integrações" eyebrow="Canais e conexões" description="Mantenha os canais e serviços conectados para que a operação siga sem interrupções." accent="blue">
             <WhatsAppGuide />
           </OperationsModuleFrame>

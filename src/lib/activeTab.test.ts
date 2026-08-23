@@ -7,6 +7,10 @@ describe('parseStoredActiveTab', () => {
     expect(parseStoredActiveTab('whatsapp')).toBe('whatsapp');
   });
 
+  it('mantém Integrações válida para acesso contextual', () => {
+    expect(parseStoredActiveTab('integration')).toBe('integration');
+  });
+
   it('usa home para valor ausente ou inválido', () => {
     expect(parseStoredActiveTab(null)).toBe('home');
     expect(parseStoredActiveTab('')).toBe('home');
