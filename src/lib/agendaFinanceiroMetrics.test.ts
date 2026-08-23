@@ -32,6 +32,11 @@ describe('summarizeFinancialTransactions', () => {
     expect(summary.overdue).toBe(80);
     expect(summary.spent).toBe(200);
     expect(summary.net).toBe(300);
+    expect(summary.projectedIncome).toBe(700);
+    expect(summary.pendingCount).toBe(2);
+    expect(summary.incomeCount).toBe(3);
+    expect(summary.expenseCount).toBe(1);
+    expect(summary.collectionRate).toBeCloseTo(500 / 700);
   });
 
   it('não trata lançamentos de meses anteriores como resultado do mês atual', () => {
@@ -41,5 +46,7 @@ describe('summarizeFinancialTransactions', () => {
     ], 'month', new Date('2026-08-21T12:00:00.000Z'));
 
     expect(summary.received).toBe(300);
+    expect(summary.projectedIncome).toBe(300);
+    expect(summary.collectionRate).toBe(1);
   });
 });

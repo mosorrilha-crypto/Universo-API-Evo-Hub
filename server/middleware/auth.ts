@@ -1,8 +1,8 @@
 import jwt from 'jsonwebtoken';
 import type { NextFunction, Request, Response } from 'express';
-import type { ParamsFlatDictionary } from 'express-serve-static-core';
+import type { ParamsDictionary } from 'express-serve-static-core';
 
-export type AuthenticatedRequest = Request<ParamsFlatDictionary> & { user?: any };
+export type AuthenticatedRequest = Request<ParamsDictionary> & { user?: any };
 
 export function createAuthenticateToken(jwtSecret: string) {
   return function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {

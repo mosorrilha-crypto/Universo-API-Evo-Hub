@@ -20,5 +20,10 @@ export function summarizeFinancialTransactions(
   const open = income.filter((transaction) => transaction.status === 'pendente' || transaction.status === 'atrasado').reduce((total, transaction) => total + transaction.amount, 0);
   const overdue = income.filter((transaction) => transaction.status === 'atrasado').reduce((total, transaction) => total + transaction.amount, 0);
   const spent = expenses.filter((transaction) => transaction.status !== 'cancelado').reduce((total, transaction) => total + transaction.amount, 0);
-  return { scoped, income, received, open, overdue, spent, net: received - spent };
+  const projectedIncome = income.filter((transaction) => transaction.status !== 'cancelado').reduce((total, transaction) => total + transaction.amount, 0);
+  const pendingCount = income.filter((transaction) => transaction.status === 'pendente' || transaction.status === 'atrasado').length;
+  const incomeCount = income.filter((transaction) => transaction.status !== 'cancelado').length;
+  const expenseCount = expenses.filter((transaction) => transaction.status !== 'cancelado').length;
+  const collectionRate = projectedIncome > 0 ? received / projectedIncome : null;
+  return { scoped, income, received, open, overdue, spent, net: received - spent, projectedIncome, pendingCount, incomeCount, expenseCount, collectionRate };
 }
