@@ -133,7 +133,7 @@ export function QuickRepliesMenu({
         <div
           role="dialog"
           aria-label={isSpanish ? 'Administrar respuestas rápidas' : 'Gerenciar respostas rápidas'}
-          className="absolute bottom-full right-0 z-50 mb-2 w-[min(360px,calc(100vw-2rem))] max-h-[min(70vh,520px)] overflow-hidden rounded-2xl border border-slate-700 bg-[#182229] text-slate-100 shadow-2xl shadow-black/50"
+          className="fixed bottom-24 left-2 right-2 z-50 mx-auto max-h-[min(70dvh,520px)] w-auto max-w-[360px] overflow-hidden rounded-2xl border border-slate-700 bg-[#182229] text-slate-100 shadow-2xl shadow-black/50 sm:absolute sm:bottom-full sm:left-auto sm:right-0 sm:mb-2 sm:w-[360px] sm:max-w-[min(360px,calc(100vw-2rem))]"
         >
           <div className="flex items-start justify-between gap-3 border-b border-slate-700 bg-[#202c33] px-3 py-2.5">
             <div className="min-w-0">
@@ -157,7 +157,7 @@ export function QuickRepliesMenu({
             </button>
           </div>
 
-          <div className="max-h-[min(55vh,390px)] overflow-y-auto p-2">
+          <div className="max-h-[min(55dvh,390px)] overscroll-contain overflow-y-auto p-2">
             {editor && (
               <div className="mb-2 rounded-xl border border-amber-500/40 bg-amber-950/20 p-2.5">
                 <div className="mb-2 flex items-center justify-between gap-2">
