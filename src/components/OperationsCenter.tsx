@@ -112,7 +112,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
 
   return (
     <section className="space-y-4 animate-page-enter">
-      <div className="operations-hero relative overflow-hidden rounded-card border px-4 py-4 sm:px-5 sm:py-5">
+      <div className="operations-hero relative overflow-hidden rounded-2xl border border-white/8 px-4 py-4 sm:px-5 sm:py-5">
         <div className="relative flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-pill border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-300">
@@ -125,7 +125,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
                 : t('operationOrganized')}
             </p>
           </div>
-          <div className="rounded-panel border border-white/8 bg-slate-950/35 px-3 py-2 text-left xl:text-right">
+          <div className="rounded-xl bg-slate-950/25 px-3 py-2 text-left xl:text-right">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{t('activeCompany')}</p>
             <p className="mt-0.5 text-[13px] font-bold text-white">{activeTenant.name}</p>
             <p className="mt-0.5 text-[11px] capitalize text-slate-400">{formatShortDate(new Date().toISOString(), language)}</p>
@@ -133,7 +133,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         </div>
       </div>
 
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard label={t('humanPending')} value={summary.unresolved.length} detail={t('humanPendingDetail')} icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
         <MetricCard label={t('leadsInProgress')} value={summary.openLeads.length} detail={t('leadsInProgressDetail')} icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
         <MetricCard label={t('nextActions')} value={summary.uncompletedTasks.length} detail={t('nextActionsDetail')} icon={<Clock3 className="h-4 w-4" />} tone="sky" onClick={() => onNavigate('crm')} />
@@ -141,7 +141,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
       </div>
 
       <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1.45fr)_minmax(270px,0.8fr)]">
-        <section className="rounded-card border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
+        <section className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('smartQueue')}</p>
@@ -149,24 +149,24 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
               <p className="mt-0.5 text-xs text-slate-400">{t('actionsPrioritized')} {priorityItems.length > 0 && `Exibindo ${priorityItems.length} item${priorityItems.length === 1 ? '' : 's'} da fila.`}</p>
             </div>
             {summary.unresolved.length > 0 && (
-              <button onClick={() => onNavigate('escalations')} className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-300 transition-colors hover:text-emerald-100">
+              <button onClick={() => onNavigate('escalations')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-bold text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
                 {language === 'es' ? 'Ver todas' : 'Ver todas'} <ArrowRight className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
 
           {priorityItems.length > 0 ? (
-            <div className="mt-5 space-y-2">
+            <div className="mt-4 space-y-1.5">
               {priorityItems.map((item) => {
                 const Icon = item.icon;
                 const tone = item.tone === 'amber'
-                  ? 'border-amber-500/20 bg-amber-500/8 text-amber-300'
+                  ? 'bg-amber-500/10 text-amber-300'
                   : item.tone === 'sky'
-                    ? 'border-sky-500/20 bg-sky-500/8 text-sky-300'
-                    : 'border-emerald-500/20 bg-emerald-500/8 text-emerald-300';
+                    ? 'bg-sky-500/10 text-sky-300'
+                    : 'bg-emerald-500/10 text-emerald-300';
                 return (
-                  <button key={item.id} onClick={() => onNavigate(item.tab)} className="group flex w-full items-start gap-3 rounded-panel border border-slate-800 bg-slate-950/35 p-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-700 hover:bg-slate-800/70">
-                    <span className={`mt-0.5 rounded-control border p-2 ${tone}`}><Icon className="h-4 w-4" /></span>
+                  <button key={item.id} onClick={() => onNavigate(item.tab)} className="group flex w-full items-start gap-2.5 rounded-xl bg-slate-950/30 p-2.5 text-left transition-colors hover:bg-slate-800/65 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
+                    <span className={`mt-0.5 rounded-lg p-1.5 ${tone}`}><Icon className="h-4 w-4" /></span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{item.type}</span>
                       <span className="mt-1 block truncate text-sm font-bold text-slate-100">{item.description}</span>
@@ -178,7 +178,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
               })}
             </div>
           ) : (
-            <div className="mt-3 rounded-panel border border-dashed border-emerald-500/25 bg-emerald-500/5 px-4 py-5 text-center">
+            <div className="mt-3 rounded-xl bg-emerald-500/5 px-4 py-4 text-center">
               <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
               <h3 className="mt-2 text-sm font-bold text-slate-100">{t('noCriticalPending')}</h3>
               <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-slate-400">{t('noCriticalPendingDetail')}</p>
@@ -186,15 +186,15 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
           )}
         </section>
 
-        <aside className="rounded-card border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
+        <aside className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('quickAccess')}</p>
           <h2 className="mt-1 text-base font-bold text-white">{t('followRoutine')}</h2>
-          <div className="mt-3 space-y-1.5">
+          <div className="mt-3 space-y-1">
             {quickActions.map((action) => {
               const Icon = action.icon;
               return (
-                <button key={action.label} onClick={() => onNavigate(action.tab)} className="group flex w-full items-center gap-2.5 rounded-panel border border-slate-800 bg-slate-950/35 px-2.5 py-2 text-left transition-all hover:border-emerald-500/35 hover:bg-emerald-500/8">
-                  <span className="rounded-control border border-slate-700 bg-slate-800 p-1.5 text-emerald-400 group-hover:border-emerald-500/30 group-hover:bg-emerald-500/10"><Icon className="h-3.5 w-3.5" /></span>
+                <button key={action.label} onClick={() => onNavigate(action.tab)} className="group flex w-full items-center gap-2 rounded-xl bg-slate-950/30 px-2 py-1.5 text-left transition-colors hover:bg-emerald-500/8 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
+                  <span className="rounded-lg bg-slate-800/80 p-1.5 text-emerald-400 group-hover:bg-emerald-500/10"><Icon className="h-3.5 w-3.5" /></span>
                   <span className="min-w-0 flex-1"><span className="block text-xs font-bold text-slate-100">{action.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{action.description}</span></span>
                   <ArrowRight className="h-4 w-4 text-slate-600 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-300" />
                 </button>
@@ -202,7 +202,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
             })}
           </div>
           {canSeeFinancial && summary.pendingTransactions.length > 0 && (
-            <button onClick={() => onNavigate('agenda_financeiro')} className="mt-5 flex w-full items-start gap-2 rounded-panel border border-amber-500/20 bg-amber-500/8 p-3 text-left">
+            <button onClick={() => onNavigate('agenda_financeiro')} className="mt-4 flex w-full items-start gap-2 rounded-xl bg-amber-500/8 p-2.5 text-left transition-colors hover:bg-amber-500/12 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70">
               <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
               <span><span className="block text-xs font-bold text-amber-100">{summary.pendingTransactions.length} recebimento(s) em aberto</span><span className="mt-0.5 block text-[11px] leading-relaxed text-amber-100/65">Confira a situação financeira antes do fechamento do dia.</span></span>
             </button>
@@ -215,16 +215,16 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
 
 const MetricCard: React.FC<{ label: string; value: string | number; detail: string; icon: React.ReactNode; tone: 'emerald' | 'amber' | 'sky' | 'blue'; onClick: () => void; disabled?: boolean }> = ({ label, value, detail, icon, tone, onClick, disabled = false }) => {
   const tones = {
-    emerald: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
-    amber: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
-    sky: 'border-sky-500/20 bg-sky-500/10 text-sky-300',
-    blue: 'border-sky-500/20 bg-sky-500/10 text-sky-300',
+    emerald: 'bg-emerald-500/10 text-emerald-300',
+    amber: 'bg-amber-500/10 text-amber-300',
+    sky: 'bg-sky-500/10 text-sky-300',
+    blue: 'bg-sky-500/10 text-sky-300',
   };
   return (
-    <button disabled={disabled} onClick={onClick} className="group rounded-card border border-slate-800 bg-slate-900/80 p-3 text-left shadow-md shadow-slate-950/15 transition-all hover:-translate-y-0.5 hover:border-slate-700 disabled:cursor-default disabled:hover:translate-y-0">
-      <span className="flex items-center justify-between gap-3"><span className="text-[11px] font-semibold text-slate-400">{label}</span><span className={`rounded-control border p-1.5 ${tones[tone]}`}>{icon}</span></span>
-      <span className="mt-2.5 block text-xl font-bold tracking-tight text-white">{value}</span>
-      <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{detail}</span>
+    <button disabled={disabled} onClick={onClick} className="group min-h-[5.5rem] rounded-xl bg-slate-900/65 p-2.5 text-left shadow-none transition-colors hover:bg-slate-800/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 disabled:cursor-default disabled:hover:bg-slate-900/65">
+      <span className="flex items-center justify-between gap-2"><span className="line-clamp-1 text-[10px] font-semibold text-slate-400">{label}</span><span className={`rounded-lg p-1.5 ${tones[tone]}`}>{icon}</span></span>
+      <span className="mt-1.5 block text-lg font-bold tracking-tight text-white">{value}</span>
+      <span className="mt-0.5 line-clamp-1 block text-[9px] leading-4 text-slate-500">{detail}</span>
     </button>
   );
 };
