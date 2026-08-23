@@ -471,7 +471,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread'>('all');
+  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'waiting'>('all');
   // O painel auxiliar continua disponível pelo cabeçalho, mas não ocupa uma
   // terceira coluna por padrão: a referência canônica coloca a IA no rascunho
   // revisável e deixa o contexto expandível dentro da conversa.
@@ -1996,6 +1996,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return lead.status === 'pending' ? 1 : 0;
   };
   const unreadLeadsCount = leads.filter((lead) => getUnreadCount(lead) > 0).length;
+  const isWaitingForAgent = (lead: LeadInfo): boolean => lead.messages?.[lead.messages.length - 1]?.sender === 'lead';
+  const waitingForAgentCount = leads.filter((lead) => !lead.archivedAt && isWaitingForAgent(lead)).length;
 
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
@@ -2017,6 +2019,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       if (activeTabFilter === 'unread') {
         return getUnreadCount(lead) > 0;
+      }
+      if (activeTabFilter === 'waiting') {
+        return isWaitingForAgent(lead);
       }
       return true;
     })
@@ -3425,6 +3430,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 }`}
               >
                 {t('unread')} ({unreadLeadsCount})
+              </button>
+              <button
+                onClick={() => setActiveTabFilter('waiting')}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
+                  activeTabFilter === 'waiting'
+                    ? 'bg-amber-400 text-slate-950 font-bold'
+                    : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
+                }`}
+                title="Conversas cuja última mensagem veio do cliente"
+              >
+                {isSpanish ? 'Esperando respuesta' : 'Esperando você'} ({waitingForAgentCount})
               </button>
 
               {/* Status — só aparece pra números conectados via Evolution API
