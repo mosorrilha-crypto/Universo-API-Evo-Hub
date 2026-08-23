@@ -125,13 +125,36 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
                 : t('operationOrganized')}
             </p>
           </div>
-          <div className="rounded-xl bg-slate-950/25 px-3 py-2 text-left xl:text-right">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{t('activeCompany')}</p>
-            <p className="mt-0.5 text-[13px] font-bold text-white">{activeTenant.name}</p>
-            <p className="mt-0.5 text-[11px] capitalize text-slate-400">{formatShortDate(new Date().toISOString(), language)}</p>
+          <div className="mt-2 flex min-w-0 items-center gap-2 text-[11px] text-slate-400 xl:mt-0 xl:max-w-xs">
+            <span className="shrink-0 font-semibold uppercase tracking-[0.12em] text-slate-500">{t('activeCompany')}</span>
+            <span className="truncate font-semibold text-slate-200">{activeTenant.name}</span>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <span className="shrink-0 capitalize">{formatShortDate(new Date().toISOString(), language)}</span>
           </div>
         </div>
       </div>
+
+      <section className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="quick-access-heading">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('quickAccess')}</p>
+            <h2 id="quick-access-heading" className="mt-1 text-base font-bold text-white">{t('followRoutine')}</h2>
+          </div>
+          <span className="hidden shrink-0 text-[10px] text-slate-500 sm:inline">Atalhos da operação</span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {quickActions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button key={action.label} type="button" onClick={() => onNavigate(action.tab)} className="group flex min-w-0 items-center gap-2 rounded-xl bg-slate-950/30 px-2.5 py-2 text-left transition-colors hover:bg-emerald-500/8 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
+                <span className="shrink-0 rounded-lg bg-slate-800/80 p-1.5 text-emerald-400 group-hover:bg-emerald-500/10"><Icon className="h-3.5 w-3.5" /></span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-100">{action.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{action.description}</span></span>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-600 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-300" />
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard label={t('humanPending')} value={summary.unresolved.length} detail={t('humanPendingDetail')} icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
@@ -140,12 +163,12 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('agenda_financeiro')} disabled={!canSeeFinancial} />
       </div>
 
-      <div className="grid gap-3.5 xl:grid-cols-[minmax(0,1.45fr)_minmax(270px,0.8fr)]">
-        <section className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4">
+      <section className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="smart-queue-heading">
+        <div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('smartQueue')}</p>
-              <h2 className="mt-1 text-base font-bold text-white">{t('attentionNow')}</h2>
+              <h2 id="smart-queue-heading" className="mt-1 text-base font-bold text-white">{t('attentionNow')}</h2>
               <p className="mt-0.5 text-xs text-slate-400">{t('actionsPrioritized')} {priorityItems.length > 0 && `Exibindo ${priorityItems.length} item${priorityItems.length === 1 ? '' : 's'} da fila.`}</p>
             </div>
             {summary.unresolved.length > 0 && (
@@ -154,6 +177,13 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
               </button>
             )}
           </div>
+
+          {canSeeFinancial && summary.pendingTransactions.length > 0 && (
+            <button type="button" onClick={() => onNavigate('agenda_financeiro')} className="mt-3 flex w-full items-start gap-2 rounded-xl bg-amber-500/8 p-2.5 text-left transition-colors hover:bg-amber-500/12 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70">
+              <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+              <span><span className="block text-xs font-bold text-amber-100">{summary.pendingTransactions.length} recebimento(s) em aberto</span><span className="mt-0.5 block text-[11px] leading-relaxed text-amber-100/65">Confira a situação financeira antes do fechamento do dia.</span></span>
+            </button>
+          )}
 
           {priorityItems.length > 0 ? (
             <div className="mt-4 space-y-1.5">
@@ -184,31 +214,8 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
               <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-slate-400">{t('noCriticalPendingDetail')}</p>
             </div>
           )}
-        </section>
-
-        <aside className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('quickAccess')}</p>
-          <h2 className="mt-1 text-base font-bold text-white">{t('followRoutine')}</h2>
-          <div className="mt-3 space-y-1">
-            {quickActions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <button key={action.label} onClick={() => onNavigate(action.tab)} className="group flex w-full items-center gap-2 rounded-xl bg-slate-950/30 px-2 py-1.5 text-left transition-colors hover:bg-emerald-500/8 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
-                  <span className="rounded-lg bg-slate-800/80 p-1.5 text-emerald-400 group-hover:bg-emerald-500/10"><Icon className="h-3.5 w-3.5" /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-xs font-bold text-slate-100">{action.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{action.description}</span></span>
-                  <ArrowRight className="h-4 w-4 text-slate-600 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-300" />
-                </button>
-              );
-            })}
-          </div>
-          {canSeeFinancial && summary.pendingTransactions.length > 0 && (
-            <button onClick={() => onNavigate('agenda_financeiro')} className="mt-4 flex w-full items-start gap-2 rounded-xl bg-amber-500/8 p-2.5 text-left transition-colors hover:bg-amber-500/12 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70">
-              <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-              <span><span className="block text-xs font-bold text-amber-100">{summary.pendingTransactions.length} recebimento(s) em aberto</span><span className="mt-0.5 block text-[11px] leading-relaxed text-amber-100/65">Confira a situação financeira antes do fechamento do dia.</span></span>
-            </button>
-          )}
-        </aside>
-      </div>
+        </div>
+      </section>
     </section>
   );
 };
