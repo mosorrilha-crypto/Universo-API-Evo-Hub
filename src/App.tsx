@@ -708,6 +708,50 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleGenerateReplySuggestion = async (id: string): Promise<EscalationInfo | null> => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/reply-suggestion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+      showToast('Sugestão segura gerada. Revise antes de copiar; nada foi enviado.');
+      return data.escalation as EscalationInfo;
+    } catch (err: any) {
+      console.error('Falha ao gerar sugestão supervisionada:', err);
+      showToast(err?.message || 'Não foi possível gerar a sugestão agora. O bloqueio permanece.');
+      return null;
+    }
+  };
+
+  const handleReplySuggestionFeedback = async (
+    id: string,
+    suggestion: string,
+    status: 'edited' | 'copied' | 'discarded',
+  ): Promise<EscalationInfo | null> => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/reply-suggestion-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestion, status }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+      if (status === 'edited') showToast('Edição da sugestão salva para auditoria.');
+      if (status === 'copied') showToast('Resposta copiada. Revise novamente antes de qualquer envio.');
+      if (status === 'discarded') showToast('Sugestão descartada; o bloqueio continua registrado.');
+      return data.escalation as EscalationInfo;
+    } catch (err) {
+      console.error('Falha ao registrar feedback da sugestão supervisionada:', err);
+      showToast('Não foi possível registrar essa ação da sugestão. Tente novamente.');
+      return null;
+    }
+  };
+
   // Verificação de pagamento unificada aqui (pedido real do dono do
   // produto, 12/08/2026) — antes existiam dois lugares desconectados pro
   // mesmo caso: o banner Confirmar/Rejeitar dentro da conversa, e este
@@ -1063,6 +1107,8 @@ export const App: React.FC = () => {
             onDelete={handleDeleteEscalation}
             onAssignSelf={handleAssignEscalationToSelf}
             onSubmitOperatorReply={handleSubmitOperatorReply}
+            onGenerateReplySuggestion={handleGenerateReplySuggestion}
+            onReplySuggestionFeedback={handleReplySuggestionFeedback}
             onResolvePayment={handleResolvePaymentEscalation}
             onGoToConversation={(phone) => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });

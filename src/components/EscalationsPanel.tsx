@@ -6,6 +6,7 @@ import {
   Archive,
   CheckCircle2,
   Clock,
+  Copy,
   ExternalLink,
   Globe2,
   Layers3,
@@ -13,7 +14,9 @@ import {
   MessageCircleReply,
   MessageSquare,
   Phone,
+  RefreshCw,
   Send,
+  Sparkles,
   TimerReset,
   UserRoundCheck,
   XCircle,
@@ -26,6 +29,10 @@ interface EscalationsPanelProps {
   onGoToConversation?: (phone: string) => void;
   onAssignSelf?: (id: string) => void;
   onSubmitOperatorReply?: (id: string, reply: string) => void;
+  /** Gera uma proposta para revisão humana; nunca envia mensagem ao cliente. */
+  onGenerateReplySuggestion?: (id: string) => Promise<EscalationInfo | null>;
+  /** Registra edição, cópia ou descarte sem salvar o texto no evento de auditoria. */
+  onReplySuggestionFeedback?: (id: string, suggestion: string, status: 'edited' | 'copied' | 'discarded') => Promise<EscalationInfo | null>;
   onResolvePayment?: (id: string, phone: string, status: 'verified' | 'rejected', reply?: string) => void;
 }
 
@@ -70,11 +77,16 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
   onGoToConversation,
   onAssignSelf,
   onSubmitOperatorReply,
+  onGenerateReplySuggestion,
+  onReplySuggestionFeedback,
   onResolvePayment,
 }) => {
   const [filter, setFilter] = useState<'pending' | 'resolved'>('pending');
   const [replyDraftById, setReplyDraftById] = useState<Record<string, string>>({});
   const [openReplyId, setOpenReplyId] = useState<string | null>(null);
+  const [openSuggestionId, setOpenSuggestionId] = useState<string | null>(null);
+  const [suggestionDraftById, setSuggestionDraftById] = useState<Record<string, string>>({});
+  const [suggestionBusyId, setSuggestionBusyId] = useState<string | null>(null);
 
   const { pending, resolved, visible, overdue } = useMemo(() => {
     const current = escalations.filter((e) => e.status !== 'archived');
@@ -156,6 +168,20 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                         </div>
                       </div>
                     )}
+                    {openSuggestionId === e.id && onGenerateReplySuggestion && onReplySuggestionFeedback && (
+                      <div className="mt-3 space-y-2 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div><p className="flex items-center gap-1.5 text-xs font-bold text-sky-100"><Sparkles className="h-3.5 w-3.5" /> Sugestão supervisionada</p><p className="mt-0.5 text-[10px] text-slate-400">Nada é enviado automaticamente. Revise, edite, copie ou descarte.</p></div>
+                          <button type="button" disabled={suggestionBusyId === e.id} onClick={async () => { setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[10px] font-bold text-sky-100 disabled:opacity-50"><RefreshCw className={`h-3 w-3 ${suggestionBusyId === e.id ? 'animate-spin' : ''}`} /> Gerar</button>
+                        </div>
+                        <AutoResizeTextarea value={suggestionDraftById[e.id] ?? e.suggestedReply ?? ''} onChange={(event) => setSuggestionDraftById((previous) => ({ ...previous, [e.id]: event.target.value }))} placeholder="A sugestão aparecerá aqui para sua revisão." minRows={3} maxLength={900} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()} onClick={async () => { const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim(); if (!suggestion) return; setSuggestionBusyId(e.id); try { const updated = await onReplySuggestionFeedback(e.id, suggestion, 'edited'); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || suggestion })); } finally { setSuggestionBusyId(null); } }} className="rounded-lg bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-slate-100 disabled:opacity-40">Salvar edição</button>
+                          <button type="button" disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()} onClick={async () => { const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim(); if (!suggestion) return; setSuggestionBusyId(e.id); try { await navigator.clipboard?.writeText(suggestion); await onReplySuggestionFeedback(e.id, suggestion, 'copied'); } finally { setSuggestionBusyId(null); } }} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-[10px] font-bold text-white disabled:opacity-40"><Copy className="h-3 w-3" /> Copiar</button>
+                          <button type="button" disabled={suggestionBusyId === e.id} onClick={async () => { setSuggestionBusyId(e.id); try { await onReplySuggestionFeedback(e.id, '', 'discarded'); setSuggestionDraftById((previous) => ({ ...previous, [e.id]: '' })); setOpenSuggestionId(null); } finally { setSuggestionBusyId(null); } }} className="rounded-lg px-3 py-1.5 text-[10px] font-bold text-rose-300 disabled:opacity-40">Descartar</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
                     {onGoToConversation && <button onClick={() => onGoToConversation(e.phone)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500/35 hover:text-emerald-200"><MessageCircle className="h-3.5 w-3.5" /> Conversa</button>}
@@ -165,6 +191,7 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                       <button onClick={() => onResolvePayment(e.id, e.phone, 'verified')} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar pagamento</button>
                       <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/20"><XCircle className="h-3.5 w-3.5" /> Rejeitar</button>
                     </> : isPending ? <>
+                      {onGenerateReplySuggestion && onReplySuggestionFeedback && <button onClick={async () => { const shouldOpen = openSuggestionId !== e.id; setOpenSuggestionId(shouldOpen ? e.id : null); if (!shouldOpen || e.suggestedReply) return; setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} disabled={suggestionBusyId === e.id} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> {e.suggestedReply ? 'Revisar sugestão' : 'Gerar sugestão'}</button>}
                       {onSubmitOperatorReply && <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20"><MessageCircleReply className="h-3.5 w-3.5" /> Orientar IA</button>}
                       <button onClick={() => onResolve(e.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Resolver</button>
                     </> : null}

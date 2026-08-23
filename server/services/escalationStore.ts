@@ -7,6 +7,8 @@ import { recordOperationEvent } from './operationEventStore';
 export type EscalationKind = 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
 export type EscalationPriority = 'critical' | 'high' | 'medium' | 'low';
 export type EscalationStatus = 'open' | 'assigned' | 'awaiting_customer' | 'resolved' | 'archived';
+export type ReplySuggestionStatus = 'generated' | 'edited' | 'copied' | 'discarded';
+export type ReplySuggestionSource = 'groq-suggestion' | 'gemini-suggestion';
 
 export interface Escalation {
   id: string;
@@ -33,6 +35,11 @@ export interface Escalation {
   operatorReply?: string;
   operatorReplyAt?: string;
   operatorReplyConsumedAt?: string;
+  /** Sugestão corrigida gerada sob demanda; nunca é enviada automaticamente. */
+  suggestedReply?: string;
+  suggestedReplyAt?: string;
+  suggestedReplyStatus?: ReplySuggestionStatus;
+  suggestedReplySource?: ReplySuggestionSource;
   guidanceExpiresAt?: string;
   guidanceContextHash?: string;
   lastAlertAttemptAt?: string;
@@ -73,6 +80,10 @@ type EscalationRow = {
   operator_reply_at: string | null;
   operator_reply_consumed_at: string | null;
   kind: EscalationKind | null;
+  suggested_reply?: string | null;
+  suggested_reply_at?: string | null;
+  suggested_reply_status?: ReplySuggestionStatus | null;
+  suggested_reply_source?: ReplySuggestionSource | null;
   status?: EscalationStatus | null;
   priority?: EscalationPriority | null;
   due_at?: string | null;
@@ -117,6 +128,10 @@ function toEscalation(row: EscalationRow): Escalation {
     operatorReply: row.operator_reply || undefined,
     operatorReplyAt: row.operator_reply_at || undefined,
     operatorReplyConsumedAt: row.operator_reply_consumed_at || undefined,
+    suggestedReply: row.suggested_reply || undefined,
+    suggestedReplyAt: row.suggested_reply_at || undefined,
+    suggestedReplyStatus: row.suggested_reply_status || undefined,
+    suggestedReplySource: row.suggested_reply_source || undefined,
     guidanceExpiresAt: row.guidance_expires_at || undefined,
     guidanceContextHash: row.guidance_context_hash || undefined,
     lastAlertAttemptAt: row.last_alert_attempt_at || undefined,
@@ -307,10 +322,45 @@ export async function listEscalations(tenantId: string): Promise<Escalation[]> {
     });
 }
 
+export async function getEscalation(tenantId: string, id: string): Promise<Escalation | undefined> {
+  const { data, error } = await getDb()
+    .from('escalations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toEscalation(data as EscalationRow) : undefined;
+}
+
+export async function saveReplySuggestion(
+  tenantId: string,
+  id: string,
+  suggestion: string,
+  status: ReplySuggestionStatus,
+  source?: ReplySuggestionSource,
+): Promise<Escalation | undefined> {
+  const trimmed = suggestion.trim().slice(0, 1_600);
+  if (!trimmed && status !== 'discarded') throw new Error('Sugestão de resposta não pode ficar vazia.');
+  const { data, error } = await getDb()
+    .from('escalations')
+    .update({
+      suggested_reply: trimmed || null,
+      suggested_reply_at: new Date().toISOString(),
+      suggested_reply_status: status,
+      ...(source ? { suggested_reply_source: source } : {}),
+    })
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toEscalation(data as EscalationRow) : undefined;
+}
+
 /** Escalonamento em aberto mais recente para um contato específico, sem consultar dados de outros contatos/tenants. */
 export async function getOpenEscalationForPhone(tenantId: string, phone: string): Promise<Escalation | undefined> {
-  const db = getDb();
-  const { data, error } = await db
+  const { data, error } = await getDb()
     .from('escalations')
     .select('*')
     .eq('tenant_id', tenantId)

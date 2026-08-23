@@ -581,6 +581,11 @@ export interface EscalationInfo {
   serviceWindowExpiresAt?: string;
   /** Casos de pagamento, revisão do dono e retorno de cliente usam políticas e SLA distintos. */
   kind?: 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
+  /** Sugestão corrigida gerada sob demanda; nunca enviada automaticamente. */
+  suggestedReply?: string;
+  suggestedReplyAt?: string;
+  suggestedReplyStatus?: 'generated' | 'edited' | 'copied' | 'discarded';
+  suggestedReplySource?: 'groq-suggestion' | 'gemini-suggestion';
 }
 
 export interface Operator {
