@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractMessagingConversations,
+  isMetaAccessTokenExpired,
   isTrafficDatePreset,
   trafficDeliveryLabel,
 } from '../metaAdsInsightsService';
@@ -34,6 +35,21 @@ describe('metaAdsInsightsService', () => {
   it('não inventa conversas quando a Meta não retornou uma ação de mensagens', () => {
     expect(extractMessagingConversations([{ action_type: 'link_click', value: '23' }]))
       .toEqual({ actionType: null, value: 0 });
+  });
+
+  it('reconhece o erro de token expirado devolvido pela Meta', () => {
+    expect(isMetaAccessTokenExpired({
+      error: { code: 190, error_subcode: 463, message: 'Session has expired on Friday.' },
+    })).toBe(true);
+  });
+
+  it('não confunde outras falhas de autenticação com token expirado', () => {
+    expect(isMetaAccessTokenExpired({
+      error: { code: 190, error_subcode: 460, message: 'Invalid OAuth access token.' },
+    })).toBe(false);
+    expect(isMetaAccessTokenExpired({
+      error: { code: 200, message: 'Permissions error.' },
+    })).toBe(false);
   });
 
   it('aceita somente os períodos expostos pela Central de Tráfego', () => {

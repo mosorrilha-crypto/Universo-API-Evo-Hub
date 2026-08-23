@@ -998,6 +998,847 @@ html[data-theme='light'] .operations-module-frame__header {
 }
 
 
+/* --------------------------------------------------------------------------
+   Responsividade operacional compartilhada
+   O Atendimento define o padrão: contexto breve, próxima ação legível e
+   conteúdo rolável dentro do módulo — nunca a página inteira lateralmente.
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .app-main {
+    gap: .75rem;
+    padding: .75rem;
+  }
+
+  .app-toast {
+    max-width: calc(100vw - 1.5rem);
+  }
+
+  .operations-module-frame {
+    gap: .75rem;
+  }
+
+  .operations-module-frame__content {
+    min-width: 0;
+  }
+
+  .operations-module-frame__header {
+    gap: .7rem;
+    padding: .9rem 1rem;
+    border-radius: 1rem;
+  }
+
+  .operations-module-frame__header p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .operations-module-frame__badge {
+    width: 100%;
+    padding: .45rem .6rem;
+    text-align: left;
+  }
+
+  .responsive-tab-strip {
+    max-width: 100%;
+    scroll-padding-inline: .25rem;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+  }
+
+  .responsive-tab-strip > * {
+    flex: 0 0 auto;
+  }
+
+  .responsive-table-scroll {
+    margin-inline: -.2rem;
+    padding-inline: .2rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .crm-workspace,
+  .agenda-financeiro-workspace,
+  .growth-workspace,
+  .traffic-workspace,
+  .knowledge-workspace,
+  .quality-workspace,
+  .saas-workspace {
+    gap: .75rem;
+  }
+
+  .crm-workspace__hero,
+  .agenda-financeiro-workspace__hero,
+  .growth-workspace__hero,
+  .traffic-workspace__hero,
+  .knowledge-workspace__hero {
+    padding: 1rem;
+    border-radius: 1rem;
+    box-shadow: none;
+  }
+
+  .agenda-financeiro-workspace__hero h1 {
+    font-size: 1.65rem;
+  }
+
+  .agenda-financeiro-workspace__hero p,
+  .growth-workspace__hero p,
+  .traffic-workspace__hero p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .crm-workspace__actions,
+  .agenda-financeiro-workspace__actions,
+  .growth-workspace__actions,
+  .traffic-workspace__actions {
+    width: 100%;
+    gap: .5rem;
+  }
+
+  .agenda-financeiro-workspace__actions > button,
+  .growth-workspace__actions > button,
+  .traffic-workspace__actions > button {
+    flex: 1 1 calc(50% - .25rem);
+    justify-content: center;
+  }
+
+  .crm-workspace__metrics,
+  .agenda-financeiro-workspace__metrics,
+  .growth-workspace__metrics,
+  .traffic-workspace__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .55rem;
+  }
+
+  .crm-workspace__metrics > *,
+  .agenda-financeiro-workspace__metrics > *,
+  .growth-workspace__metrics > *,
+  .traffic-workspace__metrics > * {
+    padding: .75rem;
+  }
+
+  .crm-workspace__filters {
+    align-items: stretch;
+    padding: .75rem;
+  }
+
+  .crm-workspace__filters > div:last-child {
+    justify-content: flex-start;
+  }
+
+  .crm-workspace__kanban {
+    display: flex;
+    gap: .75rem;
+    margin-right: -.75rem;
+    padding-right: .75rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .crm-workspace__kanban > * {
+    flex: 0 0 min(82vw, 18rem);
+    scroll-snap-align: start;
+  }
+
+  .knowledge-workspace__hero {
+    align-items: flex-start;
+  }
+
+  .knowledge-workspace__hero p {
+    -webkit-line-clamp: 2;
+  }
+
+  .quality-workspace > div:first-child > div:last-child {
+    width: 100%;
+  }
+
+  .quality-workspace > div:first-child > div:last-child > button {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .saas-workspace__tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .saas-workspace__tabs > button {
+    flex: 0 0 auto;
+  }
+}
+
+
+@media (max-width: 640px) {
+  .saas-workspace__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .6rem;
+  }
+
+  .saas-workspace__metrics > * {
+    padding: .8rem;
+  }
+}
+
+html[data-theme='light'] .quality-workspace__persistence-alert {
+  color: #6D4A00;
+  background: #FFF8E8;
+  border-color: #E8C678;
+}
+
+html[data-theme='light'] .quality-workspace__persistence-alert .text-amber-200,
+html[data-theme='light'] .quality-workspace__persistence-alert .text-amber-100\/70 {
+  color: #6D4A00 !important;
+}
+
+
+/* Correção de regressão: alguns navegadores Android mantêm um layout viewport
+   largo mesmo com viewport meta. Em telas de toque, a prioridade é sempre
+   fila ou conversa — nunca as três colunas comprimidas. */
+@media (hover: none) and (pointer: coarse) {
+  .atendimento-workspace {
+    gap: .7rem;
+  }
+
+  .atendimento-workspace__header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: .65rem;
+    padding: .85rem .9rem;
+    border-radius: 1rem;
+  }
+
+  .atendimento-workspace__header p {
+    display: none;
+  }
+
+  .atendimento-workspace__tenant {
+    width: 100%;
+    padding-top: .5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .atendimento-workspace__signals {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .45rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .atendimento-signal,
+  .atendimento-workspace__approval {
+    min-width: 0;
+    padding: .55rem .6rem;
+    border: 1px solid var(--border);
+    border-radius: .8rem;
+    background: var(--surface-panel);
+  }
+
+  .atendimento-signal {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+  }
+
+  .atendimento-signal__icon {
+    width: 1.45rem;
+    height: 1.45rem;
+    flex: 0 0 auto;
+  }
+
+  .atendimento-signal strong {
+    display: block;
+    overflow: hidden;
+    font-size: .7rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .atendimento-signal span:not(.atendimento-signal__icon) {
+    display: block;
+    overflow: hidden;
+    font-size: .54rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .atendimento-workspace__approval {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    color: var(--text-secondary);
+    font-size: .57rem;
+    line-height: 1.25;
+  }
+
+  .atendimento-chat-shell {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    height: 70dvh !important;
+    min-height: 26rem !important;
+    max-height: 38rem;
+  }
+
+  .atendimento-chat-shell .atendimento-queue,
+  .atendimento-chat-shell .atendimento-thread {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .atendimento-chat-shell .atendimento-queue.flex,
+  .atendimento-chat-shell .atendimento-thread.flex {
+    display: flex !important;
+  }
+
+  .atendimento-chat-shell .atendimento-queue.hidden,
+  .atendimento-chat-shell .atendimento-thread.hidden {
+    display: none !important;
+  }
+
+  .atendimento-analysis-panel {
+    display: none !important;
+  }
+
+  .atendimento-analysis-trigger {
+    display: inline-flex !important;
+  }
+
+  .atendimento-analysis-drawer {
+    display: flex !important;
+  }
+}
+
+
+/* Central de Qualidade: auditoria compreensível e contrastada em todos os temas. */
+.quality-workspace__timeline {
+  background: var(--surface-panel) !important;
+  border-color: var(--border) !important;
+}
+
+.quality-workspace__timeline-header {
+  border-color: var(--border) !important;
+}
+
+.quality-workspace__timeline-header h3,
+.quality-workspace__event-title {
+  color: var(--text-primary) !important;
+}
+
+.quality-workspace__timeline-header p,
+.quality-workspace__event-time,
+.quality-workspace__event-meta {
+  color: var(--text-secondary) !important;
+}
+
+.quality-workspace__event {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  background: var(--surface-panel);
+}
+
+.quality-workspace__event + .quality-workspace__event {
+  border-top: 1px solid var(--border);
+}
+
+.quality-workspace__event-icon {
+  display: flex;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--action) 32%, var(--border));
+  border-radius: .65rem;
+  color: var(--action);
+  background: color-mix(in srgb, var(--action) 10%, var(--surface-panel));
+}
+
+.quality-workspace__event-title {
+  font-size: .82rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.quality-workspace__event-time {
+  font-size: .67rem;
+  white-space: nowrap;
+}
+
+.quality-workspace__event-summary {
+  margin-top: .3rem;
+  color: var(--text-primary);
+  font-size: .76rem;
+  line-height: 1.5;
+}
+
+.quality-workspace__event-meta {
+  margin-top: .35rem;
+  font-size: .68rem;
+}
+
+.quality-workspace__event-details {
+  margin-top: .65rem;
+  border: 1px solid var(--border);
+  border-radius: .65rem;
+  background: var(--surface-sunken);
+}
+
+.quality-workspace__event-details summary {
+  padding: .55rem .65rem;
+  color: var(--text-secondary);
+  font-size: .68rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.quality-workspace__event-details pre {
+  overflow: auto;
+  max-height: 14rem;
+  margin: 0;
+  padding: .65rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
+  font: 500 .68rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .quality-workspace__event {
+    gap: .6rem;
+    padding: .85rem;
+  }
+
+  .quality-workspace__event-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: .55rem;
+  }
+
+  .quality-workspace__event-time {
+    flex-basis: 100%;
+  }
+}
+
+
+/* CRM em largura intermediária: a leitura continua sequencial até haver espaço
+   real para as seis etapas. Evita o retorno prematuro à grade desktop. */
+@media (min-width: 641px) and (max-width: 1023px) {
+  .crm-workspace__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: .75rem;
+  }
+
+  .crm-workspace__filters {
+    align-items: stretch;
+    gap: .75rem;
+  }
+
+  .crm-workspace__filters > div:first-child {
+    width: 100%;
+  }
+
+  .crm-workspace__filters > div:last-child {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .crm-workspace__kanban {
+    display: flex !important;
+    gap: .75rem;
+    margin-right: -1.5rem;
+    padding-right: 1.5rem;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .crm-workspace__kanban > * {
+    flex: 0 0 min(58vw, 22rem);
+    scroll-snap-align: start;
+  }
+}
+
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .crm-workspace__kanban {
+    display: flex !important;
+    gap: .85rem;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .crm-workspace__kanban > * {
+    flex: 0 0 min(31vw, 20rem);
+    scroll-snap-align: start;
+  }
+}
+
+
+/* Base de Conhecimento: diagnóstico e prioridades legíveis no modo claro. */
+.knowledge-workspace__audit {
+  background: var(--surface-panel) !important;
+  border-color: color-mix(in srgb, var(--action) 28%, var(--border)) !important;
+}
+
+.knowledge-workspace__audit > div:first-child > div:first-child > div,
+.knowledge-workspace__audit > div:first-child > div:first-child > p,
+.knowledge-workspace__audit > div:nth-child(3) > div:first-child > span {
+  color: var(--text-primary);
+}
+
+.knowledge-workspace__audit-metric {
+  background: var(--surface-raised) !important;
+  border-color: var(--border) !important;
+}
+
+.knowledge-workspace__audit-metric p:first-child {
+  color: var(--text-secondary) !important;
+}
+
+.knowledge-workspace__finding {
+  background: var(--surface-raised) !important;
+  border-color: var(--border) !important;
+}
+
+.knowledge-workspace__finding-title {
+  color: var(--text-primary) !important;
+}
+
+.knowledge-workspace__finding-description {
+  color: var(--text-secondary) !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__audit {
+  background: #ffffff !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__audit-metric {
+  background: #f7fbfa !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__finding {
+  background: #f7fbfa !important;
+}
+
+
+/* Aviso de comprovante: alerta de atenção legível também no modo claro. */
+.atendimento-payment-verification {
+  color: #FFE7A8;
+}
+
+.atendimento-payment-verification__hint {
+  color: #FFD66B !important;
+}
+
+.atendimento-payment-verification__action {
+  color: #FFFFFF !important;
+  background: #B45309 !important;
+  border: 1px solid #92400E;
+}
+
+.atendimento-payment-verification__action:hover {
+  background: #92400E !important;
+}
+
+html[data-theme='light'] .atendimento-payment-verification {
+  color: #5F3B00 !important;
+  background: #FFF4D8 !important;
+  border-color: #E7BC58 !important;
+}
+
+html[data-theme='light'] .atendimento-payment-verification .text-amber-400,
+html[data-theme='light'] .atendimento-payment-verification__hint {
+  color: #8A5700 !important;
+}
+
+html[data-theme='light'] .atendimento-payment-verification__action {
+  color: #FFFFFF !important;
+  background: #A84E00 !important;
+  border-color: #873F00 !important;
+}
+
+
+/* Qualidade da IA: princípio de controle e estados sempre legíveis no claro. */
+.quality-workspace__control-card,
+.quality-workspace__control-quote,
+.quality-workspace__control-pill {
+  color: var(--text-primary);
+}
+
+html[data-theme='light'] .quality-workspace__control-card {
+  background: #FFFFFF !important;
+  border-color: #D8E5E1 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-card h3 {
+  color: #173B37 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-card > div:first-child p {
+  color: #52706B !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-quote {
+  background: #ECF8F2 !important;
+  border-color: #9FD6BE !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-quote p {
+  color: #1F5B43 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-pill {
+  background: #F7FBFA !important;
+  border-color: #D8E5E1 !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-pill > p:first-child {
+  color: #52706B !important;
+}
+
+html[data-theme='light'] .quality-workspace__control-pill--sky > p:last-child { color: #036B91 !important; }
+html[data-theme='light'] .quality-workspace__control-pill--sky > p:last-child { color: #036B91 !important; }
+html[data-theme='light'] .quality-workspace__control-pill--amber > p:last-child { color: #8A5700 !important; }
+html[data-theme='light'] .quality-workspace__control-pill--emerald > p:last-child { color: #09734B !important; }
+
+
+/* Qualidade IA — superfícies claras inspiradas no Atendimento validado.
+   Esta área é deliberadamente clara mesmo se o operador estiver usando outro
+   tema global: informação de auditoria, leitura de evidências e ações humanas
+   não devem depender de texto claro sobre azul escuro para serem compreendidas. */
+.quality-workspace--clear {
+  --quality-canvas: #F4F3EF;
+  --quality-panel: #FFFFFF;
+  --quality-soft: #F8F8F5;
+  --quality-line: #DCDAD3;
+  --quality-line-strong: #C9C6BD;
+  --quality-text: #22241F;
+  --quality-secondary: #5A5B54;
+  --quality-muted: #77766F;
+  --quality-action: #176B4C;
+  color: var(--quality-text);
+  padding: 1rem;
+  border: 1px solid var(--quality-line);
+  border-radius: 1rem;
+  background: var(--quality-canvas);
+  box-shadow: 0 1px 2px rgba(34, 36, 31, 0.05);
+}
+
+.quality-workspace--clear .text-white,
+.quality-workspace--clear .text-slate-100,
+.quality-workspace--clear .text-slate-200,
+.quality-workspace--clear .text-slate-300 {
+  color: var(--quality-text) !important;
+}
+
+.quality-workspace--clear .text-slate-400,
+.quality-workspace--clear .text-slate-500,
+.quality-workspace--clear .text-slate-600,
+.quality-workspace--clear .placeholder\:text-slate-600,
+.quality-workspace--clear .placeholder\:text-slate-400 {
+  color: var(--quality-secondary) !important;
+}
+
+html .quality-workspace.quality-workspace--clear .bg-slate-950,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/90,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/80,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/60,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/50,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/45 {
+  background-color: var(--quality-soft) !important;
+}
+
+html .quality-workspace.quality-workspace--clear .bg-slate-900,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/90,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/80,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/70,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/65 {
+  background-color: var(--quality-panel) !important;
+}
+
+html .quality-workspace.quality-workspace--clear .bg-slate-800,
+html .quality-workspace.quality-workspace--clear .bg-slate-800\/90,
+html .quality-workspace.quality-workspace--clear .bg-slate-800\/70,
+html .quality-workspace.quality-workspace--clear .bg-slate-800\/65 {
+  background-color: #ECEBE6 !important;
+}
+
+html .quality-workspace.quality-workspace--clear .border-slate-800,
+html .quality-workspace.quality-workspace--clear .border-slate-800\/80,
+html .quality-workspace.quality-workspace--clear .border-slate-800\/60,
+html .quality-workspace.quality-workspace--clear .border-slate-700,
+html .quality-workspace.quality-workspace--clear .border-slate-700\/80 {
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .bg-gradient-to-br {
+  background-image: none !important;
+  background-color: var(--quality-panel) !important;
+}
+
+.quality-workspace--clear .text-sky-300,
+.quality-workspace--clear .text-sky-200,
+.quality-workspace--clear .text-sky-100 {
+  color: #086780 !important;
+}
+
+.quality-workspace--clear .bg-sky-500\/5,
+.quality-workspace--clear .bg-sky-500\/10,
+.quality-workspace--clear .bg-sky-500\/15,
+.quality-workspace--clear .bg-sky-500\/20 {
+  background-color: #E7F4F6 !important;
+}
+
+.quality-workspace--clear .border-sky-500\/20,
+.quality-workspace--clear .border-sky-500\/25,
+.quality-workspace--clear .border-sky-500\/30,
+.quality-workspace--clear .border-sky-400\/20,
+.quality-workspace--clear .border-sky-400\/30,
+.quality-workspace--clear .border-sky-400\/50 {
+  border-color: #9BCFD6 !important;
+}
+
+.quality-workspace--clear .bg-sky-500.text-white {
+  background-color: #0D718A !important;
+  color: #FFFFFF !important;
+}
+
+.quality-workspace--clear .bg-sky-500\/10:hover,
+.quality-workspace--clear .bg-sky-500\/20:hover,
+.quality-workspace--clear .hover\:bg-sky-500\/20:hover {
+  background-color: #D7EDF0 !important;
+}
+
+.quality-workspace--clear .text-emerald-300,
+.quality-workspace--clear .text-emerald-200,
+.quality-workspace--clear .text-emerald-100 {
+  color: #0A704C !important;
+}
+
+.quality-workspace--clear .bg-emerald-500\/5,
+.quality-workspace--clear .bg-emerald-500\/10,
+.quality-workspace--clear .bg-emerald-500\/15 {
+  background-color: #EAF7F0 !important;
+}
+
+.quality-workspace--clear .border-emerald-500\/20,
+.quality-workspace--clear .border-emerald-500\/25,
+.quality-workspace--clear .border-emerald-400\/20,
+.quality-workspace--clear .border-emerald-400\/25 {
+  border-color: #9CD4B8 !important;
+}
+
+.quality-workspace--clear .text-amber-300,
+.quality-workspace--clear .text-amber-200,
+.quality-workspace--clear .text-amber-100 {
+  color: #825300 !important;
+}
+
+.quality-workspace--clear .bg-amber-500\/5,
+.quality-workspace--clear .bg-amber-500\/10 {
+  background-color: #FFF4D8 !important;
+}
+
+.quality-workspace--clear .border-amber-500\/25,
+.quality-workspace--clear .border-amber-500\/30,
+.quality-workspace--clear .border-amber-400\/25,
+.quality-workspace--clear .border-amber-400\/30 {
+  border-color: #E6BB58 !important;
+}
+
+.quality-workspace--clear .text-rose-300,
+.quality-workspace--clear .text-rose-200,
+.quality-workspace--clear .text-rose-100 {
+  color: #9C3F2C !important;
+}
+
+.quality-workspace--clear .bg-rose-500\/5,
+.quality-workspace--clear .bg-rose-500\/10 {
+  background-color: #FCEEEA !important;
+}
+
+.quality-workspace--clear .border-rose-500\/20,
+.quality-workspace--clear .border-rose-500\/25,
+.quality-workspace--clear .border-rose-500\/30,
+.quality-workspace--clear .border-rose-400\/20,
+.quality-workspace--clear .border-rose-400\/25 {
+  border-color: #E6B8AC !important;
+}
+
+.quality-workspace--clear .text-orange-300,
+.quality-workspace--clear .text-orange-200 {
+  color: #954A19 !important;
+}
+
+.quality-workspace--clear .bg-orange-500\/10 {
+  background-color: #FCEEE4 !important;
+}
+
+.quality-workspace--clear .border-orange-500\/30 {
+  border-color: #E8BF9F !important;
+}
+
+.quality-workspace--clear .quality-workspace__timeline,
+.quality-workspace--clear .quality-workspace__event {
+  background: var(--quality-panel) !important;
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .quality-workspace__event-details {
+  background: var(--quality-soft) !important;
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .quality-workspace__event-title,
+.quality-workspace--clear .quality-workspace__event-summary,
+.quality-workspace--clear .quality-workspace__timeline-header h3 {
+  color: var(--quality-text) !important;
+}
+
+.quality-workspace--clear .quality-workspace__event-time,
+.quality-workspace--clear .quality-workspace__event-meta,
+.quality-workspace--clear .quality-workspace__timeline-header p,
+.quality-workspace--clear .quality-workspace__event-details summary {
+  color: var(--quality-secondary) !important;
+}
+
+.quality-workspace--clear .quality-workspace__control-card {
+  background: var(--quality-panel) !important;
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .quality-workspace__control-quote {
+  background: #EAF7F0 !important;
+  border-color: #9CD4B8 !important;
+}
+
+.quality-workspace--clear .quality-workspace__control-pill {
+  background: var(--quality-soft) !important;
+  border-color: var(--quality-line) !important;
+}
+
+@media (max-width: 640px) {
+  .quality-workspace--clear {
+    padding: .75rem;
+    border-radius: .85rem;
+  }
+
+  .quality-workspace--clear .responsive-tab-strip {
+    margin-right: -.75rem;
+    margin-left: -.75rem;
+    padding-right: .75rem;
+    padding-left: .75rem;
+  }
+}
 /* Ações secundárias da conversa: menu compacto no desktop, bottom sheet no mobile. */
 @media (max-width: 640px) {
   .mobile-header-context-menu {

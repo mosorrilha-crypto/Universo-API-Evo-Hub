@@ -305,10 +305,10 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   };
 
   return (
-    <div className="space-y-5 animate-page-enter">
+    <div className="growth-workspace space-y-5 animate-page-enter">
       
       {/* Top Banner & Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-card p-5 sm:p-6 shadow-xl relative overflow-hidden">
+      <div className="growth-workspace__hero bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-card p-5 sm:p-6 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 transform translate-x-10 -translate-y-10 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 relative z-10">
@@ -326,7 +326,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="growth-workspace__actions flex flex-wrap items-center gap-2">
             <button
               onClick={handleGenerateAIReport}
               disabled={isGeneratingReport}
@@ -356,7 +356,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
         </div>
 
         {/* Sub-navigation tabs inside header */}
-        <div className="flex items-center space-x-2 mt-6 pt-4 border-t border-slate-800/80 overflow-x-auto scrollbar-none">
+        <div className="responsive-tab-strip flex items-center space-x-2 mt-6 pt-4 border-t border-slate-800/80 overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('traffic_center')}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
@@ -389,7 +389,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Bot className="w-4 h-4 text-purple-400" />
+            <Bot className="w-4 h-4 text-sky-400" />
             <span>{isSpanish ? 'Diagnóstico de IA' : 'Diagnóstico IA'}</span>
           </button>
 
@@ -426,7 +426,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
       {activeTab === 'traffic_center' && <TrafficCenter />}
 
       {/* Metric Cards Banner */}
-      {activeTab !== 'traffic_center' && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {activeTab !== 'traffic_center' && <div className="growth-workspace__metrics grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between text-slate-400 mb-2">
@@ -483,11 +483,11 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-medium">{isSpanish ? 'Tráfico orgánico y directo' : 'Tráfego orgânico e direto'}</span>
-            <Globe className="w-4 h-4 text-purple-400" />
+            <Globe className="w-4 h-4 text-sky-400" />
           </div>
           <div className="flex items-baseline space-x-2">
             <span className="text-2xl font-bold text-white">{totalOrganicLeads}</span>
-            <span className="text-xs font-semibold text-purple-400">
+            <span className="text-xs font-semibold text-sky-400">
               ({Math.round((totalOrganicLeads / (leads.length || 1)) * 100)}%)
             </span>
           </div>
@@ -534,7 +534,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               />
               <div 
                 style={{ width: `${(instagramOrgCount / (leads.length || 1)) * 100}%` }} 
-                className="bg-purple-500 h-full transition-all"
+                className="bg-sky-500 h-full transition-all"
                 title={`${isSpanish ? 'Instagram orgánico' : 'Instagram orgânico'}: ${instagramOrgCount}`}
               />
               <div 
@@ -557,7 +557,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <span className="text-slate-500 font-bold">({googleAdsCount})</span>
               </div>
               <div className="flex items-center space-x-2 text-xs">
-                <span className="w-3 h-3 rounded-full bg-purple-500 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-sky-500 inline-block" />
                 <span className="text-slate-300 font-medium">{isSpanish ? 'Instagram orgánico' : 'Instagram orgânico'}</span>
                 <span className="text-slate-500 font-bold">({instagramOrgCount})</span>
               </div>
@@ -640,7 +640,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                               : isGoogle
                               ? 'bg-blue-950/80 text-blue-300 border-blue-800/80'
                               : isOrganic
-                              ? 'bg-purple-950/80 text-purple-300 border-purple-800/80'
+                              ? 'bg-sky-950/80 text-sky-300 border-sky-800/80'
                               : 'bg-slate-800 text-slate-300 border-slate-700'
                           }`}>
                             {lead.attribution?.channelLabel || (isSpanish ? 'Directo / WhatsApp' : 'Direto / WhatsApp')}
@@ -717,7 +717,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
                 <div className="flex items-center space-x-2">
-                  <Bot className="w-6 h-6 text-purple-400" />
+                  <Bot className="w-6 h-6 text-sky-400" />
                   <h3 className="text-xl font-bold text-white">
                     {isSpanish ? 'Estudio de rendimiento de anuncios con IA' : 'Estudo de performance de anúncios com IA'}
                   </h3>
@@ -730,7 +730,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <button
                 onClick={handleGenerateAIReport}
                 disabled={isGeneratingReport}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-2 transition-all shadow-lg shadow-purple-950/50"
+                className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-2 transition-all shadow-lg shadow-sky-950/50"
               >
                 {isGeneratingReport ? (
                   <>
@@ -739,7 +739,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4 text-purple-200" />
+                    <Sparkles className="w-4 h-4 text-sky-200" />
                     <span>{isSpanish ? 'Recalcular análisis de IA' : 'Recalcular análise de IA'}</span>
                   </>
                 )}
@@ -751,12 +751,12 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               <div className="space-y-6">
                 
                 {/* Top Performing Channel Banner */}
-                <div className="bg-gradient-to-r from-purple-950/40 via-slate-900 to-slate-900 border border-purple-500/30 rounded-xl p-5 flex items-center space-x-4">
-                  <div className="p-3 bg-purple-500/20 border border-purple-500/40 rounded-xl text-purple-300">
+                <div className="bg-gradient-to-r from-sky-950/40 via-slate-900 to-slate-900 border border-sky-500/30 rounded-xl p-5 flex items-center space-x-4">
+                  <div className="p-3 bg-sky-500/20 border border-sky-500/40 rounded-xl text-sky-300">
                     <TrendingUp className="w-6 h-6" />
                   </div>
                   <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-purple-400">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-sky-400">
                       {isSpanish ? 'Canal con mayor retorno de ventas' : 'Canal com maior retorno de vendas'}
                     </span>
                     <h4 className="text-lg font-bold text-white mt-0.5">
@@ -805,7 +805,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 {/* Strategic Insights */}
                 <div className="space-y-3 bg-slate-950/60 border border-slate-800 p-5 rounded-xl">
                   <h4 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
-                    <Sparkles className="w-4 h-4 text-purple-400" />
+                    <Sparkles className="w-4 h-4 text-sky-400" />
                     <span>{isSpanish ? 'Recomendaciones de tráfico pago y CAPI' : 'Recomendações de tráfego pago e CAPI'}</span>
                   </h4>
 

@@ -10,7 +10,7 @@ import {
 } from '../services/financialStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { resolveTenantId } from '../middleware/rbac';
+import { requireRole, resolveTenantId } from '../middleware/rbac';
 
 interface FinancialRouterDeps {
   authenticateToken: RequestHandler;
@@ -34,12 +34,12 @@ const ENTRY_TYPES: FinancialEntryType[] = ['income', 'expense'];
 export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps): Router {
   const router = Router();
 
-  router.get('/api/financial/transactions', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/financial/transactions', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const transactions = await listFinancialTransactions(tenantOf(req));
     res.json({ transactions });
   }));
 
-  router.post('/api/financial/transactions', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/financial/transactions', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType } = req.body || {};
 
     if (typeof id !== 'string' || !id.trim()) return res.status(400).json({ error: 'id é obrigatório.' });
@@ -71,7 +71,7 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
     res.json({ transaction });
   }));
 
-  router.patch('/api/financial/transactions/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/financial/transactions/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status } = req.body || {};
     if (!PAYMENT_STATUSES.includes(status)) {
       return res.status(400).json({ error: `status inválido — esperado um de: ${PAYMENT_STATUSES.join(', ')}.` });
@@ -81,7 +81,7 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
     res.json({ transaction });
   }));
 
-  router.delete('/api/financial/transactions/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/financial/transactions/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteFinancialTransaction(tenantOf(req), req.params.id);
     res.json({ success: true });
   }));

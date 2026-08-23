@@ -33,9 +33,16 @@ import ffmpegPath from 'ffmpeg-static';
 export function stripDataUrlPrefix(value: string): string {
   return value.replace(/^data:[^,]*;base64,/i, '');
 }
+export type WhatsAppAudioOutput = 'mp3' | 'ogg_opus';
+
+/**
+ * Converte áudio para o formato de entrega escolhido. MP3 é o padrão estável;
+ * OGG/Opus só deve ser solicitado pelo ensaio controlado autenticado.
+ */
 export async function transcodeToWhatsAppVoiceNote(
   base64: string,
-  mimeType: string
+  mimeType: string,
+  output: WhatsAppAudioOutput = 'mp3'
 ): Promise<{ base64: string; mimeType: string }> {
   if (!ffmpegPath) {
     throw new Error('ffmpeg não disponível neste ambiente — não foi possível converter o áudio pro formato aceito pela Meta.');
@@ -47,22 +54,24 @@ export async function transcodeToWhatsAppVoiceNote(
   const tmpDir = os.tmpdir();
   const id = crypto.randomBytes(8).toString('hex');
   const inputPath = path.join(tmpDir, `voice-in-${id}`);
-  const outputPath = path.join(tmpDir, `voice-out-${id}.mp3`);
+  const outputMimeType = output === 'ogg_opus' ? 'audio/ogg; codecs=opus' : 'audio/mpeg';
+  const outputPath = path.join(tmpDir, `voice-out-${id}.${output === 'ogg_opus' ? 'ogg' : 'mp3'}`);
+  const ffmpegArgs = output === 'ogg_opus'
+    ? [
+        '-y', '-i', inputPath, '-vn',
+        '-c:a', 'libopus', '-ac', '1', '-ar', '16000', '-b:a', '24k',
+        '-vbr', 'on', '-application', 'voip', '-f', 'ogg', outputPath,
+      ]
+    : [
+        '-y', '-i', inputPath, '-vn',
+        '-c:a', 'libmp3lame', '-ac', '1', '-ar', '48000', '-b:a', '64k',
+        '-f', 'mp3', outputPath,
+      ];
 
   await fs.writeFile(inputPath, inputBuffer);
   try {
     await new Promise<void>((resolve, reject) => {
-      const proc = spawn(ffmpegPath as unknown as string, [
-        '-y',
-        '-i', inputPath,
-        '-vn',
-        '-c:a', 'libmp3lame',
-        '-ac', '1',
-        '-ar', '48000',
-        '-b:a', '64k',
-        '-f', 'mp3',
-        outputPath,
-      ]);
+      const proc = spawn(ffmpegPath as unknown as string, ffmpegArgs);
       let stderr = '';
       proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
       proc.on('error', reject);
@@ -73,12 +82,20 @@ export async function transcodeToWhatsAppVoiceNote(
     });
 
     const outputBuffer = await fs.readFile(outputPath);
-    const magic = outputBuffer.subarray(0, 3).toString('ascii');
-    console.log(`🎙️  [audioTranscode] fallback=mp3 input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic}" (esperado "ID3")`);
-    if (magic !== 'ID3') {
-      throw new Error('A conversão de áudio não produziu um MP3 válido.');
+    const magic = outputBuffer.subarray(0, 4).toString('ascii');
+    const hasOpusHeader = outputBuffer.includes(Buffer.from('OpusHead'));
+    if (output === 'ogg_opus') {
+      console.log(`🎙️  [audioTranscode] probe=ogg_opus input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic}" opus=${hasOpusHeader}`);
+      if (magic !== 'OggS' || !hasOpusHeader) {
+        throw new Error('A conversão de áudio não produziu um OGG/Opus válido.');
+      }
+    } else {
+      console.log(`🎙️  [audioTranscode] fallback=mp3 input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic.slice(0, 3)}" (esperado "ID3")`);
+      if (magic.slice(0, 3) !== 'ID3') {
+        throw new Error('A conversão de áudio não produziu um MP3 válido.');
+      }
     }
-    return { base64: outputBuffer.toString('base64'), mimeType: 'audio/mpeg' };
+    return { base64: outputBuffer.toString('base64'), mimeType: outputMimeType };
   } finally {
     await fs.unlink(inputPath).catch(() => {});
     await fs.unlink(outputPath).catch(() => {});

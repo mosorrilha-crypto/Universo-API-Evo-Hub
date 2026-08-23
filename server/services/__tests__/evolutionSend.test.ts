@@ -5,7 +5,7 @@
  * com header `apikey`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sendEvolutionTextMessage, showEvolutionTyping, setEvolutionWebhook } from '../evolutionSend';
+import { sendEvolutionTextMessage, sendEvolutionVoiceMessage, showEvolutionTyping, setEvolutionWebhook } from '../evolutionSend';
 
 const realFetch = global.fetch;
 
@@ -34,6 +34,44 @@ describe('sendEvolutionTextMessage', () => {
 
   it('lança erro quando falta instância/URL/chave', async () => {
     await expect(sendEvolutionTextMessage(undefined, undefined, undefined, '595981234567', 'Oi!')).rejects.toThrow();
+  });
+});
+
+describe('sendEvolutionVoiceMessage', () => {
+  it('usa o endpoint PTT dedicado e fornece o áudio em Base64 puro com codificação habilitada', async () => {
+    const fetchMock = vi.fn(async (_url: string, _options?: any) => ({
+      ok: true,
+      json: async () => ({ key: { id: 'voice-123' } }),
+    }));
+    global.fetch = fetchMock as any;
+
+    await sendEvolutionVoiceMessage('inst-1', 'https://evo.example.com/', 'key-1', '595981234567', 'T2dnUw==', 'audio/ogg; codecs=opus');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://evo.example.com/message/sendWhatsAppAudio/inst-1');
+    expect((options as any).headers.apikey).toBe('key-1');
+    expect(JSON.parse((options as any).body)).toEqual({
+      number: '595981234567',
+      audio: 'T2dnUw==',
+      encoding: true,
+      delay: 1200,
+    });
+  });
+
+  it('remove o cabeçalho Data URL e preserva somente os bytes Base64 enviados à Evolution', async () => {
+    const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as any;
+
+    await sendEvolutionVoiceMessage('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'data:audio/ogg; codecs=opus;base64,T2dnUw==', 'audio/ogg; codecs=opus');
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse((options as any).body).audio).toBe('T2dnUw==');
+  });
+
+  it('propaga uma falha do endpoint PTT', async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) })) as any;
+    await expect(sendEvolutionVoiceMessage('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'T2dnUw==', 'audio/ogg; codecs=opus')).rejects.toThrow(/HTTP 500/);
   });
 });
 

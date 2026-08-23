@@ -16,7 +16,6 @@ import {
 } from '../services/googleCalendar';
 import { updateAppointmentSummaryByEventId, updateAppointmentTimesByEventId, clearAppointmentByEventId, getAppointmentByEventId } from '../services/appointmentStore';
 import { clearRemindersForEvent } from '../services/reminderStore';
-import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from '../services/calendarEventCompletionStore';
 import { getConversation } from '../services/conversationStore';
 import {
@@ -30,7 +29,7 @@ import {
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { resolveTenantId } from '../middleware/rbac';
+import { requireRole, resolveTenantId } from '../middleware/rbac';
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['pago', 'pendente', 'atrasado', 'cancelado'];
@@ -71,12 +70,12 @@ function tenantOf(req: AuthenticatedRequest): string {
 export function createGoogleCalendarRouter({ authenticateToken, googleClientId, googleClientSecret, googleRedirectUri, jwtSecret }: GoogleCalendarRouterDeps): Router {
   const router = Router();
 
-  router.get('/api/google-calendar/status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/status', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     res.json({ connected: await isGoogleCalendarConnected(tenantId) });
   }));
 
-  router.get('/api/google-calendar/connect', authenticateToken, (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/connect', authenticateToken, requireRole('admin'), (req: AuthenticatedRequest, res) => {
     if (!googleClientId || !googleClientSecret) {
       return res.status(500).json({ error: 'GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET não configurados no servidor.' });
     }
@@ -91,26 +90,29 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     const error = req.query.error as string | undefined;
 
     if (error) {
-      return res.status(400).send(`<html><body style="font-family:sans-serif;padding:2rem"><h2>Conexão cancelada</h2><p>${error}</p><a href="/">Voltar ao painel</a></body></html>`);
+      return res.status(400).send('<html><body style="font-family:sans-serif;padding:2rem"><h2>Conexão cancelada</h2><p>A autorização foi cancelada ou recusada pelo provedor.</p><a href="/">Voltar ao painel</a></body></html>');
     }
     if (!code || !googleClientId || !googleClientSecret) {
       return res.status(400).send('<html><body style="font-family:sans-serif;padding:2rem"><h2>Erro</h2><p>Código de autorização ausente ou credenciais não configuradas.</p></body></html>');
     }
 
-    // Fallback pro tenant legado se o state vier ausente/inválido/expirado —
-    // preserva o comportamento de hoje em vez de simplesmente falhar.
-    const tenantId = verifyOAuthState(req.query.state as string | undefined, jwtSecret) || LEGACY_DEFAULT_TENANT_ID;
+    // O callback é público, portanto o state assinado é a única prova de qual
+    // tenant iniciou o consentimento. Sem ele, nunca associe um refresh token.
+    const tenantId = verifyOAuthState(req.query.state as string | undefined, jwtSecret);
+    if (!tenantId) {
+      return res.status(400).send('<html><body style="font-family:sans-serif;padding:2rem"><h2>Conexão inválida</h2><p>O link de autorização expirou ou não é válido. Volte ao painel e inicie a conexão novamente.</p><a href="/">Voltar ao painel</a></body></html>');
+    }
 
     try {
       await handleGoogleOAuthCallback(tenantId, code, googleClientId, googleClientSecret, googleRedirectUri);
       res.send('<html><body style="font-family:sans-serif;padding:2rem;text-align:center"><h2>✅ Google Calendar conectado!</h2><p>Pode fechar esta aba e voltar ao painel.</p></body></html>');
     } catch (err: any) {
       console.error('❌ [Google Calendar] Falha no callback OAuth:', err.message);
-      res.status(500).send(`<html><body style="font-family:sans-serif;padding:2rem"><h2>Falha ao conectar</h2><p>${err.message}</p></body></html>`);
+      res.status(500).send('<html><body style="font-family:sans-serif;padding:2rem"><h2>Falha ao conectar</h2><p>Não foi possível concluir a conexão. Volte ao painel e tente novamente.</p></body></html>');
     }
   }));
 
-  router.post('/api/google-calendar/disconnect', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/google-calendar/disconnect', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     await disconnectGoogleCalendar(tenantId);
     res.json({ success: true });
@@ -128,7 +130,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // fora da janela de N dias). `?year=YYYY&month=1-12` (opcional, os dois
   // juntos) troca a janela pra esse mês inteiro; sem eles, mantém o
   // comportamento antigo (compatibilidade com quem já chamava sem parâmetro).
-  router.get('/api/google-calendar/upcoming-events', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/upcoming-events', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!(await isGoogleCalendarConnected(tenantId))) {
       return res.status(503).json({ error: 'Google Calendar não conectado pra este tenant.' });
@@ -180,7 +182,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // conversations.ts) — não sobrescreve nada no Google Calendar. Só cria uma
   // vez por evento (a constraint única de source_ref barra duplicata); editar
   // um pagamento já lançado fica pra uma etapa seguinte.
-  router.post('/api/google-calendar/events/:eventId/payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/google-calendar/events/:eventId/payment', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { amount, paymentMethod, status } = req.body || {};
     if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
@@ -226,7 +228,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // pedido real 20/08/2026 — a etapa 1, criar o lançamento, é a rota POST
   // acima). Nunca cria: se ainda não existe transação com esse `sourceRef`,
   // 404 (o operador usa "Registrar pagamento" pra criar a primeira vez).
-  router.patch('/api/google-calendar/events/:eventId/payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/google-calendar/events/:eventId/payment', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { amount, paymentMethod, status } = req.body || {};
     if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)) {
@@ -249,7 +251,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // opções reais em vez do operador digitar hora "no escuro" (pedido real,
   // 20/08/2026: "consigo até auditar os horários que a IA tem disponível
   // visualmente"). `durationMinutes` vem do serviço escolhido no modal.
-  router.get('/api/google-calendar/free-slots', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/free-slots', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!(await isGoogleCalendarConnected(tenantId))) {
       return res.status(503).json({ error: 'Google Calendar não conectado pra este tenant.' });
@@ -279,7 +281,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // do evento original, só desloca o início) em vez de recalculado aqui —
   // evita duplicar a lógica de duração por serviço, que já mora no catálogo
   // e é resolvida no cliente a partir do evento atual.
-  router.patch('/api/google-calendar/events/:eventId/reschedule', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/google-calendar/events/:eventId/reschedule', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { newStartIso, newEndIso } = req.body || {};
     if (typeof newStartIso !== 'string' || typeof newEndIso !== 'string' || !newStartIso || !newEndIso) {
@@ -317,7 +319,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // ativo" pro resto do sistema — bloquearia um novo agendamento pro mesmo
   // contato e o job de lembretes tentaria avisar de um evento que não existe
   // mais).
-  router.delete('/api/google-calendar/events/:eventId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/google-calendar/events/:eventId', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!googleRedirectUri) {
       return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
@@ -337,7 +339,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // Marca/desmarca um evento como concluído (checkbox da Agenda) — só a
   // marca em si, nunca mexe no evento real do Google Calendar (ver
   // calendarEventCompletionStore.ts).
-  router.post('/api/google-calendar/events/:eventId/complete', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/google-calendar/events/:eventId/complete', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { completed } = req.body || {};
     if (typeof completed !== 'boolean') {
@@ -353,7 +355,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // Atualiza o evento real no Google Calendar e, melhor esforço, a linha
   // espelhada em `appointments` (se o eventId bater com uma) pra não ficar
   // com o nome errado grudado no painel mesmo depois da correção real.
-  router.patch('/api/google-calendar/events/:eventId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/google-calendar/events/:eventId', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { summary } = req.body || {};
     if (typeof summary !== 'string' || !summary.trim()) {

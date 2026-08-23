@@ -14,14 +14,11 @@ import { createWebhooksRouter } from '../webhooks';
 
 let server: Server;
 let baseUrl: string;
-const ORIGINAL_APP_SECRET = process.env.META_APP_SECRET;
 
 beforeAll(async () => {
-  process.env.META_APP_SECRET = 'test-app-secret';
-
   const app = express();
   app.use(express.json());
-  app.use(createWebhooksRouter({ metaWebhookVerifyToken: 'verify-token' }));
+  app.use(createWebhooksRouter({ metaWebhookVerifyToken: 'verify-token', metaAppSecret: 'test-app-secret' }));
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, resolve);
@@ -33,10 +30,21 @@ beforeAll(async () => {
 
 afterAll(() => {
   server.close();
-  process.env.META_APP_SECRET = ORIGINAL_APP_SECRET;
 });
 
-describe('POST /webhook — assinatura HMAC fail-closed', () => {
+describe('Webhook Meta — validação fail-closed', () => {
+  it('rejeita (403) uma inscrição sem token de verificação', async () => {
+    const res = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.challenge=challenge`);
+    expect(res.status).toBe(403);
+  });
+
+  it('aceita a inscrição somente com modo e token corretos', async () => {
+    const res = await fetch(`${baseUrl}/webhook?hub.mode=subscribe&hub.verify_token=verify-token&hub.challenge=challenge`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('challenge');
+  });
+
+
   it('rejeita (403) um payload sem x-hub-signature-256 quando o app secret está configurado', async () => {
     const res = await fetch(`${baseUrl}/webhook`, {
       method: 'POST',

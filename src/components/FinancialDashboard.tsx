@@ -53,7 +53,7 @@ interface FinancialDashboardProps {
   locale?: string;
 }
 
-const DONUT_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
+const DONUT_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#0EA5E9', '#ec4899'];
 
 const PAYMENT_METHOD_ICON: Record<PaymentMethod, React.ReactNode> = {
   'PIX': <QrCode className="w-3.5 h-3.5 mr-1 text-emerald-400" />,
@@ -315,11 +315,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
         <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
             <span>Vendas Confirmadas no Mês</span>
-            <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+            <div className="p-2 bg-sky-500/10 rounded-lg text-sky-400">
               <ArrowUpRight className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-purple-300">{paidThisMonthCount}</div>
+          <div className="text-2xl font-black text-sky-300">{paidThisMonthCount}</div>
           <p className="text-[10px] text-slate-500 mt-2">Transações pagas neste mês</p>
         </div>
       </div>

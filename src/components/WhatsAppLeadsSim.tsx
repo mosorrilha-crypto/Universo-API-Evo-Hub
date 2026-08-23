@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
+import { ContactContextPanel, type OperatorMemoryEditPayload } from './ContactContextPanel';
 import { ForwardMessageModal } from './chat/ForwardMessageModal';
 import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
@@ -314,7 +315,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
         type="button"
         onClick={openModal}
         title="Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)"
-        className="px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+        className="px-3 py-1.5 rounded-xl text-xs font-medium bg-sky-950/60 hover:bg-sky-900/80 text-sky-300 border border-sky-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
       >
         <QrCode className="w-3.5 h-3.5" />
         <span>Reconectar WhatsApp (QR Code)</span>
@@ -328,7 +329,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
           >
             <div className="flex items-center justify-between">
               <h3 className="text-white font-bold text-sm flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-purple-400" /> Reconectar WhatsApp (Evolution API)
+                <QrCode className="w-4 h-4 text-sky-400" /> Reconectar WhatsApp (Evolution API)
               </h3>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
                 <X className="w-4 h-4" />
@@ -361,7 +362,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
                   type="button"
                   onClick={handleRefreshQr}
                   disabled={isGeneratingQr}
-                  className="text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
+                  className="text-xs text-sky-300 hover:text-sky-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3 h-3 ${isGeneratingQr ? 'animate-spin' : ''}`} /> QR expirou? Gerar novo
                 </button>
@@ -371,7 +372,7 @@ const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) 
                 type="button"
                 onClick={handleGenerateQr}
                 disabled={isGeneratingQr}
-                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 {isGeneratingQr ? <span className="animate-spin">⏳</span> : <QrCode className="w-3.5 h-3.5" />}
                 {isGeneratingQr ? 'Gerando...' : 'Gerar QR Code'}
@@ -431,6 +432,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // da conversa, sem mexer no showRightPanel (que continua controlando só a
   // coluna fixa do desktop).
   const [mobileAnalysisOpen, setMobileAnalysisOpen] = useState(false);
+  // Contexto operacional redigido: leitura exclusiva, tenant-scoped e sem
+  // poder de ação. O painel nunca usa memória para confirmar agenda/pagamento.
+  const [contactContext, setContactContext] = useState<ContactAgentContext | null>(null);
+  const [contactContextPhone, setContactContextPhone] = useState<string | null>(null);
+  const [contactContextTenantId, setContactContextTenantId] = useState<string | null>(null);
+  const [isContactContextLoading, setIsContactContextLoading] = useState(false);
+  const contactContextRequestRef = useRef(0);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -568,9 +576,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // processando a última mensagem — o operador ficava sem saber se ia
   // chegar resposta em instantes ou se precisava assumir. Vem pelo mesmo SSE
   // de conversas (aiReplyStatus no payload, ver emitAiReplyStatus em
-  // conversationEvents.ts). Chave = telefone; 'failed' se auto-limpa depois
-  // de alguns segundos (o escalonamento real já fica registrado à parte).
-  const [aiReplyStatusByPhone, setAiReplyStatusByPhone] = useState<Record<string, 'generating' | 'failed'>>({});
+  // conversationEvents.ts). Chave = telefone; o aviso é transitório porque a
+  // linha do tempo persistida e os Escalonamentos são a fonte de verdade.
+  const [aiReplyStatusByPhone, setAiReplyStatusByPhone] = useState<Record<string, 'generating' | 'awaiting_human' | 'delivery_failed'>>({});
 
   // Modo "somente anúncios" (pedido real, 14/08/2026): quando ativo, o
   // agente só responde automaticamente contatos com atribuição de anúncio
@@ -1454,27 +1462,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           if (phone && phone === activeLeadPhoneRef.current) {
             void loadRealConversationHistory(phone, `real-${phone}`);
           }
-          const status: 'generating' | 'sent' | 'failed' | undefined = payload?.aiReplyStatus;
+          const status: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | undefined = payload?.aiReplyStatus;
           if (!phone || !status) return;
-          if (status === 'generating') {
+          if (status === 'generating' || status === 'drafted') {
             setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'generating' }));
-          } else if (status === 'sent') {
+          } else if (status === 'sent' || status === 'template_sent') {
             setAiReplyStatusByPhone((prev) => {
               if (!(phone in prev)) return prev;
               const { [phone]: _removed, ...rest } = prev;
               return rest;
             });
-          } else if (status === 'failed') {
-            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: 'failed' }));
-            // Some sozinho depois de alguns segundos — o escalonamento real
-            // já fica registrado em Escalonamentos, este é só um aviso rápido.
+          } else {
+            const localStatus = status === 'delivery_failed' ? 'delivery_failed' : 'awaiting_human';
+            setAiReplyStatusByPhone((prev) => ({ ...prev, [phone]: localStatus }));
+            // Some sozinho depois de alguns segundos — o escalonamento e os
+            // eventos persistidos permanecem disponíveis para auditoria.
             setTimeout(() => {
               setAiReplyStatusByPhone((prev) => {
-                if (prev[phone] !== 'failed') return prev;
+                if (prev[phone] !== localStatus) return prev;
                 const { [phone]: _removed, ...rest } = prev;
                 return rest;
               });
-            }, 6000);
+            }, 9000);
           }
         } catch {
           // Heartbeat (": heartbeat\n\n") ou payload antigo sem JSON válido — ignora.
@@ -1644,6 +1653,58 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const selectedLead = leads.find((l) => l.id === activeLeadId) || leads[0];
+
+  const refreshContactContext = React.useCallback(async () => {
+    const phone = selectedLead?.phone;
+    const tenantId = activeTenant?.id;
+    const isRealConversation = Boolean((selectedLead as any)?.isReal);
+    const requestId = ++contactContextRequestRef.current;
+    if (!phone || !tenantId || !isRealConversation) {
+      setContactContext(null);
+      setContactContextPhone(null);
+      setContactContextTenantId(null);
+      setIsContactContextLoading(false);
+      return;
+    }
+
+    // Vincula o estado ao telefone E tenant antes do request. Durante a troca
+    // de lead/empresa, o render nunca pode reaproveitar a memória anterior.
+    setContactContextPhone(phone);
+    setContactContextTenantId(tenantId);
+    setContactContext(null);
+    setIsContactContextLoading(true);
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/context`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || typeof data.available !== 'boolean') throw new Error(data?.error || `HTTP ${response.status}`);
+      if (requestId === contactContextRequestRef.current) setContactContext(data as ContactAgentContext);
+    } catch {
+      if (requestId === contactContextRequestRef.current) {
+        setContactContext({ available: false, unavailable: { memory: true, trace: true }, memory: null, latestDecision: null });
+      }
+    } finally {
+      if (requestId === contactContextRequestRef.current) setIsContactContextLoading(false);
+    }
+  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  useEffect(() => {
+    void refreshContactContext();
+  }, [refreshContactContext]);
+
+  const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
+
+  const handleSaveContactMemory = React.useCallback(async (patch: Partial<OperatorMemoryEditPayload>) => {
+    const phone = selectedLead?.phone;
+    if (!phone || !(selectedLead as any)?.isReal) throw new Error('Selecione uma conversa real para corrigir a memória.');
+    const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/context/memory`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Não foi possível salvar a correção de memória.');
+    await refreshContactContext();
+  }, [refreshContactContext, selectedLead?.phone, (selectedLead as any)?.isReal]);
 
   const openOperatorFeedback = (kind: 'bug' | 'operator_idea') => {
     setOperatorFeedbackKind(kind);
@@ -2157,6 +2218,39 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return () => clearTimeout(timer);
   }, [activeLeadId, selectedLead?.messages?.length, autoAnalyze, isAnalyzingConversation]);
 
+  // Recupera a última Ficha versionada no servidor ao trocar de conversa. Isso
+  // evita que uma recarga ou outro operador perca uma leitura já validada.
+  useEffect(() => {
+    if (!selectedLead?.phone || selectedLead.fullAnalysis || isAnalyzingConversation) return;
+    let cancelled = false;
+    const loadPersistedAnalysis = async () => {
+      try {
+        const messageCount = selectedLead.messages?.length || 0;
+        const response = await apiFetch(`/api/conversation-analysis/${encodeURIComponent(selectedLead.phone)}?messageCount=${messageCount}`);
+        const data = await response.json();
+        if (cancelled || !response.ok || !data.success || !data.analysis || !data.persisted) return;
+        const fullAnalysis: FullConversationAnalysis = {
+          ...data.analysis,
+          source: data.persisted.source,
+          lastUpdated: new Date(data.persisted.generatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          persistence: {
+            generatedAt: data.persisted.generatedAt,
+            contextHash: data.persisted.contextHash,
+            messageCount: data.persisted.messageCount,
+            model: data.persisted.model,
+            newMessages: data.freshness?.newMessages || 0,
+            isFresh: Boolean(data.freshness?.isFresh),
+          },
+        };
+        setLeads((prev) => prev.map((lead) => lead.id === selectedLead.id ? { ...lead, fullAnalysis } : lead));
+      } catch (error) {
+        console.warn('Não foi possível recuperar a Ficha Inteligente persistida:', error);
+      }
+    };
+    void loadPersistedAnalysis();
+    return () => { cancelled = true; };
+  }, [activeLeadId, selectedLead?.phone, selectedLead?.messages?.length, selectedLead?.fullAnalysis, isAnalyzingConversation]);
+
   // Full Conversation Analysis API call
   const handleAnalyzeConversation = async (
     targetLead = selectedLead,
@@ -2192,10 +2286,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         throw new Error(data?.error || 'Erro ao analisar histórico da conversa.');
       }
 
+      // Uma indisponibilidade do modelo nunca substitui a última Ficha confiável
+      // por um fallback vazio: o operador mantém a leitura persistida e recebe
+      // a falha para decidir se tenta de novo.
+      if (data.source === 'fallback' && targetLead.fullAnalysis?.persistence) {
+        setErrorMsg(data.analysis?.conversationSummary || 'A Ficha não pôde ser atualizada agora; a última leitura confiável foi preservada.');
+        return;
+      }
+
       const fullAnalysis: FullConversationAnalysis = {
         ...data.analysis,
         source: data.source,
-        lastUpdated: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        lastUpdated: new Date(data.persisted?.generatedAt || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        persistence: data.persisted ? {
+          generatedAt: data.persisted.generatedAt,
+          contextHash: data.persisted.contextHash,
+          messageCount: data.persisted.messageCount,
+          newMessages: 0,
+          isFresh: true,
+        } : undefined,
       };
 
       setLeads((prev) =>
@@ -2832,6 +2941,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               de filtros ao lado de "Tudo"/"Não lidos" — mais perto de onde
               afetam (a lista de conversas), sem duplicar espaço aqui. */}
 
+          {/* No mobile, agenda e filtro de contatos ficam no menu contextual para
+              a barra priorizar pendências sem remover recursos recorrentes. */}
+          <div className="hidden sm:contents">
           {/* Modo "somente anúncios" (pedido real, 14/08/2026): a Monique tem
               dois números ligados hoje — o pessoal dela (conectado
               temporariamente pra não perder mensagem) e o dedicado do agente.
@@ -2891,14 +3003,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
           </button>
 
-          {/* Configurações pontuais (Auto IA, notificações, limpar testes,
-              desconectar Calendar) — mexidas uma vez e esquecidas, não no
-              dia a dia. Ficam atrás deste botão em vez de sempre visíveis,
-              pra barra não quebrar em 3-4 linhas no mobile. */}
+          </div>
+
+          {/* Configurações pontuais e ações secundárias no mobile — a ação de
+              pendências continua como prioridade visível na barra de trabalho. */}
           <button
             type="button"
             onClick={() => setIsToolbarSettingsOpen((v) => !v)}
-            title="Configurações (Auto IA, notificações, limpar testes)"
+            title="Configurações e ações secundárias"
             className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               isToolbarSettingsOpen
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
@@ -2912,6 +3024,42 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
         {isToolbarSettingsOpen && (
           <div className="w-full flex flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
+            {/* Ações diárias preservadas dentro do menu no mobile; no desktop,
+                permanecem na barra principal para acesso imediato. */}
+            <div className="flex w-full flex-wrap items-center gap-2 sm:hidden">
+              <button
+                onClick={handleToggleAdsOnly}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+                  adsOnly
+                    ? 'bg-[var(--action)] border-[var(--action)] text-[var(--action-contrast)]'
+                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Filter className="w-3.5 h-3.5" />
+                <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
+              </button>
+              <button
+                onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
+                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+                  googleCalendarConnected
+                    ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
+                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <CalendarIcon className="w-3.5 h-3.5" />
+                <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
+              </button>
+              {adsOnly && (
+                <button
+                  type="button"
+                  onClick={openAdTriggersModal}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-800 bg-slate-950/80 text-[11px] font-semibold text-slate-300 hover:text-white"
+                >
+                  Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}
+                </button>
+              )}
+            </div>
+
             {/* Reconectar WhatsApp via QR Code — só faz sentido pra tenant
                 conectado via Evolution API (statusAvailable) e só aparece
                 pra quem tem permissão de admin+ (canManageWhatsAppConnection,
@@ -3044,7 +3192,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           Ação em si mora só no card de escalonamento (kind: 'payment_proof')
           desde a unificação — aqui é só o aviso, com atalho pra decidir. */}
       {paymentAppointment?.paymentStatus === 'pending_verification' && (
-        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3 flex-wrap">
+        <div className="atendimento-payment-verification p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-start space-x-2">
             <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div>
@@ -3057,7 +3205,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   pergunta real do dono do produto: hoje o sistema não olhava
                   o conteúdo da foto, só o contexto). */}
               {paymentAppointment.paymentReceiptHint && (
-                <p className="text-amber-300/80 mt-1 flex items-start gap-1">
+                <p className="atendimento-payment-verification__hint text-amber-300/80 mt-1 flex items-start gap-1">
                   <Sparkles className="w-3 h-3 mt-0.5 flex-shrink-0" />
                   <span>IA: "{paymentAppointment.paymentReceiptHint}"</span>
                 </p>
@@ -3067,7 +3215,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {onGoToEscalations && (
             <button
               onClick={onGoToEscalations}
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer flex-shrink-0"
+              className="atendimento-payment-verification__action px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer flex-shrink-0"
             >
               <AlertTriangle className="w-3 h-3" />
               <span>Confirmar/rejeitar em Escalonamentos</span>
@@ -3101,12 +3249,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
+      <div className="atendimento-chat-shell relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
         {/* ========================================== */}
-        <div className={`border-r border-slate-800/80 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
+        <div className={`atendimento-queue border-r border-slate-800/80 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
           showRightPanel ? 'lg:col-span-3' : 'lg:col-span-3'
         }`}>
           
@@ -3152,17 +3300,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   destacado por padrão mesmo com o backend em outro estado,
                   passando confiança falsa pro operador de que a IA estava
                   respondendo. */}
-              {agentStatusLoadFailed && (
-                <button
-                  type="button"
-                  onClick={loadAgentStatus}
-                  title="Não foi possível confirmar o status real do agente no servidor — os pills abaixo podem não refletir a verdade. Clique pra tentar de novo."
-                  className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-all cursor-pointer"
-                >
-                  <AlertCircle className="w-3 h-3" />
-                  <span>Status incerto — recarregar</span>
-                </button>
-              )}
               <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
                 {(['active', 'restricted', 'paused'] as const).map((status) => (
                   <button
@@ -3184,6 +3321,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
                   </button>
                 ))}
+                {agentStatusLoadFailed && (
+                  <button
+                    type="button"
+                    onClick={loadAgentStatus}
+                    title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+                    className="ml-0.5 inline-flex items-center gap-1 rounded-lg border-l border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    <span>Erro</span>
+                    <span className="sr-only">Status incerto — recarregar</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -3295,7 +3444,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* ========================================== */}
         {/* COLUMN 2: Conversa principal com rascunho revisável da IA */}
         {/* ========================================== */}
-        <div className={`${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
+        <div className={`atendimento-thread ${mobileThreadOpen ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#0b141a] relative ${
           showRightPanel ? 'lg:col-span-6' : 'lg:col-span-9'
         }`}>
           {selectedLead ? (
@@ -3387,7 +3536,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver PR #70) */}
                   <button
                     onClick={() => setMobileAnalysisOpen(true)}
-                    className="lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                    className="atendimento-analysis-trigger lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Ver Ficha IA"
                   >
                     <Info className="w-4 h-4" />
@@ -3650,21 +3799,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
               </div>
 
-              {/* Context strip from the canonical design: the essential AI summary
-                  stays in the conversation, while the full panel remains optional. */}
-              {selectedLead.fullAnalysis && (
-                <div className="atendimento-context-strip">
-                  <div className="atendimento-context-strip__copy">
-                    <span className="atendimento-context-strip__label">CONTEXTO</span>
-                    <p>
-                      {selectedLead.fullAnalysis.actionObjective || selectedLead.fullAnalysis.conversationSummary}
-                      {selectedLead.fullAnalysis.actionRationale && <span className="atendimento-context-strip__rationale"> · {selectedLead.fullAnalysis.actionRationale}</span>}
-                    </p>
-                  </div>
-                  <button type="button" onClick={() => setShowRightPanel(true)} className="atendimento-context-strip__action">
-                    {isSpanish ? 'Ver ficha' : 'Ver ficha completa'}
-                  </button>
-                </div>
+              {/* Contexto compactado acompanha a conversa real. A ficha completa
+                  continua opcional e apenas informa o operador: nunca autoriza
+                  confirmação de agenda, pagamento ou qualquer exceção. */}
+              {(selectedLead as any)?.isReal && (
+                <ContactContextPanel
+                  context={visibleContactContext}
+                  isLoading={isContactContextLoading}
+                  isSpanish={isSpanish}
+                  variant="compact"
+                  onRetry={() => void refreshContactContext()}
+                  onOpenDetails={() => {
+                    if (window.innerWidth >= 1024) setShowRightPanel(true);
+                    else setMobileAnalysisOpen(true);
+                  }}
+                />
               )}
 
               {/* Real-time Analyzing Banner */}
@@ -4187,7 +4336,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         <button
                           type="button"
                           onClick={handleSendSampleFile}
-                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-purple-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-sky-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
                           title="Simular Envio de PDF (conversa de teste)"
                         >
                           <Paperclip className="w-3 h-3" />
@@ -4209,10 +4358,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <span>A IA está formulando uma resposta para {selectedLead.name}...</span>
                   </div>
                 )}
-                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'failed' && (
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'awaiting_human' && (
+                  <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-800/40 rounded-lg px-3 py-1.5 text-[11px] text-amber-200">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Atendimento transferido para humano — verifique Escalonamentos antes de responder.</span>
+                  </div>
+                )}
+                {(selectedLead as any).isReal && aiReplyStatusByPhone[selectedLead.phone] === 'delivery_failed' && (
                   <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/40 rounded-lg px-3 py-1.5 text-[11px] text-rose-300">
                     <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>A IA não conseguiu gerar resposta — escalado, veja Escalonamentos ou responda manualmente.</span>
+                    <span>A entrega automática falhou e o caso foi escalado para acompanhamento manual.</span>
                   </div>
                 )}
 
@@ -4316,7 +4471,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           // equivalente lá é o painel deslizante controlado por
           // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
           // cabeçalho da conversa.
-          <div className="hidden lg:flex lg:col-span-3 border-l border-slate-800/80 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
+          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/80 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
@@ -4326,6 +4481,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onSendCAPIEvent={handleDirectCAPI}
               onGenerateReplyFromHint={handleGenerateReplyFromHint}
               onAskAi={handleAskAi}
+              contactContext={visibleContactContext}
+              isContactContextLoading={isContactContextLoading}
+              onRefreshContactContext={() => void refreshContactContext()}
+              onSaveContactMemory={handleSaveContactMemory}
             />
           </div>
         )}
@@ -4336,7 +4495,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           mesmas props do painel de desktop acima, só a apresentação muda. */}
       {mobileAnalysisOpen && mobileThreadOpen && selectedLead && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          className="atendimento-analysis-drawer lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
           onClick={() => setMobileAnalysisOpen(false)}
         >
           <div
@@ -4362,6 +4521,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onSendCAPIEvent={handleDirectCAPI}
                 onGenerateReplyFromHint={handleGenerateReplyFromHint}
                 onAskAi={handleAskAi}
+                contactContext={visibleContactContext}
+                isContactContextLoading={isContactContextLoading}
+                onRefreshContactContext={() => void refreshContactContext()}
+                onSaveContactMemory={handleSaveContactMemory}
               />
             </div>
           </div>

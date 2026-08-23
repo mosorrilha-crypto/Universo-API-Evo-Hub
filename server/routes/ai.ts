@@ -5,6 +5,7 @@ import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { callGroqJsonCompletion } from '../services/groqClient';
 import { formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { buildChronologicalConversationContext, guardContinuationReply } from '../services/conversationReplyGuard';
+import { freshnessFor, getLatestConversationAnalysis, saveConversationAnalysis } from '../services/conversationAnalysisStore';
 
 /**
  * Achado real em produção (18/08/2026): os quatro endpoints deste arquivo
@@ -101,6 +102,18 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
   router.post('/api/analyze-conversation', authenticateToken, rateLimiter, async (req, res) => {
     try {
       const { leadInfo, messages, agentKnowledgeBase } = req.body || {};
+      const tenantId = (req as any).user?.tenantId as string | undefined;
+      const leadPhone = typeof leadInfo?.phone === 'string' ? leadInfo.phone.trim() : '';
+      const persistAnalysis = async (analysis: Record<string, unknown>, source: 'groq' | 'gemini', model: string) => {
+        if (!tenantId || !leadPhone) return undefined;
+        try {
+          return await saveConversationAnalysis(tenantId, leadPhone, Array.isArray(messages) ? messages : [], agentKnowledgeBase || null, analysis, source, { model, actorId: (req as any).user?.id });
+        } catch (persistError: any) {
+          // A análise continua utilizável na sessão atual; a falha de persistência nunca deve produzir uma resposta inventada nem mascarar o erro do modelo.
+          console.warn(`⚠️ [Ficha IA] análise gerada mas não persistida (tenant=${tenantId}, phone=${leadPhone}):`, persistError?.message || persistError);
+          return undefined;
+        }
+      };
 
       const chronologicalHistory = buildChronologicalConversationContext(messages);
       const prompt = `Você é um analista de Vendas e CRM inteligente para um sistema SaaS no WhatsApp.
@@ -150,7 +163,9 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
           if (!parsed || typeof parsed.leadStage !== 'string') {
             throw new Error(`Groq retornou análise sem "leadStage" válido: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
-          return res.json({ success: true, source: 'groq', analysis: guardContinuationReply(parsed, messages) });
+          const analysis = guardContinuationReply(parsed, messages);
+          const persisted = await persistAnalysis(analysis, 'groq', 'groq');
+          return res.json({ success: true, source: 'groq', analysis, persisted: persisted ? { generatedAt: persisted.generatedAt, contextHash: persisted.contextHash, messageCount: persisted.messageCount, source: persisted.source } : null });
         } catch (groqError) {
           console.warn('⚠️  [Ficha IA] Groq falhou (analyze-conversation), caindo pro Gemini:', (groqError as Error)?.message || groqError);
         }
@@ -173,7 +188,9 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 
           const rawText = response.text || '';
           const parsed = JSON.parse(rawText);
-          return res.json({ success: true, source: 'gemini', analysis: guardContinuationReply(parsed, messages) });
+          const analysis = guardContinuationReply(parsed, messages);
+          const persisted = await persistAnalysis(analysis, 'gemini', 'gemini-3.5-flash-lite');
+          return res.json({ success: true, source: 'gemini', analysis, persisted: persisted ? { generatedAt: persisted.generatedAt, contextHash: persisted.contextHash, messageCount: persisted.messageCount, source: persisted.source } : null });
         } catch (geminiError) {
           console.warn('Gemini API call error, fallbacking to preset analysis:', geminiError);
         }
@@ -216,9 +233,26 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
         suggestedSmartReplyTranslation: '',
       };
 
-      return res.json({ success: true, source: 'fallback', analysis: fallbackAnalysis });
+      // Fallback não substitui a última análise confiável persistida: ele é apenas um aviso seguro e efêmero para a sessão atual.
+      return res.json({ success: true, source: 'fallback', analysis: fallbackAnalysis, persisted: null });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao analisar conversa.' });
+    }
+  });
+
+  /** Recupera a última Ficha persistida e informa quantas mensagens chegaram desde a geração. */
+  router.get('/api/conversation-analysis/:phone', authenticateToken, rateLimiter, async (req, res) => {
+    try {
+      const tenantId = (req as any).user?.tenantId as string | undefined;
+      if (!tenantId) return res.status(401).json({ success: false, error: 'Sessão sem tenant identificado.' });
+      const phone = String(req.params.phone || '').trim();
+      if (!phone) return res.status(400).json({ success: false, error: 'Telefone é obrigatório.' });
+      const stored = await getLatestConversationAnalysis(tenantId, phone);
+      const messageCount = Number(req.query.messageCount || stored?.messageCount || 0);
+      const freshness = freshnessFor(messageCount, stored);
+      res.json({ success: true, analysis: stored?.analysis || null, persisted: stored ? { generatedAt: stored.generatedAt, contextHash: stored.contextHash, messageCount: stored.messageCount, source: stored.source, model: stored.model } : null, freshness });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message || 'Erro ao recuperar a Ficha Inteligente.' });
     }
   });
 

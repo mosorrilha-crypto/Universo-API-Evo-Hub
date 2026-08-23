@@ -112,7 +112,8 @@ async function startServer() {
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken }));
   app.use(createWebhooksRouter({
-    metaWebhookVerifyToken: config.metaWebhookVerifyToken,
+      metaWebhookVerifyToken: config.metaWebhookVerifyToken,
+    metaAppSecret: config.metaAppSecret,
     getAi: () => getGeminiClient(config),
     groqApiKey: config.groqApiKey,
     metaAccessToken: config.metaAccessToken,

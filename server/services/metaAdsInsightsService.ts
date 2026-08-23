@@ -129,6 +129,8 @@ interface GraphCampaignRow {
 
 export class MetaAdsConfigurationError extends Error {}
 export class MetaAdsRequestError extends Error {}
+/** A Meta retorna o código 190 quando o token foi revogado, expirou ou ficou inválido. */
+export class MetaAdsTokenExpiredError extends MetaAdsRequestError {}
 
 function numberOrZero(value: unknown): number {
   const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value ?? '0'));
@@ -188,6 +190,13 @@ function extractMessagingConversationCost(stats: GraphActionStat[] | undefined, 
   return nullableNumber(stats.find((item) => item.action_type === actionType)?.value);
 }
 
+export function isMetaAccessTokenExpired(payload: any): boolean {
+  const code = Number(payload?.error?.code);
+  const subcode = Number(payload?.error?.error_subcode);
+  const message = String(payload?.error?.message || '');
+  return code === 190 && (subcode === 463 || /session has expired|access token.*expired|token.*expired/i.test(message));
+}
+
 function safeMetaMessage(payload: any, status: number): string {
   const message = payload?.error?.error_user_msg || payload?.error?.message;
   const code = Number(payload?.error?.code);
@@ -213,7 +222,12 @@ async function graphGet<T>(path: string, params: Record<string, string>, accessT
     throw new MetaAdsRequestError('Não foi possível conectar à Meta para buscar as métricas. Tente atualizar novamente em alguns instantes.');
   }
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new MetaAdsRequestError(safeMetaMessage(payload, response.status));
+  if (!response.ok) {
+    if (isMetaAccessTokenExpired(payload)) {
+      throw new MetaAdsTokenExpiredError('O acesso da Meta expirou. Gere um novo token com a permissão ads_read e salve-o para voltar a atualizar as métricas.');
+    }
+    throw new MetaAdsRequestError(safeMetaMessage(payload, response.status));
+  }
   return payload as T;
 }
 

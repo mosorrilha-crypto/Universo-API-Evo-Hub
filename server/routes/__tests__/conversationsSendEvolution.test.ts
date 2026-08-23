@@ -21,9 +21,14 @@ const sendWhatsAppAudioMessage = vi.fn(async () => 'media-id-123');
 
 const sendEvolutionTextMessage = vi.fn(async () => undefined);
 const sendEvolutionMediaMessage = vi.fn(async () => undefined);
+const sendEvolutionVoiceMessage = vi.fn(async () => undefined);
 
 const saveMediaImage = vi.fn(async (_supabaseUrl?: string, _supabaseKey?: string, _messageId?: string, _base64?: string, _mimeType?: string) => undefined);
-const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: string) => ({ base64: 'bXAzLWNvbnZlcnRpZG8=', mimeType: 'audio/mpeg' }));
+const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: string, output: 'ogg_opus' | 'mp3') => (
+  output === 'ogg_opus'
+    ? { base64: 'b2dnLW9wdXMtY29udmVydGlkbw==', mimeType: 'audio/ogg; codecs=opus' }
+    : { base64: 'bXAzLWNvbnZlcnRpZG8=', mimeType: 'audio/mpeg' }
+));
 const getKnowledgeBase = vi.fn(async () => ({
   products: [{ name: 'Microlips', price: 'R$ 500', exampleImageBase64: 'ZmFrZS1pbWFnZQ==', exampleImageMimeType: 'image/jpeg' }],
 }));
@@ -32,7 +37,7 @@ vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
   return { ...actual, sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage };
 });
-vi.mock('../../services/evolutionSend', () => ({ sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping: vi.fn() }));
+vi.mock('../../services/evolutionSend', () => ({ sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping: vi.fn() }));
 vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveMediaImage }));
 vi.mock('../../services/audioTranscode', () => ({ transcodeToWhatsAppVoiceNote }));
 vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
@@ -89,6 +94,7 @@ beforeEach(() => {
   sendWhatsAppAudioMessage.mockClear();
   sendEvolutionTextMessage.mockClear();
   sendEvolutionMediaMessage.mockClear();
+  sendEvolutionVoiceMessage.mockClear();
   saveMediaImage.mockClear();
   transcodeToWhatsAppVoiceNote.mockClear();
 
@@ -192,7 +198,7 @@ describe('Roteamento por provedor (Evolution vs Meta) no envio manual do painel'
     expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
   });
 
-  it('POST /send-media (áudio) transcodifica e usa evolutionSend, nunca sendWhatsAppAudioMessage', async () => {
+  it('POST /send-media (áudio) transcodifica e usa o endpoint PTT nativo da Evolution, nunca Meta', async () => {
     currentTenantId = TENANT_EVOLUTION;
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send-media`, {
       method: 'POST',
@@ -200,17 +206,18 @@ describe('Roteamento por provedor (Evolution vs Meta) no envio manual do painel'
       body: JSON.stringify({ base64: 'd2VibS1mYWtl', mimeType: 'audio/webm;codecs=opus', filename: 'audio.webm' }),
     });
     expect(res.status).toBe(200);
-    expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('d2VibS1mYWtl', 'audio/webm;codecs=opus');
-    expect(sendEvolutionMediaMessage).toHaveBeenCalledWith(
+    expect(transcodeToWhatsAppVoiceNote).toHaveBeenCalledWith('d2VibS1mYWtl', 'audio/webm;codecs=opus', 'ogg_opus');
+    expect(sendEvolutionVoiceMessage).toHaveBeenCalledWith(
       'instancia-cliente', 'https://evo-cliente.example.com', 'tenant-evo-key',
-      '595981111111', 'bXAzLWNvbnZlcnRpZG8=', 'audio/mpeg', 'audio.mp3'
+      '595981111111', 'b2dnLW9wdXMtY29udmVydGlkbw==', 'audio/ogg; codecs=opus'
     );
+    expect(sendEvolutionMediaMessage).not.toHaveBeenCalled();
     expect(sendWhatsAppAudioMessage).not.toHaveBeenCalled();
 
     expect(saveMediaImage).toHaveBeenCalledTimes(1);
     const [, , , savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
-    expect(savedBase64).toBe('bXAzLWNvbnZlcnRpZG8=');
-    expect(savedMimeType).toBe('audio/mpeg');
+    expect(savedBase64).toBe('b2dnLW9wdXMtY29udmVydGlkbw==');
+    expect(savedMimeType).toBe('audio/ogg; codecs=opus');
   });
 
   it('POST /send-example-photo usa evolutionSend pra tenant Evolution', async () => {

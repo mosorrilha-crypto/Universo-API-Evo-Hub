@@ -88,10 +88,10 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
       detail: item.reason || t('conversationForwarded'),
       action: t('openPending'),
       icon: ShieldAlert,
-      tone: 'violet' as const,
+      tone: 'sky' as const,
       tab: 'escalations' as ActiveTab,
     })),
-    ...summary.uncompletedTasks.slice(0, 3).map((task) => ({
+    ...summary.uncompletedTasks.map((task) => ({
       id: task.id,
       type: t('commercialNextAction'),
       description: task.title,
@@ -101,7 +101,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
       tone: 'emerald' as const,
       tab: 'crm' as ActiveTab,
     })),
-  ].slice(0, 5);
+  ];
 
   const quickActions = [
     { label: t('openConversations'), description: t('openConversationsDetail'), icon: MessageSquare, tab: 'whatsapp' as ActiveTab, visible: true },
@@ -136,7 +136,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label={t('humanPending')} value={summary.unresolved.length} detail={t('humanPendingDetail')} icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
         <MetricCard label={t('leadsInProgress')} value={summary.openLeads.length} detail={t('leadsInProgressDetail')} icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
-        <MetricCard label={t('nextActions')} value={summary.uncompletedTasks.length} detail={t('nextActionsDetail')} icon={<Clock3 className="h-4 w-4" />} tone="violet" onClick={() => onNavigate('crm')} />
+        <MetricCard label={t('nextActions')} value={summary.uncompletedTasks.length} detail={t('nextActionsDetail')} icon={<Clock3 className="h-4 w-4" />} tone="sky" onClick={() => onNavigate('crm')} />
         <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('agenda_financeiro')} disabled={!canSeeFinancial} />
       </div>
 
@@ -146,7 +146,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('smartQueue')}</p>
               <h2 className="mt-1 text-base font-bold text-white">{t('attentionNow')}</h2>
-              <p className="mt-0.5 text-xs text-slate-400">{t('actionsPrioritized')}</p>
+              <p className="mt-0.5 text-xs text-slate-400">{t('actionsPrioritized')} {priorityItems.length > 0 && `Exibindo ${priorityItems.length} item${priorityItems.length === 1 ? '' : 's'} da fila.`}</p>
             </div>
             {summary.unresolved.length > 0 && (
               <button onClick={() => onNavigate('escalations')} className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-300 transition-colors hover:text-emerald-100">
@@ -161,8 +161,8 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
                 const Icon = item.icon;
                 const tone = item.tone === 'amber'
                   ? 'border-amber-500/20 bg-amber-500/8 text-amber-300'
-                  : item.tone === 'violet'
-                    ? 'border-violet-500/20 bg-violet-500/8 text-violet-300'
+                  : item.tone === 'sky'
+                    ? 'border-sky-500/20 bg-sky-500/8 text-sky-300'
                     : 'border-emerald-500/20 bg-emerald-500/8 text-emerald-300';
                 return (
                   <button key={item.id} onClick={() => onNavigate(item.tab)} className="group flex w-full items-start gap-3 rounded-panel border border-slate-800 bg-slate-950/35 p-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-700 hover:bg-slate-800/70">
@@ -213,11 +213,11 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   );
 };
 
-const MetricCard: React.FC<{ label: string; value: string | number; detail: string; icon: React.ReactNode; tone: 'emerald' | 'amber' | 'violet' | 'blue'; onClick: () => void; disabled?: boolean }> = ({ label, value, detail, icon, tone, onClick, disabled = false }) => {
+const MetricCard: React.FC<{ label: string; value: string | number; detail: string; icon: React.ReactNode; tone: 'emerald' | 'amber' | 'sky' | 'blue'; onClick: () => void; disabled?: boolean }> = ({ label, value, detail, icon, tone, onClick, disabled = false }) => {
   const tones = {
     emerald: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300',
     amber: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
-    violet: 'border-violet-500/20 bg-violet-500/10 text-violet-300',
+    sky: 'border-sky-500/20 bg-sky-500/10 text-sky-300',
     blue: 'border-sky-500/20 bg-sky-500/10 text-sky-300',
   };
   return (
