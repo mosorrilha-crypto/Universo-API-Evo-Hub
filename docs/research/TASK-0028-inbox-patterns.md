@@ -1,4 +1,4 @@
-# TASK-0026 — padrões pesquisados para atomização da Central de Atendimento
+# TASK-0028 — padrões pesquisados para atomização da Central de Atendimento
 
 ## Síntese
 
@@ -12,7 +12,7 @@ A pesquisa foi feita em documentação oficial de Intercom, HubSpot, Respond.io,
 | SleekFlow Inbox | Inbox omnichannel com ownership claro, perfil do cliente ao lado, atribuição, colaboradores, notas internas, resumo/assistência de IA e templates. | Dar destaque à propriedade da conversa, resumo supervisionado e próximo passo; preservar o gate de aprovação antes do envio. |
 | Zendesk Agent Workspace | Interface unificada de ticket/canais e painel de apps/contexto; a documentação/comentários também mostram que excesso de caixas coloridas, largura reduzida e ações escondidas geram atrito. | Manter densidade controlada, contraste acessível, largura útil para mensagens e ações visíveis, sem adicionar uma terceira coluna permanente no mobile. |
 
-## Decisões para TASK-0026
+## Decisões para TASK-0028
 
 1. O topo deve ser um resumo curto da fila: conversas em acompanhamento, pendências humanas, estado da supervisão e empresa ativa.
 2. As pendências devem funcionar como filtro/atalho primário e não como um cartão decorativo.
