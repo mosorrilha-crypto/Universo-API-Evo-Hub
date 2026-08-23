@@ -213,10 +213,11 @@ export function ConectarEvolutionQrCode() {
       <button
         type="button"
         onClick={openModal}
-        className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
+        title="Conectar WhatsApp via QR Code"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-sky-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70"
       >
         <QrCode className="w-3.5 h-3.5" />
-        Conectar WhatsApp via QR Code
+        WhatsApp QR
       </button>
 
       {isModalOpen && (
@@ -433,10 +434,11 @@ function GerenciarCredenciaisCapi() {
       <button
         type="button"
         onClick={openModal}
-        className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
+        title="Gerenciar credenciais Meta CAPI"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-blue-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300/70"
       >
         <Zap className="w-3.5 h-3.5" />
-        Credenciais Meta CAPI
+        Meta CAPI
       </button>
 
       {isModalOpen && (
@@ -640,10 +642,11 @@ function GerenciarCredenciaisInstagram() {
       <button
         type="button"
         onClick={openModal}
-        className="bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center gap-2 transition-all shadow"
+        title="Conectar Instagram"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-pink-600 px-2.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-pink-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300/70"
       >
         <Camera className="w-3.5 h-3.5" />
-        Conectar Instagram
+        Instagram
       </button>
 
       {isModalOpen && (
@@ -1208,7 +1211,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const knownSegments = Array.from(new Set(realTenants.map((t) => t.segment).filter((s): s is string => !!s)));
 
   return (
-    <div className="saas-workspace space-y-6 animate-fade-in">
+    <div className="saas-workspace space-y-4 animate-fade-in">
       {/* SaaS Admin Banner — achado real em produção: repetia "Painel SaaS
           Master" (a aba logo acima já diz isso) e "Empresa Selecionada no
           Painel" duplicava o nome do tenant que já aparece no topo da
@@ -1232,7 +1235,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       <div className="saas-workspace__tabs responsive-tab-strip flex items-center gap-2 border-b border-slate-800 pb-3">
         <button
           onClick={() => setActiveAdminTab('tenants')}
-          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all ${
+          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-2 transition-all ${
             activeAdminTab === 'tenants'
               ? 'bg-emerald-600 text-slate-950 shadow-md shadow-emerald-950/30'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
@@ -1244,7 +1247,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
         <button
           onClick={() => setActiveAdminTab('users')}
-          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all cursor-pointer ${
+          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-2 transition-all cursor-pointer ${
             activeAdminTab === 'users'
               ? 'bg-sky-600 text-white shadow-md shadow-sky-950/30'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
@@ -1256,7 +1259,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
         <button
           onClick={() => setActiveAdminTab('roadmap')}
-          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all cursor-pointer ${
+          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-2 transition-all cursor-pointer ${
             activeAdminTab === 'roadmap'
               ? 'bg-blue-600 text-white shadow-md shadow-blue-950/30'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
@@ -1268,7 +1271,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
         <button
           onClick={() => setActiveAdminTab('tokens_telemetry')}
-          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all cursor-pointer ${
+          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-2 transition-all cursor-pointer ${
             activeAdminTab === 'tokens_telemetry'
               ? 'bg-amber-600 text-slate-950 shadow-md shadow-amber-950/30'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
@@ -1280,7 +1283,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 
         <button
           onClick={() => setActiveAdminTab('global_prompt')}
-          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2 transition-all cursor-pointer ${
+          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-2 transition-all cursor-pointer ${
             activeAdminTab === 'global_prompt'
               ? 'bg-pink-600 text-white shadow-md shadow-pink-950/30'
               : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
@@ -1304,9 +1307,9 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           usavam) — sem inventar MRR, plano, engine de WhatsApp ou uptime,
           nenhum dos quais existe de verdade na tabela `tenants`. */}
       {activeAdminTab === 'tenants' && (
-        <div className="space-y-6">
-          <div className="saas-workspace__metrics grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
+        <div className="space-y-4">
+          <div className="saas-workspace__metrics grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow-none">
               <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
                 <span>Empresas Cadastradas</span>
                 <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
@@ -1319,7 +1322,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               <p className="text-[10px] text-slate-500 mt-2">Tabela `tenants` real (Supabase)</p>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
+            <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow-none">
               <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
                 <span>WhatsApp Conectado</span>
                 <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
@@ -1333,21 +1336,21 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             </div>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="bg-slate-900/75 border border-slate-800/70 rounded-2xl p-3.5 shadow-none space-y-3.5 sm:p-4">
+            <div className="flex flex-col items-start justify-between gap-2.5 sm:flex-row sm:items-center">
               <div>
                 <h2 className="text-base font-bold text-white">Lista de Clientes SaaS (Tenants Cadastrados)</h2>
                 <p className="text-xs text-slate-400">Empresas reais cadastradas no banco — cada linha corresponde a um tenant de verdade.</p>
               </div>
 
-              <div className="flex items-center space-x-2 w-full sm:w-auto">
-                <div className="relative flex-1 sm:w-64">
+              <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                <div className="relative w-full sm:w-64">
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Buscar empresa..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 pl-8"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 pl-8 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
                 </div>
@@ -1355,7 +1358,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <select
                   value={segmentFilter}
                   onChange={(e) => setSegmentFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 sm:w-auto"
                 >
                   <option value="all">Todos os Segmentos</option>
                   {knownSegments.map((seg) => (
@@ -1365,63 +1368,83 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-800/70 pt-2.5" aria-label="Ações de conexão">
+              <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Conexões</span>
               <GerenciarCredenciaisCapi />
               <GerenciarCredenciaisInstagram />
               <ConectarEvolutionQrCode />
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
-                  <tr>
-                    <th className="p-3.5">Empresa / Tenant</th>
-                    <th className="p-3.5">Segmento</th>
-                    <th className="p-3.5">Moeda / Idioma</th>
-                    <th className="p-3.5">WhatsApp</th>
-                    <th className="p-3.5">Criado em</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/80">
-                  {isLoadingRealTenants ? (
-                    <tr>
-                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">Carregando tenants...</td>
-                    </tr>
-                  ) : filteredRealTenants.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">
-                        {realTenants.length === 0 ? 'Nenhum tenant cadastrado ainda.' : 'Nenhum tenant corresponde à busca/filtro.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredRealTenants.map((t) => (
-                      <tr key={t.id} className="hover:bg-slate-800/50 transition-colors">
-                        <td className="p-3.5">
-                          <div className="font-bold text-white text-sm">{t.name}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">ID: {t.id}{t.slug ? ` (${t.slug})` : ''}</div>
-                        </td>
-                        <td className="p-3.5 text-slate-300">{t.segment || '—'}</td>
-                        <td className="p-3.5 text-slate-300">{t.currency} / {t.locale}</td>
-                        <td className="p-3.5">
-                          {t.whatsappConnected ? (
-                            <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Conectado
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3" /> Não conectado
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3.5 text-slate-400">
-                          {t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}
-                        </td>
+            {isLoadingRealTenants ? (
+              <div className="rounded-xl bg-slate-950/35 px-4 py-8 text-center text-xs text-slate-500">Carregando tenants...</div>
+            ) : filteredRealTenants.length === 0 ? (
+              <div className="rounded-xl bg-slate-950/35 px-4 py-8 text-center text-xs text-slate-500">
+                {realTenants.length === 0 ? 'Nenhum tenant cadastrado ainda.' : 'Nenhum tenant corresponde à busca/filtro.'}
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2 sm:hidden">
+                  {filteredRealTenants.map((t) => (
+                    <article key={t.id} className="rounded-xl bg-slate-950/45 px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="truncate text-sm font-bold text-white">{t.name}</h3>
+                          <p className="mt-0.5 truncate font-mono text-[10px] text-slate-500">{t.slug || t.id}</p>
+                        </div>
+                        {t.whatsappConnected ? (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-300">
+                            <CheckCircle2 className="h-3 w-3" /> Conectado
+                          </span>
+                        ) : (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-800/70 px-2 py-1 text-[10px] font-semibold text-slate-400">
+                            <AlertCircle className="h-3 w-3" /> Offline
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-slate-400">
+                        <span><span className="mr-1 uppercase tracking-wide text-slate-600">Segmento</span>{t.segment || '—'}</span>
+                        <span><span className="mr-1 uppercase tracking-wide text-slate-600">Moeda</span>{t.currency} / {t.locale}</span>
+                        <span><span className="mr-1 uppercase tracking-wide text-slate-600">Criado</span>{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="responsive-table-scroll hidden overflow-x-auto sm:block">
+                  <table className="min-w-[680px] w-full text-left text-xs text-slate-300">
+                    <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
+                      <tr>
+                        <th className="p-3">Empresa / Tenant</th>
+                        <th className="p-3">Segmento</th>
+                        <th className="p-3">Moeda / Idioma</th>
+                        <th className="p-3">WhatsApp</th>
+                        <th className="p-3">Criado em</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/80">
+                      {filteredRealTenants.map((t) => (
+                        <tr key={t.id} className="transition-colors hover:bg-slate-800/50">
+                          <td className="p-3">
+                            <div className="text-sm font-bold text-white">{t.name}</div>
+                            <div className="font-mono text-[10px] text-slate-500">ID: {t.id}{t.slug ? ` (${t.slug})` : ''}</div>
+                          </td>
+                          <td className="p-3 text-slate-300">{t.segment || '—'}</td>
+                          <td className="p-3 text-slate-300">{t.currency} / {t.locale}</td>
+                          <td className="p-3">
+                            {t.whatsappConnected ? (
+                              <span className="flex items-center gap-1 text-[10px] text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Conectado</span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-[10px] text-slate-500"><AlertCircle className="h-3 w-3" /> Não conectado</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-400">{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
