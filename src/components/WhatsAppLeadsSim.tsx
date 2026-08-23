@@ -3309,12 +3309,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border border-slate-800 rounded-card shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px]">
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
         {/* ========================================== */}
-        <div className={`atendimento-queue border-r border-slate-800/80 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
+        <div className={`atendimento-queue border-r border-slate-800/35 bg-[#111b21] ${mobileThreadOpen ? 'hidden' : 'flex'} lg:flex flex-col min-h-0 ${
           showRightPanel ? 'lg:col-span-3' : 'lg:col-span-3'
         }`}>
           
@@ -3334,7 +3334,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Pausado) fica à direita dela (pedido direto), busca em si mais
               curta (flex-1 dividindo a linha com o status, em vez de w-full
               sozinha). */}
-          <div className="p-2 bg-[#111b21] border-b border-slate-800/60">
+          <div className="p-2 bg-[#111b21] border-b border-slate-800/30">
             <div className="flex items-center gap-2">
               <div className="relative flex items-center flex-1 min-w-0">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
@@ -3360,7 +3360,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   destacado por padrão mesmo com o backend em outro estado,
                   passando confiança falsa pro operador de que a IA estava
                   respondendo. */}
-              <div className="flex items-center gap-0.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800 flex-shrink-0">
+              <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
                 {(['active', 'restricted', 'paused'] as const).map((status) => (
                   <button
                     key={status}
@@ -3510,7 +3510,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {selectedLead ? (
             <>
               {/* WhatsApp Web Chat Header */}
-              <div className="px-3 py-2.5 bg-[#202c33] border-b border-slate-800 flex items-center justify-between gap-2 z-10 shadow-md">
+              <div className="px-3 py-2.5 bg-[#202c33] border-b border-white/10 flex items-center justify-between gap-2 z-10 shadow-none">
                 {/* min-w-0 é o que deixa esta metade encolher/truncar de
                     verdade — sem isso, um nome de lead comprido (achado ao
                     vivo: nome tipo e-mail sem espaço nenhum pra quebrar,
@@ -3529,7 +3529,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <ArrowLeft className="w-4 h-4" />
                   </button>
                   <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-xs border border-emerald-500/50 flex-shrink-0 ${avatarColorClasses(selectedLead.name || selectedLead.phone)}`}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-xs ring-1 ring-emerald-500/40 flex-shrink-0 ${avatarColorClasses(selectedLead.name || selectedLead.phone)}`}
                   >
                     {getInitials(selectedLead.name || selectedLead.phone)}
                   </div>
@@ -4063,7 +4063,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         )}
 
                         <div
-                          className={`max-w-[85%] rounded-xl shadow-md text-xs relative border border-white/5 overflow-hidden ${
+                          className={`max-w-[85%] rounded-xl shadow-sm text-xs relative overflow-hidden ${
                             isLead
                               ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none'
                               : msg.sentBy === 'operator'
@@ -4292,7 +4292,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </div>
 
               {/* WhatsApp Web Bottom Simulation Control & Input Bar */}
-              <div className="p-2.5 bg-[#202c33] border-t border-slate-800 space-y-2">
+              <div className="p-2.5 bg-[#202c33] border-t border-slate-800/50 space-y-2">
                 
                 {/* Sender Role Switcher & Attachments Toolbar */}
                 <div className="flex items-center justify-between text-xs px-1">
@@ -4302,7 +4302,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       reais pra não sobrar vestígio de modo demo na tela que
                       a operadora usa todo dia. */}
                   {!(selectedLead as any)?.isReal ? (
-                    <div className="flex items-center space-x-1 bg-[#111b21] p-1 rounded-xl border border-slate-800">
+                    <div className="flex items-center space-x-1 bg-[#111b21]/80 p-1 rounded-lg">
                       <span className="text-[10px] text-slate-400 font-bold px-1">{isSpanish ? 'Enviar como:' : 'Enviar como:'}</span>
                       <button
                         type="button"
@@ -4508,7 +4508,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    className="flex-1 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-[#00a884]"
+                    className="flex-1 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-[#00a884]"
                   />
 
                   <button
@@ -4540,7 +4540,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           // equivalente lá é o painel deslizante controlado por
           // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
           // cabeçalho da conversa.
-          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/80 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
+          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/45 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
