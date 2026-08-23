@@ -3365,7 +3365,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   {(selectedLead as any)?.isReal && !paymentAppointment && (
                     <button
                       onClick={() => setIsManualAppointmentModalOpen(true)}
-                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Cadastrar agendamento manual (combinado fora do WhatsApp)"
                     >
                       <CalendarPlus className="w-4 h-4" />
@@ -3377,7 +3377,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   {(selectedLead as any)?.isReal && activeTenant?.id === CLIC_PISCINAS_TENANT_ID && (
                     <button
                       onClick={() => setIsContractModalOpen(true)}
-                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Gerar contrato"
                     >
                       <FileText className="w-4 h-4" />
@@ -3401,7 +3401,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       backend. */}
                   <button
                     onClick={() => window.open(`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}`, '_blank', 'noopener,noreferrer')}
-                    className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                    className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Transferir pro WhatsApp pessoal do operador"
                   >
                     <Phone className="w-4 h-4" />
@@ -3436,7 +3436,36 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       return (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsHeaderMenuOpen(false)} />
-                          <div className="absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
+                          <div className="mobile-header-context-menu absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
+                            {(selectedLead as any)?.isReal && !paymentAppointment && (
+                              <button
+                                onClick={() => { setIsHeaderMenuOpen(false); setIsManualAppointmentModalOpen(true); }}
+                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                title="Cadastrar agendamento manual combinado fora do WhatsApp"
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" />
+                                <span>Cadastrar agendamento</span>
+                              </button>
+                            )}
+                            {(selectedLead as any)?.isReal && activeTenant?.id === CLIC_PISCINAS_TENANT_ID && (
+                              <button
+                                onClick={() => { setIsHeaderMenuOpen(false); setIsContractModalOpen(true); }}
+                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                title="Gerar contrato"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>Gerar contrato</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => { setIsHeaderMenuOpen(false); window.open(`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}`, '_blank', 'noopener,noreferrer'); }}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              title="Continuar no WhatsApp pessoal do operador"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                              <span>Abrir no WhatsApp</span>
+                            </button>
+                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
                               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
