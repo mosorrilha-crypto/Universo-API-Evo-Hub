@@ -9,6 +9,8 @@ export interface MetaAdsConnectionStatus {
   adAccountId: string | null;
   accessTokenSet: boolean;
   configured: boolean;
+  managementTokenSet: boolean;
+  managementConfigured: boolean;
 }
 
 export interface MetaTrafficAd {
@@ -252,7 +254,7 @@ export async function getMetaAdsConnectionStatus(tenantId: string): Promise<Meta
   const database = getDb();
   const { data, error } = await database
     .from('tenant_meta_credentials')
-    .select('meta_ads_account_id, meta_ads_access_token, capi_access_token')
+    .select('meta_ads_account_id, meta_ads_access_token, meta_ads_management_access_token, capi_access_token')
     .eq('tenant_id', tenantId)
     .maybeSingle();
   if (error) throw new Error(`Não foi possível ler a configuração Meta Ads: ${error.message}`);
@@ -261,30 +263,39 @@ export async function getMetaAdsConnectionStatus(tenantId: string): Promise<Meta
     ? data.meta_ads_account_id.trim()
     : null;
   const accessTokenSet = Boolean(data?.meta_ads_access_token || data?.capi_access_token);
-  return { adAccountId, accessTokenSet, configured: Boolean(adAccountId && accessTokenSet) };
+  const managementTokenSet = Boolean(data?.meta_ads_management_access_token);
+  return {
+    adAccountId,
+    accessTokenSet,
+    configured: Boolean(adAccountId && accessTokenSet),
+    managementTokenSet,
+    managementConfigured: Boolean(adAccountId && managementTokenSet),
+  };
 }
 
 /** Salva a autorização exclusivamente no banco do tenant e preserva um token já configurado quando o campo vem vazio. */
 export async function saveMetaAdsConnection(
   tenantId: string,
-  input: { adAccountId: string; accessToken?: string | null }
+  input: { adAccountId: string; accessToken?: string | null; managementAccessToken?: string | null }
 ): Promise<MetaAdsConnectionStatus> {
   const database = getDb();
   const adAccountId = validAdAccountId(input.adAccountId);
   const accessToken = typeof input.accessToken === 'string' ? input.accessToken.trim() : '';
+  const managementAccessToken = typeof input.managementAccessToken === 'string' ? input.managementAccessToken.trim() : '';
 
   const { data: existing, error: readError } = await database
     .from('tenant_meta_credentials')
-    .select('meta_ads_access_token, capi_access_token')
+    .select('meta_ads_access_token, meta_ads_management_access_token, capi_access_token')
     .eq('tenant_id', tenantId)
     .maybeSingle();
   if (readError) throw new Error(`Não foi possível validar a configuração Meta Ads: ${readError.message}`);
-  if (!accessToken && !existing?.meta_ads_access_token && !existing?.capi_access_token) {
-    throw new MetaAdsConfigurationError('Informe o token de acesso da Marketing API na primeira configuração.');
+  if (!accessToken && !managementAccessToken && !existing?.meta_ads_access_token && !existing?.meta_ads_management_access_token && !existing?.capi_access_token) {
+    throw new MetaAdsConfigurationError('Informe ao menos um token da Marketing API na primeira configuração.');
   }
 
   const update: Record<string, string> = { tenant_id: tenantId, meta_ads_account_id: adAccountId };
   if (accessToken) update.meta_ads_access_token = accessToken;
+  if (managementAccessToken) update.meta_ads_management_access_token = managementAccessToken;
 
   const { error } = await database
     .from('tenant_meta_credentials')
