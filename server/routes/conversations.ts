@@ -1263,6 +1263,58 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: true });
   }));
 
+  // Catálogo público (contato + opt-in) — até aqui só dava pra configurar
+  // via SQL direto no Supabase. Achado real (23/08/2026): a config publicada
+  // pra Monique acabou presa no tenant errado — o slug "monique" tinha sido
+  // reaproveitado por outro tenant num rename anterior, e quem editou via
+  // SQL direto (sem essa tela) não tinha como perceber. Uma rota escopada
+  // por `tenantOf(req)` (nunca por slug/id vindo do cliente) elimina essa
+  // classe de erro. Mesmo padrão de autenticação/tenant-escopo das rotas de
+  // knowledge-base/business-hours acima.
+  router.get('/api/public-catalog-settings', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { data, error } = await getDb()
+      .from('tenants')
+      .select('slug, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label')
+      .eq('id', tenantOf(req))
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({
+      slug: data?.slug || null,
+      enabled: data?.public_catalog_enabled === true,
+      whatsappPhone: data?.public_whatsapp_phone || '',
+      instagramUrl: data?.public_instagram_url || '',
+      locationMapsUrl: data?.public_location_maps_url || '',
+      address: data?.public_address || '',
+      hoursLabel: data?.public_hours_label || '',
+    });
+  }));
+
+  router.put('/api/public-catalog-settings', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { enabled, whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel } = req.body || {};
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'Campo "enabled" precisa ser booleano.' });
+    }
+    const textFields = { whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel };
+    for (const [field, value] of Object.entries(textFields)) {
+      if (value !== undefined && value !== null && typeof value !== 'string') {
+        return res.status(400).json({ error: `Campo "${field}" precisa ser string ou null.` });
+      }
+    }
+    const { error } = await getDb()
+      .from('tenants')
+      .update({
+        public_catalog_enabled: enabled,
+        public_whatsapp_phone: whatsappPhone?.trim() || null,
+        public_instagram_url: instagramUrl?.trim() || null,
+        public_location_maps_url: locationMapsUrl?.trim() || null,
+        public_address: address?.trim() || null,
+        public_hours_label: hoursLabel?.trim() || null,
+      })
+      .eq('id', tenantOf(req));
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  }));
+
   // Dados básicos (id/nome) do tenant do usuário autenticado — até aqui não
   // existia rota nenhuma pra isso, e o badge de "empresa ativa" no
   // cabeçalho (Header.tsx, `activeTenant.name`) vinha só de um mock local

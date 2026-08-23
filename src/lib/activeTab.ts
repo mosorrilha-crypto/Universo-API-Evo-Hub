@@ -11,6 +11,7 @@ const ACTIVE_TAB_VALUES: readonly ActiveTab[] = [
   'saas',
   'attribution',
   'knowledge',
+  'catalog',
   'integration',
   'escalations',
   'quality',

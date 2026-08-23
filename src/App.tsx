@@ -20,6 +20,7 @@ import { EscalationsPanel } from './components/EscalationsPanel';
 import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
+import { PublicCatalogSettings } from './components/PublicCatalogSettings';
 import { OperationsCenter } from './components/OperationsCenter';
 import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
@@ -170,7 +171,7 @@ export const App: React.FC = () => {
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (['financial', 'agenda_financeiro'].includes(activeTab) && !canSeeFinancial) ||
-      (['attribution', 'knowledge', 'integration', 'quality'].includes(activeTab) && !canSeeAdminTools);
+      (['attribution', 'knowledge', 'catalog', 'integration', 'quality'].includes(activeTab) && !canSeeAdminTools);
     if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
@@ -1115,6 +1116,14 @@ export const App: React.FC = () => {
                 return null;
               }
             }}
+          />
+        )}
+
+        {activeTab === 'catalog' && canSeeAdminTools && (
+          <PublicCatalogSettings
+            tenantSlug={activeTenant.slug}
+            activeProductCount={(knowledgeBase.products || []).filter((product) => product.active !== false).length}
+            onGoToKnowledgeBase={() => handleSetActiveTab('knowledge')}
           />
         )}
 
