@@ -9,6 +9,7 @@ import { ContactContextPanel, type OperatorMemoryEditPayload } from './ContactCo
 import { ForwardMessageModal } from './chat/ForwardMessageModal';
 import { ImageLightboxModal } from './chat/ImageLightboxModal';
 import { LeadListRow } from './chat/LeadListRow';
+import { QuickRepliesMenu } from './chat/QuickRepliesMenu';
 import { AddLeadModal } from './leads/AddLeadModal';
 import { ManualAppointmentModal } from './leads/ManualAppointmentModal';
 import { ManageLabelsModal, type LabelCatalogEntry } from './leads/ManageLabelsModal';
@@ -616,42 +617,55 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Respostas rápidas configuráveis — lista compartilhada pela equipe.
   const [quickReplies, setQuickRepliesState] = useState<string[]>([]);
+  const [quickRepliesSaving, setQuickRepliesSaving] = useState(false);
 
   useEffect(() => {
     apiFetch('/api/quick-replies')
       .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data?.quickReplies) setQuickRepliesState(data.quickReplies); })
+      .then((data) => { if (Array.isArray(data?.quickReplies)) setQuickRepliesState(data.quickReplies); })
       .catch(() => {});
   }, []);
 
-  const handleAddQuickReply = async () => {
-    const text = window.prompt('Texto da nova resposta rápida:');
-    if (!text?.trim()) return;
-    const updated = [...quickReplies, text.trim()];
+  const persistQuickReplies = async (updated: string[]) => {
+    const previous = quickReplies;
     setQuickRepliesState(updated);
+    setQuickRepliesSaving(true);
     try {
-      await apiFetch('/api/quick-replies', {
+      const response = await apiFetch('/api/quick-replies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quickReplies: updated }),
       });
-    } catch (err) {
-      console.error('Falha ao salvar resposta rápida:', err);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || 'Não foi possível salvar as respostas rápidas.');
+      }
+    } catch (error) {
+      setQuickRepliesState(previous);
+      throw error;
+    } finally {
+      setQuickRepliesSaving(false);
     }
   };
 
-  const handleDeleteQuickReply = async (index: number) => {
-    const updated = quickReplies.filter((_, i) => i !== index);
-    setQuickRepliesState(updated);
-    try {
-      await apiFetch('/api/quick-replies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quickReplies: updated }),
-      });
-    } catch (err) {
-      console.error('Falha ao remover resposta rápida:', err);
+  const handleCreateQuickReply = async (text: string) => {
+    const normalized = text.trim();
+    if (quickReplies.some((reply) => reply.trim() === normalized)) {
+      throw new Error('Essa resposta rápida já está cadastrada.');
     }
+    await persistQuickReplies([...quickReplies, normalized]);
+  };
+
+  const handleUpdateQuickReply = async (index: number, text: string) => {
+    const normalized = text.trim();
+    if (quickReplies.some((reply, replyIndex) => replyIndex !== index && reply.trim() === normalized)) {
+      throw new Error('Essa resposta rápida já está cadastrada.');
+    }
+    await persistQuickReplies(quickReplies.map((reply, replyIndex) => replyIndex === index ? normalized : reply));
+  };
+
+  const handleDeleteQuickReply = async (index: number) => {
+    await persistQuickReplies(quickReplies.filter((_, replyIndex) => replyIndex !== index));
   };
 
   // Postar Status/Stories da empresa (pedido real do dono do produto,
@@ -4262,33 +4276,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       <span>{isRecordingReal ? `Gravando p/ ${recordingForLeadName}...` : 'Áudio'}</span>
                     </button>
 
-                    <select
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === '__add__') handleAddQuickReply();
-                        else if (val.startsWith('__del__')) {
-                          const idx = Number(val.replace('__del__', ''));
-                          if (window.confirm(`Remover a resposta rápida "${quickReplies[idx]}"?`)) handleDeleteQuickReply(idx);
-                        } else if (val) setInputMessage(val);
-                        e.target.value = '';
-                      }}
-                      defaultValue=""
-                      className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-amber-400 text-[10px] font-semibold cursor-pointer max-w-[110px]"
-                      title="Respostas rápidas"
-                    >
-                      <option value="" disabled>⚡ Resp. rápida...</option>
-                      {quickReplies.map((qr, i) => (
-                        <option key={i} value={qr}>{qr.slice(0, 40)}{qr.length > 40 ? '…' : ''}</option>
-                      ))}
-                      <option value="__add__">➕ Nova resposta rápida</option>
-                      {quickReplies.length > 0 && (
-                        <optgroup label="Remover">
-                          {quickReplies.map((qr, i) => (
-                            <option key={`del-${i}`} value={`__del__${i}`}>🗑️ {qr.slice(0, 30)}{qr.length > 30 ? '…' : ''}</option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
+                    <QuickRepliesMenu
+                      quickReplies={quickReplies}
+                      isSpanish={isSpanish}
+                      saving={quickRepliesSaving}
+                      onSelect={setInputMessage}
+                      onCreate={handleCreateQuickReply}
+                      onUpdate={handleUpdateQuickReply}
+                      onDelete={handleDeleteQuickReply}
+                    />
 
                     {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
                       <select
