@@ -18,7 +18,7 @@ import {
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
-import { sendEvolutionTextMessage, sendEvolutionMediaMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
+import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, findProductMatch, resolveProductAmountByName } from '../services/knowledgeBaseStore';
@@ -27,11 +27,14 @@ import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours }
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
-import { listEscalations, getEscalation, resolveEscalation, deleteEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
+import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
+import { listOperationEvents } from '../services/operationEventStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { generateCorrectedReplySuggestion } from '../services/replySafetyGate';
+import { getContactAgentMemory, OperatorContactMemoryValidationError, updateContactAgentMemoryByOperator } from '../services/contactAgentMemoryStore';
+import { listAgentTurnTraces } from '../services/agentTurnTraceStore';
 import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
 import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
@@ -232,6 +235,107 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ conversations: await listConversations(tenantOf(req), { includeArchived }) });
   }));
 
+  /**
+   * Contexto supervisionado do contato. Retorna apenas a memória operacional
+   * compacta e a última decisão já redigida do agente; nunca devolve prompt,
+   * histórico/mensagens, comprovantes, mídias, credenciais ou o telefone
+   * duplicado dentro do payload. Toda busca é obrigatoriamente tenant-scoped.
+   */
+  router.get('/api/conversations/:phone/context', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const [memoryResult, traceResult] = await Promise.allSettled([
+      getContactAgentMemory(tenantId, phone),
+      listAgentTurnTraces(tenantId, phone, 1),
+    ]);
+    const memory = memoryResult.status === 'fulfilled' ? memoryResult.value : null;
+    const latestTrace = traceResult.status === 'fulfilled' ? traceResult.value[0] || null : null;
+    const unavailable = {
+      memory: memoryResult.status === 'rejected',
+      trace: traceResult.status === 'rejected',
+    };
+    if (unavailable.memory || unavailable.trace) {
+      console.warn(`⚠️  [Conversation Context] tenant=${tenantId} leitura parcial de contexto (memory=${unavailable.memory}, trace=${unavailable.trace}); painel continua em modo seguro.`);
+    }
+
+    res.json({
+      available: !unavailable.memory && !unavailable.trace,
+      unavailable,
+      memory: memory ? {
+        preferredLanguage: memory.preferred_language,
+        preferredName: memory.preferred_name,
+        currentIntent: memory.current_intent,
+        serviceInterest: memory.service_interest,
+        objections: memory.objections,
+        openLoops: memory.open_loops,
+        nextBestAction: memory.next_best_action,
+        conversationSummary: memory.conversation_summary,
+        updatedAt: memory.updated_at,
+        updatedBy: memory.updated_by,
+      } : null,
+      latestDecision: latestTrace ? {
+        createdAt: latestTrace.created_at,
+        routerDecision: latestTrace.router_decision,
+        reasoningSummary: latestTrace.reasoning_summary,
+        contextPackVersion: latestTrace.context_pack_version,
+        selectedFacts: latestTrace.selected_facts,
+        toolSummaries: latestTrace.tool_summaries,
+        needsHumanConfirmation: latestTrace.needs_human_confirmation,
+        outcome: latestTrace.outcome,
+      } : null,
+    });
+  }));
+
+  /**
+   * Correção humana de memória. O contrato é uma allowlist deliberadamente
+   * pequena: idioma, nome, intenção, interesse, objeções e próximo passo.
+   * Pagamento, agenda, escalonamento, fatos vivos e resumo do agente não são
+   * editáveis por esta rota nem aceitos silenciosamente no body.
+   */
+  router.patch('/api/conversations/:phone/context/memory', authenticateToken, requireRole('operator'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    try {
+      const memory = await updateContactAgentMemoryByOperator({ tenantId, phone, patch: req.body });
+      const changedFields = Object.keys(req.body || {}).sort();
+      const latestTrace = (await listAgentTurnTraces(tenantId, phone, 1))[0] || null;
+
+      // Auditável sem registrar o conteúdo editado, que pode incluir dados
+      // pessoais do contato. O evento prova quem/quando/quais campos, não guarda
+      // a conversa, prompts, comprovantes ou valores antes/depois.
+      await recordQualityAuditEvent({
+        tenantId,
+        eventType: 'contact_memory_corrected',
+        source: 'atendimento_context_panel',
+        entityType: 'contact_agent_memory',
+        entityId: `${tenantId}:${phone}`,
+        conversationPhone: phone,
+        actorId: req.user?.id,
+        payload: { changedFields, updatedBy: 'operator', agentRoute: latestTrace?.router_decision || 'unknown' },
+      });
+
+      res.json({
+        success: true,
+        changedFields,
+        memory: {
+          preferredLanguage: memory.preferred_language,
+          preferredName: memory.preferred_name,
+          currentIntent: memory.current_intent,
+          serviceInterest: memory.service_interest,
+          objections: memory.objections,
+          nextBestAction: memory.next_best_action,
+          updatedAt: memory.updated_at,
+          updatedBy: memory.updated_by,
+        },
+      });
+    } catch (error) {
+      if (error instanceof OperatorContactMemoryValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      throw error;
+    }
+  }));
+
   router.get('/api/conversations/:phone', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const conv = await getConversation(tenantOf(req), req.params.phone);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
@@ -320,11 +424,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
   // Envio de arquivo/foto real (upload do dispositivo do operador, via painel)
   router.post('/api/conversations/:phone/send-media', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { base64, mimeType, filename, caption } = req.body || {};
+    const { base64, mimeType, filename, caption, deliveryMode } = req.body || {};
     if (!base64 || !mimeType) {
       return res.status(400).json({ error: 'Campos "base64" e "mimeType" são obrigatórios.' });
     }
     const tenantId = tenantOf(req);
+    // OGG/Opus fica disponível apenas no ensaio técnico autenticado. O caminho
+    // normal de produção continua usando MP3 até a conclusão da prova.
+    const isOggOpusProbe = deliveryMode === 'ogg_opus_probe';
+    if (isOggOpusProbe && process.env.META_OGG_OPUS_PROBE_ENABLED !== 'true') {
+      return res.status(403).json({ error: 'Ensaio OGG/Opus não está habilitado neste ambiente.' });
+    }
 
     try {
       let uploadBase64 = base64;
@@ -336,19 +446,55 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
       const isEvolution = channel.provider === 'evolution';
+      if (isOggOpusProbe && isEvolution) {
+        return res.status(400).json({ error: 'O ensaio OGG/Opus exige um canal Meta Cloud API.' });
+      }
       if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) {
-        const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType);
-        uploadBase64 = transcoded.base64;
-        // mimeType (e filename) do upload/persistência seguem o que a
-        // transcodificação retornou.
-        uploadMimeType = transcoded.mimeType;
-        uploadFilename = uploadMimeType.startsWith('audio/mpeg') ? 'audio.mp3' : 'audio.ogg';
+        // A Meta reconhece nota de voz somente quando o áudio é OGG/Opus mono
+        // e o payload de mensagem contém `audio.voice: true`. MP3 passa a ser
+        // um fallback de entrega, não mais o formato padrão desse canal.
+        const applyTranscode = async (output: 'ogg_opus' | 'mp3') => {
+          const transcoded = await transcodeToWhatsAppVoiceNote(base64, mimeType, output);
+          uploadBase64 = transcoded.base64;
+          uploadMimeType = transcoded.mimeType;
+          uploadFilename = output === 'ogg_opus' ? 'voice-note.ogg' : 'voice-note.mp3';
+        };
+
+        await applyTranscode('ogg_opus');
 
         if (isEvolution) {
-          await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType, uploadFilename);
+          try {
+            await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
+          } catch (error) {
+            console.warn(`🎙️ [audioFallback] evolution_ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            await applyTranscode('mp3');
+            await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
+          }
         } else {
-          const audioBuffer = Buffer.from(uploadBase64, 'base64');
-          await sendWhatsAppAudioMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, audioBuffer, uploadMimeType);
+          const sendCurrentAudio = async (diagnosticTag?: string) => {
+            const audioBuffer = Buffer.from(uploadBase64, 'base64');
+            const mediaId = await sendWhatsAppAudioMessage(
+              channel.metaPhoneNumberId,
+              channel.metaAccessToken,
+              req.params.phone,
+              audioBuffer,
+              uploadMimeType,
+              diagnosticTag
+            );
+            if (diagnosticTag) {
+              console.log(`🔬 [${diagnosticTag}] to=***${req.params.phone.replace(/\D/g, '').slice(-4)} media_id=${mediaId} mime="${uploadMimeType}" bytes=${audioBuffer.length}`);
+            }
+          };
+
+          try {
+            await sendCurrentAudio(isOggOpusProbe ? 'oggOpusProbe' : undefined);
+          } catch (error) {
+            // A falha cobre tanto rejeição da Meta quanto uma eventual falha de
+            // codificação OGG local. Só então entregamos MP3 como contingência.
+            console.warn(`🎙️ [audioFallback] ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            await applyTranscode('mp3');
+            await sendCurrentAudio('audioMp3Fallback');
+          }
         }
       } else {
         const cleanBase64 = uploadBase64.replace(/^data:[^;]+;base64,/, '');
@@ -1018,7 +1164,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ status, adsOnly, adTriggerMessages });
   }));
 
-  router.post('/api/agent-status', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/agent-status', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status, adsOnly, adTriggerMessages } = req.body || {};
     const tenantId = tenantOf(req);
     try {
@@ -1043,7 +1189,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ knowledgeBase: await getKnowledgeBase(tenantOf(req)) });
   }));
 
-  router.post('/api/knowledge-base', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { knowledgeBase } = req.body || {};
     if (!knowledgeBase || typeof knowledgeBase !== 'object') {
       return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
@@ -1108,7 +1254,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ businessHours: await getTenantBusinessHours(tenantOf(req)) });
   }));
 
-  router.post('/api/business-hours', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/business-hours', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { businessHours } = req.body || {};
     if (!validateBusinessHours(businessHours)) {
       return res.status(400).json({ error: 'Campo "businessHours" inválido — cada dia precisa de open/close em formato "HH:mm", com close depois de open.' });
@@ -1156,7 +1302,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // (PDF/TXT/CSV/JSON/MD, ver knowledgeBaseDocumentStore.ts) pra o agente
   // usar como contexto real (formatKnowledgeBaseForPrompt), com teto de
   // tamanho pra nunca inflar o prompt sem limite.
-  router.post('/api/knowledge-base/documents', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base/documents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64 } = req.body || {};
     if (!fileName?.trim() || !base64) {
@@ -1206,7 +1352,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.send(doc.buffer);
   }));
 
-  router.delete('/api/knowledge-base/documents/:docId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/knowledge-base/documents/:docId', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const docId = req.params.docId;
     await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId);
@@ -1223,7 +1369,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // Quem associa a referência a um produto é o cliente (AgentKnowledgeBase.tsx),
   // no mesmo formData local que já guarda exampleImageBase64 — só persiste
   // de verdade quando a base inteira é salva (POST /api/knowledge-base acima).
-  router.post('/api/knowledge-base/videos', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base/videos', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64 } = req.body || {};
     if (!fileName?.trim() || !base64 || !mimeType) {
@@ -1298,7 +1444,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // e roda extração de texto; um catálogo de primeiro contato é só pra
   // MANDAR pro cliente, nunca deve virar contexto de prompt nem contar no
   // teto de MAX_DOCUMENTS_PER_TENANT daquela lista.
-  router.post('/api/knowledge-base/first-contact-file', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/knowledge-base/first-contact-file', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64, oldFileId } = req.body || {};
     if (!fileName?.trim() || !base64) {
@@ -1358,8 +1504,30 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ escalations: withWindow });
   }));
 
+  router.get('/api/operation-events', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const phone = typeof req.query.phone === 'string' && req.query.phone.trim() ? req.query.phone.trim() : undefined;
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 500)) : 200;
+    const events = await listOperationEvents(tenantOf(req), { phone, limit });
+    res.json({ events });
+  }));
+
+  router.post('/api/escalations/:id/assign', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const operatorId = req.body?.operatorId === null ? null : (req.body?.operatorId || req.user?.id);
+    if (operatorId !== null && typeof operatorId !== 'string') return res.status(400).json({ error: 'Campo "operatorId" inválido.' });
+    const escalation = await assignEscalation(tenantOf(req), req.params.id, operatorId, { id: req.user?.id });
+    if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ escalation });
+  }));
+
   router.post('/api/escalations/:id/resolve', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const e = await resolveEscalation(tenantOf(req), req.params.id);
+    const resolutionCode = typeof req.body?.resolutionCode === 'string' ? req.body.resolutionCode.trim() : undefined;
+    const resolutionNote = typeof req.body?.resolutionNote === 'string' ? req.body.resolutionNote.trim() : undefined;
+    const e = await resolveEscalation(tenantOf(req), req.params.id, {
+      actor: { id: req.user?.id },
+      resolutionCode: resolutionCode || undefined,
+      resolutionNote: resolutionNote || undefined,
+    });
     if (!e) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ escalation: e });
   }));
@@ -1458,7 +1626,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const reply: string = (req.body?.reply || '').trim();
     if (!reply) return res.status(400).json({ error: 'Campo "reply" é obrigatório.' });
 
-    const escalation = await submitOperatorReply(tenantId, req.params.id, reply);
+    const escalation = await submitOperatorReply(tenantId, req.params.id, reply, { id: req.user?.id });
     if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
 
     const { data: tenant } = await getDb().from('tenants').select('name').eq('id', tenantId).maybeSingle();
@@ -1508,7 +1676,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     const trimmedReply: string = (reply || '').trim();
     if (!trimmedReply) {
-      const escalation = await resolveEscalation(tenantId, req.params.id);
+      const escalation = await resolveEscalation(tenantId, req.params.id, {
+        actor: { id: operatorId },
+        resolutionCode: status === 'verified' ? 'payment_verified' : 'payment_rejected',
+      });
       if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
       return res.json({ appointment, escalation, outcome: null, calendarReleased });
     }
@@ -1526,7 +1697,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const deleted = await deleteEscalation(tenantOf(req), req.params.id);
+    const deleted = await deleteEscalation(tenantOf(req), req.params.id, { id: req.user?.id });
     if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ success: true });
   }));

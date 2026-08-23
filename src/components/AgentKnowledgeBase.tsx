@@ -37,7 +37,8 @@ import {
   Paperclip,
   ChevronUp,
   ChevronDown,
-  GripVertical
+  GripVertical,
+  ExternalLink
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 
@@ -53,6 +54,8 @@ interface AgentKnowledgeBaseProps {
   onFetchTenantKnowledgeBase?: (tenantId: string) => Promise<AgentKnowledgeBase | null>;
   /** Modelos fixos são ferramenta de configuração inicial e só ficam disponíveis para saas_admin. */
   canUseBusinessTemplates?: boolean;
+  /** Slug do tenant ativo para abrir a pré-visualização pública sem autenticação. */
+  publicCatalogSlug?: string;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -73,7 +76,7 @@ const FIRST_CONTACT_BLOCK_META: Record<FirstContactBlockType, { label: string; i
   text: { label: 'Texto', icon: <MessageSquare className="w-3.5 h-3.5" />, color: 'text-slate-300' },
   image: { label: 'Imagem', icon: <ImageIcon className="w-3.5 h-3.5" />, color: 'text-blue-400' },
   video: { label: 'Vídeo', icon: <Video className="w-3.5 h-3.5" />, color: 'text-emerald-400' },
-  file: { label: 'Arquivo', icon: <Paperclip className="w-3.5 h-3.5" />, color: 'text-purple-400' },
+  file: { label: 'Arquivo', icon: <Paperclip className="w-3.5 h-3.5" />, color: 'text-sky-400' },
 };
 
 function AuditMetric({ label, value, tone }: { label: string; value: string | number; tone: 'emerald' | 'sky' | 'amber' | 'rose' | 'slate' }) {
@@ -84,7 +87,7 @@ function AuditMetric({ label, value, tone }: { label: string; value: string | nu
     rose: 'border-rose-500/20 bg-rose-500/5 text-rose-200',
     slate: 'border-slate-700 bg-slate-950/70 text-slate-300',
   };
-  return <div className={`rounded-xl border p-2.5 ${styles[tone]}`}><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>;
+  return <div className={`knowledge-workspace__audit-metric rounded-xl border p-2.5 ${styles[tone]}`}><p className="text-[10px] font-semibold text-slate-500">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>;
 }
 
 /**
@@ -327,6 +330,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   copyableTenants = [],
   onFetchTenantKnowledgeBase,
   canUseBusinessTemplates = false,
+  publicCatalogSlug,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -1353,10 +1357,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const selectedProduct = formData.products.find((p) => p.id === selectedProductId) || null;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="knowledge-workspace space-y-6 max-w-7xl mx-auto">
       
       {/* Top Header Banner */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl flex items-center justify-between gap-3">
+      <div className="knowledge-workspace__hero p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl flex items-center justify-between gap-3">
         <div className="flex items-center space-x-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0">
             <Brain className="w-5 h-5 text-emerald-400" />
@@ -1379,6 +1383,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
         {/* Primary Header Actions */}
         <div className="flex items-center space-x-2 flex-shrink-0">
+          {publicCatalogSlug && (
+            <a
+              href={`/catalogo/${encodeURIComponent(publicCatalogSlug)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-2 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
+              title="Abrir catálogo público"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Ver catálogo</span>
+            </a>
+          )}
           <button
             onClick={handleResetToDefault}
             className="px-3 py-2 rounded-xl border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
@@ -1390,7 +1406,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       </div>
 
-      <section className="rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
+      <section className="knowledge-workspace__audit rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-white">
@@ -1420,7 +1436,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <div className="mt-4 border-t border-slate-800 pt-3">
             <div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Prioridades encontradas</span><span className="text-[10px] text-slate-500">Exibindo as 4 primeiras</span></div>
             <div className="grid gap-2 md:grid-cols-2">
-              {knowledgeAudit.findings.slice(0, 4).map((finding) => <div key={finding.id} className="rounded-xl border border-slate-800 bg-slate-950/65 p-2.5"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${finding.severity === 'critical' ? 'bg-rose-400' : finding.severity === 'attention' ? 'bg-amber-300' : 'bg-sky-400'}`} /><p className="truncate text-[11px] font-bold text-slate-200">{finding.title}</p></div><p className="mt-1 pl-3.5 text-[10px] leading-4 text-slate-500">{finding.description}</p></div>)}
+              {knowledgeAudit.findings.slice(0, 4).map((finding) => <div key={finding.id} className="knowledge-workspace__finding rounded-xl border border-slate-800 bg-slate-950/65 p-2.5"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${finding.severity === 'critical' ? 'bg-rose-400' : finding.severity === 'attention' ? 'bg-amber-300' : 'bg-sky-400'}`} /><p className="knowledge-workspace__finding-title truncate text-[11px] font-bold text-slate-200">{finding.title}</p></div><p className="knowledge-workspace__finding-description mt-1 pl-3.5 text-[10px] leading-4 text-slate-500">{finding.description}</p></div>)}
             </div>
           </div>
         ) : <p className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3 text-xs text-emerald-200">A estrutura principal está completa para o agente usar dados reais desta empresa.</p>}
@@ -1892,7 +1908,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Itens ativos</p><p className="mt-0.5 text-lg font-extrabold text-emerald-300">{productStats.active}<span className="ml-1 text-[10px] font-medium text-slate-500">/ {formData.products.length}</span></p></div>
                 <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Categorias</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productCategories.length}</p></div>
                 <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com variantes</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productStats.withVariants}</p></div>
-                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com mídia</p><p className="mt-0.5 text-lg font-extrabold text-violet-300">{productStats.withMedia}</p></div>
+                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com mídia</p><p className="mt-0.5 text-lg font-extrabold text-sky-300">{productStats.withMedia}</p></div>
               </div>
             </div>
 
@@ -2360,7 +2376,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <button
             type="button"
             onClick={() => toggleSection('s5')}
-            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-purple-400 uppercase tracking-wide cursor-pointer"
+            className="w-full flex items-center justify-between gap-1.5 text-[11px] font-bold text-sky-400 uppercase tracking-wide cursor-pointer"
           >
             <span className="flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5" />
@@ -2373,7 +2389,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-purple-400" />
+                  <FileText className="w-4 h-4 text-sky-400" />
                   Documentos & Manuais de Treinamento
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -2393,7 +2409,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             </div>
 
             {/* Drag and Drop File Upload Area */}
-            <div className="border-2 border-dashed border-slate-800 hover:border-purple-500/50 bg-slate-950/80 rounded-2xl p-6 text-center space-y-3 transition-colors relative">
+            <div className="border-2 border-dashed border-slate-800 hover:border-sky-500/50 bg-slate-950/80 rounded-2xl p-6 text-center space-y-3 transition-colors relative">
               <input
                 type="file"
                 multiple
@@ -2402,7 +2418,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 disabled={uploadingDocNames.length > 0}
                 className="absolute inset-0 opacity-0 cursor-pointer w-full h-full disabled:cursor-not-allowed"
               />
-              <div className="w-12 h-12 rounded-full bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 mx-auto">
+              <div className="w-12 h-12 rounded-full bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 mx-auto">
                 {uploadingDocNames.length > 0 ? (
                   <Loader2 className="w-6 h-6 animate-spin" />
                 ) : (
@@ -2430,7 +2446,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               {formData.documents.map((doc) => (
                 <div key={doc.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
                   <div className="flex items-center space-x-3">
-                    <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400">
+                    <div className="p-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400">
                       <FileCheck className="w-4 h-4" />
                     </div>
                     <div>
@@ -2446,10 +2462,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   <div className="flex items-center space-x-3">
                     {doc.extractedText ? (
                       <span
-                        className="px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 text-[10px] font-bold border border-purple-800/60 flex items-center gap-1"
+                        className="px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 text-[10px] font-bold border border-sky-800/60 flex items-center gap-1"
                         title="O agente lê o conteúdo deste arquivo"
                       >
-                        <BrainCircuit className="w-3 h-3 text-purple-400" />
+                        <BrainCircuit className="w-3 h-3 text-sky-400" />
                         Lido pela IA
                       </span>
                     ) : (
@@ -2467,7 +2483,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     <button
                       onClick={() => handleDownloadDoc(doc)}
                       disabled={downloadingDocId === doc.id}
-                      className="text-slate-500 hover:text-purple-400 p-1 transition-colors cursor-pointer disabled:opacity-50"
+                      className="text-slate-500 hover:text-sky-400 p-1 transition-colors cursor-pointer disabled:opacity-50"
                       title="Baixar documento"
                     >
                       {downloadingDocId === doc.id ? (
@@ -2692,7 +2708,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                                 onClick={() => handlePreviewFirstContactBlockFile(block.fileId!)}
                                 disabled={previewingBlockMediaId === block.fileId}
                                 title={block.fileName || 'Ver arquivo'}
-                                className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-purple-400 hover:text-purple-300 disabled:opacity-50 cursor-pointer"
+                                className="w-14 h-14 rounded-lg border border-slate-700 bg-slate-900 flex items-center justify-center text-sky-400 hover:text-sky-300 disabled:opacity-50 cursor-pointer"
                               >
                                 {previewingBlockMediaId === block.fileId ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                               </button>
@@ -2774,7 +2790,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 <button
                   type="button"
                   onClick={() => handleAddFirstContactBlock('file')}
-                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-purple-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-sky-600 text-[11px] font-semibold text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-all"
                 >
                   <Paperclip className="w-3.5 h-3.5" />
                   Arquivo

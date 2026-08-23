@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
-import { createQualityReview, deriveQualityRecommendations, listQualityReviews, recordQualityAuditEvent, updateQualityReview } from '../qualityAuditStore';
+import { createQualityReview, deriveMemoryCorrectionInsights, deriveQualityRecommendations, listQualityReviews, recordQualityAuditEvent, updateQualityReview } from '../qualityAuditStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const TENANT_B = '22222222-2222-2222-2222-222222222222';
@@ -80,6 +80,38 @@ describe('qualityAuditStore — auditoria e aprendizado supervisionado', () => {
       base('idea', 'operator_idea', {}, 'pending'),
     ]);
     expect(recommendations.map((item) => item.id)).toEqual(['repeated-corrections', 'pending-ideas']);
+  });
+
+  it('agrega correções de memória por campo e rota sem carregar telefone, ator ou valores editados', () => {
+    const event = (id: string, fields: unknown[], agentRoute: string, createdAt: string) => ({
+      id,
+      tenant_id: TENANT_A,
+      event_type: 'contact_memory_corrected',
+      source: 'atendimento_context_panel',
+      entity_type: 'contact_agent_memory',
+      entity_id: `${TENANT_A}:telefone-privado`,
+      conversation_phone: '595981111111',
+      actor_id: 'operator-a',
+      payload: { changedFields: fields, agentRoute, preferredName: 'NÃO DEVE APARECER' },
+      created_at: createdAt,
+    } as any);
+    const insights = deriveMemoryCorrectionInsights([
+      event('one', ['preferredName', 'serviceInterest', 'paymentStatus'], 'faq', '2026-08-22T10:00:00.000Z'),
+      event('two', ['preferredName'], 'faq', '2026-08-22T11:00:00.000Z'),
+      event('three', ['preferredName', 'objections'], 'agendamento', '2026-08-22T12:00:00.000Z'),
+      { ...event('other', ['serviceInterest'], 'faq', '2026-08-22T13:00:00.000Z'), event_type: 'crm_lead_updated' },
+    ]);
+
+    expect(insights.totalCorrections).toBe(3);
+    expect(insights.topFields).toEqual([
+      { field: 'preferredName', count: 3 },
+      { field: 'objections', count: 1 },
+      { field: 'serviceInterest', count: 1 },
+    ]);
+    expect(insights.byAgentRoute).toEqual([{ route: 'faq', count: 2 }, { route: 'agendamento', count: 1 }]);
+    expect(insights.reviewCandidates).toEqual([{ field: 'preferredName', count: 3 }]);
+    expect(JSON.stringify(insights)).not.toContain('595981111111');
+    expect(JSON.stringify(insights)).not.toContain('NÃO DEVE APARECER');
   });
 
   it('registra eventos de auditoria no tenant correto', async () => {

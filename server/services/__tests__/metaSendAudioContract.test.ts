@@ -22,7 +22,7 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     });
 
     const buf = Buffer.from('fake-audio');
-    const mediaId = await sendWhatsAppAudioMessage('pn', 'tok', '595981111111', buf, 'audio/ogg');
+    const mediaId = await sendWhatsAppAudioMessage('pn', 'tok', '595981111111', buf, 'audio/ogg; codecs=opus');
 
     expect(mediaId).toBe('media-123');
     // Três chamadas: /media (upload), GET /{media_id} (diagnóstico — só pra
@@ -30,8 +30,8 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
     
     // Verifica a segunda chamada (o envio da mensagem) — "voice: true" marca
-    // como nota de voz de verdade (waveform), exigido pela Meta pra áudio
-    // gravado no navegador.
+    // como nota de voz de verdade (waveform), exigido pela Meta para um
+    // arquivo OGG/Opus válido.
     expect(global.fetch).toHaveBeenLastCalledWith(
       'https://graph.facebook.com/v23.0/pn/messages',
       expect.objectContaining({
@@ -47,28 +47,26 @@ describe('metaSend — Contrato de Áudio da Graph API', () => {
     );
   });
 
-  it('uploadWhatsAppMedia deve enviar o MIME type BASE (sem parâmetros) no campo type e no Blob do arquivo', async () => {
+  it('uploadWhatsAppMedia deve preservar o MIME OGG/Opus completo no campo type e no Blob do arquivo', async () => {
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({ id: 'media-123' })
     });
 
     const buf = Buffer.from('fake-audio');
-    // Entra com "; codecs=opus" (usado internamente pro player do painel),
-    // mas o upload pra Meta deve usar só o tipo base — a lista de tipos de
-    // áudio suportados documentada pela Meta usa "audio/ogg" sem parâmetros.
+    // OGG/Opus exige o parâmetro de codec: `audio/ogg` isolado não é
+    // suportado pela Meta. O upload deve preservar o MIME integral.
     await uploadWhatsAppMedia('pn', 'tok', buf, 'audio/ogg; codecs=opus', 'a.ogg');
 
     const lastCall = (global.fetch as any).mock.calls[0];
     const body = lastCall[1].body as FormData;
 
     expect(body.get('messaging_product')).toBe('whatsapp');
-    // O campo "type" deve ser o MIME type BASE — nem categoria genérica
-    // ("audio"), nem o tipo com parâmetro de codec.
-    expect(body.get('type')).toBe('audio/ogg');
-    // O Blob da parte "file" carrega o mesmo MIME type base.
+    // O campo "type" deve manter o tipo completo, inclusive o codec.
+    expect(body.get('type')).toBe('audio/ogg; codecs=opus');
+    // A parte "file" precisa carregar o mesmo MIME integral.
     const filePart = body.get('file') as File;
-    expect(filePart.type).toBe('audio/ogg');
+    expect(filePart.type).toBe('audio/ogg; codecs=opus');
     expect(filePart.name).toBe('a.ogg');
   });
 });

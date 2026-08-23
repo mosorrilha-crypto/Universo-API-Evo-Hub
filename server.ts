@@ -22,6 +22,7 @@ import { createCrmRouter } from './server/routes/crm';
 import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
 import { createQualityAuditRouter } from './server/routes/qualityAudit';
+import { createPublicCatalogRouter } from './server/routes/publicCatalog';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
@@ -108,11 +109,16 @@ async function startServer() {
   }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
+  // slug e só publica tenants explicitamente habilitados na migration 0042.
+  app.use(createPublicCatalogRouter());
+
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken }));
   app.use(createWebhooksRouter({
-    metaWebhookVerifyToken: config.metaWebhookVerifyToken,
+      metaWebhookVerifyToken: config.metaWebhookVerifyToken,
+    metaAppSecret: config.metaAppSecret,
     getAi: () => getGeminiClient(config),
     groqApiKey: config.groqApiKey,
     metaAccessToken: config.metaAccessToken,

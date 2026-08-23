@@ -14,16 +14,18 @@ const isGoogleCalendarConnected = vi.fn(async (_tenantId: string) => true);
 const listUpcomingEvents = vi.fn(async (_tenantId: string, _cfg: unknown, _timeMinIso: string, _timeMaxIso: string) => [
   { id: 'evt-1', summary: 'Design de Sobrancelhas — Clarice', startIso: '2026-08-15T10:00:00-04:00' },
 ]);
+const handleGoogleOAuthCallback = vi.fn();
+const verifyOAuthState = vi.fn();
 
 vi.mock('../../services/googleCalendar', () => ({
   isGoogleCalendarConnected,
   listUpcomingEvents,
   // Stubs — importados pelo router mas não exercitados por estes testes.
   getGoogleAuthUrl: vi.fn(),
-  handleGoogleOAuthCallback: vi.fn(),
+  handleGoogleOAuthCallback,
   disconnectGoogleCalendar: vi.fn(),
   signOAuthState: vi.fn(),
-  verifyOAuthState: vi.fn(),
+  verifyOAuthState,
 }));
 
 const { createGoogleCalendarRouter } = await import('../googleCalendar');
@@ -39,10 +41,11 @@ const ROUTER_DEPS = {
 
 let server: Server;
 let baseUrl: string;
+let authenticatedRole: 'operator' | 'manager' | 'admin' | 'saas_admin' = 'manager';
 
 function fakeAuthenticateToken(tenantId: string) {
   return (req: any, _res: any, next: any) => {
-    req.user = { id: 'op-1', tenantId, role: 'operator' };
+    req.user = { id: 'op-1', tenantId, role: authenticatedRole };
     next();
   };
 }
@@ -61,6 +64,7 @@ function startServer(tenantId: string, deps: typeof ROUTER_DEPS = ROUTER_DEPS) {
 }
 
 beforeEach(() => {
+  authenticatedRole = 'manager';
   initDb(createFakeSupabase());
 });
 
@@ -68,6 +72,28 @@ afterEach(async () => {
   vi.clearAllMocks();
   isGoogleCalendarConnected.mockResolvedValue(true);
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+describe('GET /api/google-calendar/oauth-callback', () => {
+  it('rejeita state ausente ou inválido sem associar um refresh token a tenant algum', async () => {
+    ({ server, baseUrl } = await startServer(TENANT_A));
+
+    const res = await fetch(`${baseUrl}/api/google-calendar/oauth-callback?code=authorization-code`);
+
+    expect(res.status).toBe(400);
+    expect(handleGoogleOAuthCallback).not.toHaveBeenCalled();
+  });
+
+  it('conclui a conexão somente quando o state assinado identifica o tenant', async () => {
+    verifyOAuthState.mockReturnValue(TENANT_A);
+    handleGoogleOAuthCallback.mockResolvedValue(undefined);
+    ({ server, baseUrl } = await startServer(TENANT_A));
+
+    const res = await fetch(`${baseUrl}/api/google-calendar/oauth-callback?code=authorization-code&state=state-assinado`);
+
+    expect(res.status).toBe(200);
+    expect(handleGoogleOAuthCallback).toHaveBeenCalledWith(TENANT_A, 'authorization-code', 'client-id', 'client-secret', 'https://x/oauth-callback');
+  });
 });
 
 describe('GET /api/google-calendar/upcoming-events', () => {
@@ -166,6 +192,17 @@ describe('POST /api/google-calendar/events/:eventId/complete', () => {
       body: JSON.stringify({ completed: 'sim' }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('recusa alteração por operador, mesmo quando a rota é chamada diretamente', async () => {
+    authenticatedRole = 'operator';
+    ({ server, baseUrl } = await startServer(TENANT_A));
+    const res = await fetch(`${baseUrl}/api/google-calendar/events/evt-1/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed: true }),
+    });
+    expect(res.status).toBe(403);
   });
 
   it('isolado por tenant — marcar concluído no tenant A não vaza pro tenant B', async () => {

@@ -8,6 +8,7 @@ import {
   isTrafficDatePreset,
   MetaAdsConfigurationError,
   MetaAdsRequestError,
+  MetaAdsTokenExpiredError,
   saveMetaAdsConnection,
 } from '../services/metaAdsInsightsService';
 
@@ -62,6 +63,7 @@ export function createMetaAdsRouter({ authenticateToken }: MetaAdsRouterDeps): R
       res.json({ overview });
     } catch (error: any) {
       if (error instanceof MetaAdsConfigurationError) return res.status(409).json({ error: error.message, code: 'META_ADS_NOT_CONFIGURED' });
+      if (error instanceof MetaAdsTokenExpiredError) return res.status(401).json({ error: error.message, code: 'META_ADS_TOKEN_EXPIRED' });
       if (error instanceof MetaAdsRequestError) return res.status(502).json({ error: error.message, code: 'META_ADS_REQUEST_FAILED' });
       throw error;
     }

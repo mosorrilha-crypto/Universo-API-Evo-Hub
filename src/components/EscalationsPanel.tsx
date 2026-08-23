@@ -1,395 +1,208 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { EscalationInfo } from '../types';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
-import { AlertTriangle, CheckCircle2, XCircle, Trash2, Clock, Phone, MessageSquare, Globe2, MessageCircle, ExternalLink, MessageCircleReply, Send, TimerReset, Sparkles, Copy, RefreshCw } from 'lucide-react';
+import {
+  AlertTriangle,
+  Archive,
+  CheckCircle2,
+  Clock,
+  Copy,
+  ExternalLink,
+  Globe2,
+  Layers3,
+  MessageCircle,
+  MessageCircleReply,
+  MessageSquare,
+  Phone,
+  RefreshCw,
+  Send,
+  Sparkles,
+  TimerReset,
+  UserRoundCheck,
+  XCircle,
+} from 'lucide-react';
 
 interface EscalationsPanelProps {
   escalations: EscalationInfo[];
   onResolve: (id: string) => void;
   onDelete: (id: string) => void;
-  /** Abre a conversa desse lead na aba WhatsApp — pedido real do operador
-   * depois de revisar prints do app no celular: hoje resolver um
-   * escalonamento exige sair daqui e caçar o lead manualmente na lista de
-   * conversas. */
   onGoToConversation?: (phone: string) => void;
-  /**
-   * Issue #97 — operador orienta a IA em vez de assumir a conversa
-   * pessoalmente: dentro da janela de 24h ela já responde agora; fora dela,
-   * manda um convite e usa a orientação assim que o cliente escrever de novo.
-   */
+  onAssignSelf?: (id: string) => void;
   onSubmitOperatorReply?: (id: string, reply: string) => void;
-  /** Gera uma sugestão corrigida sob demanda; nunca envia ao cliente. */
+  /** Gera uma proposta para revisão humana; nunca envia mensagem ao cliente. */
   onGenerateReplySuggestion?: (id: string) => Promise<EscalationInfo | null>;
-  /** Salva edição/cópia/descarte da sugestão para auditoria e aprendizado. */
+  /** Registra edição, cópia ou descarte sem salvar o texto no evento de auditoria. */
   onReplySuggestionFeedback?: (id: string, suggestion: string, status: 'edited' | 'copied' | 'discarded') => Promise<EscalationInfo | null>;
-  /**
-   * Verificação de pagamento unificada aqui (pedido real do dono do
-   * produto, 12/08/2026) — antes existiam dois lugares desconectados pro
-   * mesmo caso: o banner Confirmar/Rejeitar dentro da conversa, e este
-   * escalonamento gerado automaticamente pro mesmo comprovante. `reply`
-   * presente = também usa o motivo como orientação pra IA avisar o cliente
-   * (reusa o mesmo pipeline de onSubmitOperatorReply).
-   */
   onResolvePayment?: (id: string, phone: string, status: 'verified' | 'rejected', reply?: string) => void;
 }
 
-/** wa.me só aceita dígitos (sem "+", espaços, parênteses, hífen). */
 function toWaMeLink(phone: string): string {
   return `https://wa.me/${phone.replace(/\D/g, '')}`;
 }
 
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(diffMs / 60000);
+  const minutes = Math.max(0, Math.floor(diffMs / 60000));
   if (minutes < 1) return 'agora mesmo';
   if (minutes < 60) return `há ${minutes} min`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `há ${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `há ${days}d`;
+  return `há ${Math.floor(hours / 24)}d`;
 }
 
-/** "expira em 3h40" / "expirou há 2h" — usado no timer da janela de 24h (issue #97). */
-function formatWindowRemaining(expiresAtIso: string): string {
+function formatRemaining(expiresAtIso: string, expiredLabel = 'vencido'): string {
   const diffMs = new Date(expiresAtIso).getTime() - Date.now();
   const abs = Math.abs(diffMs);
   const hours = Math.floor(abs / 3600000);
   const minutes = Math.floor((abs % 3600000) / 60000);
   const label = hours > 0 ? `${hours}h${minutes.toString().padStart(2, '0')}` : `${minutes}min`;
-  return diffMs > 0 ? `expira em ${label}` : `expirou há ${label}`;
+  return diffMs > 0 ? `em ${label}` : `${expiredLabel} há ${label}`;
 }
 
-export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({ escalations, onResolve, onDelete, onGoToConversation, onSubmitOperatorReply, onGenerateReplySuggestion, onReplySuggestionFeedback, onResolvePayment }) => {
-  const [filter, setFilter] = useState<'pendentes' | 'resolvidos'>('pendentes');
+const priorityMeta = {
+  critical: { label: 'Crítica', className: 'border-rose-500/30 bg-rose-500/10 text-rose-200' },
+  high: { label: 'Alta', className: 'border-amber-500/30 bg-amber-500/10 text-amber-200' },
+  medium: { label: 'Média', className: 'border-sky-500/30 bg-sky-500/10 text-sky-200' },
+  low: { label: 'Baixa', className: 'border-slate-600 bg-slate-800 text-slate-300' },
+} as const;
+
+function statusLabel(status?: EscalationInfo['status']): string {
+  return ({ open: 'Sem responsável', assigned: 'Em atendimento', awaiting_customer: 'Aguardando cliente', resolved: 'Resolvido', archived: 'Arquivado' } as const)[status || 'open'];
+}
+
+export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
+  escalations,
+  onResolve,
+  onDelete,
+  onGoToConversation,
+  onAssignSelf,
+  onSubmitOperatorReply,
+  onGenerateReplySuggestion,
+  onReplySuggestionFeedback,
+  onResolvePayment,
+}) => {
+  const [filter, setFilter] = useState<'pending' | 'resolved'>('pending');
   const [replyDraftById, setReplyDraftById] = useState<Record<string, string>>({});
   const [openReplyId, setOpenReplyId] = useState<string | null>(null);
   const [openSuggestionId, setOpenSuggestionId] = useState<string | null>(null);
   const [suggestionDraftById, setSuggestionDraftById] = useState<Record<string, string>>({});
   const [suggestionBusyId, setSuggestionBusyId] = useState<string | null>(null);
 
-  const pending = escalations.filter((e) => !e.resolved);
-  const resolved = escalations.filter((e) => e.resolved);
-  const visible = filter === 'pendentes' ? pending : resolved;
+  const { pending, resolved, visible, overdue } = useMemo(() => {
+    const current = escalations.filter((e) => e.status !== 'archived');
+    const pendingItems = current.filter((e) => !e.resolved && e.status !== 'resolved');
+    const resolvedItems = current.filter((e) => e.resolved || e.status === 'resolved');
+    return {
+      pending: pendingItems,
+      resolved: resolvedItems,
+      visible: filter === 'pending' ? pendingItems : resolvedItems,
+      overdue: pendingItems.filter((e) => e.dueAt && new Date(e.dueAt).getTime() < Date.now()).length,
+    };
+  }, [escalations, filter]);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-400" />
-            Escalonamentos — precisa de atenção humana
-          </h2>
-          <p className="text-sm text-slate-400 mt-1">
-            Casos que a IA não conseguiu resolver sozinha: comprovante de pagamento, falha ao responder, ou qualquer coisa que precisa de uma pessoa real.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setFilter('pendentes')}
-            className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-              filter === 'pendentes' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-            }`}
-          >
-            Pendentes
-            {pending.length > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full text-[11px] bg-white/20 font-bold">{pending.length}</span>
-            )}
-          </button>
-          <button
-            onClick={() => setFilter('resolvidos')}
-            className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
-              filter === 'resolvidos' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-            }`}
-          >
-            Resolvidos ({resolved.length})
-          </button>
-        </div>
-      </div>
-
-      {visible.length === 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-500">
-          {filter === 'pendentes' ? 'Nenhum escalonamento pendente. 🎉' : 'Nenhum escalonamento resolvido ainda.'}
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {visible.map((e) => (
-          <div key={e.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-2">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-white">{e.contactName || e.phone}</span>
-                  <span className="text-slate-500 text-sm flex items-center gap-1">
-                    <Phone className="w-3.5 h-3.5" /> {e.phone}
-                  </span>
-                  <span className="text-slate-500 text-sm flex items-center gap-1">
-                    <Globe2 className="w-3.5 h-3.5" /> {e.country}
-                  </span>
-                </div>
-                <p className="text-sm text-amber-300 mt-1">{e.reason}</p>
-                {e.lastMessage && (
-                  <p className="text-sm text-slate-400 mt-1 flex items-start gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                    <span className="truncate">"{e.lastMessage}"</span>
-                  </p>
-                )}
-                <div className="flex items-center gap-3 flex-wrap mt-1">
-                  <span className="text-xs text-slate-600 flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> {timeAgo(e.createdAt)}
-                  </span>
-                  {/* Timer da janela de 24h da Meta (issue #97) — só faz
-                      sentido pro operador decidir enquanto o caso ainda está
-                      pendente; escalonamento resolvido não precisa mais disso. */}
-                  {!e.resolved && e.serviceWindowExpiresAt && (
-                    <span
-                      title="Desde a última mensagem do cliente — dentro da janela a IA responde de imediato; fora dela, precisa de um template de reengajamento primeiro."
-                      className={`text-xs flex items-center gap-1 px-1.5 py-0.5 rounded-md ${
-                        e.withinServiceWindow ? 'bg-emerald-950/60 text-emerald-300' : 'bg-amber-950/60 text-amber-300'
-                      }`}
-                    >
-                      <TimerReset className="w-3 h-3" /> {formatWindowRemaining(e.serviceWindowExpiresAt)}
-                    </span>
-                  )}
-                </div>
-                {e.operatorReply && !e.operatorReplyConsumedAt && (
-                  <p className="text-xs text-amber-400 mt-1.5 flex items-start gap-1.5">
-                    <MessageCircleReply className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                    Orientação enviada, aguardando o cliente responder pra IA retomar: "{e.operatorReply}"
-                  </p>
-                )}
-                {openReplyId === e.id && (
-                  <div className="mt-2 flex flex-col gap-1.5" onClick={(evt) => evt.stopPropagation()}>
-                    <AutoResizeTextarea
-                      value={replyDraftById[e.id] || ''}
-                      onChange={(evt) => setReplyDraftById((prev) => ({ ...prev, [e.id]: evt.target.value }))}
-                      placeholder={e.kind === 'payment_proof' ? 'Ex: faltam Gs 10.000, pede pra ela completar e reenviar o comprovante' : 'Ex: diz pra ela que o horário de sábado 14h ainda está livre'}
-                      minRows={2}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          const reply = (replyDraftById[e.id] || '').trim();
-                          if (!reply) return;
-                          if (e.kind === 'payment_proof') {
-                            if (!onResolvePayment) return;
-                            onResolvePayment(e.id, e.phone, 'rejected', reply);
-                          } else {
-                            if (!onSubmitOperatorReply) return;
-                            onSubmitOperatorReply(e.id, reply);
-                          }
-                          setReplyDraftById((prev) => ({ ...prev, [e.id]: '' }));
-                          setOpenReplyId(null);
-                        }}
-                        disabled={!(replyDraftById[e.id] || '').trim()}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-                      >
-                        <Send className="w-3.5 h-3.5" /> {e.kind === 'payment_proof' ? 'Rejeitar e enviar' : 'Enviar orientação'}
-                      </button>
-                      <button
-                        onClick={() => setOpenReplyId(null)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {openSuggestionId === e.id && onGenerateReplySuggestion && onReplySuggestionFeedback && (
-                  <div className="mt-3 flex flex-col gap-2 rounded-xl border border-sky-500/25 bg-sky-500/5 p-3" onClick={(evt) => evt.stopPropagation()}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="flex items-center gap-1.5 text-xs font-bold text-sky-200"><Sparkles className="h-3.5 w-3.5 text-sky-300" /> Sugestão corrigida supervisionada{e.suggestedReplySource ? ` · ${e.suggestedReplySource === 'groq-suggestion' ? 'Groq' : 'Gemini'}` : ''}</p>
-                        <p className="mt-1 text-[10px] leading-4 text-slate-400">Apenas uma proposta para o operador revisar. Nada é enviado automaticamente.</p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={suggestionBusyId === e.id}
-                        onClick={async () => {
-                          setSuggestionBusyId(e.id);
-                          const updated = await onGenerateReplySuggestion(e.id);
-                          if (updated) setSuggestionDraftById((prev) => ({ ...prev, [e.id]: updated.suggestedReply || '' }));
-                          setSuggestionBusyId(null);
-                        }}
-                        className="shrink-0 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[10px] font-bold text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
-                      >
-                        <RefreshCw className={`mr-1 inline h-3 w-3 ${suggestionBusyId === e.id ? 'animate-spin' : ''}`} /> Gerar novamente
-                      </button>
-                    </div>
-                    <AutoResizeTextarea
-                      value={suggestionDraftById[e.id] ?? e.suggestedReply ?? ''}
-                      onChange={(evt) => setSuggestionDraftById((prev) => ({ ...prev, [e.id]: evt.target.value }))}
-                      placeholder="A sugestão corrigida aparecerá aqui. Revise antes de copiar."
-                      minRows={3}
-                      maxLength={900}
-                      className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-2 text-xs leading-5 text-slate-200 placeholder-slate-600 focus:border-sky-500 focus:outline-none"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()}
-                        onClick={async () => {
-                          const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim();
-                          if (!suggestion) return;
-                          setSuggestionBusyId(e.id);
-                          const updated = await onReplySuggestionFeedback(e.id, suggestion, 'edited');
-                          if (updated) setSuggestionDraftById((prev) => ({ ...prev, [e.id]: updated.suggestedReply || suggestion }));
-                          setSuggestionBusyId(null);
-                        }}
-                        className="rounded-lg bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-slate-200 hover:bg-slate-700 disabled:opacity-40"
-                      >Salvar edição</button>
-                      <button
-                        type="button"
-                        disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()}
-                        onClick={async () => {
-                          const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim();
-                          if (!suggestion) return;
-                          setSuggestionBusyId(e.id);
-                          try {
-                            if (navigator.clipboard?.writeText) {
-                              await navigator.clipboard.writeText(suggestion);
-                            } else {
-                              const helper = document.createElement('textarea');
-                              helper.value = suggestion;
-                              helper.setAttribute('readonly', '');
-                              helper.style.position = 'fixed';
-                              helper.style.opacity = '0';
-                              document.body.appendChild(helper);
-                              helper.select();
-                              const copied = document.execCommand('copy');
-                              helper.remove();
-                              if (!copied) throw new Error('Clipboard indisponível');
-                            }
-                            await onReplySuggestionFeedback(e.id, suggestion, 'copied');
-                          } catch (err) {
-                            console.error('Não foi possível copiar a sugestão:', err);
-                          } finally {
-                            setSuggestionBusyId(null);
-                          }
-                        }}
-                        className="rounded-lg bg-sky-600 px-3 py-1.5 text-[10px] font-bold text-white hover:bg-sky-500 disabled:opacity-40"
-                      ><Copy className="mr-1 inline h-3 w-3" /> Copiar resposta</button>
-                      <button
-                        type="button"
-                        disabled={suggestionBusyId === e.id}
-                        onClick={async () => {
-                          setSuggestionBusyId(e.id);
-                          await onReplySuggestionFeedback(e.id, '', 'discarded');
-                          setSuggestionDraftById((prev) => ({ ...prev, [e.id]: '' }));
-                          setOpenSuggestionId(null);
-                          setSuggestionBusyId(null);
-                        }}
-                        className="rounded-lg px-3 py-1.5 text-[10px] font-bold text-rose-300 hover:bg-rose-950/40"
-                      >Descartar</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {/* Achado real em produção (mesmo padrão já documentado em
-                  WhatsAppLeadsSim.tsx): flex-wrap sozinho não quebra linha
-                  no mobile se o item não tiver uma largura própria pra
-                  quebrar contra — sem w-full aqui, os 3-4 botões
-                  estouravam a tela em vez de empilhar. md:w-auto devolve o
-                  tamanho natural no desktop, onde cabem numa linha só. */}
-              <div className="flex gap-2 flex-wrap justify-end w-full md:w-auto md:flex-shrink-0">
-                {onGoToConversation && (
-                  <button
-                    onClick={() => onGoToConversation(e.phone)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300 flex items-center gap-1.5"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5" /> Voltar pra conversa
-                  </button>
-                )}
-                <a
-                  href={toWaMeLink(e.phone)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-emerald-900/40 hover:text-emerald-300 flex items-center gap-1.5"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> WhatsApp pessoal
-                </a>
-                {/* Verificação de pagamento unificada aqui — em vez das ações
-                    genéricas, o card já resolvido pra decidir na hora
-                    (pedido real do dono do produto, 12/08/2026): antes disso
-                    confirmar/rejeitar vivia num banner separado dentro da
-                    conversa, desconectado deste escalonamento gerado pro
-                    mesmo comprovante. */}
-                {!e.resolved && e.kind === 'payment_proof' && onResolvePayment ? (
-                  <>
-                    <button
-                      onClick={() => onResolvePayment(e.id, e.phone, 'verified')}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Confirmar pagamento
-                    </button>
-                    <button
-                      onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800/60 flex items-center gap-1.5"
-                    >
-                      <XCircle className="w-3.5 h-3.5" /> Rejeitar pagamento
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {!e.resolved && onGenerateReplySuggestion && onReplySuggestionFeedback && (
-                      <button
-                        onClick={async () => {
-                          const shouldOpen = openSuggestionId !== e.id;
-                          setOpenSuggestionId(shouldOpen ? e.id : null);
-                          if (!shouldOpen || e.suggestedReply || !onGenerateReplySuggestion) return;
-                          setSuggestionBusyId(e.id);
-                          try {
-                            const updated = await onGenerateReplySuggestion(e.id);
-                            if (updated) setSuggestionDraftById((prev) => ({ ...prev, [e.id]: updated.suggestedReply || '' }));
-                          } finally {
-                            setSuggestionBusyId(null);
-                          }
-                        }}
-                        disabled={suggestionBusyId === e.id}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-600/90 text-white hover:bg-sky-500 disabled:opacity-50 flex items-center gap-1.5"
-                      >
-                        <Sparkles className={`w-3.5 h-3.5 ${suggestionBusyId === e.id ? 'animate-pulse' : ''}`} /> {e.suggestedReply ? 'Revisar sugestão' : 'Gerar sugestão'}
-                      </button>
-                    )}
-                    {!e.resolved && onSubmitOperatorReply && (
-                      <button
-                        onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-amber-900/40 hover:text-amber-300 flex items-center gap-1.5"
-                      >
-                        <MessageCircleReply className="w-3.5 h-3.5" /> Orientar a IA
-                      </button>
-                    )}
-                    {!e.resolved && (
-                      <button
-                        onClick={() => onResolve(e.id)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Marcar resolvido
-                      </button>
-                    )}
-                  </>
-                )}
-                {!e.resolved && (
-                  <button
-                    onClick={() => onDelete(e.id)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-red-900/40 hover:text-red-300 flex items-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Descartar
-                  </button>
-                )}
-                {e.resolved && (
-                  <button
-                    onClick={() => onDelete(e.id)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-red-900/40 hover:text-red-300 flex items-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Remover
-                  </button>
-                )}
+      <header className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-amber-300"><AlertTriangle className="h-4 w-4" /></span>
+              <div>
+                <h2 className="text-base font-bold text-white">Escalonamentos</h2>
+                <p className="mt-0.5 text-xs text-slate-400">Fila completa ordenada por estado, prioridade e prazo. Cada caso preserva responsável e histórico de decisão.</p>
               </div>
             </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+              <span className="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 font-semibold text-slate-300">{pending.length} pendente{pending.length === 1 ? '' : 's'}</span>
+              {overdue > 0 && <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 font-semibold text-rose-200">{overdue} com SLA vencido</span>}
+              <span className="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-slate-400">Exibindo {visible.length} de {filter === 'pending' ? pending.length : resolved.length}</span>
+            </div>
           </div>
-        ))}
-      </div>
+          <div className="flex rounded-xl border border-slate-700 bg-slate-950 p-1">
+            <button onClick={() => setFilter('pending')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>Pendentes ({pending.length})</button>
+            <button onClick={() => setFilter('resolved')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'resolved' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>Resolvidos ({resolved.length})</button>
+          </div>
+        </div>
+      </header>
+
+      {visible.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-10 text-center">
+          <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-400" />
+          <p className="mt-3 text-sm font-bold text-slate-100">{filter === 'pending' ? 'Nenhum escalonamento pendente.' : 'Nenhum escalonamento resolvido ainda.'}</p>
+          <p className="mt-1 text-xs text-slate-500">A fila será atualizada quando houver uma nova decisão humana necessária.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {visible.map((e) => {
+            const priority = priorityMeta[e.priority || 'medium'];
+            const isPending = !e.resolved && e.status !== 'resolved';
+            const isOverdue = Boolean(isPending && e.dueAt && new Date(e.dueAt).getTime() < Date.now());
+            return (
+              <article key={e.id} className={`rounded-2xl border bg-slate-900/90 p-4 shadow-md shadow-slate-950/15 ${isOverdue ? 'border-rose-500/35' : 'border-slate-800'}`}>
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-white">{e.contactName || e.phone}</h3>
+                      <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${priority.className}`}>{priority.label}</span>
+                      <span className="rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] font-semibold text-slate-300">{statusLabel(e.status)}</span>
+                      {(e.occurrenceCount || 1) > 1 && <span title="Ocorrências reunidas no mesmo caso" className="inline-flex items-center gap-1 rounded-md border border-violet-500/25 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold text-violet-200"><Layers3 className="h-3 w-3" /> {e.occurrenceCount} ocorrências</span>}
+                    </div>
+                    <p className="mt-1.5 text-sm font-medium text-amber-200">{e.reason}</p>
+                    {e.lastMessage && <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-slate-400"><MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>“{e.lastMessage}”</span></p>}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="inline-flex items-center gap-1 text-slate-500"><Clock className="h-3 w-3" /> Criado {timeAgo(e.createdAt)}</span>
+                      {isPending && e.dueAt && <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-semibold ${isOverdue ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-slate-700 bg-slate-950 text-slate-300'}`}><AlertTriangle className="h-3 w-3" /> SLA {formatRemaining(e.dueAt)}</span>}
+                      {isPending && e.serviceWindowExpiresAt && <span title="Janela de atendimento do WhatsApp" className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${e.withinServiceWindow ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/25 bg-amber-500/10 text-amber-200'}`}><TimerReset className="h-3 w-3" /> Janela {formatRemaining(e.serviceWindowExpiresAt, 'fechada')}</span>}
+                      {e.assignedOperatorId ? <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-200"><UserRoundCheck className="h-3 w-3" /> Responsável atribuído</span> : isPending ? <span className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-400"><UserRoundCheck className="h-3 w-3" /> Sem responsável</span> : null}
+                      <span className="inline-flex items-center gap-1 text-slate-500"><Phone className="h-3 w-3" /> {e.phone}</span>
+                      <span className="inline-flex items-center gap-1 text-slate-500"><Globe2 className="h-3 w-3" /> {e.country}</span>
+                    </div>
+                    {e.operatorReply && !e.operatorReplyConsumedAt && <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2 text-xs text-amber-100"><span className="font-bold">Orientação pendente:</span> {e.operatorReply}{e.guidanceExpiresAt && <span className="ml-1 text-amber-300">· expira {formatRemaining(e.guidanceExpiresAt)}</span>}</div>}
+                    {e.resolutionNote && <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2 text-xs text-emerald-100"><span className="font-bold">Decisão:</span> {e.resolutionNote}</div>}
+                    {openReplyId === e.id && (
+                      <div className="mt-3 space-y-2 rounded-xl border border-slate-700 bg-slate-950 p-3">
+                        <AutoResizeTextarea value={replyDraftById[e.id] || ''} onChange={(event) => setReplyDraftById((prev) => ({ ...prev, [e.id]: event.target.value }))} placeholder={e.kind === 'payment_proof' ? 'Explique a pendência do comprovante para a cliente.' : 'Descreva a orientação segura para a IA.'} minRows={2} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-amber-500 focus:outline-none" />
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => { const reply = (replyDraftById[e.id] || '').trim(); if (!reply) return; if (e.kind === 'payment_proof') onResolvePayment?.(e.id, e.phone, 'rejected', reply); else onSubmitOperatorReply?.(e.id, reply); setReplyDraftById((prev) => ({ ...prev, [e.id]: '' })); setOpenReplyId(null); }} disabled={!(replyDraftById[e.id] || '').trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-3.5 w-3.5" /> Enviar orientação</button>
+                          <button onClick={() => setOpenReplyId(null)} className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700">Cancelar</button>
+                        </div>
+                      </div>
+                    )}
+                    {openSuggestionId === e.id && onGenerateReplySuggestion && onReplySuggestionFeedback && (
+                      <div className="mt-3 space-y-2 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div><p className="flex items-center gap-1.5 text-xs font-bold text-sky-100"><Sparkles className="h-3.5 w-3.5" /> Sugestão supervisionada</p><p className="mt-0.5 text-[10px] text-slate-400">Nada é enviado automaticamente. Revise, edite, copie ou descarte.</p></div>
+                          <button type="button" disabled={suggestionBusyId === e.id} onClick={async () => { setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[10px] font-bold text-sky-100 disabled:opacity-50"><RefreshCw className={`h-3 w-3 ${suggestionBusyId === e.id ? 'animate-spin' : ''}`} /> Gerar</button>
+                        </div>
+                        <AutoResizeTextarea value={suggestionDraftById[e.id] ?? e.suggestedReply ?? ''} onChange={(event) => setSuggestionDraftById((previous) => ({ ...previous, [e.id]: event.target.value }))} placeholder="A sugestão aparecerá aqui para sua revisão." minRows={3} maxLength={900} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()} onClick={async () => { const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim(); if (!suggestion) return; setSuggestionBusyId(e.id); try { const updated = await onReplySuggestionFeedback(e.id, suggestion, 'edited'); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || suggestion })); } finally { setSuggestionBusyId(null); } }} className="rounded-lg bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-slate-100 disabled:opacity-40">Salvar edição</button>
+                          <button type="button" disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()} onClick={async () => { const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim(); if (!suggestion) return; setSuggestionBusyId(e.id); try { await navigator.clipboard?.writeText(suggestion); await onReplySuggestionFeedback(e.id, suggestion, 'copied'); } finally { setSuggestionBusyId(null); } }} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-[10px] font-bold text-white disabled:opacity-40"><Copy className="h-3 w-3" /> Copiar</button>
+                          <button type="button" disabled={suggestionBusyId === e.id} onClick={async () => { setSuggestionBusyId(e.id); try { await onReplySuggestionFeedback(e.id, '', 'discarded'); setSuggestionDraftById((previous) => ({ ...previous, [e.id]: '' })); setOpenSuggestionId(null); } finally { setSuggestionBusyId(null); } }} className="rounded-lg px-3 py-1.5 text-[10px] font-bold text-rose-300 disabled:opacity-40">Descartar</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
+                    {onGoToConversation && <button onClick={() => onGoToConversation(e.phone)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500/35 hover:text-emerald-200"><MessageCircle className="h-3.5 w-3.5" /> Conversa</button>}
+                    <a href={toWaMeLink(e.phone)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500/35 hover:text-emerald-200"><ExternalLink className="h-3.5 w-3.5" /> WhatsApp</a>
+                    {isPending && !e.assignedOperatorId && onAssignSelf && <button onClick={() => onAssignSelf(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-200 hover:bg-violet-500/20"><UserRoundCheck className="h-3.5 w-3.5" /> Assumir</button>}
+                    {isPending && e.kind === 'payment_proof' && onResolvePayment ? <>
+                      <button onClick={() => onResolvePayment(e.id, e.phone, 'verified')} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar pagamento</button>
+                      <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/20"><XCircle className="h-3.5 w-3.5" /> Rejeitar</button>
+                    </> : isPending ? <>
+                      {onGenerateReplySuggestion && onReplySuggestionFeedback && <button onClick={async () => { const shouldOpen = openSuggestionId !== e.id; setOpenSuggestionId(shouldOpen ? e.id : null); if (!shouldOpen || e.suggestedReply) return; setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} disabled={suggestionBusyId === e.id} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> {e.suggestedReply ? 'Revisar sugestão' : 'Gerar sugestão'}</button>}
+                      {onSubmitOperatorReply && <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20"><MessageCircleReply className="h-3.5 w-3.5" /> Orientar IA</button>}
+                      <button onClick={() => onResolve(e.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Resolver</button>
+                    </> : null}
+                    <button onClick={() => onDelete(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500 hover:text-white"><Archive className="h-3.5 w-3.5" /> Arquivar</button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

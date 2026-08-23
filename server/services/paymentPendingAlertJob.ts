@@ -53,7 +53,10 @@ async function checkPaymentPendingForTenant(tenantId: string, thresholdMs: numbe
         tenantId,
         appt.phone,
         conv?.name,
-        `Pagamento pendente de verificação há ${pendingHours}h — cliente enviou comprovante e está esperando confirmação.`
+        `Pagamento pendente de verificação há ${pendingHours}h — cliente enviou comprovante e está esperando confirmação.`,
+        undefined,
+        'payment_proof',
+        { sourceKey: `payment_pending:${appt.phone}:${appt.paymentPendingSince}` },
       );
       await markPaymentPendingAlerted(tenantId, appt.phone);
       console.log(`🔔 [Alerta pagamento pendente] tenant=${tenantId} alertou sobre ${appt.phone} (pendente há ${pendingHours}h).`);

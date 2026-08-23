@@ -228,32 +228,36 @@ export async function sendWhatsAppTemplateMessage(
  * ffmpeg gera um Ogg/Opus genuinamente válido, confirmado com "file"
  * (libmagic) reconhecendo corretamente "Ogg data, Opus audio, ... 16000 Hz";
  * (b) montagem do multipart — testado tanto à mão quanto com FormData/Blob
- * nativos do Node, resultado idêntico. O que sobra: a lista de tipos de
- * áudio documentados pela Meta usa o valor literal "audio/ogg" (sem
- * parâmetro de codec) — só o texto da doc esclarece "codecs=opus" como
- * requisito do CONTAINER, não como parte do MIME type a enviar. Todas as
- * tentativas anteriores mandaram "; codecs=opus" em pelo menos um dos dois
- * lugares (campo "type" do multipart e/ou Content-Type da parte "file").
- * Aqui os dois usam o MIME type base, sem parâmetro — combinação ainda não
- * testada nas rodadas anteriores.
+ * nativos do Node, resultado idêntico. A documentação atual da Meta explicita
+ * que, para OGG, o MIME base `audio/ogg` não é suportado: o arquivo precisa
+ * ser Ogg codificado em OPUS e mono. Portanto, não normalizamos mais o MIME
+ * removendo `; codecs=opus`: o mesmo valor completo precisa seguir tanto no
+ * campo `type` quanto no Content-Type da parte `file` do multipart.
+ *
+ * O fallback MP3 de produção continua sendo escolhido antes deste método.
+ * Esta preservação permite que o ensaio controlado OGG/Opus chegue à Meta sem
+ * perder a informação de codec necessária para a validação.
  */
 export async function uploadWhatsAppMedia(
   phoneNumberId: string | undefined,
   accessToken: string | undefined,
   mediaBuffer: Buffer,
   mimeType: string,
-  filename: string
+  filename: string,
+  diagnosticTag?: string
 ): Promise<string> {
   if (!phoneNumberId) throw new Error('META_PHONE_NUMBER_ID ausente — não é possível fazer upload de mídia.');
   if (!accessToken) throw new Error('META_ACCESS_TOKEN ausente — não é possível fazer upload de mídia.');
   if (!mediaBuffer || mediaBuffer.length === 0) throw new Error('Buffer da mídia ausente ou vazio.');
   if (!mimeType) throw new Error('MIME type da mídia ausente.');
 
-  const cleanMimeType = mimeType.split(';')[0].trim();
+  const uploadMimeType = mimeType.trim();
   const form = new FormData();
   form.append('messaging_product', 'whatsapp');
-  form.append('type', cleanMimeType);
-  form.append('file', new Blob([mediaBuffer], { type: cleanMimeType }), filename);
+  // Para OGG/Opus, `audio/ogg` sem o parâmetro de codec não é suportado pela
+  // Meta. Use o mesmo MIME integral no campo `type` e na parte do arquivo.
+  form.append('type', uploadMimeType);
+  form.append('file', new Blob([mediaBuffer], { type: uploadMimeType }), filename);
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/media`, {
     method: 'POST',
@@ -267,6 +271,9 @@ export async function uploadWhatsAppMedia(
   }
   if (!data.id) {
     throw new Error('Resposta da Meta não retornou um media_id válido após o upload.');
+  }
+  if (diagnosticTag) {
+    console.log(`🔬 [${diagnosticTag}] meta_upload_response=${JSON.stringify(data)}`);
   }
 
   // Diagnóstico temporário (erro 131053 "however on processing it is of
@@ -303,7 +310,8 @@ export async function sendWhatsAppMediaMessage(
   to: string,
   mediaId: string,
   mimeType: string,
-  caption?: string
+  caption?: string,
+  diagnosticTag?: string
 ): Promise<void> {
   if (!phoneNumberId) throw new Error('META_PHONE_NUMBER_ID ausente — não é possível enviar mensagem de mídia.');
   if (!accessToken) throw new Error('META_ACCESS_TOKEN ausente — não é possível enviar mensagem de mídia.');
@@ -334,6 +342,10 @@ export async function sendWhatsAppMediaMessage(
   if (!res.ok) {
     await throwMetaError(res, 'Falha ao enviar mídia via Meta Cloud API');
   }
+  if (diagnosticTag) {
+    const data = await res.json().catch(() => ({}));
+    console.log(`🔬 [${diagnosticTag}] meta_message_response=${JSON.stringify(data)}`);
+  }
 }
 
 /**
@@ -345,7 +357,8 @@ export async function sendWhatsAppAudioMessage(
   accessToken: string | undefined,
   to: string,
   audioBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  diagnosticTag?: string
 ): Promise<string> {
   // 1. Validar parâmetros
   if (!phoneNumberId) throw new Error('phoneNumberId ausente');
@@ -356,10 +369,10 @@ export async function sendWhatsAppAudioMessage(
 
   // 2. Fazer upload do arquivo de áudio no endpoint de mídia
   const filename = mimeType.startsWith('audio/ogg') ? 'voice-note.ogg' : mimeType.startsWith('audio/mpeg') ? 'voice-note.mp3' : 'voice-note';
-  const mediaId = await uploadWhatsAppMedia(phoneNumberId, accessToken, audioBuffer, mimeType, filename);
+  const mediaId = await uploadWhatsAppMedia(phoneNumberId, accessToken, audioBuffer, mimeType, filename, diagnosticTag);
 
   // 3. Enviar a mensagem final com type: "audio" e o media_id obtido
-  await sendWhatsAppMediaMessage(phoneNumberId, accessToken, to, mediaId, mimeType);
+  await sendWhatsAppMediaMessage(phoneNumberId, accessToken, to, mediaId, mimeType, undefined, diagnosticTag);
 
   return mediaId;
 }

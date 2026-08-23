@@ -47,6 +47,8 @@ async function endOfBusinessDayIso(tenantId: string): Promise<string> {
 
 interface WebhooksRouterDeps {
   metaWebhookVerifyToken: string;
+  /** Segredo do App Meta para validar a assinatura dos POSTs de webhook. */
+  metaAppSecret?: string;
   getAi?: () => GoogleGenAI | null;
   /** Router fallback Groq (plano aprovado) — ver classifyAgent em autoReply.ts. Opcional: sem ela, o router usa só o Gemini como sempre. */
   groqApiKey?: string;
@@ -63,7 +65,7 @@ interface WebhooksRouterDeps {
   googleRedirectUri?: string;
 }
 
-export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
+export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, getAi, groqApiKey, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, googleClientId, googleClientSecret, googleRedirectUri }: WebhooksRouterDeps): Router {
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri
     ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
     : undefined;
@@ -173,7 +175,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
         // firstContactMessage mantém o comportamento de sempre.
         if (history?.length === 0 && hasFirstContactMessage(kb)) {
           await sendFirstContactMessage(tenantId, phone, kb!, mediaConfig);
-          emitAiReplyStatus(tenantId, phone, 'sent');
+          emitAiReplyStatus(tenantId, phone, 'template_sent');
           return;
         }
 
@@ -195,9 +197,36 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
           // conversa. Escala silenciosamente: o operador vê no painel e
           // conduz a próxima resposta do zero, sem a IA ter dito nada antes.
           await logEscalation(tenantId, phone, contactName, 'IA não conseguiu gerar resposta automática (falhou mesmo com retry)', text);
-          emitAiReplyStatus(tenantId, phone, 'failed');
+          emitAiReplyStatus(tenantId, phone, 'escalated');
+          emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
+        emitAiReplyStatus(tenantId, phone, 'drafted');
+
+        // Política de reclamações: a IA apenas identifica e encaminha. Não há
+        // texto automático de "resolução" nem continuidade até o envio, pois
+        // uma resposta imprecisa pode agravar o caso e comprometer a apuração
+        // humana. A chave da mensagem torna a reentrega do webhook idempotente.
+        if (result.agent === 'reclamacao') {
+          await logEscalation(
+            tenantId,
+            phone,
+            contactName,
+            'Cliente com reclamação — atendimento humano obrigatório; nenhuma resposta automática foi enviada',
+            text,
+            'general',
+            {
+              sourceKey: `complaint:${messageId}`,
+              priority: 'high',
+              dueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            },
+          );
+          console.warn(`⚠️ [Reclamação] tenant=${tenantId} caso ${messageId} escalado para humano sem resposta automática.`);
+          emitAiReplyStatus(tenantId, phone, 'escalated');
+          emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+          return;
+        }
+
         const safety = await reviewAutoReplyBeforeSend({
           customerMessage: text,
           draftBubbles: result.bubbles,
@@ -216,13 +245,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
             text
           );
           console.warn(`🛡️ [Revisor pré-envio] tenant=${tenantId} bloqueou resposta para ${phone}: ${safety.reason}`);
-          emitAiReplyStatus(tenantId, phone, 'failed');
+          emitAiReplyStatus(tenantId, phone, 'safety_blocked');
+          emitAiReplyStatus(tenantId, phone, 'escalated');
+          emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
-        if (result.agent === 'reclamacao') {
-          await logEscalation(tenantId, phone, contactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', text);
-        } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
+        if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
           await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
+          emitAiReplyStatus(tenantId, phone, 'awaiting_human');
         }
         await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
           await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
@@ -268,7 +298,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
         }
         emitAiReplyStatus(tenantId, phone, 'sent');
       } catch (err: any) {
-        emitAiReplyStatus(tenantId, phone, 'failed');
+        emitAiReplyStatus(tenantId, phone, 'delivery_failed');
         if (isGeoRestrictedError(err)) {
           await markGeoRestricted(tenantId, phone, err.message);
           await logEscalation(tenantId, phone, contactName, 'Envio bloqueado por restrição geográfica — precisa de atendimento manual', text);
@@ -520,7 +550,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
     const verifyToken = metaWebhookVerifyToken;
 
     if (challenge) {
-      if (mode === 'subscribe' && token && token !== verifyToken) {
+      if (mode !== 'subscribe' || !token || token !== verifyToken) {
         return res.status(403).json({ error: 'Token de verificação inválido' });
       }
       return res.status(200).send(challenge);
@@ -543,7 +573,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, getAi, groqApiKey
     // WhatsApp inteiras só omitindo o header. Corrigido pra fail-closed:
     // com o secret configurado, o header é obrigatório.
     const signatureHeader = (req.headers['x-hub-signature-256'] || req.headers['x-hub-signature']) as string | undefined;
-    const appSecret = process.env.META_APP_SECRET || process.env.META_API_TOKEN;
+    const appSecret = metaAppSecret;
 
     if (appSecret) {
       if (!signatureHeader) {

@@ -73,7 +73,7 @@ export const TranscriptHistory: React.FC<TranscriptHistoryProps> = ({
       case 'file_upload':
         return <Upload className="w-3.5 h-3.5 text-blue-400" />;
       default:
-        return <MessageSquare className="w-3.5 h-3.5 text-purple-400" />;
+        return <MessageSquare className="w-3.5 h-3.5 text-sky-400" />;
     }
   };
 

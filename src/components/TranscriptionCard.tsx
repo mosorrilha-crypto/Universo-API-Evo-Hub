@@ -47,7 +47,7 @@ export const TranscriptionCard: React.FC<TranscriptionCardProps> = ({
       return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
     }
     if (s.includes('objeção') || s.includes('objecao') || s.includes('reclamacao')) {
-      return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+      return 'bg-sky-500/10 text-sky-400 border-sky-500/30';
     }
     return 'bg-slate-700/50 text-slate-300 border-slate-600';
   };
@@ -145,7 +145,7 @@ export const TranscriptionCard: React.FC<TranscriptionCardProps> = ({
 
           <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-700/60">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center mb-1.5">
-              <AlertCircle className="w-3.5 h-3.5 mr-1.5 text-purple-400" />
+              <AlertCircle className="w-3.5 h-3.5 mr-1.5 text-sky-400" />
               Intenção Comercial
             </span>
             <p className="text-xs text-slate-200 font-semibold">{result.intent}</p>
