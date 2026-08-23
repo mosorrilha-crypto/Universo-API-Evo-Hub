@@ -61,6 +61,7 @@ import {
   ChevronUp,
   ChevronDown,
   ArrowLeft,
+  ArrowDown,
   Ban,
   CheckCircle2,
   XCircle,
@@ -1095,6 +1096,33 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const messagesContainerRef = React.useRef<HTMLDivElement>(null);
+  const lastMessageCountRef = React.useRef(0);
+  const activeConversationForScrollRef = React.useRef<string | undefined>(undefined);
+  const shouldAutoScrollRef = React.useRef(true);
+  const [isAtLatestMessage, setIsAtLatestMessage] = useState(true);
+  const [newMessagesWhileAway, setNewMessagesWhileAway] = useState(0);
+
+  const scrollToLatestMessage = (behavior: ScrollBehavior = 'smooth') => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+    }
+    shouldAutoScrollRef.current = true;
+    setIsAtLatestMessage(true);
+    setNewMessagesWhileAway(0);
+  };
+
+  const handleMessagesScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 48;
+    shouldAutoScrollRef.current = isNearBottom;
+    setIsAtLatestMessage(isNearBottom);
+    if (isNearBottom) setNewMessagesWhileAway(0);
+  };
+
   /** Barra de controles reais (Ativo/Restrito/Pausado, Calendar, Auto IA) — o ícone "Config" da barra lateral estilo WhatsApp Web rola até aqui, em vez de fingir uma tela de configurações que não existe. */
   const toolbarRef = React.useRef<HTMLDivElement>(null);
   // Achado real testando com o Lucas em produção ("dá pra otimizar as
@@ -1774,12 +1802,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   }, [selectedLead?.id, (selectedLead as any)?.isReal]);
 
-  // Agora que a área de mensagens tem altura fixa e rola por conta própria
-  // (em vez de crescer a página inteira), precisa rolar sozinha até o fim
-  // quando chega mensagem nova ou o operador troca de conversa — igual ao
-  // WhatsApp Web real.
+  // Rola automaticamente quando o operador está no fim ou troca de conversa.
+  // Se ele subiu para ler o histórico, a chegada de novas mensagens não o
+  // empurra para baixo: o botão flutuante e o contador ficam disponíveis.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const conversationId = selectedLead?.id;
+    const messageCount = selectedLead?.messages?.length ?? 0;
+    const conversationChanged = activeConversationForScrollRef.current !== conversationId;
+    const previousMessageCount = lastMessageCountRef.current;
+
+    if (conversationChanged) {
+      activeConversationForScrollRef.current = conversationId;
+      lastMessageCountRef.current = 0;
+      shouldAutoScrollRef.current = true;
+      setIsAtLatestMessage(true);
+      setNewMessagesWhileAway(0);
+    }
+
+    if (conversationChanged || shouldAutoScrollRef.current) {
+      window.requestAnimationFrame(() => scrollToLatestMessage(conversationChanged ? 'auto' : 'smooth'));
+    } else if (messageCount > previousMessageCount) {
+      setNewMessagesWhileAway((count) => count + (messageCount - previousMessageCount));
+    }
+
+    lastMessageCountRef.current = messageCount;
   }, [selectedLead?.id, selectedLead?.messages?.length]);
 
   // Issue #82, item 3 — o backend de verificação de pagamento
@@ -3839,7 +3885,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               )}
 
               {/* WhatsApp Messages Scroll Body */}
-              <div className="flex-1 min-h-0 p-4 overflow-y-auto space-y-3 bg-[#0b141a] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] scrollbar-thin">
+              <div className="relative flex-1 min-h-0">
+              <div
+                ref={messagesContainerRef}
+                onScroll={handleMessagesScroll}
+                className="h-full min-h-0 p-4 overflow-y-auto space-y-3 bg-[#0b141a] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] scrollbar-thin"
+              >
                 
                 {/* WhatsApp Floating Date Badge */}
                 <div className="flex justify-center my-2">
@@ -4216,6 +4267,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
                 <div ref={messagesEndRef} />
                 <audio ref={realAudioRef} className="hidden" />
+              </div>
+
+              {!isAtLatestMessage && (
+                <button
+                  type="button"
+                  onClick={() => scrollToLatestMessage('smooth')}
+                  aria-label={
+                    newMessagesWhileAway > 0
+                      ? `${newMessagesWhileAway} ${isSpanish ? 'nuevas' : 'novas'} ${isSpanish ? 'mensajes' : 'mensagens'}. ${isSpanish ? 'Ir al último mensaje' : 'Ir para a última mensagem'}`
+                      : (isSpanish ? 'Ir al último mensaje' : 'Ir para a última mensagem')
+                  }
+                  title={isSpanish ? 'Ir al último mensaje' : 'Ir para a última mensagem'}
+                  className="absolute bottom-4 right-4 z-20 flex min-h-10 min-w-10 items-center justify-center gap-1 rounded-full border border-slate-600 bg-[#202c33]/95 px-2 text-slate-100 shadow-xl shadow-black/30 backdrop-blur transition-all hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-[#26343c] focus:outline-none focus:ring-2 focus:ring-emerald-400/70"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                  {newMessagesWhileAway > 0 && (
+                    <span className="min-w-5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-extrabold leading-none text-slate-950">
+                      {newMessagesWhileAway > 99 ? '99+' : newMessagesWhileAway}
+                    </span>
+                  )}
+                </button>
+              )}
               </div>
 
               {/* WhatsApp Web Bottom Simulation Control & Input Bar */}
