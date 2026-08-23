@@ -47,7 +47,7 @@ beforeAll(async () => {
     authenticateToken: (_req, _res, next) => next(),
     rateLimiter: (_req, _res, next) => next(),
   }));
-  await new Promise<void>((resolve) => { server = app.listen(0, resolve); });
+  await new Promise<void>((resolve) => { server = app.listen(0, () => resolve()); });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
   baseUrl = `http://127.0.0.1:${port}`;

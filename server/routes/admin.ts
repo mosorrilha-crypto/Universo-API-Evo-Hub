@@ -624,7 +624,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // falha silenciosa só visível no log do servidor (ver
   // firstContactMessage.ts). Conteúdo inline (imagem base64 de produto e
   // de bloco de 1º contato) não tem esse problema, continua igual.
-  router.get('/api/admin/tenants/:id/knowledge-base', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+  router.get('/api/admin/tenants/:id/knowledge-base', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const kb = await getKnowledgeBase(req.params.id);
     if (!kb) return res.status(404).json({ error: 'Este tenant ainda não tem Base de Conhecimento salva.' });
     res.json({

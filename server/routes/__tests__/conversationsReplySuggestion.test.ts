@@ -38,7 +38,7 @@ beforeAll(async () => {
     getAi: () => fakeAi as any,
   }));
   await new Promise<void>((resolve) => {
-    server = app.listen(0, resolve);
+    server = app.listen(0, () => resolve());
   });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
