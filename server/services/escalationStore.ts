@@ -152,6 +152,11 @@ function defaultSourceKey(phone: string, kind: EscalationKind, reason: string, l
   return `${kind}:${phone}:${sha256(`${normalizeForKey(reason)}|${normalizeForKey(lastMessage)}`)}`;
 }
 
+/** Fonte estável para recorrências do revisor no mesmo contato. */
+export function reviewerEscalationSourceKey(phone: string): string {
+  return `revisor-pre-envio:${phone}`;
+}
+
 function defaultPriority(kind: EscalationKind, reason: string): EscalationPriority {
   const text = normalizeForKey(reason);
   if (kind === 'payment_proof' || /reclamacao|reclamação|fraude|bloquead/.test(text)) return 'high';
@@ -200,6 +205,15 @@ async function updateAlertStatus(tenantId: string, id: string, status: 'sent' | 
     .eq('id', id);
   if (error) throw error;
   await appendAuditEvent(tenantId, id, `alert_${status}`);
+}
+
+function dispatchEscalationAlert(tenantId: string, escalation: Escalation): void {
+  notifyEscalationCreated(tenantId, { phone: escalation.phone, contactName: escalation.contactName, reason: escalation.reason })
+    .then(() => updateAlertStatus(tenantId, escalation.id, 'sent'))
+    .catch(async (err) => {
+      console.warn(`⚠️ [Alerta de escalonamento] tenant=${tenantId} falha ao notificar:`, (err as Error).message);
+      await updateAlertStatus(tenantId, escalation.id, 'failed').catch(() => undefined);
+    });
 }
 
 /** Pagamentos exigem decisão humana; termos fortes de assédio também são escalados. */
@@ -256,6 +270,10 @@ export async function logEscalation(
     const escalation = toEscalation(data as EscalationRow);
     await appendAuditEvent(tenantId, escalation.id, wasResolved ? 'reopened' : 'reoccurred', { sourceKey, occurrenceCount: escalation.occurrenceCount, reason }, options.actor);
     recordEscalationOperation(tenantId, escalation, 'escalation_created', { outcome: wasResolved ? 'reopened' : 'reoccurred', occurrenceCount: escalation.occurrenceCount, priority: escalation.priority });
+    // Recorrência de um caso já aberto atualiza o cartão, mas não dispara
+    // outro WhatsApp. Se o operador resolveu o caso, ou a última tentativa
+    // falhou, um novo alerta é apropriado e não deve ser perdido.
+    if (wasResolved || existing.last_alert_status === 'failed') dispatchEscalationAlert(tenantId, escalation);
     return escalation;
   }
 
@@ -282,18 +300,22 @@ export async function logEscalation(
     operator_reply_consumed_at: null,
   };
   const { data, error } = await db.from('escalations').insert(row).select('*').maybeSingle();
-  if (error) throw error;
+  if (error) {
+    // A constraint unique (tenant_id, source_key) protege contra duas
+    // instâncias do Render processando o mesmo bloqueio ao mesmo tempo.
+    // Reentra pelo caminho de consolidação para não perder a ocorrência nem
+    // transformar a corrida em erro para o webhook.
+    if ((error as any).code === '23505') {
+      return logEscalation(tenantId, phone, contactName, reason, lastMessage, kind, { ...options, sourceKey });
+    }
+    throw error;
+  }
   const escalation = toEscalation((data || row) as EscalationRow);
   await appendAuditEvent(tenantId, escalation.id, 'created', { sourceKey, priority, dueAt: escalation.dueAt, kind, reason }, options.actor);
   recordEscalationOperation(tenantId, escalation, 'escalation_created', { priority, dueAt: escalation.dueAt, kind });
   console.log(`🚨 [Escalonamento] tenant=${tenantId} ${phone} (${row.country}) [${priority}]: ${reason}`);
   // Alerta é observável, mas nunca impede a criação do caso de negócio.
-  notifyEscalationCreated(tenantId, { phone, contactName, reason })
-    .then(() => updateAlertStatus(tenantId, escalation.id, 'sent'))
-    .catch(async (err) => {
-      console.warn(`⚠️ [Alerta de escalonamento] tenant=${tenantId} falha ao notificar:`, (err as Error).message);
-      await updateAlertStatus(tenantId, escalation.id, 'failed').catch(() => undefined);
-    });
+  dispatchEscalationAlert(tenantId, escalation);
   return escalation;
 }
 

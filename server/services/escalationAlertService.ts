@@ -18,11 +18,11 @@
  * canal real do tenant é Meta; via Evolution API manda texto livre, sem
  * depender de template aprovado.
  *
- * Sem debounce de propósito por enquanto: no volume atual (1 tenant real),
- * cada escalação é um cliente diferente que pode estar sendo perdido — vale
- * mais avisar demais do que perder um caso real. Se o volume crescer a
- * ponto de virar spam pro operador, revisitar com um limite por janela de
- * tempo.
+ * A deduplicação é feita antes deste serviço, no store de escalonamentos:
+ * recorrências da mesma fonte estável (por exemplo, o revisor para o mesmo
+ * telefone) atualizam o cartão e seu contador, sem gerar um novo aviso. Fontes
+ * diferentes continuam podendo alertar o operador, porque representam riscos
+ * distintos e não devem ser ocultadas silenciosamente.
  *
  * Canal 2 (WhatsApp) via adminAlertChannel.ts (issue #290, seção 1) — antes
  * chamava resolveMetaCredentialsForTenant direto com `{}` de fallback,

@@ -67,6 +67,23 @@ describe('logEscalation — alerta imediato pro operador', () => {
     expect(escalation.resolved).toBe(false);
   });
 
+  it('não envia um segundo aviso quando o mesmo caso do revisor reaparece com outro motivo', async () => {
+    const db = createFakeSupabase({
+      tenants: [{ id: TENANT_A, name: 'Monique', admin_alert_phone: '595990000000' }],
+    });
+    initDb(db);
+    const sourceKey = 'revisor-pre-envio:595981234567';
+    await logEscalation(TENANT_A, '595981234567', 'Cliente Teste', 'Revisor bloqueou por idioma', 'Mensagem A', 'general', { sourceKey });
+    await new Promise((r) => setImmediate(r));
+    await logEscalation(TENANT_A, '595981234567', 'Cliente Teste', 'Revisor bloqueou por agenda', 'Mensagem B', 'general', { sourceKey });
+    await new Promise((r) => setImmediate(r));
+
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    const row = db.__tables.escalations.find((item: any) => item.source_key === sourceKey);
+    expect(row.occurrence_count).toBe(2);
+    expect(row.reason).toContain('agenda');
+  });
+
   it('tenant cujo canal real é Evolution API recebe o alerta por texto livre, não por template Meta (issue #290)', async () => {
     initDb(createFakeSupabase({
       tenants: [{ id: TENANT_A, name: 'Monique Sorrilha Beauty Studio', admin_alert_phone: '595990000000' }],

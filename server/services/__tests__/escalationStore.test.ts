@@ -17,6 +17,7 @@ import {
   markOperatorGuidanceConsumed,
   resolveEscalation,
   submitOperatorReply,
+  reviewerEscalationSourceKey,
 } from '../escalationStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
@@ -46,6 +47,18 @@ describe('governança do caso', () => {
     expect(second.id).toBe(first.id);
     expect(second.occurrenceCount).toBe(2);
     expect((await listEscalations(TENANT_A)).filter((item) => item.sourceKey === 'message:wamid-1')).toHaveLength(1);
+  });
+
+  it('consolida razões diferentes do revisor na mesma conversa usando a mesma sourceKey', async () => {
+    const sourceKey = reviewerEscalationSourceKey(PHONE);
+    const first = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Revisor bloqueou por idioma', 'Mensaje A', 'general', { sourceKey });
+    const second = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Revisor bloqueou por agenda', 'Mensaje B', 'general', { sourceKey });
+
+    expect(second.id).toBe(first.id);
+    expect(second.reason).toContain('agenda');
+    expect(second.lastMessage).toBe('Mensaje B');
+    expect(second.occurrenceCount).toBe(2);
+    expect((await listEscalations(TENANT_A)).filter((item) => item.sourceKey === sourceKey)).toHaveLength(1);
   });
 
   it('atribui, resolve com trilha de decisão e arquiva sem apagar a história', async () => {

@@ -18,7 +18,7 @@ import { hasFirstContactMessage, sendFirstContactMessage } from '../services/fir
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
-import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed } from '../services/escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { consumePendingEcho } from '../services/outboundEchoTracker';
@@ -242,7 +242,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
             phone,
             contactName,
             `Revisor pré-envio bloqueou a resposta automática (${safety.source}, risco ${safety.severity}): ${safety.reason} Rascunho bloqueado: ${blockedDraft}`,
-            text
+            text,
+            'general',
+            { sourceKey: reviewerEscalationSourceKey(phone), priority: 'high' }
           );
           console.warn(`🛡️ [Revisor pré-envio] tenant=${tenantId} bloqueou resposta para ${phone}: ${safety.reason}`);
           emitAiReplyStatus(tenantId, phone, 'safety_blocked');
