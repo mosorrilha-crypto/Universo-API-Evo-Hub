@@ -37,7 +37,8 @@ import {
   Paperclip,
   ChevronUp,
   ChevronDown,
-  GripVertical
+  GripVertical,
+  ExternalLink
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 
@@ -53,6 +54,8 @@ interface AgentKnowledgeBaseProps {
   onFetchTenantKnowledgeBase?: (tenantId: string) => Promise<AgentKnowledgeBase | null>;
   /** Modelos fixos são ferramenta de configuração inicial e só ficam disponíveis para saas_admin. */
   canUseBusinessTemplates?: boolean;
+  /** Slug do tenant ativo para abrir a pré-visualização pública sem autenticação. */
+  publicCatalogSlug?: string;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -327,6 +330,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   copyableTenants = [],
   onFetchTenantKnowledgeBase,
   canUseBusinessTemplates = false,
+  publicCatalogSlug,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -1379,6 +1383,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
         {/* Primary Header Actions */}
         <div className="flex items-center space-x-2 flex-shrink-0">
+          {publicCatalogSlug && (
+            <a
+              href={`/catalogo/${encodeURIComponent(publicCatalogSlug)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-2 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
+              title="Abrir catálogo público"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Ver catálogo</span>
+            </a>
+          )}
           <button
             onClick={handleResetToDefault}
             className="px-3 py-2 rounded-xl border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"

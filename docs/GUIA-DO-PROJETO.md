@@ -62,6 +62,7 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 | Idempotência de webhook | ✅ Feito | Postgres (`processed_webhook_messages`), sobrevive restart/multi-instância — **doc antigo dizia "em memória", isso está errado, já foi corrigido no código** |
 | Buffer de rajada de mensagens | ✅ Feito, com recovery | Map em memória é o caminho rápido, mas cada rajada é persistida (`pending_message_buffers`) e um sweeper recupera se a instância reiniciar no meio da janela |
 | SSE de conversas (`conversationEvents.ts`) | ❌ Gap real | `EventEmitter` em memória, single-instance, não sobrevive restart — só tem um poll de 90s como rede de segurança. Vira problema no dia que escalar horizontalmente. |
+| Catálogo público por tenant | ⚠️ Código pronto + migration pendente | `/catalogo/:slug` lê produtos ativos e preços vigentes da `knowledge_base`, expõe somente campos comerciais e mantém regras internas fora do payload. A Monique é habilitada pela migration `0042_public_catalog.sql`; o endpoint usa rate limit próprio e opt-in explícito. |
 | Pagamentos | ❌ Não existe (gateway) | Nenhum provedor real (Stripe/PIX/etc). Hoje é um campo `payment_status` que um operador humano marca manualmente (card de Escalonamentos, kind `payment_proof`), com a IA lendo o comprovante só como dica, nunca confirmando sozinha. Desde 19/08/2026 essa confirmação já vira um registro real no Financeiro (`financial_transactions`), mas continua sendo *registro*, não *cobrança* — nada aqui move dinheiro de verdade. |
 | Observabilidade / error tracking | ❌ Não existe | Só `console.log`/`console.warn` (145 ocorrências em `server/`), zero Sentry/Pino/serviço externo — decisão deliberada de não depender de serviço externo, mas significa que incidentes só aparecem se alguém for procurar nos logs do Render |
 | Testes & CI | ✅ Feito | 122 arquivos de teste, `.github/workflows/ci.yml` roda lint+test+build em toda PR |
@@ -73,8 +74,9 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 2. ~~`FinancialDashboard.tsx` mockado sem aviso~~ / ~~`OperatorCRM.tsx` mockado / sem ponte com o Financeiro~~ — ambos resolvidos, ver linha "Frontend saindo do localStorage" acima.
 3. **Falta de error tracking** — hoje só se descobre incidente lendo log manualmente (como o esgotamento de billing do Gemini, que já aconteceu mais de uma vez em produção). Fix: alerta ativo (não só log) quando padrões de erro conhecidos aparecem.
 4. **RLS não é a barreira real de isolamento** — funciona hoje porque o código de serviço é disciplinado em exigir `tenantId`, mas é uma garantia de processo, não de banco de dados. Vale endurecer pra RLS ser a barreira de fato (não usar service key em queries tenant-scoped), ou aceitar conscientemente o risco documentado.
-5. **Pagamento sem provedor real** — bloqueia cobrar cliente novo de forma automática; decisão de produto (qual provedor, PYG/BRL/USD) mais que de engenharia pura.
-6. ~~**Central de Qualidade aguardando migration 0040**~~ — migration aplicada no Supabase de produção e tabelas confirmadas via REST; continua pendente apenas a validação funcional ponta a ponta após o deploy do PR.
+5. **Catálogo público e troca de endereço** — a implementação está pronta, mas requer aplicar a migration `0042_public_catalog.sql` no Supabase antes do deploy e validar `/catalogo/monique`; a Netlify deve permanecer como rollback até a conferência visual e funcional.
+6. **Pagamento sem provedor real** — bloqueia cobrar cliente novo de forma automática; decisão de produto (qual provedor, PYG/BRL/USD) mais que de engenharia pura.
+7. ~~**Central de Qualidade aguardando migration 0040**~~ — migration aplicada no Supabase de produção e tabelas confirmadas via REST; continua pendente apenas a validação funcional ponta a ponta após o deploy do PR.
 
 ## Mudanças recentes relevantes (não é auditoria completa, só registro)
 
