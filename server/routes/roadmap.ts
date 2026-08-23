@@ -68,7 +68,7 @@ export function createRoadmapRouter({ authenticateToken }: RoadmapRouterDeps): R
     res.status(201).json({ item });
   }));
 
-  router.patch('/api/admin/roadmap-items/:id', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+  router.patch('/api/admin/roadmap-items/:id', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { title, description, priority, status, imageBase64 } = req.body || {};
     if (title !== undefined && (typeof title !== 'string' || !title.trim())) {
       return res.status(400).json({ error: 'Campo "title" não pode ficar vazio.' });
@@ -93,7 +93,7 @@ export function createRoadmapRouter({ authenticateToken }: RoadmapRouterDeps): R
     res.json({ item });
   }));
 
-  router.delete('/api/admin/roadmap-items/:id', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+  router.delete('/api/admin/roadmap-items/:id', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteRoadmapItem(req.params.id);
     res.json({ success: true });
   }));

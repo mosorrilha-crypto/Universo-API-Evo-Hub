@@ -35,7 +35,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use(createQualityAuditRouter({ authenticateToken: fakeAuthenticateToken as any }));
-  await new Promise<void>((resolve) => { server = app.listen(0, resolve); });
+  await new Promise<void>((resolve) => { server = app.listen(0, () => resolve()); });
   const address = server.address();
   baseUrl = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
 });

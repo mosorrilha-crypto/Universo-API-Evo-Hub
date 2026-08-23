@@ -27,7 +27,7 @@ beforeAll(async () => {
     metaAccessToken: 'token',
     metaPhoneNumberId: 'phone-id',
   }));
-  await new Promise<void>((resolve) => { server = app.listen(0, resolve); });
+  await new Promise<void>((resolve) => { server = app.listen(0, () => resolve()); });
   const address = server.address();
   baseUrl = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
 });
