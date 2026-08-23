@@ -46,6 +46,10 @@ export class MetaAdsManagementRequestError extends Error {}
 export class MetaAdsOperationInProgressError extends Error {}
 export class MetaAdsOperationAlreadyFailedError extends Error {}
 
+function normalizedAccountId(value: unknown): string {
+  return String(value || '').trim().replace(/^act_/, '');
+}
+
 function validAdAccountId(value: unknown): string {
   const normalized = typeof value === 'string' ? value.trim() : '';
   if (!/^act_\d+$/.test(normalized)) {
@@ -123,22 +127,34 @@ function safeMetaMessage(payload: any, status: number): string {
   return `A Meta não concluiu a operação de anúncios (HTTP ${status}).`;
 }
 
-async function graphRequest<T>(path: string, method: 'POST' | 'DELETE', params: Record<string, string>, accessToken: string): Promise<T> {
+async function graphRequest<T>(path: string, method: 'GET' | 'POST' | 'DELETE', params: Record<string, string>, accessToken: string): Promise<T> {
   const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${path.replace(/^\//, '')}`);
   const body = new URLSearchParams({ ...params, access_token: accessToken });
+  const request: RequestInit = {
+    method,
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+  };
+  if (method === 'GET') {
+    for (const [key, value] of body.entries()) url.searchParams.set(key, value);
+  } else {
+    request.body = body;
+  }
   let response: Response;
   try {
-    response = await fetch(url, {
-      method,
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body,
-    });
+    response = await fetch(url, request);
   } catch {
     throw new MetaAdsManagementRequestError('Não foi possível conectar à Meta para executar a operação.');
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new MetaAdsManagementRequestError(safeMetaMessage(payload, response.status));
   return payload as T;
+}
+
+async function assertCampaignBelongsToAccount(credentials: MetaAdsManagementCredentials, campaignId: string): Promise<void> {
+  const payload = await graphRequest<{ id?: string; account_id?: string }>(campaignId, 'GET', { fields: 'id,account_id' }, credentials.accessToken);
+  if (String(payload.id || '') !== campaignId || normalizedAccountId(payload.account_id) !== normalizedAccountId(credentials.adAccountId)) {
+    throw new MetaAdsManagementRequestError('A campanha informada não pertence à conta de anúncios configurada para este tenant.');
+  }
 }
 
 async function getManagementCredentials(tenantId: string): Promise<MetaAdsManagementCredentials> {
@@ -283,6 +299,7 @@ export async function updateMetaCampaignStatus(
   const id = validCampaignId(campaignId);
   const nextStatus = validMutationStatus(status);
   const result = await runIdempotentMutation(tenantId, idempotencyKey, 'update_campaign_status', id, async () => {
+    await assertCampaignBelongsToAccount(credentials, id);
     await graphRequest<Record<string, unknown>>(`${id}`, 'POST', { status: nextStatus }, credentials.accessToken);
     return { id, status: nextStatus };
   });
@@ -299,6 +316,7 @@ export async function updateMetaCampaignBudget(
   const id = validCampaignId(campaignId);
   const budget = validDailyBudgetMinor(dailyBudgetMinor);
   const result = await runIdempotentMutation(tenantId, idempotencyKey, 'update_campaign_budget', id, async () => {
+    await assertCampaignBelongsToAccount(credentials, id);
     await graphRequest<Record<string, unknown>>(`${id}`, 'POST', { daily_budget: String(budget) }, credentials.accessToken);
     return { id, dailyBudgetMinor: budget };
   });

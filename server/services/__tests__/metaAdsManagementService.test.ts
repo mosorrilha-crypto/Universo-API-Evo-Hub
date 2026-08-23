@@ -11,6 +11,7 @@ vi.mock('../operationEventStore', () => ({ recordOperationEvent: mocks.recordOpe
 import {
   createMetaCampaign,
   metaAdsManagementLimits,
+  MetaAdsManagementRequestError,
   MetaAdsManagementValidationError,
   updateMetaCampaignBudget,
 } from '../metaAdsManagementService';
@@ -141,5 +142,35 @@ describe('metaAdsManagementService', () => {
 
     await expect(createMetaCampaign('tenant-a', { name: 'Campanha', objective: 'OUTCOME_ENGAGEMENT' }, 'curta'))
       .rejects.toBeInstanceOf(MetaAdsManagementValidationError);
+  });
+
+  it('confirma a conta Meta antes de alterar status ou orçamento', async () => {
+    const fake = createFakeDb();
+    mocks.getDb.mockReturnValue(fake.db);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: '987654321', account_id: '999' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(updateMetaCampaignBudget('tenant-a', '987654321', 100000, 'meta-test-account-123456'))
+      .rejects.toBeInstanceOf(MetaAdsManagementRequestError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/987654321');
+    expect(fake.operations[0]?.status).toBe('failed');
+  });
+
+  it('continua a mutação quando a conta Meta pertence ao tenant configurado', async () => {
+    const fake = createFakeDb();
+    mocks.getDb.mockReturnValue(fake.db);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: '987654321', account_id: '123' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await updateMetaCampaignBudget('tenant-a', '987654321', 100000, 'meta-test-account-123457');
+
+    expect(result).toEqual({ id: '987654321', dailyBudgetMinor: 100000 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/987654321');
+    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toContain('daily_budget=100000');
   });
 });
