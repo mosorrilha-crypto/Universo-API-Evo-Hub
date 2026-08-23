@@ -523,7 +523,7 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   }
 
   return (
-    <section className="quality-workspace space-y-5 animate-fade-in">
+    <section className="quality-workspace quality-workspace--clear space-y-5 animate-fade-in">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-sky-300 text-xs font-semibold uppercase tracking-[0.18em]">

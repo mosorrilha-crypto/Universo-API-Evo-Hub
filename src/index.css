@@ -1609,3 +1609,233 @@ html[data-theme='light'] .quality-workspace__control-pill--sky > p:last-child { 
 html[data-theme='light'] .quality-workspace__control-pill--sky > p:last-child { color: #036B91 !important; }
 html[data-theme='light'] .quality-workspace__control-pill--amber > p:last-child { color: #8A5700 !important; }
 html[data-theme='light'] .quality-workspace__control-pill--emerald > p:last-child { color: #09734B !important; }
+
+
+/* Qualidade IA — superfícies claras inspiradas no Atendimento validado.
+   Esta área é deliberadamente clara mesmo se o operador estiver usando outro
+   tema global: informação de auditoria, leitura de evidências e ações humanas
+   não devem depender de texto claro sobre azul escuro para serem compreendidas. */
+.quality-workspace--clear {
+  --quality-canvas: #F4F3EF;
+  --quality-panel: #FFFFFF;
+  --quality-soft: #F8F8F5;
+  --quality-line: #DCDAD3;
+  --quality-line-strong: #C9C6BD;
+  --quality-text: #22241F;
+  --quality-secondary: #5A5B54;
+  --quality-muted: #77766F;
+  --quality-action: #176B4C;
+  color: var(--quality-text);
+  padding: 1rem;
+  border: 1px solid var(--quality-line);
+  border-radius: 1rem;
+  background: var(--quality-canvas);
+  box-shadow: 0 1px 2px rgba(34, 36, 31, 0.05);
+}
+
+.quality-workspace--clear .text-white,
+.quality-workspace--clear .text-slate-100,
+.quality-workspace--clear .text-slate-200,
+.quality-workspace--clear .text-slate-300 {
+  color: var(--quality-text) !important;
+}
+
+.quality-workspace--clear .text-slate-400,
+.quality-workspace--clear .text-slate-500,
+.quality-workspace--clear .text-slate-600,
+.quality-workspace--clear .placeholder\:text-slate-600,
+.quality-workspace--clear .placeholder\:text-slate-400 {
+  color: var(--quality-secondary) !important;
+}
+
+html .quality-workspace.quality-workspace--clear .bg-slate-950,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/90,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/80,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/60,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/50,
+html .quality-workspace.quality-workspace--clear .bg-slate-950\/45 {
+  background-color: var(--quality-soft) !important;
+}
+
+html .quality-workspace.quality-workspace--clear .bg-slate-900,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/90,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/80,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/70,
+html .quality-workspace.quality-workspace--clear .bg-slate-900\/65 {
+  background-color: var(--quality-panel) !important;
+}
+
+html .quality-workspace.quality-workspace--clear .bg-slate-800,
+html .quality-workspace.quality-workspace--clear .bg-slate-800\/90,
+html .quality-workspace.quality-workspace--clear .bg-slate-800\/70,
+html .quality-workspace.quality-workspace--clear .bg-slate-800\/65 {
+  background-color: #ECEBE6 !important;
+}
+
+html .quality-workspace.quality-workspace--clear .border-slate-800,
+html .quality-workspace.quality-workspace--clear .border-slate-800\/80,
+html .quality-workspace.quality-workspace--clear .border-slate-800\/60,
+html .quality-workspace.quality-workspace--clear .border-slate-700,
+html .quality-workspace.quality-workspace--clear .border-slate-700\/80 {
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .bg-gradient-to-br {
+  background-image: none !important;
+  background-color: var(--quality-panel) !important;
+}
+
+.quality-workspace--clear .text-sky-300,
+.quality-workspace--clear .text-sky-200,
+.quality-workspace--clear .text-sky-100 {
+  color: #086780 !important;
+}
+
+.quality-workspace--clear .bg-sky-500\/5,
+.quality-workspace--clear .bg-sky-500\/10,
+.quality-workspace--clear .bg-sky-500\/15,
+.quality-workspace--clear .bg-sky-500\/20 {
+  background-color: #E7F4F6 !important;
+}
+
+.quality-workspace--clear .border-sky-500\/20,
+.quality-workspace--clear .border-sky-500\/25,
+.quality-workspace--clear .border-sky-500\/30,
+.quality-workspace--clear .border-sky-400\/20,
+.quality-workspace--clear .border-sky-400\/30,
+.quality-workspace--clear .border-sky-400\/50 {
+  border-color: #9BCFD6 !important;
+}
+
+.quality-workspace--clear .bg-sky-500.text-white {
+  background-color: #0D718A !important;
+  color: #FFFFFF !important;
+}
+
+.quality-workspace--clear .bg-sky-500\/10:hover,
+.quality-workspace--clear .bg-sky-500\/20:hover,
+.quality-workspace--clear .hover\:bg-sky-500\/20:hover {
+  background-color: #D7EDF0 !important;
+}
+
+.quality-workspace--clear .text-emerald-300,
+.quality-workspace--clear .text-emerald-200,
+.quality-workspace--clear .text-emerald-100 {
+  color: #0A704C !important;
+}
+
+.quality-workspace--clear .bg-emerald-500\/5,
+.quality-workspace--clear .bg-emerald-500\/10,
+.quality-workspace--clear .bg-emerald-500\/15 {
+  background-color: #EAF7F0 !important;
+}
+
+.quality-workspace--clear .border-emerald-500\/20,
+.quality-workspace--clear .border-emerald-500\/25,
+.quality-workspace--clear .border-emerald-400\/20,
+.quality-workspace--clear .border-emerald-400\/25 {
+  border-color: #9CD4B8 !important;
+}
+
+.quality-workspace--clear .text-amber-300,
+.quality-workspace--clear .text-amber-200,
+.quality-workspace--clear .text-amber-100 {
+  color: #825300 !important;
+}
+
+.quality-workspace--clear .bg-amber-500\/5,
+.quality-workspace--clear .bg-amber-500\/10 {
+  background-color: #FFF4D8 !important;
+}
+
+.quality-workspace--clear .border-amber-500\/25,
+.quality-workspace--clear .border-amber-500\/30,
+.quality-workspace--clear .border-amber-400\/25,
+.quality-workspace--clear .border-amber-400\/30 {
+  border-color: #E6BB58 !important;
+}
+
+.quality-workspace--clear .text-rose-300,
+.quality-workspace--clear .text-rose-200,
+.quality-workspace--clear .text-rose-100 {
+  color: #9C3F2C !important;
+}
+
+.quality-workspace--clear .bg-rose-500\/5,
+.quality-workspace--clear .bg-rose-500\/10 {
+  background-color: #FCEEEA !important;
+}
+
+.quality-workspace--clear .border-rose-500\/20,
+.quality-workspace--clear .border-rose-500\/25,
+.quality-workspace--clear .border-rose-500\/30,
+.quality-workspace--clear .border-rose-400\/20,
+.quality-workspace--clear .border-rose-400\/25 {
+  border-color: #E6B8AC !important;
+}
+
+.quality-workspace--clear .text-orange-300,
+.quality-workspace--clear .text-orange-200 {
+  color: #954A19 !important;
+}
+
+.quality-workspace--clear .bg-orange-500\/10 {
+  background-color: #FCEEE4 !important;
+}
+
+.quality-workspace--clear .border-orange-500\/30 {
+  border-color: #E8BF9F !important;
+}
+
+.quality-workspace--clear .quality-workspace__timeline,
+.quality-workspace--clear .quality-workspace__event {
+  background: var(--quality-panel) !important;
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .quality-workspace__event-details {
+  background: var(--quality-soft) !important;
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .quality-workspace__event-title,
+.quality-workspace--clear .quality-workspace__event-summary,
+.quality-workspace--clear .quality-workspace__timeline-header h3 {
+  color: var(--quality-text) !important;
+}
+
+.quality-workspace--clear .quality-workspace__event-time,
+.quality-workspace--clear .quality-workspace__event-meta,
+.quality-workspace--clear .quality-workspace__timeline-header p,
+.quality-workspace--clear .quality-workspace__event-details summary {
+  color: var(--quality-secondary) !important;
+}
+
+.quality-workspace--clear .quality-workspace__control-card {
+  background: var(--quality-panel) !important;
+  border-color: var(--quality-line) !important;
+}
+
+.quality-workspace--clear .quality-workspace__control-quote {
+  background: #EAF7F0 !important;
+  border-color: #9CD4B8 !important;
+}
+
+.quality-workspace--clear .quality-workspace__control-pill {
+  background: var(--quality-soft) !important;
+  border-color: var(--quality-line) !important;
+}
+
+@media (max-width: 640px) {
+  .quality-workspace--clear {
+    padding: .75rem;
+    border-radius: .85rem;
+  }
+
+  .quality-workspace--clear .responsive-tab-strip {
+    margin-right: -.75rem;
+    margin-left: -.75rem;
+    padding-right: .75rem;
+    padding-left: .75rem;
+  }
+}
