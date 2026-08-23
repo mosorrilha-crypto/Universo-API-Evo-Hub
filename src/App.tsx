@@ -25,6 +25,7 @@ import { OperationsCenter } from './components/OperationsCenter';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
+import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
 import { isStandalonePwa } from './lib/pwa';
 import { hasRoleAtLeast } from './lib/roles';
 
@@ -97,7 +98,13 @@ export const App: React.FC = () => {
   // saas_admin (pedido direto, 19/08/2026) — o Painel Multi-Tenant saiu da
   // faixa de abas e virou um botão próprio no cabeçalho (ver Header.tsx),
   // acessado sob demanda em vez de ser a tela de entrada.
-  const [activeTab, setActiveTab] = useState<ActiveTab>('home');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    try {
+      return parseStoredActiveTab(localStorage.getItem(ACTIVE_TAB_STORAGE_KEY));
+    } catch {
+      return 'home';
+    }
+  });
   // Lead a abrir automaticamente ao entrar na aba WhatsApp — usado pelo
   // botão "Voltar pra conversa" do card de Escalonamento. requestId muda a
   // cada clique (mesmo pro mesmo telefone), pra garantir que clicar de novo
@@ -134,6 +141,14 @@ export const App: React.FC = () => {
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
 
+  // Persiste a última aba escolhida para que um refresh seja apenas um
+  // refresh: o operador volta ao mesmo contexto em vez de cair sempre em
+  // "home". O valor é validado por allowlist em activeTab.ts.
+  const handleSetActiveTab = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    safeSetLocalStorage(ACTIVE_TAB_STORAGE_KEY, tab);
+  };
+
   // Restrição de telas por papel + contexto (issue #159, pedido direto do
   // Lucas: atendente não deve ver Financeiro nem telas administrativas).
   // Mesmos níveis usados em Header.tsx pra esconder os botões das abas —
@@ -149,11 +164,14 @@ export const App: React.FC = () => {
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
   // papel no meio da sessão, sem depender de um reload de página completo.
   useEffect(() => {
+    // Durante o carregamento/login não redireciona a preferência restaurada.
+    // A permissão é verificada assim que o usuário real estiver disponível.
+    if (!currentUser) return;
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (['financial', 'agenda_financeiro'].includes(activeTab) && !canSeeFinancial) ||
       (['attribution', 'knowledge', 'integration', 'quality'].includes(activeTab) && !canSeeAdminTools);
-    if (blocked) setActiveTab('whatsapp');
+    if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
 
@@ -879,7 +897,7 @@ export const App: React.FC = () => {
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
     setFinancialPreselectedLead(lead);
-    setActiveTab('agenda_financeiro');
+    handleSetActiveTab('agenda_financeiro');
   };
 
   return (
@@ -888,11 +906,12 @@ export const App: React.FC = () => {
       {/* Header Navigation */}
       <Header
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSetActiveTab}
         savedCount={savedTranscripts.length}
         currentUser={currentUser}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={() => {
+          handleSetActiveTab('home');
           setCurrentUser(null);
           setAuthToken(null);
           setIsLoginModalOpen(true);
@@ -923,7 +942,7 @@ export const App: React.FC = () => {
             escalations={escalations}
             canSeeFinancial={canSeeFinancial}
             canSeeAdminTools={canSeeAdminTools}
-            onNavigate={setActiveTab}
+            onNavigate={handleSetActiveTab}
           />
         )}
 
@@ -957,7 +976,7 @@ export const App: React.FC = () => {
             activeTenantName={activeTenant.name}
             pendingCount={escalations.filter((e) => !e.resolved).length}
             leadCount={leads.length}
-            onOpenEscalations={() => setActiveTab('escalations')}
+            onOpenEscalations={() => handleSetActiveTab('escalations')}
           >
           <WhatsAppLeadsSim
             knowledgeBase={knowledgeBase}
@@ -973,7 +992,7 @@ export const App: React.FC = () => {
             }}
             onDeleteLead={handleDeleteLead}
             escalationsPendingCount={escalations.filter((e) => !e.resolved).length}
-            onGoToEscalations={() => setActiveTab('escalations')}
+            onGoToEscalations={() => handleSetActiveTab('escalations')}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
           />
@@ -1072,7 +1091,7 @@ export const App: React.FC = () => {
             }}
             canUseBusinessTemplates={canSeeSaasMaster}
             publicCatalogSlug={activeTenant.slug}
-            onGoToWhatsAppSim={() => setActiveTab('whatsapp')}
+            onGoToWhatsAppSim={() => handleSetActiveTab('whatsapp')}
             // Pedido real do saas_admin (18/08/2026): os "Modelos de Negócio
             // Prontos" são fixos em código — isso deixa carregar a Base de
             // Conhecimento REAL de outro tenant como ponto de partida pra
@@ -1112,7 +1131,7 @@ export const App: React.FC = () => {
             onResolvePayment={handleResolvePaymentEscalation}
             onGoToConversation={(phone) => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
-              setActiveTab('whatsapp');
+              handleSetActiveTab('whatsapp');
             }}
                     />
           </OperationsModuleFrame>
