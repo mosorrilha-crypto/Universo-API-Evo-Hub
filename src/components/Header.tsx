@@ -14,6 +14,7 @@ import {
   Home,
   Kanban,
   Layers,
+  Link2,
   LogOut,
   Menu,
   MessageSquare,
@@ -66,9 +67,9 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: 'Atención, CRM, agenda, caja y conversiones en un solo lugar', today: 'Hoy', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda y Caja', growth: 'Crecimiento', quality: 'Calidad de IA', knowledge: 'Conocimiento', integration: 'Integraciones', escalations: 'Pendientes', companies: 'Empresas', adminGroup: 'Administración', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: 'Atención, CRM, agenda, caja y conversiones en un solo lugar', today: 'Hoy', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda y Caja', growth: 'Crecimiento', quality: 'Calidad de IA', knowledge: 'Conocimiento', catalog: 'Catálogo', integration: 'Integraciones', escalations: 'Pendientes', companies: 'Empresas', adminGroup: 'Administración', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: 'Atendimento, CRM, agenda, caixa e conversões em um só lugar', today: 'Hoje', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda & Caixa', growth: 'Crescimento', quality: 'Qualidade IA', knowledge: 'Conhecimento', integration: 'Integrações', escalations: 'Pendências', companies: 'Empresas', adminGroup: 'Administração', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: 'Atendimento, CRM, agenda, caixa e conversões em um só lugar', today: 'Hoje', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda & Caixa', growth: 'Crescimento', quality: 'Qualidade IA', knowledge: 'Conhecimento', catalog: 'Catálogo', integration: 'Integrações', escalations: 'Pendências', companies: 'Empresas', adminGroup: 'Administração', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   const primaryNavigation: NavigationItem[] = [
@@ -85,6 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'attribution', label: copy.growth, icon: <Target className="w-4 h-4" /> },
     { id: 'quality', label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' },
     { id: 'knowledge', label: copy.knowledge, icon: <Brain className="w-4 h-4" /> },
+    { id: 'catalog', label: copy.catalog, icon: <Link2 className="w-4 h-4" /> },
     { id: 'integration', label: copy.integration, icon: <Layers className="w-4 h-4" /> },
   ] : [];
   const isAdminToolsActive = adminToolsNavigation.some((item) => item.id === activeTab);
