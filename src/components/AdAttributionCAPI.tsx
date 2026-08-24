@@ -890,6 +890,9 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                     placeholder="EAAG..."
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500 font-mono text-[11px]"
                   />
+                  <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center text-xs font-semibold text-emerald-300 underline decoration-emerald-400/70 underline-offset-4 hover:text-emerald-100">
+                    {isSpanish ? 'Generar este token en Graph API Explorer' : 'Gerar este token no Graph API Explorer'}
+                  </a>
                 </div>
 
                 <div>
