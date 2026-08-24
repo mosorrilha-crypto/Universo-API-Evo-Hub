@@ -20,6 +20,10 @@ Todas as rotas exigem autenticação e `admin`/`saas_admin`. O tenant é resolvi
 
 A migration `0045_meta_ads_management.sql` deve ser revisada e aplicada no Supabase antes do deploy do código. Depois, o administrador deve salvar um token separado com as permissões aprovadas pela Meta e confirmar a conta `act_<id>`. O backend não executa chamadas de escrita durante a instalação, o desenvolvimento ou a abertura desta PR.
 
+Para teste imediato, abra o [Graph API Explorer](https://developers.facebook.com/tools/explorer/), selecione o Meta App, escolha **User Token**, adicione `ads_management` e gere o token. Use o [Access Token Debugger](https://developers.facebook.com/tools/debug/accesstoken/) para conferir permissões e validade antes de colá-lo no campo inferior do painel.
+
+Para produção, prefira o caminho de [System Users da Meta](https://developers.facebook.com/docs/business-management-apis/system-users/install-apps-and-generate-tokens): instale o app no usuário do sistema, associe os ativos da conta de anúncios e da página, e gere um token persistente ou expirável com os escopos necessários. O campo inferior aceita os dois formatos, mas o token de usuário do sistema é mais adequado para operação contínua.
+
 ## Referências oficiais
 
 [1] [Meta — Basic Ad Creation](https://developers.facebook.com/documentation/ads-commerce/marketing-api/get-started/basic-ad-creation)
