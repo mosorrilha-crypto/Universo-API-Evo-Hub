@@ -38,7 +38,8 @@ import {
   ChevronUp,
   ChevronDown,
   GripVertical,
-  ExternalLink
+  ExternalLink,
+  Pencil
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 
@@ -465,6 +466,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
   const [newRuleText, setNewRuleText] = useState('');
+  const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
+  const [editingRuleText, setEditingRuleText] = useState('');
 
   const [newFaqQuestion, setNewFaqQuestion] = useState('');
   const [newFaqAnswer, setNewFaqAnswer] = useState('');
@@ -1118,6 +1121,33 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       ...prev,
       businessRules: prev.businessRules.filter((_, idx) => idx !== index)
     }));
+    setEditingRuleIndex((prevIndex) => {
+      if (prevIndex === null) return null;
+      if (prevIndex === index) return null;
+      return prevIndex > index ? prevIndex - 1 : prevIndex;
+    });
+  };
+
+  const handleStartEditRule = (index: number) => {
+    setEditingRuleIndex(index);
+    setEditingRuleText(formData.businessRules[index]);
+  };
+
+  const handleCancelEditRule = () => {
+    setEditingRuleIndex(null);
+    setEditingRuleText('');
+  };
+
+  const handleSaveEditRule = () => {
+    if (editingRuleIndex === null) return;
+    const trimmed = editingRuleText.trim();
+    if (!trimmed) return;
+    setFormData((prev) => ({
+      ...prev,
+      businessRules: prev.businessRules.map((rule, idx) => (idx === editingRuleIndex ? trimmed : rule))
+    }));
+    setEditingRuleIndex(null);
+    setEditingRuleText('');
   };
 
   const handleAddFaq = (e: React.FormEvent) => {
@@ -1824,19 +1854,61 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     key={idx}
                     className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 flex items-start justify-between gap-3 text-xs"
                   >
-                    <div className="flex items-start space-x-2.5">
+                    <div className="flex items-start space-x-2.5 flex-1 min-w-0">
                       <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
                         {idx + 1}
                       </span>
-                      <p className="text-slate-200 font-medium leading-relaxed">{rule}</p>
+                      {editingRuleIndex === idx ? (
+                        <input
+                          type="text"
+                          value={editingRuleText}
+                          onChange={(e) => setEditingRuleText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); handleSaveEditRule(); }
+                            if (e.key === 'Escape') { e.preventDefault(); handleCancelEditRule(); }
+                          }}
+                          autoFocus
+                          className="flex-1 min-w-0 px-2 py-1 bg-slate-900 border border-emerald-500 rounded-lg text-xs text-white focus:outline-none"
+                        />
+                      ) : (
+                        <p className="text-slate-200 font-medium leading-relaxed">{rule}</p>
+                      )}
                     </div>
-                    <button
-                      onClick={() => handleDeleteRule(idx)}
-                      className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
-                      title="Excluir regra"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {editingRuleIndex === idx ? (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={handleSaveEditRule}
+                          className="text-slate-500 hover:text-emerald-400 p-1 transition-colors cursor-pointer"
+                          title="Salvar edição"
+                        >
+                          <Check className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={handleCancelEditRule}
+                          className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
+                          title="Cancelar edição"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => handleStartEditRule(idx)}
+                          className="text-slate-500 hover:text-emerald-400 p-1 transition-colors cursor-pointer"
+                          title="Editar regra"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRule(idx)}
+                          className="text-slate-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
+                          title="Excluir regra"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))
               ) : (
