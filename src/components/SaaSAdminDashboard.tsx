@@ -26,7 +26,9 @@ import {
   Save,
   RotateCcw,
   Loader2,
-  Camera
+  Camera,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 
 interface RealTenant {
@@ -1047,6 +1049,83 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSaasAdminUser]);
 
+  // Editar/apagar tenant — pedido real do dono do produto depois de criar
+  // tenants de teste com nome errado ("Monique 2", "Tanent 3") e não ter
+  // como corrigir sem SQL direto no Supabase (PATCH/DELETE
+  // /api/admin/tenants/:id). Exclusão é irreversível e em cascata (apaga
+  // conversas/mensagens/credenciais/base de conhecimento desse tenant
+  // inteiro) — por isso exige digitar o nome exato do tenant pra confirmar,
+  // não só um window.confirm genérico.
+  const [editingTenant, setEditingTenant] = useState<{ id: string; name: string; slug: string; segment: string; currency: string; locale: string } | null>(null);
+  const [isSavingTenantEdit, setIsSavingTenantEdit] = useState(false);
+  const [tenantEditError, setTenantEditError] = useState<string | null>(null);
+
+  const openEditTenant = (t: (typeof realTenants)[number]) => {
+    setTenantEditError(null);
+    setEditingTenant({ id: t.id, name: t.name, slug: t.slug || '', segment: t.segment || '', currency: t.currency, locale: t.locale });
+  };
+
+  const handleSaveTenantEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTenant) return;
+    if (!editingTenant.name.trim()) { setTenantEditError('Nome não pode ficar vazio.'); return; }
+    setIsSavingTenantEdit(true);
+    setTenantEditError(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${editingTenant.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editingTenant.name.trim(),
+          slug: editingTenant.slug.trim() || null,
+          segment: editingTenant.segment.trim() || null,
+          currency: editingTenant.currency,
+          locale: editingTenant.locale,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setEditingTenant(null);
+      await fetchRealTenants();
+    } catch (err: any) {
+      setTenantEditError(err.message || 'Falha ao salvar as alterações.');
+    } finally {
+      setIsSavingTenantEdit(false);
+    }
+  };
+
+  const [deletingTenant, setDeletingTenant] = useState<{ id: string; name: string } | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeletingTenant, setIsDeletingTenant] = useState(false);
+  const [deleteTenantError, setDeleteTenantError] = useState<string | null>(null);
+
+  const openDeleteTenant = (t: { id: string; name: string }) => {
+    setDeleteTenantError(null);
+    setDeleteConfirmText('');
+    setDeletingTenant(t);
+  };
+
+  const handleConfirmDeleteTenant = async () => {
+    if (!deletingTenant) return;
+    setIsDeletingTenant(true);
+    setDeleteTenantError(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${deletingTenant.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmName: deleteConfirmText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setDeletingTenant(null);
+      await fetchRealTenants();
+    } catch (err: any) {
+      setDeleteTenantError(err.message || 'Falha ao excluir o tenant.');
+    } finally {
+      setIsDeletingTenant(false);
+    }
+  };
+
   const fetchOperators = async () => {
     setIsLoadingUsers(true);
     try {
@@ -1406,6 +1485,14 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                         <span><span className="mr-1 uppercase tracking-wide text-slate-600">Moeda</span>{t.currency} / {t.locale}</span>
                         <span><span className="mr-1 uppercase tracking-wide text-slate-600">Criado</span>{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</span>
                       </div>
+                      <div className="mt-2 flex items-center gap-1.5 border-t border-slate-800/70 pt-2">
+                        <button type="button" onClick={() => openEditTenant(t)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
+                          <Pencil className="h-3 w-3" /> Editar
+                        </button>
+                        <button type="button" onClick={() => openDeleteTenant(t)} className="inline-flex items-center gap-1 rounded-lg bg-rose-950/60 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-900/60">
+                          <Trash2 className="h-3 w-3" /> Excluir
+                        </button>
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -1419,6 +1506,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                         <th className="p-3">Moeda / Idioma</th>
                         <th className="p-3">WhatsApp</th>
                         <th className="p-3">Criado em</th>
+                        <th className="p-3">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/80">
@@ -1438,6 +1526,16 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                             )}
                           </td>
                           <td className="p-3 text-slate-400">{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <button type="button" onClick={() => openEditTenant(t)} title="Editar empresa" className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
+                                <Pencil className="h-3 w-3" /> Editar
+                              </button>
+                              <button type="button" onClick={() => openDeleteTenant(t)} title="Excluir empresa" className="inline-flex items-center gap-1 rounded-lg bg-rose-950/60 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-900/60">
+                                <Trash2 className="h-3 w-3" /> Excluir
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1445,6 +1543,111 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {editingTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !isSavingTenantEdit && setEditingTenant(null)}>
+          <form
+            onSubmit={handleSaveTenantEdit}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-white"><Pencil className="h-4 w-4 text-emerald-400" /> Editar empresa</h3>
+              <button type="button" onClick={() => setEditingTenant(null)} className="text-slate-500 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+            {tenantEditError && <div className="rounded-lg border border-red-800 bg-red-950/60 p-2.5 text-xs text-red-300">{tenantEditError}</div>}
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Nome da empresa</label>
+              <input
+                type="text"
+                value={editingTenant.name}
+                onChange={(e) => setEditingTenant({ ...editingTenant, name: e.target.value })}
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Slug (opcional, usado no catálogo público)</label>
+              <input
+                type="text"
+                value={editingTenant.slug}
+                onChange={(e) => setEditingTenant({ ...editingTenant, slug: e.target.value })}
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-xs text-slate-400">Moeda</label>
+                <input
+                  type="text"
+                  value={editingTenant.currency}
+                  onChange={(e) => setEditingTenant({ ...editingTenant, currency: e.target.value })}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-slate-400">Idioma</label>
+                <input
+                  type="text"
+                  value={editingTenant.locale}
+                  onChange={(e) => setEditingTenant({ ...editingTenant, locale: e.target.value })}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Segmento de negócio</label>
+              <input
+                type="text"
+                value={editingTenant.segment}
+                onChange={(e) => setEditingTenant({ ...editingTenant, segment: e.target.value })}
+                placeholder="ex: beauty_studio, generic"
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSavingTenantEdit}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white transition-all hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {isSavingTenantEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {isSavingTenantEdit ? 'Salvando...' : 'Salvar alterações'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {deletingTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !isDeletingTenant && setDeletingTenant(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md space-y-3 rounded-2xl border border-rose-900/60 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-rose-300"><Trash2 className="h-4 w-4" /> Excluir empresa</h3>
+              <button type="button" onClick={() => setDeletingTenant(null)} className="text-slate-500 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+            <p className="text-xs text-slate-300">
+              Isso apaga <strong className="text-white">{deletingTenant.name}</strong> e <strong>tudo</strong> que pertence a ela pra sempre — conversas, mensagens, base de conhecimento, credenciais de WhatsApp, operadores. Não tem como desfazer.
+            </p>
+            {deleteTenantError && <div className="rounded-lg border border-red-800 bg-red-950/60 p-2.5 text-xs text-red-300">{deleteTenantError}</div>}
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Digite <strong className="text-white">{deletingTenant.name}</strong> pra confirmar</label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-rose-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleConfirmDeleteTenant}
+              disabled={isDeletingTenant || deleteConfirmText !== deletingTenant.name}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose-700 py-2.5 text-xs font-bold text-white transition-all hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isDeletingTenant ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              {isDeletingTenant ? 'Excluindo...' : 'Excluir permanentemente'}
+            </button>
           </div>
         </div>
       )}
