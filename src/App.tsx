@@ -975,6 +975,10 @@ export const App: React.FC = () => {
         <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
           <AtendimentoWorkspaceFrame
             activeTenantName={activeTenant.name}
+            activeTenant={activeTenant}
+            tenants={tenants}
+            canSwitchTenant={canSeeSaasMaster}
+            onSelectTenant={handleSelectTenant}
             pendingCount={escalations.filter((e) => !e.resolved).length}
             leadCount={leads.length}
             onOpenEscalations={() => handleSetActiveTab('escalations')}
