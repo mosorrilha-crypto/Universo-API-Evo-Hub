@@ -2430,8 +2430,8 @@ html[data-theme='dark'] {
 }
 
 html[data-theme='light'] {
-  --surface-gradient: linear-gradient(135deg, #E4F3EA 0%, #F5FAF6 58%, #FFFDF9 100%);
-  --surface-gradient-soft: linear-gradient(135deg, #EEF8F1 0%, #FAFCF8 58%, #FFFDF9 100%);
+  --surface-gradient: linear-gradient(112deg, #E7F4EC 0%, #F3FAF5 38%, #FCFDFC 76%, #FFFFFF 100%);
+  --surface-gradient-soft: linear-gradient(112deg, #EEF8F1 0%, #F7FBF8 42%, #FFFFFF 100%);
 }
 
 html[data-theme='blue'] {
