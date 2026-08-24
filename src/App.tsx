@@ -26,7 +26,6 @@ import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
-import { isStandalonePwa } from './lib/pwa';
 import { hasRoleAtLeast } from './lib/roles';
 
 import { INITIAL_TENANTS } from './data/mockTenants';
@@ -149,16 +148,19 @@ export const App: React.FC = () => {
     safeSetLocalStorage(ACTIVE_TAB_STORAGE_KEY, tab);
   };
 
-  // Restrição de telas por papel + contexto (issue #159, pedido direto do
-  // Lucas: atendente não deve ver Financeiro nem telas administrativas).
-  // Mesmos níveis usados em Header.tsx pra esconder os botões das abas —
-  // repetido aqui pra também travar o CONTEÚDO: esconder só o botão não
-  // bastaria se activeTab ficasse apontando pra uma aba proibida (ex: troca
-  // de usuário no meio da sessão, sem reload da página).
-  const isInstalledApp = isStandalonePwa();
-  const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
-  const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
-  const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
+  // Restrição de telas por papel (issue #159 original + TASK-0038: o app
+  // instalado (PWA) escondia Financeiro/Admin/SaaS Master de TODO MUNDO,
+  // mesmo de quem tinha papel pra ver (ex: o próprio dono do produto como
+  // saas_admin) — bloqueio era por "está instalado?", não por credencial
+  // real. Agora a regra é só o papel, igual ao navegador: quem tem o papel
+  // vê a tela também no app instalado; quem não tem continua sem ver nem
+  // no navegador. Mesmos níveis usados em Header.tsx pra esconder os
+  // botões das abas — repetido aqui pra também travar o CONTEÚDO: esconder
+  // só o botão não bastaria se activeTab ficasse apontando pra uma aba
+  // proibida (ex: troca de usuário no meio da sessão, sem reload da página).
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager');
+  const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
+  const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
