@@ -1442,55 +1442,55 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         ) : <p className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3 text-xs text-emerald-200">A estrutura principal está completa para o agente usar dados reais desta empresa.</p>}
       </section>
 
-      {/* Modelos fixos servem apenas para configurar novos tenants e não ocupam a área operacional. */}
+      {/* Configuração inicial de tenants: modelos e cópia da base ficam no mesmo painel. */}
       {canUseBusinessTemplates && (
         <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl shadow-md overflow-hidden">
           <button type="button" onClick={() => setIsBusinessTemplatesOpen((open) => !open)} className="w-full p-3.5 flex items-center justify-between gap-3 text-left hover:bg-slate-800/50 transition-colors">
-            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5"><Zap className="w-4 h-4 text-amber-400" />Modelos de negócio para configurar um novo tenant</span>
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5"><Zap className="w-4 h-4 text-amber-400" />Modelos de negócio e cópia de base para novo tenant</span>
             <span className="text-[11px] text-slate-500 flex items-center gap-1.5">{isBusinessTemplatesOpen ? 'Ocultar' : 'Abrir'} {isBusinessTemplatesOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}</span>
           </button>
-          {isBusinessTemplatesOpen && <div className="border-t border-slate-800 p-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-            {PRESET_TEMPLATES.map((tmpl, idx) => <button type="button" key={idx} onClick={() => handleApplyPreset(tmpl)} className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/80 hover:bg-slate-800/70 hover:border-emerald-500/40 transition-all text-left group">
-              <h4 className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors flex items-center justify-between"><span>{tmpl.name}</span><ArrowRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" /></h4>
-              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{tmpl.desc}</p>
-            </button>)}
+          {isBusinessTemplatesOpen && <div className="border-t border-slate-800 p-3 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {PRESET_TEMPLATES.map((tmpl, idx) => <button type="button" key={idx} onClick={() => handleApplyPreset(tmpl)} className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/80 hover:bg-slate-800/70 hover:border-emerald-500/40 transition-all text-left group">
+                <h4 className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors flex items-center justify-between"><span>{tmpl.name}</span><ArrowRight className="w-3.5 h-3.5 text-slate-600 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" /></h4>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{tmpl.desc}</p>
+              </button>)}
+            </div>
+            {copyableTenants.length > 0 && (
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Download className="w-4 h-4 text-sky-400" />
+                    Copiar Base de Conhecimento de outra empresa
+                  </span>
+                  <span className="text-[11px] text-slate-500">Só saas_admin • útil pra configurar um tenant novo a partir de um já pronto</span>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    value={copySourceTenantId}
+                    onChange={(e) => setCopySourceTenantId(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/60"
+                  >
+                    <option value="">Selecione a empresa de origem...</option>
+                    {copyableTenants.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleCopyFromTenant}
+                    disabled={!copySourceTenantId || isCopyingKb}
+                    className="px-4 py-2 rounded-xl font-bold text-xs bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    {isCopyingKb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>Carregar nesta base</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Preenche o formulário abaixo com produtos, regras, FAQs e mensagem inicial (texto/imagem) dessa empresa — vídeos e arquivos anexados não são copiados, precisam ser re-anexados aqui se fizerem falta. Nada é salvo até você clicar em "Salvar Regras no Agente".
+                </p>
+              </div>
+            )}
           </div>}
-        </div>
-      )}
-
-      {/* Copiar Base de Conhecimento real de outro tenant (só saas_admin) */}
-      {copyableTenants.length > 0 && (
-        <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-md space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Download className="w-4 h-4 text-sky-400" />
-              Copiar Base de Conhecimento de outra empresa
-            </span>
-            <span className="text-[11px] text-slate-500">Só saas_admin • útil pra configurar um tenant novo a partir de um já pronto</span>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <select
-              value={copySourceTenantId}
-              onChange={(e) => setCopySourceTenantId(e.target.value)}
-              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500/60"
-            >
-              <option value="">Selecione a empresa de origem...</option>
-              {copyableTenants.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-            <button
-              onClick={handleCopyFromTenant}
-              disabled={!copySourceTenantId || isCopyingKb}
-              className="px-4 py-2 rounded-xl font-bold text-xs bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white flex items-center justify-center gap-2 transition-all cursor-pointer"
-            >
-              {isCopyingKb ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              <span>Carregar nesta base</span>
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-500 leading-relaxed">
-            Preenche o formulário abaixo com produtos, regras, FAQs e mensagem inicial (texto/imagem) dessa empresa — vídeos e arquivos anexados não são copiados, precisam ser re-anexados aqui se fizerem falta. Nada é salvo até você clicar em "Salvar Regras no Agente".
-          </p>
         </div>
       )}
 
