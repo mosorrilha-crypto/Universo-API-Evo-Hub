@@ -42,6 +42,10 @@ export interface PublicCatalog {
     locationMapsUrl?: string;
     addressLabel?: string;
     hoursLabel?: string;
+    /** Texto pré-preenchido do botão geral de WhatsApp ("Escribinos por WhatsApp"). Ausente = frontend usa o texto padrão. */
+    whatsappMessageGeneral?: string;
+    /** Template do texto pré-preenchido do botão "Consultar por WhatsApp" de cada produto — `{produto}` é trocado pelo nome do produto. Ausente = frontend usa o texto padrão. */
+    whatsappMessageProduct?: string;
   };
   products: PublicCatalogProduct[];
 }
@@ -111,7 +115,7 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
 
   const { data: tenant, error } = await getDb()
     .from('tenants')
-    .select('id, name, slug, currency, locale, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label')
+    .select('id, name, slug, currency, locale, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
     .eq('slug', normalizedSlug)
     .maybeSingle();
   if (error) throw error;
@@ -127,6 +131,8 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
     locationMapsUrl: tenant.public_location_maps_url || knowledgeBase.locationMapsUrl || undefined,
     addressLabel: tenant.public_address || undefined,
     hoursLabel: tenant.public_hours_label || undefined,
+    whatsappMessageGeneral: tenant.public_whatsapp_message_general || undefined,
+    whatsappMessageProduct: tenant.public_whatsapp_message_product || undefined,
   };
   return catalog;
 }

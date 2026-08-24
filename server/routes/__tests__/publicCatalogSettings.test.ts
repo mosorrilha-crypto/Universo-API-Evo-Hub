@@ -78,6 +78,8 @@ describe('GET /api/public-catalog-settings', () => {
       locationMapsUrl: '',
       address: '',
       hoursLabel: '',
+      whatsappMessageGeneral: '',
+      whatsappMessageProduct: '',
     });
   });
 
@@ -100,6 +102,8 @@ describe('PUT /api/public-catalog-settings', () => {
         locationMapsUrl: 'https://maps.example/x',
         address: 'Rua X, 123',
         hoursLabel: 'Lun-Vie 8-18h',
+        whatsappMessageGeneral: 'Hola, quiero info general.',
+        whatsappMessageProduct: 'Hola, quiero info sobre {produto}.',
       }),
     });
     expect(put.status).toBe(200);
@@ -109,6 +113,8 @@ describe('PUT /api/public-catalog-settings', () => {
     expect(body.enabled).toBe(true);
     expect(body.whatsappPhone).toBe('595981436141');
     expect(body.instagramUrl).toBe('https://instagram.com/pestanaspormonique');
+    expect(body.whatsappMessageGeneral).toBe('Hola, quiero info general.');
+    expect(body.whatsappMessageProduct).toBe('Hola, quiero info sobre {produto}.');
   });
 
   it('nunca escreve no tenant de outra sessão', async () => {
