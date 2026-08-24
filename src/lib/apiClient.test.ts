@@ -17,4 +17,10 @@ describe('apiClient tenant override', () => {
     setTenantOverride(tenantId);
     expect(getTenantOverride()).toBe(tenantId);
   });
+
+  it('aceita o UUID canônico legado do Clic mesmo sem variante RFC 4122', () => {
+    const tenantId = '11111111-1111-1111-1111-111111111111';
+    setTenantOverride(tenantId);
+    expect(getTenantOverride()).toBe(tenantId);
+  });
 });

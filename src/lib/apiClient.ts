@@ -56,7 +56,10 @@ const readStoredTenantOverride = (): string | null => {
 // O backend persiste tenant_id como UUID. O cache antigo do frontend ainda
 // pode conter IDs fictícios (ex: "tenant_004"); nunca envie esse valor no
 // X-Tenant-Id, pois o PostgreSQL rejeita a consulta antes de ela chegar à rota.
-const TENANT_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Aceitamos o formato UUID canônico completo sem restringir versão/variante:
+// o tenant legado do Clic usa um UUID válido para o Postgres, mas criado com
+// grupos que não seguem a variante RFC 4122 tradicional.
+const TENANT_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const normalizeTenantOverride = (tenantId: string | null): string | null => {
   const normalized = tenantId?.trim();
   return normalized && TENANT_UUID_PATTERN.test(normalized) ? normalized : null;
