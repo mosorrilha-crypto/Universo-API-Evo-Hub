@@ -2152,3 +2152,22 @@ html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/15 { backgro
 
 html[data-theme='light'] .knowledge-workspace__audit .border-amber-400\/20,
 html[data-theme='light'] .knowledge-workspace__audit .border-amber-400\/25 { border-color: #E6BB58 !important; }
+
+
+/* Tons históricos de ciano/índigo/violeta são normalizados para o azul
+   operacional. Isso evita texto pastel e remove roxo residual do sistema. */
+html[data-theme='light'] .text-cyan-50,
+html[data-theme='light'] .text-cyan-100,
+html[data-theme='light'] .text-cyan-200,
+html[data-theme='light'] .text-cyan-300,
+html[data-theme='light'] .text-cyan-400,
+html[data-theme='light'] .text-indigo-50,
+html[data-theme='light'] .text-indigo-100,
+html[data-theme='light'] .text-indigo-200,
+html[data-theme='light'] .text-indigo-300,
+html[data-theme='light'] .text-indigo-400,
+html[data-theme='light'] .text-violet-50,
+html[data-theme='light'] .text-violet-100,
+html[data-theme='light'] .text-violet-200,
+html[data-theme='light'] .text-violet-300,
+html[data-theme='light'] .text-violet-400 { color: #0D718A !important; }
