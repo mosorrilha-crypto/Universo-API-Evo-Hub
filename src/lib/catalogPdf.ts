@@ -26,6 +26,20 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * Mesma correção aplicada em `PublicCatalogPage.tsx` (`normalizeSpanishText`)
+ * pra dois resquícios de português que sobraram no campo `price` de alguns
+ * produtos da Monique — a tradução da TASK-0049 só cobriu `name`/`description`
+ * no banco, não `price`. Mantida em espelho aqui pro PDF não voltar a mostrar
+ * "varia por efeito"/"varia pela técnica" depois que a página já corrige isso.
+ */
+function normalizeSpanishText(value: string): string {
+  return value
+    .replaceAll('varia por efeito', 'varía según el efecto')
+    .replaceAll('varia pela técnica', 'varía según la técnica')
+    .replaceAll('varia por efecto', 'varía según el efecto');
+}
+
 function formatDurationLabel(minutes?: number): string | null {
   if (!minutes || minutes <= 0) return null;
   const hours = Math.floor(minutes / 60);
@@ -116,14 +130,19 @@ function buildProductCardHtml(product: AgentProduct, contact: CatalogPdfContact)
     ? `<div style="margin-top:12px;border-top:1px solid rgba(78,62,49,.12);">${product.variants
         .map(
           (variant) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid rgba(78,62,49,.12);font-size:11.5px;color:#6f6258;">
-            <span>${escapeHtml(variant.code)}</span><strong style="color:#8d5c43;white-space:nowrap;">${escapeHtml(variant.price || '—')}</strong>
+            <span>${escapeHtml(normalizeSpanishText(variant.code))}</span><strong style="color:#8d5c43;white-space:nowrap;">${escapeHtml(normalizeSpanishText(variant.price || '—'))}</strong>
           </div>`,
         )
         .join('')}</div>`
     : '';
 
+  // Na página real esse é um link `<a>` que abre o WhatsApp — num PDF estático
+  // (imagem rasterizada, nada clicável) o mesmo botão preenchido com seta ↗
+  // vira uma isca visual morta: parece 100% clicável e não faz nada quando
+  // tocado, repetido em cada produto do catálogo. Em vez do CTA, mostra o
+  // número por extenso — informação que o cliente realmente pode usar.
   const whatsappHtml = contact.whatsappPhone
-    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px;padding:12px 14px;background:#c9987a;color:#fffdf9;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;">Consultar por WhatsApp <span>↗</span></div>`
+    ? `<div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(78,62,49,.12);color:#987254;font-size:11px;letter-spacing:.03em;">Consultas: WhatsApp ${escapeHtml(contact.whatsappPhone)}</div>`
     : '';
 
   return `<div data-pdf-block="true" style="border:1px solid rgba(78,62,49,.15);background:#fffdf9;padding:22px 24px;margin-bottom:14px;box-shadow:0 10px 26px rgba(78,62,49,.05);">
@@ -131,12 +150,12 @@ function buildProductCardHtml(product: AgentProduct, contact: CatalogPdfContact)
       <span style="display:inline-block;width:7px;height:7px;border:1px solid #bc896c;border-radius:50%;"></span>
       ${duration ? `<span>${escapeHtml(duration)}</span>` : ''}
     </div>
-    <div style="margin:18px 0 12px;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:22px;color:#211d1a;line-height:1.05;">${escapeHtml(product.name)}</div>
+    <div style="margin:18px 0 12px;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:22px;color:#211d1a;line-height:1.05;">${escapeHtml(normalizeSpanishText(product.name))}</div>
     <div style="display:flex;align-items:baseline;gap:8px;">
-      <strong style="color:#8d5c43;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:19px;font-weight:400;">${escapeHtml(product.price || '—')}</strong>
+      <strong style="color:#8d5c43;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:19px;font-weight:400;">${escapeHtml(normalizeSpanishText(product.price || '—'))}</strong>
       <span style="color:#987254;font-size:9px;letter-spacing:.1em;text-transform:uppercase;">Desde</span>
     </div>
-    ${product.description ? `<div style="margin-top:14px;font-size:12.5px;color:#6f6258;line-height:1.65;">${escapeHtml(product.description)}</div>` : ''}
+    ${product.description ? `<div style="margin-top:14px;font-size:12.5px;color:#6f6258;line-height:1.65;">${escapeHtml(normalizeSpanishText(product.description))}</div>` : ''}
     ${variantsHtml}
     ${whatsappHtml}
   </div>`;
@@ -169,7 +188,7 @@ function buildCatalogHtml(tenantName: string, contact: CatalogPdfContact, produc
   const groupsHtml = [...groups.entries()]
     .map(
       ([category, items]) => `<div style="margin-bottom:32px;">
-        <div style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#987254;margin-bottom:16px;">${escapeHtml(category)}</div>
+        <div style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#987254;margin-bottom:16px;">${escapeHtml(normalizeSpanishText(category))}</div>
         ${items.map((product) => buildProductCardHtml(product, contact)).join('')}
       </div>`,
     )
