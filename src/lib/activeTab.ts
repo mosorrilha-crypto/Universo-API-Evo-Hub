@@ -12,11 +12,13 @@ const ACTIVE_TAB_VALUES: readonly ActiveTab[] = [
   'attribution',
   'knowledge',
   'catalog',
-  'integration',
   'escalations',
   'quality',
 ];
 
 export function parseStoredActiveTab(value: string | null): ActiveTab {
+  // Integrações deixou de ser uma tela de operação. Migra a preferência antiga
+  // para Atendimento para que um refresh não reabra uma página descontinuada.
+  if (value === 'integration') return 'whatsapp';
   return value && ACTIVE_TAB_VALUES.includes(value as ActiveTab) ? value as ActiveTab : 'home';
 }

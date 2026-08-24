@@ -22,7 +22,6 @@ import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
 import { PublicCatalogSettings } from './components/PublicCatalogSettings';
 import { OperationsCenter } from './components/OperationsCenter';
-import { WhatsAppGuide } from './components/WhatsAppGuide';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
@@ -171,7 +170,7 @@ export const App: React.FC = () => {
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (['financial', 'agenda_financeiro'].includes(activeTab) && !canSeeFinancial) ||
-      (['attribution', 'knowledge', 'catalog', 'integration', 'quality'].includes(activeTab) && !canSeeAdminTools);
+      (['attribution', 'knowledge', 'catalog', 'quality'].includes(activeTab) && !canSeeAdminTools);
     if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role]);
@@ -1147,11 +1146,6 @@ export const App: React.FC = () => {
               handleSetActiveTab('whatsapp');
             }}
                     />
-          </OperationsModuleFrame>
-        )}
-        {activeTab === 'integration' && canSeeAdminTools && (
-          <OperationsModuleFrame title="Integrações" eyebrow="Canais e conexões" description="Mantenha os canais e serviços conectados para que a operação siga sem interrupções." accent="blue">
-            <WhatsAppGuide />
           </OperationsModuleFrame>
         )}
         {activeTab === 'quality' && canSeeAdminTools && (

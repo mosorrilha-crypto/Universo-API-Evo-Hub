@@ -7,8 +7,8 @@ describe('parseStoredActiveTab', () => {
     expect(parseStoredActiveTab('whatsapp')).toBe('whatsapp');
   });
 
-  it('mantém Integrações válida para acesso contextual', () => {
-    expect(parseStoredActiveTab('integration')).toBe('integration');
+  it('migra a preferência antiga de Integrações para Atendimento', () => {
+    expect(parseStoredActiveTab('integration')).toBe('whatsapp');
   });
 
   it('usa home para valor ausente ou inválido', () => {

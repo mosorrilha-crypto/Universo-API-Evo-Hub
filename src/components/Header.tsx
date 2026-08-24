@@ -56,9 +56,11 @@ export const Header: React.FC<HeaderProps> = ({
   const { language, setLanguage, theme, setTheme } = useAppPreferences();
   const tabsRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const mobileTenantMenuRef = useRef<HTMLDivElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isAdminToolsMenuOpen, setIsAdminToolsMenuOpen] = useState(false);
+  const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
   const [isInstalledApp] = useState(() => isStandalonePwa());
   const isSpanish = language === 'es';
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'blue' : 'dark');
@@ -67,9 +69,9 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: 'Atención, CRM, agenda, caja y conversiones en un solo lugar', today: 'Hoy', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda y Caja', growth: 'Crecimiento', quality: 'Calidad de IA', knowledge: 'Conocimiento', catalog: 'Catálogo', integration: 'Integraciones', escalations: 'Pendientes', companies: 'Empresas', adminGroup: 'Administración', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: 'Atención, CRM, agenda, caja y conversiones en un solo lugar', today: 'Hoy', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda y Caja', growth: 'Crecimiento', quality: 'Calidad de IA', knowledge: 'Conocimiento', catalog: 'Catálogo', escalations: 'Pendientes', companies: 'Empresas', adminGroup: 'Administración', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: 'Atendimento, CRM, agenda, caixa e conversões em um só lugar', today: 'Hoje', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda & Caixa', growth: 'Crescimento', quality: 'Qualidade IA', knowledge: 'Conhecimento', catalog: 'Catálogo', integration: 'Integrações', escalations: 'Pendências', companies: 'Empresas', adminGroup: 'Administração', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: 'Atendimento, CRM, agenda, caixa e conversões em um só lugar', today: 'Hoje', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda & Caixa', growth: 'Crescimento', quality: 'Qualidade IA', knowledge: 'Conhecimento', catalog: 'Catálogo', escalations: 'Pendências', companies: 'Empresas', adminGroup: 'Administração', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   const primaryNavigation: NavigationItem[] = [
@@ -87,7 +89,6 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'quality', label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' },
     { id: 'knowledge', label: copy.knowledge, icon: <Brain className="w-4 h-4" /> },
     { id: 'catalog', label: copy.catalog, icon: <Link2 className="w-4 h-4" /> },
-    { id: 'integration', label: copy.integration, icon: <Layers className="w-4 h-4" /> },
   ] : [];
   const isAdminToolsActive = adminToolsNavigation.some((item) => item.id === activeTab);
 
@@ -108,10 +109,27 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', close);
   }, [isAdminToolsMenuOpen]);
 
+  useEffect(() => {
+    if (!isMobileTenantMenuOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (mobileTenantMenuRef.current && !mobileTenantMenuRef.current.contains(event.target as Node)) setIsMobileTenantMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsMobileTenantMenuOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [isMobileTenantMenuOpen]);
+
   const selectTab = (tab: ActiveTab) => {
     setActiveTab(tab);
     setIsMobileMenuOpen(false);
     setIsAdminToolsMenuOpen(false);
+    setIsMobileTenantMenuOpen(false);
   };
   const scrollTabs = (direction: 'left' | 'right') => tabsRef.current?.scrollBy({ left: direction === 'left' ? -320 : 320, behavior: 'smooth' });
   const tabClass = (item: NavigationItem) => {
@@ -143,13 +161,49 @@ export const Header: React.FC<HeaderProps> = ({
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">
         <div className="flex min-w-0 items-center gap-2"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-4 h-4" /></div><span className="truncate text-sm font-bold text-white">Universo</span></div>
-        <div className="flex items-center gap-1"><button type="button" onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')} className="rounded-md border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-200" title={isSpanish ? 'Português' : 'Español'}>{isSpanish ? 'PT' : 'ES'}</button><button type="button" onClick={toggleTheme} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800" title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button><button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setIsAdminToolsMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}</button></div>
+        <div className="flex items-center gap-1"><button type="button" onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')} className="rounded-md border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-200" title={isSpanish ? 'Português' : 'Español'}>{isSpanish ? 'PT' : 'ES'}</button><button type="button" onClick={toggleTheme} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800" title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button><button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setIsAdminToolsMenuOpen(false); setIsMobileTenantMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}</button></div>
       </div>
       {isMobileMenuOpen && <div className="border-t border-slate-800 pb-3 pt-2 md:hidden">
         <div className="flex flex-col gap-1 pb-1">{primaryNavigation.map(renderTab)}{adminNavigation.map(renderTab)}{renderAdminToolsMenu('mobile')}</div>
-        <div className="mt-3 flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-          <div className="min-w-0"><p className="text-[10px] text-slate-500">{copy.activeCompany}</p><p className="truncate text-xs font-semibold text-slate-200">{activeTenant.name}</p></div>
-          {currentUser ? <button type="button" onClick={onLogout} className="inline-flex items-center gap-1 text-xs font-semibold text-rose-300"><LogOut className="w-3.5 h-3.5" />{copy.signOut}</button> : <button type="button" onClick={onOpenLoginModal} className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-300"><User className="w-3.5 h-3.5" />{copy.signIn}</button>}
+        <div className="relative mt-3 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" ref={mobileTenantMenuRef}>
+          <div className="flex items-center justify-between gap-2">
+            {canSeeSaasMaster && tenants.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setIsMobileTenantMenuOpen((value) => !value)}
+                aria-haspopup="menu"
+                aria-expanded={isMobileTenantMenuOpen}
+                aria-controls="mobile-active-tenant-menu"
+                aria-label={`${copy.activeCompany}: ${activeTenant.name}`}
+                className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md text-left touch-manipulation focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
+              >
+                <span className="min-w-0"><span className="block text-[10px] text-slate-500">{copy.activeCompany}</span><span className="block truncate text-xs font-semibold text-slate-200">{activeTenant.name}</span></span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isMobileTenantMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+              </button>
+            ) : (
+              <div className="min-w-0"><p className="text-[10px] text-slate-500">{copy.activeCompany}</p><p className="truncate text-xs font-semibold text-slate-200">{activeTenant.name}</p></div>
+            )}
+            {currentUser ? <button type="button" onClick={onLogout} className="inline-flex min-h-10 shrink-0 items-center gap-1 text-xs font-semibold text-rose-300"><LogOut className="w-3.5 h-3.5" />{copy.signOut}</button> : <button type="button" onClick={onOpenLoginModal} className="inline-flex min-h-10 shrink-0 items-center gap-1 text-xs font-semibold text-emerald-300"><User className="w-3.5 h-3.5" />{copy.signIn}</button>}
+          </div>
+          {canSeeSaasMaster && tenants.length > 1 && isMobileTenantMenuOpen && (
+            <div id="mobile-active-tenant-menu" className="mt-2 space-y-1 border-t border-slate-800 pt-2" role="menu" aria-label={copy.activeCompany}>
+              <p className="px-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{copy.activeCompany}</p>
+              <div className="max-h-52 space-y-1 overflow-y-auto">
+                {tenants.map((tenant) => (
+                  <button
+                    key={tenant.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { onSelectTenant(tenant); setIsMobileTenantMenuOpen(false); setIsMobileMenuOpen(false); }}
+                    className={`flex min-h-10 w-full items-center justify-between rounded-md px-2 py-2 text-left text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${tenant.id === activeTenant.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}
+                  >
+                    <span className="truncate">{tenant.name}</span>
+                    {tenant.id === activeTenant.id && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" role="group" aria-label="Modo visual">
           <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Modo visual</span>
