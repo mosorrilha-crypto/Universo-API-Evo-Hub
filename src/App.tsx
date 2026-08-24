@@ -1128,6 +1128,8 @@ export const App: React.FC = () => {
         {activeTab === 'catalog' && canSeeAdminTools && (
           <PublicCatalogSettings
             tenantSlug={activeTenant.slug}
+            tenantName={activeTenant.name}
+            products={knowledgeBase.products || []}
             activeProductCount={(knowledgeBase.products || []).filter((product) => product.active !== false).length}
             onGoToKnowledgeBase={() => handleSetActiveTab('knowledge')}
           />

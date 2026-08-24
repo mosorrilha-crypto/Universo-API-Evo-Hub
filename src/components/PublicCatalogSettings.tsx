@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ExternalLink, Link2, Loader2, Save } from 'lucide-react';
+import { Download, ExternalLink, Link2, Loader2, Save } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
+import { downloadCatalogPdf } from '../lib/catalogPdf';
+import type { AgentProduct } from '../types';
 
 interface PublicCatalogFormState {
   enabled: boolean;
@@ -27,6 +29,10 @@ const EMPTY_FORM: PublicCatalogFormState = {
 interface PublicCatalogSettingsProps {
   /** Slug do tenant ativo — usado só pra montar o link de pré-visualização (`/catalogo/:slug`); nunca enviado na requisição, o backend sempre resolve o tenant pelo JWT. */
   tenantSlug: string;
+  /** Nome do negócio — usado só no cabeçalho do PDF gerado localmente, nunca enviado ao backend. */
+  tenantName: string;
+  /** Produtos da Base de Conhecimento já carregados no painel — reaproveitados pra montar o PDF sem depender do catálogo público estar habilitado nem de uma chamada extra ao backend. */
+  products: AgentProduct[];
   /** Quantos produtos da Base de Conhecimento aparecem no catálogo público hoje (mesmo filtro `active !== false` do backend) — deixa claro que esta aba não cadastra produto, só publica o que já está na Base de Conhecimento. */
   activeProductCount: number;
   onGoToKnowledgeBase: () => void;
@@ -45,12 +51,13 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 const inputClass =
   'w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60';
 
-export function PublicCatalogSettings({ tenantSlug, activeProductCount, onGoToKnowledgeBase }: PublicCatalogSettingsProps) {
+export function PublicCatalogSettings({ tenantSlug, tenantName, products, activeProductCount, onGoToKnowledgeBase }: PublicCatalogSettingsProps) {
   const [form, setForm] = useState<PublicCatalogFormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +87,22 @@ export function PublicCatalogSettings({ tenantSlug, activeProductCount, onGoToKn
       cancelled = true;
     };
   }, [tenantSlug]);
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      await downloadCatalogPdf(
+        tenantName,
+        { whatsappPhone: form.whatsappPhone, instagramUrl: form.instagramUrl, address: form.address, hoursLabel: form.hoursLabel },
+        products,
+      );
+    } catch (err) {
+      console.error('Falha ao gerar PDF do catálogo:', err);
+      setError('Não foi possível gerar o PDF. Tente de novo.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -115,18 +138,30 @@ export function PublicCatalogSettings({ tenantSlug, activeProductCount, onGoToKn
             </p>
           </div>
         </div>
-        {form.enabled && (
-          <a
-            href={`/catalogo/${encodeURIComponent(tenantSlug)}`}
-            target="_blank"
-            rel="noreferrer"
-            className="px-3 py-2 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 text-xs font-semibold flex items-center gap-1.5 transition-all flex-shrink-0"
-            title="Abrir catálogo público"
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={!products.length || downloadingPdf}
+            className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/60 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            title={products.length ? 'Baixar catálogo como PDF' : 'Nenhum produto cadastrado ainda'}
           >
-            <ExternalLink className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Ver catálogo</span>
-          </a>
-        )}
+            {downloadingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">Baixar PDF</span>
+          </button>
+          {form.enabled && (
+            <a
+              href={`/catalogo/${encodeURIComponent(tenantSlug)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-2 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
+              title="Abrir catálogo público"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Ver catálogo</span>
+            </a>
+          )}
+        </div>
       </div>
 
       {loading ? (
