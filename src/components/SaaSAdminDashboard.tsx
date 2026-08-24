@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, ProviderBreakdown, QueueSystemStatus, RoadmapItem, RoadmapPriority } from '../types';
 import { apiFetch } from '../lib/apiClient';
+import { useRealTenants } from '../hooks/useRealTenants';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   Building2,
@@ -31,12 +32,6 @@ import {
   Trash2
 } from 'lucide-react';
 
-interface RealTenant {
-  id: string;
-  name: string;
-  slug: string | null;
-}
-
 /**
  * Onboarding real de WhatsApp via Evolution API (Epic 4.6, issue #95) —
  * substitui o antigo `ConfiguracaoCanais`, que era 100% decorativo (chamava
@@ -55,8 +50,7 @@ interface RealTenant {
  */
 export function ConectarEvolutionQrCode() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [realTenants, setRealTenants] = useState<RealTenant[]>([]);
-  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+  const { realTenants, isLoadingRealTenants: isLoadingTenants, refetchRealTenants: fetchRealTenants } = useRealTenants();
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
   const [newTenantName, setNewTenantName] = useState('');
   const [isCreatingTenant, setIsCreatingTenant] = useState(false);
@@ -66,21 +60,10 @@ export function ConectarEvolutionQrCode() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isRecreating, setIsRecreating] = useState(false);
 
-  const fetchRealTenants = async () => {
-    setIsLoadingTenants(true);
-    try {
-      const res = await apiFetch('/api/admin/tenants');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const tenants: RealTenant[] = (data.tenants || []).map((t: any) => ({ id: t.id, name: t.name, slug: t.slug }));
-      setRealTenants(tenants);
-      if (tenants.length && !selectedTenantId) setSelectedTenantId(tenants[0].id);
-    } catch (err) {
-      console.error('Falha ao carregar tenants reais:', err);
-    } finally {
-      setIsLoadingTenants(false);
-    }
-  };
+  useEffect(() => {
+    if (realTenants.length && !selectedTenantId) setSelectedTenantId(realTenants[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realTenants]);
 
   const openModal = () => {
     setIsModalOpen(true);
@@ -337,8 +320,7 @@ export function ConectarEvolutionQrCode() {
  */
 function GerenciarCredenciaisCapi() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [realTenants, setRealTenants] = useState<RealTenant[]>([]);
-  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+  const { realTenants, isLoadingRealTenants: isLoadingTenants, refetchRealTenants: fetchRealTenants } = useRealTenants();
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
   const [isLoadingCreds, setIsLoadingCreds] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -349,21 +331,10 @@ function GerenciarCredenciaisCapi() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const fetchRealTenants = async () => {
-    setIsLoadingTenants(true);
-    try {
-      const res = await apiFetch('/api/admin/tenants');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const tenants: RealTenant[] = (data.tenants || []).map((t: any) => ({ id: t.id, name: t.name, slug: t.slug }));
-      setRealTenants(tenants);
-      if (tenants.length && !selectedTenantId) setSelectedTenantId(tenants[0].id);
-    } catch (err) {
-      console.error('Falha ao carregar tenants reais:', err);
-    } finally {
-      setIsLoadingTenants(false);
-    }
-  };
+  useEffect(() => {
+    if (realTenants.length && !selectedTenantId) setSelectedTenantId(realTenants[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realTenants]);
 
   // Nunca limpa successMsg aqui — handleSave chama isso logo depois de setar
   // a mensagem de sucesso pra atualizar os campos com o que ficou salvo, e
@@ -552,8 +523,7 @@ function GerenciarCredenciaisCapi() {
  */
 function GerenciarCredenciaisInstagram() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [realTenants, setRealTenants] = useState<RealTenant[]>([]);
-  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+  const { realTenants, isLoadingRealTenants: isLoadingTenants, refetchRealTenants: fetchRealTenants } = useRealTenants();
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
   const [isLoadingCreds, setIsLoadingCreds] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -563,21 +533,10 @@ function GerenciarCredenciaisInstagram() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const fetchRealTenants = async () => {
-    setIsLoadingTenants(true);
-    try {
-      const res = await apiFetch('/api/admin/tenants');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const tenants: RealTenant[] = (data.tenants || []).map((t: any) => ({ id: t.id, name: t.name, slug: t.slug }));
-      setRealTenants(tenants);
-      if (tenants.length && !selectedTenantId) setSelectedTenantId(tenants[0].id);
-    } catch (err) {
-      console.error('Falha ao carregar tenants reais:', err);
-    } finally {
-      setIsLoadingTenants(false);
-    }
-  };
+  useEffect(() => {
+    if (realTenants.length && !selectedTenantId) setSelectedTenantId(realTenants[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realTenants]);
 
   // Nunca limpa successMsg aqui — mesmo motivo de GerenciarCredenciaisCapi
   // acima (handleSave chama isso logo depois de setar a mensagem de sucesso).
@@ -1014,40 +973,16 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   // outros tenants reais já cadastrados no banco. Uma lista só, real, usada
   // em todo o painel agora — sem os campos decorativos (plano, MRR, engine
   // de WhatsApp) que nunca existiram na tabela `tenants` real.
-  const [realTenants, setRealTenants] = useState<
-    { id: string; name: string; slug: string | null; segment: string | null; currency: string; locale: string; createdAt: string; whatsappConnected: boolean }[]
-  >([]);
-  const [isLoadingRealTenants, setIsLoadingRealTenants] = useState(false);
-
-  const fetchRealTenants = async () => {
-    if (!isSaasAdminUser) return;
-    setIsLoadingRealTenants(true);
-    try {
-      const res = await apiFetch('/api/admin/tenants');
-      const data = res.ok ? await res.json() : null;
-      const list = (data?.tenants || []).map((t: any) => ({
-        id: t.id,
-        name: t.name,
-        slug: t.slug ?? null,
-        segment: t.segment ?? null,
-        currency: t.currency,
-        locale: t.locale,
-        createdAt: t.created_at,
-        whatsappConnected: !!t.whatsappConnected,
-      }));
-      setRealTenants(list);
-      setNewUserTenantId((prev) => prev || list[0]?.id || '');
-    } catch (err) {
-      console.error('Falha ao carregar tenants reais:', err);
-    } finally {
-      setIsLoadingRealTenants(false);
-    }
-  };
+  const { realTenants, isLoadingRealTenants, refetchRealTenants: fetchRealTenants } = useRealTenants();
 
   useEffect(() => {
-    fetchRealTenants();
+    if (isSaasAdminUser) fetchRealTenants();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSaasAdminUser]);
+
+  useEffect(() => {
+    setNewUserTenantId((prev) => prev || realTenants[0]?.id || '');
+  }, [realTenants, setNewUserTenantId]);
 
   // Editar/apagar tenant — pedido real do dono do produto depois de criar
   // tenants de teste com nome errado ("Monique 2", "Tanent 3") e não ter
