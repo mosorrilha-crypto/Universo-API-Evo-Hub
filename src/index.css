@@ -1899,3 +1899,175 @@ html[data-theme='light'] .mobile-header-context-menu {
 html[data-theme='light'] .mobile-header-context-menu .border-t {
   border-color: var(--border) !important;
 }
+
+/* Contraste de ação no modo claro — regra transversal para todas as abas.
+   O tema anterior reaproveitava tons 200/300 pensados para fundo escuro e a
+   opacidade padrão de botões desabilitados apagava rótulos críticos. Aqui,
+   todo controle recebe texto, borda e superfície legíveis em cada estado. */
+html[data-theme='light'] {
+  --button-text: #22241F;
+  --button-muted-text: #686962;
+  --button-disabled-text: #686962;
+  --button-disabled-surface: #ECEBE6;
+  --button-disabled-border: #C9C6BD;
+  --button-action: #176B4C;
+  --button-action-hover: #11563C;
+  --button-info: #0D718A;
+  --button-info-hover: #085D73;
+  --button-warning: #825300;
+  --button-danger: #9C3F2C;
+}
+
+html[data-theme='light'] button:not(:disabled),
+html[data-theme='light'] [role='button']:not([aria-disabled='true']) {
+  color: var(--button-text);
+}
+
+/* Cores de texto semântico escuras para fundos claros, inclusive em botões outline. */
+html[data-theme='light'] button.text-emerald-50,
+html[data-theme='light'] button.text-emerald-100,
+html[data-theme='light'] button.text-emerald-200,
+html[data-theme='light'] button.text-emerald-300,
+html[data-theme='light'] button.text-emerald-400,
+html[data-theme='light'] [role='button'].text-emerald-50,
+html[data-theme='light'] [role='button'].text-emerald-100,
+html[data-theme='light'] [role='button'].text-emerald-200,
+html[data-theme='light'] [role='button'].text-emerald-300,
+html[data-theme='light'] [role='button'].text-emerald-400 { color: var(--button-action) !important; }
+
+html[data-theme='light'] button.text-sky-50,
+html[data-theme='light'] button.text-sky-100,
+html[data-theme='light'] button.text-sky-200,
+html[data-theme='light'] button.text-sky-300,
+html[data-theme='light'] button.text-sky-400,
+html[data-theme='light'] button.text-blue-50,
+html[data-theme='light'] button.text-blue-100,
+html[data-theme='light'] button.text-blue-200,
+html[data-theme='light'] button.text-blue-300,
+html[data-theme='light'] button.text-blue-400,
+html[data-theme='light'] [role='button'].text-sky-50,
+html[data-theme='light'] [role='button'].text-sky-100,
+html[data-theme='light'] [role='button'].text-sky-200,
+html[data-theme='light'] [role='button'].text-sky-300,
+html[data-theme='light'] [role='button'].text-sky-400 { color: var(--button-info) !important; }
+
+html[data-theme='light'] button.text-amber-50,
+html[data-theme='light'] button.text-amber-100,
+html[data-theme='light'] button.text-amber-200,
+html[data-theme='light'] button.text-amber-300,
+html[data-theme='light'] button.text-amber-400,
+html[data-theme='light'] [role='button'].text-amber-50,
+html[data-theme='light'] [role='button'].text-amber-100,
+html[data-theme='light'] [role='button'].text-amber-200,
+html[data-theme='light'] [role='button'].text-amber-300,
+html[data-theme='light'] [role='button'].text-amber-400 { color: var(--button-warning) !important; }
+
+html[data-theme='light'] button.text-rose-50,
+html[data-theme='light'] button.text-rose-100,
+html[data-theme='light'] button.text-rose-200,
+html[data-theme='light'] button.text-rose-300,
+html[data-theme='light'] button.text-rose-400,
+html[data-theme='light'] button.text-red-50,
+html[data-theme='light'] button.text-red-100,
+html[data-theme='light'] button.text-red-200,
+html[data-theme='light'] button.text-red-300,
+html[data-theme='light'] button.text-red-400,
+html[data-theme='light'] [role='button'].text-rose-50,
+html[data-theme='light'] [role='button'].text-rose-100,
+html[data-theme='light'] [role='button'].text-rose-200,
+html[data-theme='light'] [role='button'].text-rose-300,
+html[data-theme='light'] [role='button'].text-rose-400 { color: var(--button-danger) !important; }
+
+/* Botões de ação sólida preservam texto branco verdadeiro e fundo escuro o suficiente. */
+html[data-theme='light'] button[class~='bg-emerald-500'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-emerald-600'][class~='text-white'],
+html[data-theme='light'] [role='button'][class~='bg-emerald-500'][class~='text-white'],
+html[data-theme='light'] [role='button'][class~='bg-emerald-600'][class~='text-white'] {
+  background-color: var(--button-action) !important;
+  border-color: var(--button-action) !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme='light'] button[class~='bg-sky-500'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-sky-600'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-blue-500'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-blue-600'][class~='text-white'],
+html[data-theme='light'] [role='button'][class~='bg-sky-500'][class~='text-white'],
+html[data-theme='light'] [role='button'][class~='bg-sky-600'][class~='text-white'] {
+  background-color: var(--button-info) !important;
+  border-color: var(--button-info) !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme='light'] button[class~='bg-amber-500'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-amber-600'][class~='text-white'],
+html[data-theme='light'] [role='button'][class~='bg-amber-500'][class~='text-white'] {
+  background-color: var(--button-warning) !important;
+  border-color: var(--button-warning) !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme='light'] button[class~='bg-rose-500'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-rose-600'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-red-500'][class~='text-white'],
+html[data-theme='light'] button[class~='bg-red-600'][class~='text-white'],
+html[data-theme='light'] [role='button'][class~='bg-rose-500'][class~='text-white'] {
+  background-color: var(--button-danger) !important;
+  border-color: var(--button-danger) !important;
+  color: #FFFFFF !important;
+}
+
+/* Outline com fundo de baixa intensidade, mas texto e contorno ainda acessíveis. */
+html[data-theme='light'] button[class~='bg-emerald-500/5'],
+html[data-theme='light'] button[class~='bg-emerald-500/10'],
+html[data-theme='light'] button[class~='bg-emerald-500/15'],
+html[data-theme='light'] [role='button'][class~='bg-emerald-500/5'],
+html[data-theme='light'] [role='button'][class~='bg-emerald-500/10'],
+html[data-theme='light'] [role='button'][class~='bg-emerald-500/15'] { background-color: #EAF7F0 !important; border-color: #9CD4B8 !important; }
+
+html[data-theme='light'] button[class~='bg-sky-500/5'],
+html[data-theme='light'] button[class~='bg-sky-500/10'],
+html[data-theme='light'] button[class~='bg-sky-500/15'],
+html[data-theme='light'] button[class~='bg-sky-500/20'],
+html[data-theme='light'] [role='button'][class~='bg-sky-500/5'],
+html[data-theme='light'] [role='button'][class~='bg-sky-500/10'],
+html[data-theme='light'] [role='button'][class~='bg-sky-500/15'],
+html[data-theme='light'] [role='button'][class~='bg-sky-500/20'] { background-color: #E7F4F6 !important; border-color: #9BCFD6 !important; }
+
+html[data-theme='light'] button[class~='bg-amber-500/5'],
+html[data-theme='light'] button[class~='bg-amber-500/10'],
+html[data-theme='light'] button[class~='bg-amber-500/15'],
+html[data-theme='light'] [role='button'][class~='bg-amber-500/5'],
+html[data-theme='light'] [role='button'][class~='bg-amber-500/10'],
+html[data-theme='light'] [role='button'][class~='bg-amber-500/15'] { background-color: #FFF4D8 !important; border-color: #E6BB58 !important; }
+
+html[data-theme='light'] button[class~='bg-rose-500/5'],
+html[data-theme='light'] button[class~='bg-rose-500/10'],
+html[data-theme='light'] button[class~='bg-rose-500/15'],
+html[data-theme='light'] [role='button'][class~='bg-rose-500/5'],
+html[data-theme='light'] [role='button'][class~='bg-rose-500/10'],
+html[data-theme='light'] [role='button'][class~='bg-rose-500/15'] { background-color: #FCEEEA !important; border-color: #E6B8AC !important; }
+
+/* Desabilitado continua distinguível sem desaparecer. */
+html[data-theme='light'] button:disabled,
+html[data-theme='light'] [role='button'][aria-disabled='true'] {
+  opacity: 1 !important;
+  color: var(--button-disabled-text) !important;
+  background-color: var(--button-disabled-surface) !important;
+  border-color: var(--button-disabled-border) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme='light'] button:not(:disabled):hover[class~='bg-emerald-500'],
+html[data-theme='light'] button:not(:disabled):hover[class~='bg-emerald-600'] { background-color: var(--button-action-hover) !important; }
+
+html[data-theme='light'] button:not(:disabled):hover[class~='bg-sky-500'],
+html[data-theme='light'] button:not(:disabled):hover[class~='bg-sky-600'],
+html[data-theme='light'] button:not(:disabled):hover[class~='bg-blue-500'],
+html[data-theme='light'] button:not(:disabled):hover[class~='bg-blue-600'] { background-color: var(--button-info-hover) !important; }
+
+html[data-theme='light'] button:focus-visible,
+html[data-theme='light'] [role='button']:focus-visible {
+  outline: 2px solid var(--button-action) !important;
+  outline-offset: 2px;
+}
