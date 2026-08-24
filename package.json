@@ -29,6 +29,7 @@
     "ffmpeg-static": "^5.3.0",
     "firebase": "^12.17.0",
     "googleapis": "^174.0.1",
+    "html2canvas": "^1.4.1",
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.32.0",
@@ -41,6 +42,8 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.6",
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
@@ -48,6 +51,7 @@
     "@types/pdf-parse": "^1.1.5",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
