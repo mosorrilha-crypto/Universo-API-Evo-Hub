@@ -1,3 +1,7 @@
+/**
+ * Direção visual: Operação Serena — manter a navegação empresarial discreta,
+ * previsível e acessível, sem alterar a identidade visual existente.
+ */
 import React, { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
 import { hasRoleAtLeast } from '../lib/roles';
@@ -38,6 +42,7 @@ interface HeaderProps {
 }
 
 type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
+type DesktopMenuPosition = { top: number; left: number };
 
 const firstName = (name?: string | null) => (name || 'Operador').trim().split(/\s+/)[0] || 'Operador';
 
@@ -56,10 +61,12 @@ export const Header: React.FC<HeaderProps> = ({
   const tabsRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const mobileTenantMenuRef = useRef<HTMLDivElement>(null);
+  const adminToolsButtonRef = useRef<HTMLButtonElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isAdminToolsMenuOpen, setIsAdminToolsMenuOpen] = useState(false);
   const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
+  const [desktopMenuPosition, setDesktopMenuPosition] = useState<DesktopMenuPosition | null>(null);
   const isSpanish = language === 'es';
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'blue' : 'dark');
   // TASK-0038: liberar por papel real, não pela app estar instalada — ver
@@ -105,8 +112,23 @@ export const Header: React.FC<HeaderProps> = ({
       const target = event.target as HTMLElement;
       if (!target.closest('[data-admin-tools-menu]')) setIsAdminToolsMenuOpen(false);
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsAdminToolsMenuOpen(false);
+        adminToolsButtonRef.current?.focus();
+      }
+    };
+    const closeOnViewportChange = () => setIsAdminToolsMenuOpen(false);
     document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    document.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('resize', closeOnViewportChange);
+    window.addEventListener('scroll', closeOnViewportChange, true);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('resize', closeOnViewportChange);
+      window.removeEventListener('scroll', closeOnViewportChange, true);
+    };
   }, [isAdminToolsMenuOpen]);
 
   useEffect(() => {
@@ -132,6 +154,18 @@ export const Header: React.FC<HeaderProps> = ({
     setIsMobileTenantMenuOpen(false);
   };
   const scrollTabs = (direction: 'left' | 'right') => tabsRef.current?.scrollBy({ left: direction === 'left' ? -320 : 320, behavior: 'smooth' });
+  const toggleAdminToolsMenu = (placement: 'mobile' | 'desktop') => {
+    if (placement === 'desktop' && !isAdminToolsMenuOpen) {
+      const triggerBounds = adminToolsButtonRef.current?.getBoundingClientRect();
+      if (triggerBounds) {
+        setDesktopMenuPosition({
+          top: triggerBounds.bottom + 8,
+          left: Math.max(12, Math.min(triggerBounds.left, window.innerWidth - 272)),
+        });
+      }
+    }
+    setIsAdminToolsMenuOpen((value) => !value);
+  };
   const tabClass = (item: NavigationItem) => {
     if (activeTab !== item.id) return 'text-slate-300 hover:text-white hover:bg-slate-800/80';
     if (item.accent === 'sky') return 'bg-sky-600 text-white shadow-sm shadow-sky-950/40';
@@ -145,15 +179,17 @@ export const Header: React.FC<HeaderProps> = ({
     <div className={placement === 'desktop' ? 'relative shrink-0' : 'w-full'} data-admin-tools-menu>
       <button
         type="button"
-        onClick={() => setIsAdminToolsMenuOpen((value) => !value)}
+        ref={placement === 'desktop' ? adminToolsButtonRef : undefined}
+        onClick={() => toggleAdminToolsMenu(placement)}
         aria-haspopup="menu"
         aria-expanded={isAdminToolsMenuOpen}
+        aria-controls={`admin-tools-menu-${placement}`}
         className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${isAdminToolsActive ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/40' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'} ${placement === 'mobile' ? 'w-full justify-between' : ''}`}
       >
         <span className="inline-flex items-center gap-2"><Layers className="h-4 w-4 text-emerald-300" /><span>{canSeeSaasMaster ? copy.companies : copy.adminGroup}</span></span>
         <ChevronDown className={`h-4 w-4 transition-transform ${isAdminToolsMenuOpen ? 'rotate-180' : ''}`} />
       </button>
-      {isAdminToolsMenuOpen && <div className={`${placement === 'desktop' ? 'absolute left-0 top-full z-40 mt-2 w-64' : 'mt-2 w-full'} rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl`} role="menu" aria-label={canSeeSaasMaster ? copy.companies : copy.adminGroup}>{adminToolsNavigation.map(renderAdminTool)}</div>}
+      {isAdminToolsMenuOpen && (placement === 'mobile' || desktopMenuPosition) && <div id={`admin-tools-menu-${placement}`} className={`${placement === 'desktop' ? 'fixed z-50 w-64' : 'mt-2 w-full'} rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl`} style={placement === 'desktop' ? desktopMenuPosition : undefined} role="menu" aria-label={canSeeSaasMaster ? copy.companies : copy.adminGroup}>{adminToolsNavigation.map(renderAdminTool)}</div>}
     </div>
   ) : null;
 
