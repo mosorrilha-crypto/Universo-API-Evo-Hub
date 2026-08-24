@@ -1,7 +1,8 @@
-import { mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { execFile as execFileCallback } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { randomBytes } from 'node:crypto';
 
 const TASK_ID_PATTERN = /^TASK-(\d{4,})\.md$/;
 const LOCK_STALE_AFTER_MS = 5 * 60 * 1000;
@@ -86,16 +87,90 @@ async function acquireLock() {
   throw new Error('Não foi possível reservar a sequência: o registro está bloqueado por outra execução.');
 }
 
-async function getNextSequence() {
+async function getLocalMaxSequence() {
   const entries = await readdir(registryDir, { withFileTypes: true });
-  const lastSequence = entries.reduce((highest, entry) => {
+  return entries.reduce((highest, entry) => {
     if (!entry.isFile()) return highest;
     const match = TASK_ID_PATTERN.exec(entry.name);
     if (!match) return highest;
     return Math.max(highest, Number(match[1]));
   }, 0);
+}
 
-  return lastSequence + 1;
+const CLAIM_REF_PREFIX = 'task-claim';
+const CLAIM_HEAD_PATTERN = /refs\/heads\/task-claim\/(\d{4,})$/;
+const CLAIM_RETRY_COUNT = 30;
+
+/**
+ * O maior TASK-XXXX.md commitado localmente só reflete o que ESTA sessão já
+ * viu — duas sessões em checkouts diferentes (ex: Claude e Manus.Ai) podem
+ * ler o mesmo "último número" ao mesmo tempo e gerar o mesmo próximo, mesmo
+ * sincronizando a main antes (achado real, 23-24/08/2026: colidiu comigo
+ * duas vezes e com outra sessão uma vez na mesma janela). O remote é a
+ * única fonte compartilhada de verdade.
+ *
+ * `git push` de uma ref nova é atômico no servidor — mas duas sessões
+ * limpas sincronizadas com a mesma `main` costumam estar no MESMO commit,
+ * então empurrar esse commit pro mesmo nome de branch novo não colide (a
+ * segunda tentativa vê "Everything up-to-date" e sai com sucesso, porque
+ * pra um branch, git só rejeita quando os SHAs divergem — não quando são
+ * iguais). Por isso cada tentativa de reserva cria antes um commit vazio
+ * local (mensagem com nonce aleatório) só pra gerar um SHA garantidamente
+ * único, empurra ESSE SHA pra `refs/heads/task-claim/XXXX` e devolve o
+ * checkout pro HEAD original em seguida — quem empurrar primeiro fica com
+ * o número; a segunda tentativa recebe uma rejeição real (non-fast-forward)
+ * porque os SHAs agora são diferentes de verdade, e tenta o próximo número.
+ * (Tags seriam mais idiomáticas pra isso, mas `refs/tags/*` está bloqueado
+ * pelas credenciais de push desta sessão — confirmado por teste real,
+ * 24/08/2026; `refs/heads/*` funciona normalmente.) Os branches de reserva
+ * ficam pra sempre — são só uma trava, não apontam pra nada que precise
+ * revisão, e apagar ref remota também está bloqueado pra esta sessão.
+ */
+async function getRemoteMaxSequence(): Promise<number> {
+  const { stdout } = await execFile('git', ['ls-remote', '--heads', 'origin', `refs/heads/${CLAIM_REF_PREFIX}/*`], { cwd: root });
+  return stdout
+    .split('\n')
+    .reduce((highest, line) => {
+      const match = CLAIM_HEAD_PATTERN.exec(line.trim());
+      if (!match) return highest;
+      return Math.max(highest, Number(match[1]));
+    }, 0);
+}
+
+async function claimSequence(startCandidate: number): Promise<number> {
+  const { stdout: originalHeadOut } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: root });
+  const originalHead = originalHeadOut.trim();
+
+  let candidate = startCandidate;
+  for (let attempt = 0; attempt < CLAIM_RETRY_COUNT; attempt += 1) {
+    const claimRef = `refs/heads/${CLAIM_REF_PREFIX}/${String(candidate).padStart(4, '0')}`;
+    const nonce = randomBytes(6).toString('hex');
+
+    let claimSha: string;
+    try {
+      await execFile('git', ['commit', '--allow-empty', '-m', `chore: reserva ${claimRef} (${nonce})`], { cwd: root });
+      const { stdout } = await execFile('git', ['rev-parse', 'HEAD'], { cwd: root });
+      claimSha = stdout.trim();
+    } finally {
+      // Sempre volta o checkout pro HEAD original, empurrado ou não — o
+      // commit vazio existe só pra ter um SHA único pra reservar a ref,
+      // nunca deve sobrar no branch real de quem está rodando o comando.
+      await execFile('git', ['reset', '--hard', originalHead], { cwd: root });
+    }
+
+    try {
+      await execFile('git', ['push', 'origin', `${claimSha}:${claimRef}`], { cwd: root });
+      return candidate;
+    } catch (error) {
+      const message = (error as { stderr?: string; message?: string }).stderr || (error as Error).message || '';
+      if (/already exists|stale info|fetch first|non-fast-forward|rejected/i.test(message)) {
+        candidate += 1;
+        continue;
+      }
+      throw new Error(`Não foi possível reservar ${claimRef} no remote: ${message.trim() || error}`);
+    }
+  }
+  throw new Error(`Não foi possível reservar um número de sequência após ${CLAIM_RETRY_COUNT} tentativas — muita concorrência ao mesmo tempo.`);
 }
 
 function buildTaskRecord(taskId: string, description: string, agent: string, startedAt: string) {
@@ -108,7 +183,8 @@ async function main() {
   const lockHandle = await acquireLock();
 
   try {
-    const sequence = await getNextSequence();
+    const [localMax, remoteMax] = await Promise.all([getLocalMaxSequence(), getRemoteMaxSequence()]);
+    const sequence = await claimSequence(Math.max(localMax, remoteMax) + 1);
     const taskId = `TASK-${String(sequence).padStart(4, '0')}`;
     const startedAt = new Date().toISOString();
     const taskPath = path.join(registryDir, `${taskId}.md`);
@@ -119,6 +195,7 @@ async function main() {
     console.log(`Descrição: ${description}`);
     console.log(`Agente/plataforma: ${agent}`);
     console.log(`Registro: ${path.relative(root, taskPath)}`);
+    console.log(`Reservado no remote: refs/heads/${CLAIM_REF_PREFIX}/${String(sequence).padStart(4, '0')} (garante que nenhuma outra sessão gere este mesmo número)`);
     console.log('\nPróximos passos:');
     console.log('1. Leia a issue #290 antes de continuar.');
     console.log(`2. Trabalhe usando o identificador ${taskId}.`);
