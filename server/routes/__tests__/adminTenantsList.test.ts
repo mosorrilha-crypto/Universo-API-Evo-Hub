@@ -49,19 +49,27 @@ afterEach(async () => {
 });
 
 describe('GET /api/admin/tenants', () => {
-  it('marca whatsappConnected=true só pra tenant com phone_number_id real (Meta) ou instância Evolution — nunca fixo', async () => {
+  it('marca whatsappConnected=true só pra tenant com phone_number_id real (Meta) ou instância Evolution realmente pareada — nunca fixo', async () => {
     supabase = createFakeSupabase({
       tenants: [
         { id: 'tenant-meta', name: 'Conectado via Meta', slug: 'meta-co' },
         { id: 'tenant-evo', name: 'Conectado via Evolution', slug: 'evo-co' },
         { id: 'tenant-none', name: 'Sem conexão', slug: 'sem-conexao' },
         { id: 'tenant-empty-cred', name: 'Linha de credencial sem telefone', slug: 'linha-vazia' },
+        { id: 'tenant-evo-pending', name: 'QR gerado mas nunca escaneado', slug: 'evo-pendente' },
       ],
       tenant_meta_credentials: [
         { tenant_id: 'tenant-meta', phone_number_id: '5511999998888' },
         { tenant_id: 'tenant-empty-cred', phone_number_id: null },
       ],
-      tenant_evolution_credentials: [{ tenant_id: 'tenant-evo', instance_name: 'evo-co_main' }],
+      tenant_evolution_credentials: [
+        { tenant_id: 'tenant-evo', instance_name: 'evo-co_main', last_connection_state: 'open' },
+        // Achado real (24/08/2026): instância provisionada (QR gerado) mas
+        // nunca escaneada — a linha existe, mas o WhatsApp nunca conectou de
+        // verdade. Antes da correção, isso contava como "Conectado" igual a
+        // tenant-evo acima.
+        { tenant_id: 'tenant-evo-pending', instance_name: 'evo-pendente_main', last_connection_state: 'close' },
+      ],
     });
     ({ server, baseUrl } = await startServer('saas_admin'));
 
@@ -74,6 +82,7 @@ describe('GET /api/admin/tenants', () => {
       'tenant-evo': true,
       'tenant-none': false,
       'tenant-empty-cred': false,
+      'tenant-evo-pending': false,
     });
   });
 
@@ -85,7 +94,7 @@ describe('GET /api/admin/tenants', () => {
         { id: 'tenant-none', name: 'Sem conexão', slug: 'sem-conexao' },
       ],
       tenant_meta_credentials: [],
-      tenant_evolution_credentials: [{ tenant_id: 'tenant-evo', instance_name: 'evo-co_main' }],
+      tenant_evolution_credentials: [{ tenant_id: 'tenant-evo', instance_name: 'evo-co_main', last_connection_state: 'open' }],
     });
     ({ server, baseUrl } = await startServer('saas_admin', '5511888887777'));
 

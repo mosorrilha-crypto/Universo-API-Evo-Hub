@@ -61,15 +61,25 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     // tenantResolver.ts) pra receber/responder mensagens reais. Sem esse
     // caso especial, ele contava como "não conectado" mesmo estando de
     // verdade em produção.
+    //
+    // Segundo achado real (24/08/2026): pro provider Evolution, ter uma
+    // LINHA em tenant_evolution_credentials só prova que a instância foi
+    // PROVISIONADA (ex: alguém clicou "Gerar QR Code") — não que o WhatsApp
+    // foi realmente pareado. Um tenant recém-criado, com o QR gerado mas
+    // nunca escaneado, aparecia como "Conectado" igual a um que já estava
+    // em produção há dias. Agora usa `last_connection_state`
+    // (evolutionConnectionAlertJob.ts mantém essa coluna atualizada a cada
+    // 5min consultando o estado real na Evolution API) — só conta como
+    // conectado quando o último estado observado for `'open'`.
     const tenantIds = tenants.map((t: any) => t.id);
     const connectedIds = new Set<string>();
     if (tenantIds.length) {
       const [{ data: metaCreds }, { data: evoCreds }] = await Promise.all([
         db().from('tenant_meta_credentials').select('tenant_id, phone_number_id').in('tenant_id', tenantIds),
-        db().from('tenant_evolution_credentials').select('tenant_id').in('tenant_id', tenantIds),
+        db().from('tenant_evolution_credentials').select('tenant_id, last_connection_state').in('tenant_id', tenantIds),
       ]);
       (metaCreds || []).forEach((c: any) => { if (c.phone_number_id) connectedIds.add(c.tenant_id); });
-      (evoCreds || []).forEach((c: any) => connectedIds.add(c.tenant_id));
+      (evoCreds || []).forEach((c: any) => { if (c.last_connection_state === 'open') connectedIds.add(c.tenant_id); });
       if (sharedMetaPhoneNumberId && tenantIds.includes(LEGACY_DEFAULT_TENANT_ID)) {
         connectedIds.add(LEGACY_DEFAULT_TENANT_ID);
       }
