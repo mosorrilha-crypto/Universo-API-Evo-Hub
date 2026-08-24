@@ -3970,7 +3970,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     // bloco de mídia/texto precisa de um respiro no topo (quando não
                     // tem tag/encaminhada/citação acima) ou se a imagem pode tocar o
                     // canto arredondado do balão direto.
-                    const hasHeaderContent = (!isLead && !!msg.sentBy) || !!msg.forwardedFromMessageId || !!quotedMessage;
+                    // Áudio e vídeo já mostram check de entrega dentro do próprio
+                    // player/card — a borda colorida do balão (azul/verde) era
+                    // redundante ali (pedido direto, 24/08/2026, print de referência).
+                    // Esses dois tipos usam o mesmo cinza neutro do balão recebido, e
+                    // o rótulo IA/Operador migra pra dentro do cartão cinza (bem
+                    // pequeno) em vez do cabeçalho grande no topo do balão colorido.
+                    const isVideoFile = msg.type === 'file' && !!msg.text?.trimStart().startsWith('🎥');
+                    const isMediaBubble = !isLead && (msg.type === 'audio' || isVideoFile);
+                    const hasSenderLabel = !isLead && !!msg.sentBy && !isMediaBubble;
+                    const hasHeaderContent = hasSenderLabel || !!msg.forwardedFromMessageId || !!quotedMessage;
+                    const mediaSenderLabel = !isLead && msg.sentBy && (
+                      <div className="flex items-center gap-1 text-[8px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                        {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5" /> : <UserCheck className="w-2.5 h-2.5" />}
+                        {msg.sentBy === 'ai' ? 'IA' : 'Operador'}
+                      </div>
+                    );
                     // Horário + check de entrega — flutua à direita do último texto
                     // do balão (mesmo truque de CSS que o WhatsApp usa: float-right
                     // com margem, o texto quebra em volta dele) em vez de uma linha
@@ -4094,12 +4109,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         )}
 
                         <div
-                          className={`max-w-[85%] rounded-xl shadow-sm text-xs relative overflow-hidden ${
-                            isLead
-                              ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none'
+                          className={`max-w-[85%] rounded-xl shadow-sm text-xs relative overflow-hidden ${isLead ? 'rounded-tl-none' : 'rounded-tr-none'} ${
+                            isLead || isMediaBubble
+                              ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'
-                                ? 'bg-[#1f4287] text-white rounded-tr-none shadow-blue-950/40'
-                                : 'bg-[#005c4b] text-white rounded-tr-none shadow-emerald-950/40'
+                                ? 'bg-[#2F6FBA] text-white shadow-blue-950/40'
+                                : 'bg-[#005c4b] text-white shadow-emerald-950/40'
                           }`}
                         >
                           {msg.reactions && msg.reactions.length > 0 && (
@@ -4112,8 +4127,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
                           {hasHeaderContent && (
                             <div className="px-2.5 pt-2.5 pb-2 space-y-1">
-                              {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. */}
-                              {!isLead && msg.sentBy && (
+                              {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. Áudio/vídeo mostram esse rótulo dentro do próprio cartão cinza (ver mediaSenderLabel), não aqui. */}
+                              {hasSenderLabel && (
                                 <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide opacity-70">
                                   {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5" /> : <UserCheck className="w-2.5 h-2.5" />}
                                   {msg.sentBy === 'ai' ? 'IA' : 'Operador'}
@@ -4161,6 +4176,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   )}
                                 </button>
                                 <div className="flex-1 min-w-0">
+                                  {mediaSenderLabel}
                                   <div className="flex justify-between text-[10px] font-bold text-emerald-200">
                                     <span>{isSpanish ? 'Mensaje de voz' : 'Mensagem de voz'}</span>
                                     <span>{msg.audioDuration || 15}s</span>
@@ -4245,6 +4261,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             if (isVideo && (selectedLead as any)?.isReal) {
                               return (
                                 <div className="space-y-1.5 min-w-[220px]">
+                                  {mediaSenderLabel && <div className="px-2.5 pt-2.5">{mediaSenderLabel}</div>}
                                   <RealClientVideo messageId={msg.id} />
                                   <p className="text-xs">{msg.text}</p>
                                 </div>
@@ -4259,6 +4276,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                     <FileText className="w-5 h-5 text-emerald-400 flex-shrink-0" />
                                   )}
                                   <div className="flex-1 min-w-0">
+                                    {isVideo && mediaSenderLabel}
                                     <span className="text-[11px] font-bold truncate block">
                                       {isVideo ? 'Vídeo enviado' : msg.fileName || 'documento.pdf'}
                                     </span>
