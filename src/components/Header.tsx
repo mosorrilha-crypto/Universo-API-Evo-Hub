@@ -19,6 +19,7 @@ import {
   MessageSquare,
   Moon,
   ShieldCheck,
+  Sparkles,
   Sun,
   Target,
   User,
@@ -212,6 +213,7 @@ export const Header: React.FC<HeaderProps> = ({
               { id: 'dark' as const, label: 'Escuro', icon: Moon },
               { id: 'light' as const, label: 'Claro', icon: Sun },
               { id: 'blue' as const, label: 'Azul', icon: Layers },
+              { id: 'clean' as const, label: 'Limpo', icon: Sparkles },
             ]).map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
@@ -235,6 +237,7 @@ export const Header: React.FC<HeaderProps> = ({
           { id: 'dark' as const, label: 'Escuro', icon: Moon },
           { id: 'light' as const, label: 'Claro', icon: Sun },
           { id: 'blue' as const, label: 'Azul', icon: Layers },
+          { id: 'clean' as const, label: 'Limpo', icon: Sparkles },
         ]).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
