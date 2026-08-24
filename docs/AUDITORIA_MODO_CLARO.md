@@ -58,3 +58,8 @@ Também foram encontrados painéis legados do atendimento com cores WhatsApp har
 ## Proteção contra regressão
 
 O teste `lightThemeButtonContrast.test.ts` agora contém o inventário de todas as variações `slate` encontradas nos componentes. A alteração falhará em teste se uma dessas superfícies deixar de ter seletor correspondente no modo claro. Esta cobertura complementa os testes de interface e a validação de produção.
+
+## Confirmação após publicação
+
+O bundle de produção estabilizado contém as regras da auditoria global. Após recarregar a sessão autenticada, o CRM voltou a renderizar no modo claro com cartões, métricas, busca e colunas do Kanban em superfícies claras. A sessão preservou seus dados e permissões durante a verificação.
+O estado vazio de **Escalonamentos**, que aparecia em grafite na captura original, foi reaberto após o deploy e agora exibe fundo claro, ícone verde, título grafite e descrição legível no modo claro.
