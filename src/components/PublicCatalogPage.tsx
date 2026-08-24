@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 
 interface PublicCatalogVariant {
   code: string;
@@ -87,6 +87,26 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState(0);
+
+  // O resto do app (painel) é escuro e declara `color-scheme: dark` no
+  // index.css compartilhado — o CSS `:root { color-scheme: light }` deste
+  // componente nem sempre é suficiente pra desligar o "Tema escuro
+  // automático" do Chrome Android nessa página clara: achado real (23/08/2026,
+  // print do dono do produto) — o tema forçado do Chrome lavava
+  // especificamente os títulos grandes (h1/h2), deixando quase ilegíveis,
+  // mesmo com a fonte/cor corretas no CSS. A tag <meta name="color-scheme">
+  // é o sinal que a documentação do Chrome trata como definitivo pra opt-out
+  // do tema forçado, então é adicionada via JS (antes do primeiro paint, com
+  // useLayoutEffect) só enquanto esta página estiver montada.
+  useLayoutEffect(() => {
+    const meta = document.createElement('meta');
+    meta.name = 'color-scheme';
+    meta.content = 'light';
+    document.head.appendChild(meta);
+    return () => {
+      document.head.removeChild(meta);
+    };
+  }, []);
 
   useEffect(() => {
     if (!catalog) return undefined;
@@ -304,14 +324,14 @@ function PageShell({ children }: { children: ReactNode }) {
         .catalog-wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
         .catalog-header { position: relative; z-index: 2; border-bottom: 1px solid rgba(78, 62, 49, .12); background: rgba(243, 238, 228, .88); backdrop-filter: blur(12px); }
         .catalog-header-inner { display: flex; align-items: center; justify-content: space-between; min-height: 78px; gap: 20px; }
-        .brand { display: inline-flex; align-items: center; gap: 12px; font-family: 'Playfair Display', Georgia, "Times New Roman", serif; font-size: 20px; font-style: italic; text-decoration: none; }
+        .brand { display: inline-flex; align-items: center; gap: 12px; color: #211d1a; font-family: 'Playfair Display', Georgia, "Times New Roman", serif; font-size: 20px; font-style: italic; text-decoration: none; }
         .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid #bd8a6d; border-radius: 50%; color: #8d5c43; font-family: Montserrat, sans-serif; font-size: 11px; font-style: normal; letter-spacing: .08em; }
         .header-cta, .hero-link { color: #3c3027; font-size: 12px; letter-spacing: .06em; text-decoration: none; text-transform: uppercase; }
         .header-cta { padding: 12px 20px; border: 1px solid rgba(60, 48, 39, .45); border-radius: 999px; }
         .catalog-hero { position: relative; padding: 110px 0 120px; text-align: center; background: radial-gradient(circle at 50% 15%, rgba(255, 255, 255, .78), transparent 48%), linear-gradient(135deg, #f7f1e7 0%, #eadfce 100%); }
         .hero-inner { max-width: 820px; }
         .eyebrow { color: #987254; font-size: 11px; font-weight: 700; letter-spacing: .19em; text-transform: uppercase; }
-        .catalog-hero h1 { max-width: 760px; margin: 22px auto 14px; font-family: 'Playfair Display', Georgia, "Times New Roman", serif; font-size: clamp(48px, 8vw, 94px); font-weight: 700; font-style: italic; line-height: .98; letter-spacing: -.03em; }
+        .catalog-hero h1 { max-width: 760px; margin: 22px auto 14px; color: #211d1a; font-family: 'Playfair Display', Georgia, "Times New Roman", serif; font-size: clamp(48px, 8vw, 94px); font-weight: 700; font-style: italic; line-height: .98; letter-spacing: -.03em; }
         .hero-stroke { width: 170px; height: 18px; margin: 0 auto 22px; border-top: 2px solid #c9987a; border-radius: 50%; transform: rotate(-2deg); }
         .hero-sub { max-width: 560px; margin: 0 auto 34px; color: #66574d; font-size: 16px; line-height: 1.75; }
         .hero-link { display: inline-flex; gap: 10px; align-items: center; border-bottom: 1px solid #c9987a; padding-bottom: 5px; }
@@ -319,11 +339,11 @@ function PageShell({ children }: { children: ReactNode }) {
         .trust-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; padding: 25px 0; font-size: 11px; line-height: 1.5; text-align: center; }
         .trust-grid strong { display: block; color: #fffdf9; font-size: 12px; letter-spacing: .04em; }
         .steps-section, .services-section, .faq-section { padding: 100px 0; }
-        .steps-section h2, .services-section h2, .faq-section h2 { max-width: 680px; margin: 12px 0 46px; font-family: 'Playfair Display', Georgia, "Times New Roman", serif; font-size: clamp(34px, 5vw, 58px); font-weight: 700; font-style: italic; line-height: 1.05; letter-spacing: -.02em; }
+        .steps-section h2, .services-section h2, .faq-section h2 { max-width: 680px; margin: 12px 0 46px; color: #211d1a; font-family: 'Playfair Display', Georgia, "Times New Roman", serif; font-size: clamp(34px, 5vw, 58px); font-weight: 700; font-style: italic; line-height: 1.05; letter-spacing: -.02em; }
         .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
         .step { padding: 22px 0; border-top: 1px solid rgba(78, 62, 49, .3); }
         .step-number { color: #b88063; font-family: 'Playfair Display', Georgia, serif; font-size: 18px; }
-        .step h3 { margin: 34px 0 10px; font-family: 'Playfair Display', Georgia, serif; font-size: 25px; font-weight: 400; }
+        .step h3 { margin: 34px 0 10px; color: #211d1a; font-family: 'Playfair Display', Georgia, serif; font-size: 25px; font-weight: 400; }
         .step p, .product-card p, .faq-item p { color: #6f6258; font-size: 14px; line-height: 1.7; }
         .services-section { background: #f8f4ed; }
         .product-groups { display: grid; gap: 62px; }
@@ -332,7 +352,7 @@ function PageShell({ children }: { children: ReactNode }) {
         .product-card { display: flex; min-height: 270px; flex-direction: column; padding: 25px; border: 1px solid rgba(78, 62, 49, .15); background: #fffdf9; box-shadow: 0 18px 50px rgba(78, 62, 49, .05); }
         .product-topline { display: flex; align-items: center; justify-content: space-between; min-height: 18px; color: #987254; font-size: 11px; letter-spacing: .05em; }
         .product-dot { width: 7px; height: 7px; border: 1px solid #bc896c; border-radius: 50%; }
-        .product-card h4 { margin: 32px 0 16px; font-family: 'Playfair Display', Georgia, serif; font-size: 26px; font-weight: 400; line-height: 1.05; }
+        .product-card h4 { margin: 32px 0 16px; color: #211d1a; font-family: 'Playfair Display', Georgia, serif; font-size: 26px; font-weight: 400; line-height: 1.05; }
         .price-row { display: flex; align-items: baseline; gap: 8px; }
         .price-row strong { color: #8d5c43; font-family: 'Playfair Display', Georgia, serif; font-size: 24px; font-weight: 400; }
         .price-row span { color: #987254; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
@@ -356,7 +376,7 @@ function PageShell({ children }: { children: ReactNode }) {
         .footer-links a { color: #d4a181; font-size: 12px; text-decoration: none; text-transform: uppercase; }
         .sticky-whatsapp { position: fixed; right: 18px; bottom: 18px; z-index: 5; display: inline-flex; align-items: center; gap: 10px; padding: 15px 18px; border-radius: 999px; background: #c9987a; color: white; box-shadow: 0 14px 30px rgba(44, 32, 24, .2); font-size: 11px; font-weight: 700; text-decoration: none; text-transform: uppercase; }
         .catalog-state { display: grid; min-height: 100vh; place-content: center; width: min(620px, calc(100% - 40px)); margin: 0 auto; padding: 40px 0; text-align: center; }
-        .catalog-state h1 { margin: 18px 0 12px; font-family: 'Playfair Display', Georgia, serif; font-size: 48px; font-weight: 400; }
+        .catalog-state h1 { margin: 18px 0 12px; color: #211d1a; font-family: 'Playfair Display', Georgia, serif; font-size: 48px; font-weight: 400; }
         .catalog-state p { color: #6f6258; line-height: 1.7; }
         @media (max-width: 800px) {
           .catalog-wrap { width: min(100% - 28px, 620px); }
