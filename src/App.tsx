@@ -985,6 +985,7 @@ export const App: React.FC = () => {
             onOpenEscalations={() => handleSetActiveTab('escalations')}
           >
           <WhatsAppLeadsSim
+            key={activeTenant.id}
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
             canManageWhatsAppConnection={canSeeAdminTools}

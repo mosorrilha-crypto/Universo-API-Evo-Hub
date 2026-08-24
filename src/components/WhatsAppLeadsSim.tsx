@@ -1308,21 +1308,28 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const lastMessageIdRef = useRef<Map<string, string | null>>(new Map());
   const activeLeadPhoneRef = useRef<string | null>(null);
   const historyRequestsInFlightRef = useRef<Set<string>>(new Set());
+  // Cada request captura o tenant em que começou. Quando o operador troca de
+  // empresa, respostas atrasadas do tenant anterior não podem alterar a fila,
+  // o histórico aberto nem o aviso de erro do tenant novo.
+  const activeTenantIdRef = useRef(activeTenant.id);
+  activeTenantIdRef.current = activeTenant.id;
 
   const loadRealConversationHistory = async (phone: string, leadId: string) => {
+    const requestTenantId = activeTenantIdRef.current;
     if (historyRequestsInFlightRef.current.has(phone)) return;
     historyRequestsInFlightRef.current.add(phone);
     setLeads((prev) => prev.map((lead) => lead.id === leadId ? { ...lead, historyLoading: true } : lead));
     try {
       const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}`);
       const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.conversation) {
+      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.conversation) {
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
       const messages: ChatMessage[] = (data.conversation.messages || []).map((message: ChatMessage) => ({
         ...message,
         timestamp: new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       }));
+      if (activeTenantIdRef.current !== requestTenantId) return;
       const lastMessage = messages[messages.length - 1];
       setLeads((prev) => prev.map((lead) => lead.id === leadId ? {
         ...lead,
@@ -1333,6 +1340,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         lastMessageId: lastMessage?.id,
       } : lead));
     } catch (err: any) {
+      if (activeTenantIdRef.current !== requestTenantId) return;
       setLeads((prev) => prev.map((lead) => lead.id === leadId ? { ...lead, historyLoading: false } : lead));
       setErrorMsg(err?.message || 'Não foi possível carregar o histórico desta conversa.');
     } finally {
@@ -1344,6 +1352,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // lista — sem substituir os leads de exemplo/simulados que já existirem.
   useEffect(() => {
     let cancelled = false;
+    const requestTenantId = activeTenant.id;
     // Zera a contagem anterior a cada (re)início do efeito — inclui a troca
     // de tenant, pra não arriscar comparar a contagem de mensagens de um
     // telefone contra o valor guardado de um tenant diferente.
@@ -1352,7 +1361,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // Troca de tenant: carrega o cache do tenant novo (ou começa vazio) na
     // hora, em vez de deixar a lista do tenant anterior visível até
     // fetchRealConversations() terminar logo abaixo.
-    const cachedForTenant = localStorage.getItem(whatsappLeadsCacheKey(activeTenant.id));
+    const cachedForTenant = localStorage.getItem(whatsappLeadsCacheKey(requestTenantId));
     setLeads(cachedForTenant ? JSON.parse(cachedForTenant) : []);
 
     const fetchRealConversations = async () => {
@@ -1363,6 +1372,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         const response = await apiFetch('/api/conversations?archived=true');
         if (!response.ok || cancelled) return;
         const data = await response.json();
+        if (cancelled || activeTenantIdRef.current !== requestTenantId) return;
         const realConversations: { phone: string; name?: string; messages?: ChatMessage[]; lastMessageId?: string; lastMessageSender?: ChatMessage['sender']; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adHeadline?: string; adGreetingMatchedAt?: string; unreadCount: number }[] = data.conversations || [];
 
         // Ids que ganharam mensagem nova de CLIENTE nesta rodada (não conta
