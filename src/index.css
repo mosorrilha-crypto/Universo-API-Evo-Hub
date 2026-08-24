@@ -2273,3 +2273,135 @@ html[data-theme='light'] .operations-quick-action .text-slate-500,
 html[data-theme='light'] .operations-quick-action .text-slate-600,
 html[data-theme='light'] .operations-priority-item .text-slate-400,
 html[data-theme='light'] .operations-priority-item .text-slate-500 { color: #686962 !important; }
+
+
+/* Auditoria global do modo claro: cobre todas as variações `slate` usadas
+   pelos componentes. Antes, modificadores como /60, /70 e /30 não entravam
+   nas regras iniciais e alguns estados vazios, cards e editores voltavam a
+   ter fundo grafite no tema claro. */
+html[data-theme='light'] .bg-slate-700,
+html[data-theme='light'] .bg-slate-700\/50,
+html[data-theme='light'] .bg-slate-700\/60,
+html[data-theme='light'] .bg-slate-700\/70 {
+  background-color: var(--surface-sunken) !important;
+}
+
+html[data-theme='light'] .bg-slate-800,
+html[data-theme='light'] .bg-slate-800\/30,
+html[data-theme='light'] .bg-slate-800\/40,
+html[data-theme='light'] .bg-slate-800\/50,
+html[data-theme='light'] .bg-slate-800\/60,
+html[data-theme='light'] .bg-slate-800\/65,
+html[data-theme='light'] .bg-slate-800\/70,
+html[data-theme='light'] .bg-slate-800\/75,
+html[data-theme='light'] .bg-slate-800\/80,
+html[data-theme='light'] .bg-slate-800\/90 {
+  background-color: var(--surface-sunken) !important;
+}
+
+html[data-theme='light'] .bg-slate-900,
+html[data-theme='light'] .bg-slate-900\/40,
+html[data-theme='light'] .bg-slate-900\/45,
+html[data-theme='light'] .bg-slate-900\/50,
+html[data-theme='light'] .bg-slate-900\/60,
+html[data-theme='light'] .bg-slate-900\/65,
+html[data-theme='light'] .bg-slate-900\/70,
+html[data-theme='light'] .bg-slate-900\/75,
+html[data-theme='light'] .bg-slate-900\/80,
+html[data-theme='light'] .bg-slate-900\/90 {
+  background-color: var(--surface-panel) !important;
+}
+
+html[data-theme='light'] .bg-slate-950,
+html[data-theme='light'] .bg-slate-950\/25,
+html[data-theme='light'] .bg-slate-950\/30,
+html[data-theme='light'] .bg-slate-950\/35,
+html[data-theme='light'] .bg-slate-950\/40,
+html[data-theme='light'] .bg-slate-950\/45,
+html[data-theme='light'] .bg-slate-950\/50,
+html[data-theme='light'] .bg-slate-950\/55,
+html[data-theme='light'] .bg-slate-950\/60,
+html[data-theme='light'] .bg-slate-950\/65,
+html[data-theme='light'] .bg-slate-950\/70,
+html[data-theme='light'] .bg-slate-950\/80,
+html[data-theme='light'] .bg-slate-950\/85,
+html[data-theme='light'] .bg-slate-950\/90 {
+  background-color: var(--surface-sunken) !important;
+}
+
+html[data-theme='light'] .border-slate-700,
+html[data-theme='light'] .border-slate-700\/50,
+html[data-theme='light'] .border-slate-700\/60,
+html[data-theme='light'] .border-slate-700\/70,
+html[data-theme='light'] .border-slate-700\/80,
+html[data-theme='light'] .border-slate-800,
+html[data-theme='light'] .border-slate-800\/30,
+html[data-theme='light'] .border-slate-800\/40,
+html[data-theme='light'] .border-slate-800\/50,
+html[data-theme='light'] .border-slate-800\/60,
+html[data-theme='light'] .border-slate-800\/70,
+html[data-theme='light'] .border-slate-800\/80,
+html[data-theme='light'] .border-slate-800\/90 {
+  border-color: var(--border) !important;
+}
+
+
+/* Auditoria global: os painéis legados do atendimento usam valores WhatsApp
+   hardcoded, às vezes com opacidade ou hover. Seletores por trecho cobrem essas
+   variantes no modo claro sem alterar bolhas de mensagem ou backdrops pretos. */
+html[data-theme='light'] [class*='bg-[#0b141a]'],
+html[data-theme='light'] [class*='bg-[#111b21]'],
+html[data-theme='light'] [class*='bg-[#182229]'] {
+  background-color: var(--surface-panel) !important;
+}
+
+html[data-theme='light'] [class*='bg-[#202c33]'],
+html[data-theme='light'] [class*='bg-[#233138]'],
+html[data-theme='light'] [class*='bg-[#2a3942]'],
+html[data-theme='light'] [class*='bg-[#26343c]'] {
+  background-color: var(--surface-sunken) !important;
+}
+
+
+/* Auditoria global: variações semânticas 950 eram tratadas de forma parcial.
+   No modo claro, todas recebem superfícies suaves e preservam a cor apenas como
+   sinal operacional, nunca como um cartão escuro. */
+html[data-theme='light'] .bg-emerald-950,
+html[data-theme='light'] .bg-emerald-950\/10,
+html[data-theme='light'] .bg-emerald-950\/15,
+html[data-theme='light'] .bg-emerald-950\/20,
+html[data-theme='light'] .bg-emerald-950\/30,
+html[data-theme='light'] .bg-emerald-950\/40,
+html[data-theme='light'] .bg-emerald-950\/50,
+html[data-theme='light'] .bg-emerald-950\/60,
+html[data-theme='light'] .bg-emerald-950\/80,
+html[data-theme='light'] .bg-emerald-950\/90 { background-color: #EAF7F0 !important; }
+
+html[data-theme='light'] .bg-blue-950,
+html[data-theme='light'] .bg-blue-950\/20,
+html[data-theme='light'] .bg-blue-950\/25,
+html[data-theme='light'] .bg-blue-950\/50,
+html[data-theme='light'] .bg-blue-950\/80,
+html[data-theme='light'] .bg-sky-950,
+html[data-theme='light'] .bg-sky-950\/10,
+html[data-theme='light'] .bg-sky-950\/15,
+html[data-theme='light'] .bg-sky-950\/20,
+html[data-theme='light'] .bg-sky-950\/60,
+html[data-theme='light'] .bg-sky-950\/80,
+html[data-theme='light'] .bg-indigo-950\/30 { background-color: #E7F4F6 !important; }
+
+html[data-theme='light'] .bg-amber-950,
+html[data-theme='light'] .bg-amber-950\/20,
+html[data-theme='light'] .bg-amber-950\/25,
+html[data-theme='light'] .bg-amber-950\/40 { background-color: #FFF4D8 !important; }
+
+html[data-theme='light'] .bg-rose-950,
+html[data-theme='light'] .bg-rose-950\/20,
+html[data-theme='light'] .bg-rose-950\/25,
+html[data-theme='light'] .bg-rose-950\/30,
+html[data-theme='light'] .bg-rose-950\/40,
+html[data-theme='light'] .bg-rose-950\/50,
+html[data-theme='light'] .bg-rose-950\/60,
+html[data-theme='light'] .bg-rose-950\/80,
+html[data-theme='light'] .bg-red-950\/40,
+html[data-theme='light'] .bg-red-950\/60 { background-color: #FCEEEA !important; }
