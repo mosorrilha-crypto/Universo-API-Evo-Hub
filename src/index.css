@@ -2416,3 +2416,65 @@ html[data-theme='light'] .bg-rose-950\/60,
 html[data-theme='light'] .bg-rose-950\/80,
 html[data-theme='light'] .bg-red-950\/40,
 html[data-theme='light'] .bg-red-950\/60 { background-color: #FCEEEA !important; }
+/*
+ * TASK-0051 — linguagem de superfícies em degradê.
+ * O degradê é reservado aos headers e painéis principais; controles, tabelas,
+ * mensagens e alertas continuam usando suas superfícies semânticas para manter
+ * contraste e hierarquia. O modo claro reproduz a referência verde suave →
+ * branco quente, enquanto os temas escuro e azul preservam profundidade.
+ */
+:root,
+html[data-theme='dark'] {
+  --surface-gradient: linear-gradient(135deg, color-mix(in srgb, var(--action) 18%, var(--surface-panel)), var(--surface-panel) 70%, color-mix(in srgb, var(--surface-deep) 22%, var(--surface-panel)));
+  --surface-gradient-soft: linear-gradient(135deg, color-mix(in srgb, var(--action) 10%, var(--surface-panel)), var(--surface-panel) 76%, color-mix(in srgb, var(--surface-deep) 18%, var(--surface-panel)));
+}
+
+html[data-theme='light'] {
+  --surface-gradient: linear-gradient(135deg, #E4F3EA 0%, #F5FAF6 58%, #FFFDF9 100%);
+  --surface-gradient-soft: linear-gradient(135deg, #EEF8F1 0%, #FAFCF8 58%, #FFFDF9 100%);
+}
+
+html[data-theme='blue'] {
+  --surface-gradient: linear-gradient(135deg, color-mix(in srgb, var(--action) 30%, var(--surface-panel)), var(--surface-panel) 70%, color-mix(in srgb, var(--surface-deep) 20%, var(--surface-panel)));
+  --surface-gradient-soft: linear-gradient(135deg, color-mix(in srgb, var(--action) 18%, var(--surface-panel)), var(--surface-panel) 76%, color-mix(in srgb, var(--surface-deep) 16%, var(--surface-panel)));
+}
+
+.operations-hero,
+.operations-module-frame__header,
+.atendimento-workspace__header,
+.growth-workspace__hero,
+.traffic-workspace__hero,
+.crm-workspace__hero,
+.agenda-financeiro-workspace__hero,
+.knowledge-workspace__hero,
+.saas-workspace__banner {
+  background: var(--surface-gradient) !important;
+  border-color: color-mix(in srgb, var(--action) 26%, var(--border)) !important;
+  box-shadow: var(--shadow-premium) !important;
+}
+
+.quality-workspace--clear {
+  background: var(--surface-gradient-soft) !important;
+  border-color: color-mix(in srgb, var(--action) 24%, var(--quality-line, var(--border))) !important;
+}
+
+.knowledge-workspace__audit {
+  background: var(--surface-gradient-soft) !important;
+  border-color: color-mix(in srgb, var(--action) 24%, var(--border)) !important;
+}
+
+@media (max-width: 640px) {
+  .operations-hero,
+  .operations-module-frame__header,
+  .atendimento-workspace__header,
+  .growth-workspace__hero,
+  .traffic-workspace__hero,
+  .crm-workspace__hero,
+  .agenda-financeiro-workspace__hero,
+  .knowledge-workspace__hero,
+  .saas-workspace__banner,
+  .quality-workspace--clear,
+  .knowledge-workspace__audit {
+    box-shadow: none !important;
+  }
+}

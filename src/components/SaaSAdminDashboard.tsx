@@ -1224,7 +1224,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           Removido — o onboarding real (cria o tenant em `tenants` via POST
           /api/admin/tenants e já provisiona WhatsApp) é o botão "Conectar
           WhatsApp via QR Code" logo abaixo, na tabela. */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+      <div className="saas-workspace__banner bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
         <p className="text-xs text-slate-400 flex items-center gap-2">
           <Layers className="w-4 h-4 text-emerald-400 flex-shrink-0" />
           Controle de empresas cadastradas, conexões de WhatsApp e cotas de IA Gemini.
