@@ -2196,3 +2196,80 @@ html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-emerald-500\/
 html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/10,
 html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/15 { background-color: #FFF4D8 !important; }
 html[data-theme='light'] .knowledge-workspace__catalog-summary .border-amber-400\/25 { border-color: #E6BB58 !important; }
+
+
+/* Editor de variantes do catálogo no modo claro. A caixa e os inputs antes
+   herdavam slate-950/slate-900 do tema escuro, deixando desconto e dados da
+   variação praticamente invisíveis em telas móveis. */
+html[data-theme='light'] .knowledge-workspace__variant-editor {
+  background-color: #F3F4F1 !important;
+  border-color: #D0CEC7 !important;
+  box-shadow: none !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__variant-editor input,
+html[data-theme='light'] .knowledge-workspace__variant-editor select,
+html[data-theme='light'] .knowledge-workspace__variant-editor textarea {
+  background-color: #FFFFFF !important;
+  border-color: #C9C6BD !important;
+  color: #22241F !important;
+  color-scheme: light;
+}
+
+html[data-theme='light'] .knowledge-workspace__variant-editor input::placeholder,
+html[data-theme='light'] .knowledge-workspace__variant-editor textarea::placeholder { color: #77776F !important; opacity: 1; }
+
+html[data-theme='light'] .knowledge-workspace__variant-editor input:focus,
+html[data-theme='light'] .knowledge-workspace__variant-editor select:focus,
+html[data-theme='light'] .knowledge-workspace__variant-editor textarea:focus {
+  border-color: #176B4C !important;
+  outline: 2px solid rgba(23, 107, 76, .18) !important;
+  outline-offset: 1px;
+}
+
+html[data-theme='light'] .knowledge-workspace__variant-editor .text-slate-500 { color: #686962 !important; }
+html[data-theme='light'] .knowledge-workspace__variant-editor .text-white { color: #22241F !important; }
+
+
+/* Central de operações no modo claro: atalhos e fila não reutilizam mais
+   cartões slate do tema noturno. Mantém uma superfície clara compacta e
+   contraste suficiente para rótulos, descrições, ícones e setas. */
+html[data-theme='light'] .operations-quick-access,
+html[data-theme='light'] .operations-smart-queue {
+  background: #FFFFFF !important;
+  border-color: #C9C6BD !important;
+}
+
+html[data-theme='light'] .operations-quick-access .text-white,
+html[data-theme='light'] .operations-smart-queue .text-white,
+html[data-theme='light'] .operations-quick-access .text-slate-100,
+html[data-theme='light'] .operations-smart-queue .text-slate-100 { color: #22241F !important; }
+
+html[data-theme='light'] .operations-quick-access .text-slate-400,
+html[data-theme='light'] .operations-smart-queue .text-slate-400,
+html[data-theme='light'] .operations-quick-access .text-slate-500,
+html[data-theme='light'] .operations-smart-queue .text-slate-500,
+html[data-theme='light'] .operations-quick-access .text-slate-600,
+html[data-theme='light'] .operations-smart-queue .text-slate-600 { color: #686962 !important; }
+
+html[data-theme='light'] .operations-quick-action,
+html[data-theme='light'] .operations-priority-item {
+  background-color: #F3F4F1 !important;
+  border: 1px solid #DCDAD3 !important;
+}
+
+html[data-theme='light'] .operations-quick-action:hover,
+html[data-theme='light'] .operations-priority-item:hover { background-color: #EAF7F0 !important; }
+
+html[data-theme='light'] .operations-quick-action > span:first-child {
+  background-color: #E8F6EF !important;
+  color: #0A704C !important;
+}
+
+html[data-theme='light'] .operations-quick-action .text-slate-100,
+html[data-theme='light'] .operations-priority-item .text-slate-100 { color: #22241F !important; }
+
+html[data-theme='light'] .operations-quick-action .text-slate-500,
+html[data-theme='light'] .operations-quick-action .text-slate-600,
+html[data-theme='light'] .operations-priority-item .text-slate-400,
+html[data-theme='light'] .operations-priority-item .text-slate-500 { color: #686962 !important; }

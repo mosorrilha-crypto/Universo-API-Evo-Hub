@@ -134,7 +134,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         </div>
       </div>
 
-      <section className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="quick-access-heading">
+      <section className="operations-quick-access rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="quick-access-heading">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-400">{t('quickAccess')}</p>
@@ -146,7 +146,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (
-              <button key={action.label} type="button" onClick={() => onNavigate(action.tab)} className="group flex min-w-0 items-center gap-2 rounded-xl bg-slate-950/30 px-2.5 py-2 text-left transition-colors hover:bg-emerald-500/8 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
+              <button key={action.label} type="button" onClick={() => onNavigate(action.tab)} className="operations-quick-action group flex min-w-0 items-center gap-2 rounded-xl bg-slate-950/30 px-2.5 py-2 text-left transition-colors hover:bg-emerald-500/8 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
                 <span className="shrink-0 rounded-lg bg-slate-800/80 p-1.5 text-emerald-400 group-hover:bg-emerald-500/10"><Icon className="h-3.5 w-3.5" /></span>
                 <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-100">{action.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{action.description}</span></span>
                 <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-600 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-300" />
@@ -163,7 +163,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('agenda_financeiro')} disabled={!canSeeFinancial} />
       </div>
 
-      <section className="rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="smart-queue-heading">
+      <section className="operations-smart-queue rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="smart-queue-heading">
         <div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -195,7 +195,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
                     ? 'bg-sky-500/10 text-sky-300'
                     : 'bg-emerald-500/10 text-emerald-300';
                 return (
-                  <button key={item.id} onClick={() => onNavigate(item.tab)} className="group flex w-full items-start gap-2.5 rounded-xl bg-slate-950/30 p-2.5 text-left transition-colors hover:bg-slate-800/65 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
+                  <button key={item.id} onClick={() => onNavigate(item.tab)} className="operations-priority-item group flex w-full items-start gap-2.5 rounded-xl bg-slate-950/30 p-2.5 text-left transition-colors hover:bg-slate-800/65 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70">
                     <span className={`mt-0.5 rounded-lg p-1.5 ${tone}`}><Icon className="h-4 w-4" /></span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{item.type}</span>

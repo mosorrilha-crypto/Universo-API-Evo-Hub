@@ -33,5 +33,11 @@ describe('contraste global de botões no tema claro', () => {
     expect(css).toContain("html[data-theme='light'] .knowledge-workspace__audit-metric");
     expect(css).toContain("html[data-theme='light'] .knowledge-workspace__catalog-summary");
     expect(css).toContain("html[data-theme='light'] .knowledge-workspace__catalog-metric");
+    expect(css).toContain("html[data-theme='light'] .knowledge-workspace__variant-editor");
+    expect(css).toContain(".knowledge-workspace__variant-editor input");
+    expect(css).toContain("html[data-theme='light'] .operations-quick-access");
+    expect(css).toContain("html[data-theme='light'] .operations-quick-action");
+    expect(css).toContain("html[data-theme='light'] .operations-smart-queue");
+    expect(css).toContain("html[data-theme='light'] .operations-priority-item");
   });
 });

@@ -2228,7 +2228,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       </button>
                     </div>
                     {(prod.variants || []).map((variant, vIndex) => (
-                      <div key={vIndex} className="space-y-1 rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
+                      <div key={vIndex} className="knowledge-workspace__variant-editor space-y-1 rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
                         <div className="flex gap-1 items-center flex-wrap">
                           <input
                             type="text"
