@@ -2358,8 +2358,19 @@ html[data-theme='light'] [class*='bg-[#182229]'] {
 html[data-theme='light'] [class*='bg-[#202c33]'],
 html[data-theme='light'] [class*='bg-[#233138]'],
 html[data-theme='light'] [class*='bg-[#2a3942]'],
-html[data-theme='light'] [class*='bg-[#26343c]'] {
+html[data-theme='light'] [class*='bg-[#26343c]'],
+html[data-theme='light'] [class*='bg-[#0f191e]'] {
   background-color: var(--surface-sunken) !important;
+}
+
+/* Bug real (24/08): as bolhas de mensagem enviada (operador/IA) mantêm de
+   propósito o fundo escuro original (azul/verde) mesmo no claro — mas a
+   regra genérica `.text-white` acima escurece o texto igual, deixando texto
+   escuro sobre fundo escuro quase ilegível. Restaura branco só nessas duas
+   bolhas específicas, sem tocar no resto do `.text-white` do painel. */
+html[data-theme='light'] [class*='bg-[#1f4287]'].text-white,
+html[data-theme='light'] [class*='bg-[#005c4b]'].text-white {
+  color: #ffffff !important;
 }
 
 
