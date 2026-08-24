@@ -1956,7 +1956,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               </button>
             </div>
 
-            <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.08] via-slate-950 to-slate-950 p-4 shadow-[0_12px_30px_rgba(16,185,129,0.06)]">
+            <div className="knowledge-workspace__catalog-summary rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.08] via-slate-950 to-slate-950 p-4 shadow-[0_12px_30px_rgba(16,185,129,0.06)]">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1977,10 +1977,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 </button>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Itens ativos</p><p className="mt-0.5 text-lg font-extrabold text-emerald-300">{productStats.active}<span className="ml-1 text-[10px] font-medium text-slate-500">/ {formData.products.length}</span></p></div>
-                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Categorias</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productCategories.length}</p></div>
-                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com variantes</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productStats.withVariants}</p></div>
-                <div className="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com mídia</p><p className="mt-0.5 text-lg font-extrabold text-sky-300">{productStats.withMedia}</p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Itens ativos</p><p className="mt-0.5 text-lg font-extrabold text-emerald-300">{productStats.active}<span className="ml-1 text-[10px] font-medium text-slate-500">/ {formData.products.length}</span></p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Categorias</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productCategories.length}</p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com variantes</p><p className="mt-0.5 text-lg font-extrabold text-cyan-300">{productStats.withVariants}</p></div>
+                <div className="knowledge-workspace__catalog-metric rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-2"><p className="text-[10px] text-slate-500">Com mídia</p><p className="mt-0.5 text-lg font-extrabold text-sky-300">{productStats.withMedia}</p></div>
               </div>
             </div>
 

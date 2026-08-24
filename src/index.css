@@ -2171,3 +2171,28 @@ html[data-theme='light'] .text-violet-100,
 html[data-theme='light'] .text-violet-200,
 html[data-theme='light'] .text-violet-300,
 html[data-theme='light'] .text-violet-400 { color: #0D718A !important; }
+
+
+/* Resumo do catálogo no modo claro: não reutiliza mais superfícies slate
+   escuras do tema noturno. Os quatro indicadores permanecem claros e lidos
+   com o mesmo contraste operacional do restante do painel. */
+html[data-theme='light'] .knowledge-workspace__catalog-summary {
+  background: linear-gradient(135deg, #F6FCF8 0%, #FFFFFF 58%) !important;
+  border-color: #B8D7CB !important;
+  box-shadow: 0 12px 30px rgba(22, 107, 76, .08) !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__catalog-summary .text-white { color: #22241F !important; }
+html[data-theme='light'] .knowledge-workspace__catalog-summary .text-slate-400,
+html[data-theme='light'] .knowledge-workspace__catalog-summary .text-slate-500 { color: #686962 !important; }
+
+html[data-theme='light'] .knowledge-workspace__catalog-metric {
+  background-color: #F8F8F5 !important;
+  border-color: #DCDAD3 !important;
+  box-shadow: none !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-emerald-500\/15 { background-color: #EAF7F0 !important; }
+html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/10,
+html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/15 { background-color: #FFF4D8 !important; }
+html[data-theme='light'] .knowledge-workspace__catalog-summary .border-amber-400\/25 { border-color: #E6BB58 !important; }
