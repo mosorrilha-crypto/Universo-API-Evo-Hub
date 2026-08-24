@@ -855,14 +855,6 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                 <p className="text-xs text-slate-400 mt-1">
                   {isSpanish ? 'Credenciales de la API de conversiones de Meta Ads' : 'Credenciais da API de conversões do Meta Ads'}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
-                  <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noreferrer" className="text-xs font-semibold text-emerald-300 underline decoration-emerald-400/70 underline-offset-4 hover:text-emerald-100">
-                    {isSpanish ? 'Generar token en Graph API Explorer' : 'Gerar token no Graph API Explorer'}
-                  </a>
-                  <a href="https://business.facebook.com/events_manager2/" target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-300 underline decoration-blue-400/70 underline-offset-4 hover:text-blue-100">
-                    {isSpanish ? 'Abrir Eventos de Meta (Pixel y pruebas)' : 'Abrir Eventos da Meta (Pixel e testes)'}
-                  </a>
-                </div>
               </div>
 
               <form onSubmit={handleSaveCapiConfig} className="space-y-4 text-xs">
@@ -877,6 +869,9 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                     placeholder="Ex: 891029384712039"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
                   />
+                  <a href="https://business.facebook.com/events_manager2/" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center text-xs font-semibold text-blue-300 underline decoration-blue-400/70 underline-offset-4 hover:text-blue-100">
+                    {isSpanish ? 'Ver mi Pixel ID en el Administrador de Eventos' : 'Ver meu Pixel ID no Gerenciador de Eventos'}
+                  </a>
                 </div>
 
                 <div>
@@ -909,6 +904,9 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                   <p className="mt-1 text-[11px] text-slate-500">
                     {isSpanish ? 'Opcional: solo completalo para validar eventos en la herramienta de pruebas de Meta.' : 'Opcional: preencha somente para validar eventos na ferramenta de testes da Meta.'}
                   </p>
+                  <a href="https://business.facebook.com/events_manager2/" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center text-xs font-semibold text-blue-300 underline decoration-blue-400/70 underline-offset-4 hover:text-blue-100">
+                    {isSpanish ? 'Generar código de prueba en el Administrador de Eventos' : 'Gerar código de teste no Gerenciador de Eventos'}
+                  </a>
                 </div>
 
                 <div className="pt-2">
