@@ -4113,7 +4113,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             isLead || isMediaBubble
                               ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'
-                                ? 'bg-[#2F6FBA] text-white shadow-blue-950/40'
+                                ? 'bg-[#004080] text-white shadow-blue-950/40'
                                 : 'bg-[#005c4b] text-white shadow-emerald-950/40'
                           }`}
                         >
@@ -4161,41 +4161,42 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </div>
                           )}
 
-                          {/* Audio Message Type */}
+                          {/* Audio Message Type — cartão compacto (uma linha só, sem
+                              caixa aninhada nem rótulo "Mensagem de voz" redundante),
+                              seguindo o tamanho real de uma nota de voz do WhatsApp em
+                              vez do card grande/pesado de antes (pedido direto,
+                              24/08/2026, print de referência). */}
                           {msg.type === 'audio' && (
-                            <div className={`px-2.5 pb-2.5 space-y-2 min-w-[220px] ${hasHeaderContent ? '' : 'pt-2.5'}`}>
-                              <div className="flex items-center space-x-2 bg-slate-950/40 p-2 rounded-lg border border-white/10">
+                            <div className={`px-2.5 pb-2 min-w-[190px] max-w-[240px] ${hasHeaderContent ? '' : 'pt-2'}`}>
+                              {mediaSenderLabel}
+                              <div className="flex items-center gap-2">
                                 <button
                                   onClick={() => ((selectedLead as any)?.isReal ? handlePlayRealAudioMessage(msg.id) : handlePlayAudioMessage(msg.id, msg.text || ''))}
-                                  className="w-8 h-8 rounded-full bg-[#00a884] hover:bg-emerald-400 text-slate-950 flex items-center justify-center flex-shrink-0 transition-transform cursor-pointer"
+                                  className="w-7 h-7 rounded-full bg-[#00a884] hover:bg-emerald-400 text-slate-950 flex items-center justify-center flex-shrink-0 transition-transform cursor-pointer"
                                 >
                                   {playingAudioId === msg.id ? (
-                                    <Volume2 className="w-4 h-4 animate-bounce" />
+                                    <Volume2 className="w-3.5 h-3.5 animate-bounce" />
                                   ) : (
-                                    <Play className="w-4 h-4 ml-0.5" />
+                                    <Play className="w-3.5 h-3.5 ml-0.5" />
                                   )}
                                 </button>
-                                <div className="flex-1 min-w-0">
-                                  {mediaSenderLabel}
-                                  <div className="flex justify-between text-[10px] font-bold text-emerald-200">
-                                    <span>{isSpanish ? 'Mensaje de voz' : 'Mensagem de voz'}</span>
-                                    <span>{msg.audioDuration || 15}s</span>
-                                  </div>
-                                  <div className="w-full bg-slate-700/60 h-1.5 rounded-full mt-1 overflow-hidden">
-                                    <div className={`h-full bg-[#00a884] ${playingAudioId === msg.id ? 'animate-pulse w-full' : 'w-1/3'}`} />
-                                  </div>
+                                <div className="flex-1 min-w-0 bg-slate-700/60 h-1 rounded-full overflow-hidden">
+                                  <div className={`h-full bg-[#00a884] ${playingAudioId === msg.id ? 'animate-pulse w-full' : 'w-1/3'}`} />
                                 </div>
+                                <span className="text-[9px] text-slate-400 flex-shrink-0">{msg.audioDuration || 15}s</span>
                               </div>
-                              <p className="text-[11px] italic opacity-90">
-                                "{msg.text}"
-                                {timeFooter}
-                              </p>
+                              {msg.text && (
+                                <p className="text-[10px] opacity-80 mt-1 leading-snug">
+                                  {msg.text}
+                                  {timeFooter}
+                                </p>
+                              )}
                               {msg.text?.includes('Não foi possível transcrever') && (selectedLead as any)?.isReal && (
                                 <button
                                   type="button"
                                   onClick={() => handleRetryTranscription(msg)}
                                   disabled={retryingTranscriptionId === msg.id}
-                                  className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-300 hover:text-amber-200 disabled:opacity-50 cursor-pointer"
+                                  className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-300 hover:text-amber-200 disabled:opacity-50 cursor-pointer mt-1"
                                 >
                                   <RefreshCw className={`w-3 h-3 ${retryingTranscriptionId === msg.id ? 'animate-spin' : ''}`} />
                                   {retryingTranscriptionId === msg.id ? 'Tentando transcrever...' : 'Tentar transcrever de novo'}
