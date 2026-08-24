@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
-import { isStandalonePwa } from '../lib/pwa';
 import { hasRoleAtLeast } from '../lib/roles';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
@@ -61,12 +60,13 @@ export const Header: React.FC<HeaderProps> = ({
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isAdminToolsMenuOpen, setIsAdminToolsMenuOpen] = useState(false);
   const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
-  const [isInstalledApp] = useState(() => isStandalonePwa());
   const isSpanish = language === 'es';
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'blue' : 'dark');
-  const canSeeFinancial = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'manager');
-  const canSeeAdminTools = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'admin');
-  const canSeeSaasMaster = !isInstalledApp && hasRoleAtLeast(currentUser?.role, 'saas_admin');
+  // TASK-0038: liberar por papel real, não pela app estar instalada — ver
+  // comentário equivalente em App.tsx.
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager');
+  const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
+  const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
     platform: 'Central de operación por WhatsApp', subtitle: 'Atención, CRM, agenda, caja y conversiones en un solo lugar', today: 'Hoy', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda y Caja', growth: 'Crecimiento', quality: 'Calidad de IA', knowledge: 'Conocimiento', catalog: 'Catálogo', escalations: 'Pendientes', companies: 'Empresas', adminGroup: 'Administración', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
