@@ -20,4 +20,13 @@ describe('contraste global de botões no tema claro', () => {
     expect(css).toContain('color: var(--button-disabled-text) !important;');
     expect(css).toContain('background-color: var(--button-disabled-surface) !important;');
   });
+
+  it('escurece valores e avisos semânticos fora de botões no modo claro', () => {
+    expect(css).toContain("html[data-theme='light'] .text-emerald-200");
+    expect(css).toContain("html[data-theme='light'] .text-sky-200");
+    expect(css).toContain("html[data-theme='light'] .text-amber-200");
+    expect(css).toContain("html[data-theme='light'] .text-rose-200");
+    expect(css).toContain("html[data-theme='light'] .knowledge-workspace__audit");
+    expect(css).toContain("html[data-theme='light'] .knowledge-workspace__audit-metric");
+  });
 });

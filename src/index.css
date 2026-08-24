@@ -2071,3 +2071,84 @@ html[data-theme='light'] [role='button']:focus-visible {
   outline: 2px solid var(--button-action) !important;
   outline-offset: 2px;
 }
+
+
+/* Legibilidade semântica no modo claro — métricas, avisos e badges.
+   Essas classes Tailwind usam tons 50–400 adequados para fundos escuros. No
+   modo claro, elas precisam de equivalentes escuros para não apagar valores,
+   indicadores e mensagens de sucesso fora de elementos <button>. */
+html[data-theme='light'] .text-emerald-50,
+html[data-theme='light'] .text-emerald-100,
+html[data-theme='light'] .text-emerald-200,
+html[data-theme='light'] .text-emerald-300,
+html[data-theme='light'] .text-emerald-400 { color: #0A704C !important; }
+
+html[data-theme='light'] .text-sky-50,
+html[data-theme='light'] .text-sky-100,
+html[data-theme='light'] .text-sky-200,
+html[data-theme='light'] .text-sky-300,
+html[data-theme='light'] .text-sky-400,
+html[data-theme='light'] .text-blue-50,
+html[data-theme='light'] .text-blue-100,
+html[data-theme='light'] .text-blue-200,
+html[data-theme='light'] .text-blue-300,
+html[data-theme='light'] .text-blue-400 { color: #0D718A !important; }
+
+html[data-theme='light'] .text-amber-50,
+html[data-theme='light'] .text-amber-100,
+html[data-theme='light'] .text-amber-200,
+html[data-theme='light'] .text-amber-300,
+html[data-theme='light'] .text-amber-400,
+html[data-theme='light'] .text-yellow-50,
+html[data-theme='light'] .text-yellow-100,
+html[data-theme='light'] .text-yellow-200,
+html[data-theme='light'] .text-yellow-300,
+html[data-theme='light'] .text-yellow-400 { color: #825300 !important; }
+
+html[data-theme='light'] .text-rose-50,
+html[data-theme='light'] .text-rose-100,
+html[data-theme='light'] .text-rose-200,
+html[data-theme='light'] .text-rose-300,
+html[data-theme='light'] .text-rose-400,
+html[data-theme='light'] .text-red-50,
+html[data-theme='light'] .text-red-100,
+html[data-theme='light'] .text-red-200,
+html[data-theme='light'] .text-red-300,
+html[data-theme='light'] .text-red-400 { color: #9C3F2C !important; }
+
+html[data-theme='light'] .text-orange-50,
+html[data-theme='light'] .text-orange-100,
+html[data-theme='light'] .text-orange-200,
+html[data-theme='light'] .text-orange-300,
+html[data-theme='light'] .text-orange-400 { color: #954A19 !important; }
+
+/* O diagnóstico da base é um bloco administrativo crítico: fundo neutro e
+   mensagem de conclusão com contraste garantido, inclusive em tela móvel. */
+html[data-theme='light'] .knowledge-workspace__audit {
+  background: #FFFFFF !important;
+  border-color: #B8D7CB !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__audit-metric {
+  background-color: #F8F8F5 !important;
+  border-color: #DCDAD3 !important;
+}
+
+html[data-theme='light'] .knowledge-workspace__audit-metric.text-emerald-300 { color: #0A704C !important; }
+html[data-theme='light'] .knowledge-workspace__audit-metric.text-sky-200 { color: #0D718A !important; }
+html[data-theme='light'] .knowledge-workspace__audit-metric.text-amber-200 { color: #825300 !important; }
+html[data-theme='light'] .knowledge-workspace__audit-metric.text-rose-200 { color: #9C3F2C !important; }
+
+html[data-theme='light'] .knowledge-workspace__audit .border-emerald-500\/15,
+html[data-theme='light'] .knowledge-workspace__audit .border-emerald-500\/20,
+html[data-theme='light'] .knowledge-workspace__audit .border-emerald-500\/25 { border-color: #9CD4B8 !important; }
+
+html[data-theme='light'] .knowledge-workspace__audit .bg-emerald-500\/5,
+html[data-theme='light'] .knowledge-workspace__audit .bg-emerald-500\/10 { background-color: #EAF7F0 !important; }
+
+html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/5,
+html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/10,
+html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/15 { background-color: #FFF4D8 !important; }
+
+html[data-theme='light'] .knowledge-workspace__audit .border-amber-400\/20,
+html[data-theme='light'] .knowledge-workspace__audit .border-amber-400\/25 { border-color: #E6BB58 !important; }
