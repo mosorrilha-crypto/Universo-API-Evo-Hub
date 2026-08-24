@@ -33,6 +33,8 @@ interface PublicCatalog {
     locationMapsUrl?: string;
     addressLabel?: string;
     hoursLabel?: string;
+    whatsappMessageGeneral?: string;
+    whatsappMessageProduct?: string;
   };
   products: PublicCatalogProduct[];
 }
@@ -60,11 +62,18 @@ const FAQS = [
   },
 ];
 
-function whatsappUrl(phone: string | undefined, productName?: string): string | null {
+/**
+ * `template` vem da aba Catálogo do painel (`whatsappMessageGeneral`/
+ * `whatsappMessageProduct`) e permite ao operador controlar o texto
+ * pré-preenchido sem depender de deploy de código; `{produto}` é trocado
+ * pelo nome do produto quando presente. Ausente/vazio cai no texto padrão.
+ */
+function whatsappUrl(phone: string | undefined, productName: string | undefined, template: string | undefined): string | null {
   if (!phone) return null;
-  const message = productName
+  const defaultMessage = productName
     ? `Hola, quiero información sobre ${productName}.`
     : 'Hola, quiero información sobre los servicios.';
+  const message = template ? (productName ? template.split('{produto}').join(productName) : template) : defaultMessage;
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
@@ -169,7 +178,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     );
   }
 
-  const generalWhatsapp = whatsappUrl(catalog.contact.whatsappNumber);
+  const generalWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral);
 
   return (
     <PageShell>
@@ -225,7 +234,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                   <h3 className="group-title">{category}</h3>
                   <div className="product-grid">
                     {products.map((product) => {
-                      const productWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, product.name);
+                      const productWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, product.name, catalog.contact.whatsappMessageProduct);
                       return (
                         <article className="product-card" key={`${category}-${product.name}`}>
                           <div className="product-topline">

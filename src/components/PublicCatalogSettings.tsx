@@ -9,6 +9,8 @@ interface PublicCatalogFormState {
   locationMapsUrl: string;
   address: string;
   hoursLabel: string;
+  whatsappMessageGeneral: string;
+  whatsappMessageProduct: string;
 }
 
 const EMPTY_FORM: PublicCatalogFormState = {
@@ -18,6 +20,8 @@ const EMPTY_FORM: PublicCatalogFormState = {
   locationMapsUrl: '',
   address: '',
   hoursLabel: '',
+  whatsappMessageGeneral: '',
+  whatsappMessageProduct: '',
 };
 
 interface PublicCatalogSettingsProps {
@@ -62,6 +66,8 @@ export function PublicCatalogSettings({ tenantSlug, activeProductCount, onGoToKn
           locationMapsUrl: data.locationMapsUrl || '',
           address: data.address || '',
           hoursLabel: data.hoursLabel || '',
+          whatsappMessageGeneral: data.whatsappMessageGeneral || '',
+          whatsappMessageProduct: data.whatsappMessageProduct || '',
         });
       })
       .catch(() => {
@@ -200,6 +206,27 @@ export function PublicCatalogSettings({ tenantSlug, activeProductCount, onGoToKn
                 value={form.hoursLabel}
                 onChange={(e) => setForm((prev) => ({ ...prev, hoursLabel: e.target.value }))}
                 placeholder="Lun–Vie 8–18h · Sáb 8–13h"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1 border-t border-slate-800">
+            <Field label="Mensagem do botão geral" hint='Abre com o botão flutuante "Escribinos por WhatsApp". Vazio usa o texto padrão: "Hola, quiero información sobre los servicios."'>
+              <textarea
+                className={`${inputClass} min-h-[72px] resize-y`}
+                value={form.whatsappMessageGeneral}
+                onChange={(e) => setForm((prev) => ({ ...prev, whatsappMessageGeneral: e.target.value }))}
+                placeholder="Hola, quiero información sobre los servicios."
+                rows={3}
+              />
+            </Field>
+            <Field label="Mensagem do botão por produto" hint='Abre no botão "Consultar por WhatsApp" de cada produto. Use {produto} pra o nome entrar automaticamente. Vazio usa o texto padrão: "Hola, quiero información sobre {produto}."'>
+              <textarea
+                className={`${inputClass} min-h-[72px] resize-y`}
+                value={form.whatsappMessageProduct}
+                onChange={(e) => setForm((prev) => ({ ...prev, whatsappMessageProduct: e.target.value }))}
+                placeholder="Hola, vi el producto {produto} en el catálogo y quiero más información."
+                rows={3}
               />
             </Field>
           </div>

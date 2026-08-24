@@ -1274,7 +1274,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/public-catalog-settings', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { data, error } = await getDb()
       .from('tenants')
-      .select('slug, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label')
+      .select('slug, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
       .eq('id', tenantOf(req))
       .maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
@@ -1286,15 +1286,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       locationMapsUrl: data?.public_location_maps_url || '',
       address: data?.public_address || '',
       hoursLabel: data?.public_hours_label || '',
+      whatsappMessageGeneral: data?.public_whatsapp_message_general || '',
+      whatsappMessageProduct: data?.public_whatsapp_message_product || '',
     });
   }));
 
   router.put('/api/public-catalog-settings', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { enabled, whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel } = req.body || {};
+    const { enabled, whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel, whatsappMessageGeneral, whatsappMessageProduct } = req.body || {};
     if (typeof enabled !== 'boolean') {
       return res.status(400).json({ error: 'Campo "enabled" precisa ser booleano.' });
     }
-    const textFields = { whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel };
+    const textFields = { whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel, whatsappMessageGeneral, whatsappMessageProduct };
     for (const [field, value] of Object.entries(textFields)) {
       if (value !== undefined && value !== null && typeof value !== 'string') {
         return res.status(400).json({ error: `Campo "${field}" precisa ser string ou null.` });
@@ -1309,6 +1311,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         public_location_maps_url: locationMapsUrl?.trim() || null,
         public_address: address?.trim() || null,
         public_hours_label: hoursLabel?.trim() || null,
+        public_whatsapp_message_general: whatsappMessageGeneral?.trim() || null,
+        public_whatsapp_message_product: whatsappMessageProduct?.trim() || null,
       })
       .eq('id', tenantOf(req));
     if (error) return res.status(500).json({ error: error.message });
