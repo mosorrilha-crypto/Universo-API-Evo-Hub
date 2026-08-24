@@ -1,9 +1,10 @@
 /**
- * Refinamento do benchmark de mercado: lembretes de agendamento passam a
- * usar botões de "Confirmar"/"Remarcar" (interactive/button da Meta Cloud
- * API) em vez de só texto — a maior causa de no-show documentada é
- * dificuldade de remarcar fora do horário comercial, e um botão resolve
- * isso num toque.
+ * Achado real CONFIRMADO em produção (20/08/2026, ver reminderJob.ts): o
+ * lembrete usava botões interativos de texto livre
+ * (`sendWhatsAppInteractiveButtons`) — só funciona DENTRO da janela de 24h
+ * desde a última mensagem do cliente. Lembrete é proativo por definição, então
+ * precisa de um TEMPLATE aprovado pela Meta com botões quick-reply
+ * (`sendWhatsAppTemplateMessage` com `buttonPayloads`).
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
@@ -22,8 +23,8 @@ const wasReminderSent = vi.fn(async () => false);
 const markReminderSent = vi.fn(async () => undefined);
 vi.mock('../reminderStore', () => ({ wasReminderSent, markReminderSent }));
 
-const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
-vi.mock('../metaSend', () => ({ sendWhatsAppInteractiveButtons }));
+const sendWhatsAppTemplateMessage = vi.fn(async () => ({ messageId: 'wamid.test' }));
+vi.mock('../metaSend', () => ({ sendWhatsAppTemplateMessage }));
 
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage: vi.fn() }));
 
@@ -46,29 +47,28 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('reminderJob — lembrete com botões de Confirmar/Remarcar', () => {
-  it('manda o lembrete como botões interativos, não texto puro', async () => {
+describe('reminderJob — lembrete via template aprovado com botões quick-reply', () => {
+  it('manda o lembrete como template com botões, não texto/interativo livre', async () => {
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
 
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
-    const [phoneNumberId, accessToken, to, body, buttons] = sendWhatsAppInteractiveButtons.mock.calls[0] as any[];
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    const [phoneNumberId, accessToken, to, templateName, templateLanguage, bodyParams, buttonPayloads] = sendWhatsAppTemplateMessage.mock.calls[0] as any[];
     expect(phoneNumberId).toBe('pn');
     expect(accessToken).toBe('tok');
     expect(to).toBe('595981111111');
-    // 14:00 UTC vira 11:00 no fuso America/Asuncion — a conversão de fuso já é comportamento existente, não faz parte deste refinamento.
-    expect(body).toContain('11:00');
     // Tenant sem `reminder_language` configurado cai no default 'es'
     // (migration 0038) — é o idioma real da única tenant em produção.
-    expect(buttons).toEqual([
-      { id: 'lembrete_confirmar', title: '✅ Confirmar' },
-      { id: 'lembrete_remarcar', title: '🔄 Reprogramar' },
-    ]);
+    expect(templateName).toBe('lembrete_agendamento_es');
+    expect(templateLanguage).toBe('es');
+    // 14:00 UTC vira 11:00 no fuso America/Asuncion — a conversão de fuso já é comportamento existente, não faz parte deste refinamento.
+    expect(bodyParams).toEqual(['hoy', '11:00']);
+    expect(buttonPayloads).toEqual(['lembrete_confirmar', 'lembrete_remarcar']);
     expect(markReminderSent).toHaveBeenCalledWith('tenant-a', 'evt-1', 'mesmo_dia');
   });
 
   it('não reenvia se já foi mandado pra esse evento/tipo (idempotência)', async () => {
     wasReminderSent.mockResolvedValueOnce(true);
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
-    expect(sendWhatsAppInteractiveButtons).not.toHaveBeenCalled();
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
   });
 });

@@ -23,8 +23,8 @@ const wasReminderSent = vi.fn(async () => false);
 const markReminderSent = vi.fn(async () => undefined);
 vi.mock('../reminderStore', () => ({ wasReminderSent, markReminderSent }));
 
-const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
-vi.mock('../metaSend', () => ({ sendWhatsAppInteractiveButtons }));
+const sendWhatsAppTemplateMessage = vi.fn(async () => ({ messageId: 'wamid.test' }));
+vi.mock('../metaSend', () => ({ sendWhatsAppTemplateMessage }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage: vi.fn() }));
 vi.mock('../tenantResolver', () => ({
   resolveCredentialsForTenant: vi.fn(async () => ({ provider: 'meta', metaAccessToken: 'tok', metaPhoneNumberId: 'pn' })),
@@ -51,10 +51,11 @@ describe('reminderJob — idioma do lembrete por tenant', () => {
 
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
 
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
-    const [, , , body] = sendWhatsAppInteractiveButtons.mock.calls[0] as any[];
-    expect(body).toContain('confirmando');
-    expect(body).not.toContain('Bom dia');
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    const [, , , templateName, templateLanguage, bodyParams] = sendWhatsAppTemplateMessage.mock.calls[0] as any[];
+    expect(templateName).toBe('lembrete_agendamento_es');
+    expect(templateLanguage).toBe('es');
+    expect(bodyParams[0]).toBe('hoy');
   });
 
   it('tenant com reminder_language "pt" continua recebendo o texto em português', async () => {
@@ -64,9 +65,11 @@ describe('reminderJob — idioma do lembrete por tenant', () => {
 
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
 
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
-    const [, , , body] = sendWhatsAppInteractiveButtons.mock.calls[0] as any[];
-    expect(body).toContain('Bom dia');
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    const [, , , templateName, templateLanguage, bodyParams] = sendWhatsAppTemplateMessage.mock.calls[0] as any[];
+    expect(templateName).toBe('lembrete_agendamento_pt');
+    expect(templateLanguage).toBe('pt_BR');
+    expect(bodyParams[0]).toBe('hoje');
   });
 
   it('tenant sem linha em `tenants` (falha ao buscar idioma) cai no default "es", nunca quebra o job', async () => {
@@ -76,9 +79,9 @@ describe('reminderJob — idioma do lembrete por tenant', () => {
 
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
 
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
-    const [, , , body] = sendWhatsAppInteractiveButtons.mock.calls[0] as any[];
-    expect(body).not.toContain('Bom dia');
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    const [, , , templateName] = sendWhatsAppTemplateMessage.mock.calls[0] as any[];
+    expect(templateName).toBe('lembrete_agendamento_es');
   });
 });
 
@@ -91,7 +94,7 @@ describe('reminderJob — lembrete "mesmo_dia" só depois do horário de abertur
 
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
 
-    expect(sendWhatsAppInteractiveButtons).not.toHaveBeenCalled();
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
     expect(markReminderSent).not.toHaveBeenCalled();
   });
 
@@ -102,7 +105,7 @@ describe('reminderJob — lembrete "mesmo_dia" só depois do horário de abertur
 
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
 
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
   });
 
   it('sem expediente configurado, cai no horário de corte padrão (07:00) em vez de travar o lembrete', async () => {
@@ -112,6 +115,6 @@ describe('reminderJob — lembrete "mesmo_dia" só depois do horário de abertur
 
     await checkAndSendReminders({ getCalendarConfig: () => CALENDAR_CONFIG });
 
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
   });
 });

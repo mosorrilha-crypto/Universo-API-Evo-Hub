@@ -178,17 +178,36 @@ export async function sendWhatsAppInteractiveButtons(
  * pro uso atual; sem suporte a cabeçalho/botão dinâmico por enquanto.
  * Referência: https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates
  */
+/**
+ * `buttonPayloads` (opcional) — pro caso do template aprovado ter botões
+ * quick-reply (ver reminderJob.ts): o TEXTO do botão fica fixo no template
+ * já aprovado pela Meta (não dá pra parametrizar), só o `payload` de cada
+ * botão viaja dinamicamente aqui, um componente `button`/`quick_reply` por
+ * posição (`index` 0, 1, ...), na mesma ordem em que os botões foram
+ * cadastrados no template. Ao tocar, o cliente manda de volta um webhook
+ * `type: "button"` com esse payload (ver webhookParsers.ts) — formato
+ * diferente do `interactive.button_reply` usado por sendWhatsAppInteractiveButtons.
+ */
 export async function sendWhatsAppTemplateMessage(
   phoneNumberId: string | undefined,
   accessToken: string | undefined,
   to: string,
   templateName: string,
   languageCode: string,
-  bodyParams: string[]
-): Promise<void> {
+  bodyParams: string[],
+  buttonPayloads?: string[]
+): Promise<{ messageId?: string }> {
   if (!phoneNumberId || !accessToken) {
     throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mensagem via Meta Cloud API.');
   }
+
+  const components: Record<string, unknown>[] = [];
+  if (bodyParams.length) {
+    components.push({ type: 'body', parameters: bodyParams.map((text) => ({ type: 'text', text })) });
+  }
+  buttonPayloads?.forEach((payload, index) => {
+    components.push({ type: 'button', sub_type: 'quick_reply', index: String(index), parameters: [{ type: 'payload', payload }] });
+  });
 
   const res = await fetch(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
     method: 'POST',
@@ -203,9 +222,7 @@ export async function sendWhatsAppTemplateMessage(
       template: {
         name: templateName,
         language: { code: languageCode },
-        components: bodyParams.length
-          ? [{ type: 'body', parameters: bodyParams.map((text) => ({ type: 'text', text })) }]
-          : undefined,
+        components: components.length ? components : undefined,
       },
     }),
   });
@@ -213,6 +230,11 @@ export async function sendWhatsAppTemplateMessage(
   if (!res.ok) {
     await throwMetaError(res, 'Falha ao enviar mensagem via template (Meta Cloud API)');
   }
+
+  // Mesmo motivo de sendWhatsAppInteractiveButtons acima — devolve o wamid
+  // pra quem chama poder cruzar com um eventual status "failed" do webhook.
+  const data = await res.json().catch(() => ({}));
+  return { messageId: data?.messages?.[0]?.id };
 }
 
 /**
