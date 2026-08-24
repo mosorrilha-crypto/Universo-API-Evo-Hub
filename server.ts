@@ -29,6 +29,7 @@ import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startPendingFollowUpJob } from './server/services/pendingFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
+import { startEvolutionConnectionAlertJob } from './server/services/evolutionConnectionAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
 import { initWebPush } from './server/services/webPush';
@@ -230,6 +231,17 @@ async function startServer() {
     evolutionApiUrl: config.evolutionApiUrl,
     evolutionApiKey: config.evolutionApiKey,
     evolutionInstanceName: config.evolutionInstanceName,
+  });
+
+  // Job em background que alerta o operador quando a sessão Baileys/Evolution
+  // de um tenant cai silenciosamente (investigação real, 24/08/2026 — cliente
+  // manda mensagem, IA nunca responde, ninguém vê erro nenhum porque o
+  // WhatsApp segue entregando mensagem ponta-a-ponta enquanto nosso webhook
+  // simplesmente para de receber). Nunca reconecta sozinho, só avisa. Ver
+  // server/services/evolutionConnectionAlertJob.ts.
+  startEvolutionConnectionAlertJob({
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
   });
 
   // Job em background que alerta o operador quando um pagamento fica

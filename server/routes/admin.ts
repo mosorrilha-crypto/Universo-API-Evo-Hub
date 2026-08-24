@@ -61,15 +61,25 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     // tenantResolver.ts) pra receber/responder mensagens reais. Sem esse
     // caso especial, ele contava como "não conectado" mesmo estando de
     // verdade em produção.
+    //
+    // Segundo achado real (24/08/2026): pro provider Evolution, ter uma
+    // LINHA em tenant_evolution_credentials só prova que a instância foi
+    // PROVISIONADA (ex: alguém clicou "Gerar QR Code") — não que o WhatsApp
+    // foi realmente pareado. Um tenant recém-criado, com o QR gerado mas
+    // nunca escaneado, aparecia como "Conectado" igual a um que já estava
+    // em produção há dias. Agora usa `last_connection_state`
+    // (evolutionConnectionAlertJob.ts mantém essa coluna atualizada a cada
+    // 5min consultando o estado real na Evolution API) — só conta como
+    // conectado quando o último estado observado for `'open'`.
     const tenantIds = tenants.map((t: any) => t.id);
     const connectedIds = new Set<string>();
     if (tenantIds.length) {
       const [{ data: metaCreds }, { data: evoCreds }] = await Promise.all([
         db().from('tenant_meta_credentials').select('tenant_id, phone_number_id').in('tenant_id', tenantIds),
-        db().from('tenant_evolution_credentials').select('tenant_id').in('tenant_id', tenantIds),
+        db().from('tenant_evolution_credentials').select('tenant_id, last_connection_state').in('tenant_id', tenantIds),
       ]);
       (metaCreds || []).forEach((c: any) => { if (c.phone_number_id) connectedIds.add(c.tenant_id); });
-      (evoCreds || []).forEach((c: any) => connectedIds.add(c.tenant_id));
+      (evoCreds || []).forEach((c: any) => { if (c.last_connection_state === 'open') connectedIds.add(c.tenant_id); });
       if (sharedMetaPhoneNumberId && tenantIds.includes(LEGACY_DEFAULT_TENANT_ID)) {
         connectedIds.add(LEGACY_DEFAULT_TENANT_ID);
       }
@@ -115,6 +125,56 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     }
 
     res.status(201).json({ tenant });
+  }));
+
+  // Edição básica do tenant (nome/slug/moeda/idioma/segmento) — pedido real
+  // do dono do produto depois de criar tenants de teste com nome errado
+  // (ex: "Monique 2", "Tanent 3") e não ter como corrigir sem SQL direto no
+  // Supabase. Só os campos passados no body são atualizados; nunca mexe em
+  // credenciais (Meta/Evolution/Instagram) nem em dado de negócio (base de
+  // conhecimento, conversas) — isso continua em rotas próprias.
+  router.patch('/api/admin/tenants/:id', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+    const { name, slug, currency, locale, segment } = req.body || {};
+    const patch: Record<string, unknown> = {};
+    if (name !== undefined) {
+      if (!String(name).trim()) return res.status(400).json({ error: 'Campo "name" não pode ficar vazio.' });
+      patch.name = name;
+    }
+    if (slug !== undefined) patch.slug = slug || null;
+    if (currency !== undefined) patch.currency = currency;
+    if (locale !== undefined) patch.locale = locale;
+    if (segment !== undefined) patch.segment = segment;
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nenhum campo pra atualizar.' });
+
+    const { data: tenant, error } = await db().from('tenants').update(patch).eq('id', req.params.id).select('*').maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
+    res.json({ tenant });
+  }));
+
+  // Exclusão de tenant — destrutivo e em cascata de propósito (todas as
+  // tabelas tenant-scoped referenciam tenants(id) com "on delete cascade",
+  // ver migration 0001): apaga conversas, mensagens, credenciais, base de
+  // conhecimento, operadores etc. desse tenant, tudo de uma vez, sem
+  // recuperação. Pedido real do dono do produto pra limpar tenants de teste
+  // criados sem querer (ex: "Monique 2", "Tanent 3") sem precisar de SQL
+  // direto no Supabase.
+  //
+  // `confirmName` (exato, case-sensitive) é obrigatório — segunda barreira
+  // além da confirmação do próprio painel, justamente porque o dano aqui é
+  // irreversível e atinge todo o histórico do tenant, não só um registro.
+  router.delete('/api/admin/tenants/:id', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+    const { confirmName } = req.body || {};
+    const { data: tenant, error: fetchError } = await db().from('tenants').select('id, name').eq('id', req.params.id).maybeSingle();
+    if (fetchError) return res.status(500).json({ error: fetchError.message });
+    if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
+    if (!confirmName || confirmName !== tenant.name) {
+      return res.status(400).json({ error: 'Confirmação não bate com o nome do tenant. Digite o nome exato pra confirmar a exclusão.' });
+    }
+
+    const { error: deleteError } = await db().from('tenants').delete().eq('id', req.params.id);
+    if (deleteError) return res.status(500).json({ error: deleteError.message });
+    res.json({ success: true });
   }));
 
   // ── Operators ────────────────────────────────────────────────────────
