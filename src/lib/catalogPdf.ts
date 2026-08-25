@@ -52,6 +52,67 @@ function formatDurationLabel(minutes?: number): string | null {
 const FONT_LINK_ATTR = 'data-catalog-pdf-font';
 const CONTAINER_WIDTH_PX = 800;
 const CAPTURE_SCALE = 2;
+const IMAGE_TARGET_WIDTH = 640;
+const IMAGE_TARGET_HEIGHT = 480;
+
+/**
+ * `AgentProduct.exampleImageBase64` é a foto original guardada inline sem
+ * limite de tamanho (já chegou a ~3MB numa foto real da Monique) — usada
+ * hoje só pra o agente mandar por WhatsApp. Comprime no navegador (canvas,
+ * recorte 4:3 + reencode JPEG) antes de entrar no PDF, senão o arquivo final
+ * ficaria pesado demais pra compartilhar. Roda client-side (não no backend,
+ * como a miniatura do catálogo público) porque o painel autenticado já tem a
+ * foto original carregada em memória — não precisa de mais uma chamada.
+ */
+async function compressProductImageDataUri(product: AgentProduct): Promise<string | undefined> {
+  if (!product.exampleImageBase64) return undefined;
+  const src = product.exampleImageBase64.startsWith('data:')
+    ? product.exampleImageBase64
+    : `data:${product.exampleImageMimeType || 'image/jpeg'};base64,${product.exampleImageBase64}`;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = IMAGE_TARGET_WIDTH;
+      canvas.height = IMAGE_TARGET_HEIGHT;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(undefined);
+        return;
+      }
+      const targetRatio = IMAGE_TARGET_WIDTH / IMAGE_TARGET_HEIGHT;
+      const sourceRatio = img.width / img.height;
+      let sx = 0;
+      let sy = 0;
+      let sw = img.width;
+      let sh = img.height;
+      if (sourceRatio > targetRatio) {
+        sw = img.height * targetRatio;
+        sx = (img.width - sw) / 2;
+      } else {
+        sh = img.width / targetRatio;
+        sy = (img.height - sh) / 2;
+      }
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, IMAGE_TARGET_WIDTH, IMAGE_TARGET_HEIGHT);
+      resolve(canvas.toDataURL('image/jpeg', 0.75));
+    };
+    img.onerror = () => resolve(undefined);
+    img.src = src;
+  });
+}
+
+/** Resolve a versão comprimida da foto de cada produto em paralelo, antes de montar o HTML. */
+async function buildProductImageMap(products: AgentProduct[]): Promise<Map<AgentProduct, string>> {
+  const map = new Map<AgentProduct, string>();
+  await Promise.all(
+    products.map(async (product) => {
+      const dataUri = await compressProductImageDataUri(product);
+      if (dataUri) map.set(product, dataUri);
+    }),
+  );
+  return map;
+}
 
 interface BlockBounds {
   top: number;
@@ -124,7 +185,7 @@ async function ensureCatalogFontLoaded(): Promise<void> {
  * botão terracota "Consultar por WhatsApp" (estático aqui, já que o PDF
  * inteiro é uma imagem rasterizada sem interação possível).
  */
-function buildProductCardHtml(product: AgentProduct, contact: CatalogPdfContact): string {
+function buildProductCardHtml(product: AgentProduct, contact: CatalogPdfContact, imageDataUri: string | undefined): string {
   const duration = formatDurationLabel(product.durationMinutes);
   const variantsHtml = product.variants?.length
     ? `<div style="margin-top:12px;border-top:1px solid rgba(78,62,49,.12);">${product.variants
@@ -145,19 +206,26 @@ function buildProductCardHtml(product: AgentProduct, contact: CatalogPdfContact)
     ? `<div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(78,62,49,.12);color:#987254;font-size:11px;letter-spacing:.03em;">Consultas: WhatsApp ${escapeHtml(contact.whatsappPhone)}</div>`
     : '';
 
-  return `<div data-pdf-block="true" style="border:1px solid rgba(78,62,49,.15);background:#fffdf9;padding:22px 24px;margin-bottom:14px;box-shadow:0 10px 26px rgba(78,62,49,.05);">
-    <div style="display:flex;align-items:center;justify-content:space-between;min-height:14px;color:#987254;font-size:11px;letter-spacing:.05em;">
-      <span style="display:inline-block;width:7px;height:7px;border:1px solid #bc896c;border-radius:50%;"></span>
-      ${duration ? `<span>${escapeHtml(duration)}</span>` : ''}
+  const imageHtml = imageDataUri
+    ? `<img src="${imageDataUri}" style="display:block;width:100%;height:auto;" alt="" />`
+    : '';
+
+  return `<div data-pdf-block="true" style="border:1px solid rgba(78,62,49,.15);background:#fffdf9;margin-bottom:14px;box-shadow:0 10px 26px rgba(78,62,49,.05);overflow:hidden;">
+    ${imageHtml}
+    <div style="padding:22px 24px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;min-height:14px;color:#987254;font-size:11px;letter-spacing:.05em;">
+        <span style="display:inline-block;width:7px;height:7px;border:1px solid #bc896c;border-radius:50%;"></span>
+        ${duration ? `<span>${escapeHtml(duration)}</span>` : ''}
+      </div>
+      <div style="margin:18px 0 12px;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:22px;color:#211d1a;line-height:1.05;">${escapeHtml(normalizeSpanishText(product.name))}</div>
+      <div style="display:flex;align-items:baseline;gap:8px;">
+        <strong style="color:#8d5c43;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:19px;font-weight:400;">${escapeHtml(normalizeSpanishText(product.price || '—'))}</strong>
+        <span style="color:#987254;font-size:9px;letter-spacing:.1em;text-transform:uppercase;">Desde</span>
+      </div>
+      ${product.description ? `<div style="margin-top:14px;font-size:12.5px;color:#6f6258;line-height:1.65;">${escapeHtml(normalizeSpanishText(product.description))}</div>` : ''}
+      ${variantsHtml}
+      ${whatsappHtml}
     </div>
-    <div style="margin:18px 0 12px;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:22px;color:#211d1a;line-height:1.05;">${escapeHtml(normalizeSpanishText(product.name))}</div>
-    <div style="display:flex;align-items:baseline;gap:8px;">
-      <strong style="color:#8d5c43;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:19px;font-weight:400;">${escapeHtml(normalizeSpanishText(product.price || '—'))}</strong>
-      <span style="color:#987254;font-size:9px;letter-spacing:.1em;text-transform:uppercase;">Desde</span>
-    </div>
-    ${product.description ? `<div style="margin-top:14px;font-size:12.5px;color:#6f6258;line-height:1.65;">${escapeHtml(normalizeSpanishText(product.description))}</div>` : ''}
-    ${variantsHtml}
-    ${whatsappHtml}
   </div>`;
 }
 
@@ -174,7 +242,12 @@ const STEPS: Array<[number: string, title: string, text: string]> = [
  * cobria. Fica de fora só o que não faz sentido num PDF estático: FAQ
  * (acordeão interativo) e o botão flutuante de WhatsApp.
  */
-function buildCatalogHtml(tenantName: string, contact: CatalogPdfContact, products: AgentProduct[]): HTMLDivElement {
+function buildCatalogHtml(
+  tenantName: string,
+  contact: CatalogPdfContact,
+  products: AgentProduct[],
+  imageMap: Map<AgentProduct, string>,
+): HTMLDivElement {
   const activeProducts = products.filter((product) => product.active !== false);
 
   const groups = new Map<string, AgentProduct[]>();
@@ -189,7 +262,7 @@ function buildCatalogHtml(tenantName: string, contact: CatalogPdfContact, produc
     .map(
       ([category, items]) => `<div style="margin-bottom:32px;">
         <div style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#987254;margin-bottom:16px;">${escapeHtml(normalizeSpanishText(category))}</div>
-        ${items.map((product) => buildProductCardHtml(product, contact)).join('')}
+        ${items.map((product) => buildProductCardHtml(product, contact, imageMap.get(product))).join('')}
       </div>`,
     )
     .join('');
@@ -270,12 +343,25 @@ function buildCatalogHtml(tenantName: string, contact: CatalogPdfContact, produc
  */
 export async function downloadCatalogPdf(tenantName: string, contact: CatalogPdfContact, products: AgentProduct[]): Promise<void> {
   const [{ jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
-  await ensureCatalogFontLoaded();
+  const [, imageMap] = await Promise.all([ensureCatalogFontLoaded(), buildProductImageMap(products)]);
 
-  const container = buildCatalogHtml(tenantName, contact, products);
+  const container = buildCatalogHtml(tenantName, contact, products, imageMap);
   document.body.appendChild(container);
 
   try {
+    // As fotos já chegam prontas como data URI (comprimidas antes de montar o
+    // HTML), mas o navegador ainda precisa decodificá-las pro elemento
+    // `<img>` — sem esperar isso, o html2canvas pode capturar a área da foto
+    // em branco se disparar antes da decodificação terminar.
+    await Promise.all(
+      Array.from(container.querySelectorAll('img')).map((img) =>
+        img.complete ? Promise.resolve() : new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        }),
+      ),
+    );
+
     // `doc.html()` (o wrapper de alto nível do jsPDF) testado na prática:
     // o html2canvas renderiza normalmente, mas a imagem nunca fica de fato
     // ligada aos recursos da página (`/XObject` vazio no PDF final — página
