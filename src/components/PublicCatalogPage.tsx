@@ -570,8 +570,7 @@ function PageShell({ children }: { children: ReactNode }) {
         .product-card { display: flex; min-height: 270px; flex-direction: column; border: 1px solid rgba(78, 62, 49, .15); background: #fffdf9; box-shadow: 0 18px 50px rgba(78, 62, 49, .05); overflow: hidden; }
         .product-card-body { display: flex; flex: 1; flex-direction: column; padding: 25px; }
         .product-card.skeleton-card { padding: 25px; }
-        .product-card-image { width: 100%; height: 190px; object-fit: cover; display: block; }
-        .product-card.has-image { min-height: 460px; }
+        .product-card-image { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; display: block; }
         .product-card.has-image .product-card-body { padding-top: 22px; }
         .product-topline { display: flex; align-items: center; justify-content: space-between; min-height: 18px; color: #987254; font-size: 11px; letter-spacing: .05em; }
         .product-dot { width: 7px; height: 7px; border: 1px solid #bc896c; border-radius: 50%; }
