@@ -21,6 +21,8 @@ interface PublicCatalogProduct {
   currency: string;
   durationMinutes?: number;
   variants?: PublicCatalogVariant[];
+  /** Miniatura comprimida (data URI JPEG) — gerada no backend a partir da foto de exemplo do produto, quando existir. */
+  imageUrl?: string;
 }
 
 interface PublicCatalog {
@@ -367,25 +369,28 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                       const localizedName = localizeCatalogText(product.name, language);
                       const productWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language);
                       return (
-                        <article className="product-card" key={`${category}-${product.name}`}>
-                          <div className="product-topline">
-                            <span className="product-dot" aria-hidden="true" />
-                            {formatDuration(product.durationMinutes) && <span>{formatDuration(product.durationMinutes)}</span>}
-                          </div>
-                          <h4>{localizedName}</h4>
-                          <div className="price-row"><strong>{formatProductPrice(product, language)}</strong><span>{copy.from}</span></div>
-                          {product.description && <p>{localizeCatalogText(product.description, language)}</p>}
-                          {product.variants && product.variants.length > 0 && (
-                            <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
-                              {product.variants.map((variant) => (
-                                <div className="variant-row" key={variant.code}>
-                                  <span>{localizeCatalogText(variant.code, language)}</span>
-                                  <strong>{localizeCatalogText(variant.price, language)}</strong>
-                                </div>
-                              ))}
+                        <article className={`product-card${product.imageUrl ? ' has-image' : ''}`} key={`${category}-${product.name}`}>
+                          {product.imageUrl && <img className="product-card-image" src={product.imageUrl} alt={localizedName} loading="lazy" />}
+                          <div className="product-card-body">
+                            <div className="product-topline">
+                              <span className="product-dot" aria-hidden="true" />
+                              {formatDuration(product.durationMinutes) && <span>{formatDuration(product.durationMinutes)}</span>}
                             </div>
-                          )}
-                          {productWhatsapp && <a className="whatsapp-button" href={productWhatsapp} target="_blank" rel="noreferrer">{copy.whatsappProduct} <span aria-hidden="true">↗</span></a>}
+                            <h4>{localizedName}</h4>
+                            <div className="price-row"><strong>{formatProductPrice(product, language)}</strong><span>{copy.from}</span></div>
+                            {product.description && <p>{localizeCatalogText(product.description, language)}</p>}
+                            {product.variants && product.variants.length > 0 && (
+                              <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
+                                {product.variants.map((variant) => (
+                                  <div className="variant-row" key={variant.code}>
+                                    <span>{localizeCatalogText(variant.code, language)}</span>
+                                    <strong>{localizeCatalogText(variant.price, language)}</strong>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {productWhatsapp && <a className="whatsapp-button" href={productWhatsapp} target="_blank" rel="noreferrer">{copy.whatsappProduct} <span aria-hidden="true">↗</span></a>}
+                          </div>
                         </article>
                       );
                     })}
@@ -562,7 +567,12 @@ function PageShell({ children }: { children: ReactNode }) {
         .product-groups { display: grid; gap: 62px; }
         .group-title { margin: 0 0 18px; color: #987254; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; }
         .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-        .product-card { display: flex; min-height: 270px; flex-direction: column; padding: 25px; border: 1px solid rgba(78, 62, 49, .15); background: #fffdf9; box-shadow: 0 18px 50px rgba(78, 62, 49, .05); }
+        .product-card { display: flex; min-height: 270px; flex-direction: column; border: 1px solid rgba(78, 62, 49, .15); background: #fffdf9; box-shadow: 0 18px 50px rgba(78, 62, 49, .05); overflow: hidden; }
+        .product-card-body { display: flex; flex: 1; flex-direction: column; padding: 25px; }
+        .product-card.skeleton-card { padding: 25px; }
+        .product-card-image { width: 100%; height: 190px; object-fit: cover; display: block; }
+        .product-card.has-image { min-height: 460px; }
+        .product-card.has-image .product-card-body { padding-top: 22px; }
         .product-topline { display: flex; align-items: center; justify-content: space-between; min-height: 18px; color: #987254; font-size: 11px; letter-spacing: .05em; }
         .product-dot { width: 7px; height: 7px; border: 1px solid #bc896c; border-radius: 50%; }
         .product-card h4 { margin: 32px 0 16px; color: #211d1a; font-family: 'Playfair Display', Georgia, serif; font-size: 26px; font-weight: 400; line-height: 1.05; }

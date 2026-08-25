@@ -1,4 +1,5 @@
 import { getDb } from './db';
+import { buildCatalogThumbnail } from './catalogImageThumbnail';
 import {
   getKnowledgeBase,
   resolveProductPrice,
@@ -27,6 +28,8 @@ export interface PublicCatalogProduct {
   currency: string;
   durationMinutes?: number;
   variants?: PublicCatalogVariant[];
+  /** Miniatura comprimida (data URI JPEG) — nunca a foto original (`exampleImageBase64`), que pode chegar a alguns MB e é privada/interna. */
+  imageUrl?: string;
 }
 
 export interface PublicCatalog {
@@ -74,7 +77,7 @@ function publicVariant(variant: ProductVariant): PublicCatalogVariant {
   };
 }
 
-export function toPublicCatalogProduct(product: AgentProduct, tenantCurrency: string): PublicCatalogProduct {
+export async function toPublicCatalogProduct(product: AgentProduct, tenantCurrency: string): Promise<PublicCatalogProduct> {
   const currentPrice = resolveProductPrice(product);
   const amount = resolveProductPriceAmount(product);
   return {
@@ -86,13 +89,14 @@ export function toPublicCatalogProduct(product: AgentProduct, tenantCurrency: st
     currency: product.currency || tenantCurrency,
     durationMinutes: product.durationMinutes,
     variants: product.variants?.map(publicVariant),
+    imageUrl: await buildCatalogThumbnail(product.exampleImageBase64),
   };
 }
 
-export function toPublicCatalog(
+export async function toPublicCatalog(
   tenant: { name: string; slug: string; currency: string; locale: string },
   products: AgentProduct[],
-): PublicCatalog {
+): Promise<PublicCatalog> {
   return {
     tenant: {
       name: tenant.name,
@@ -103,9 +107,11 @@ export function toPublicCatalog(
     contact: {},
     // `active:false` é a mesma regra usada pelo agente: produto pausado não
     // deve ser ofertado ao público nem continuar aparecendo no atendimento.
-    products: products
-      .filter((product) => product.active !== false)
-      .map((product) => toPublicCatalogProduct(product, tenant.currency)),
+    products: await Promise.all(
+      products
+        .filter((product) => product.active !== false)
+        .map((product) => toPublicCatalogProduct(product, tenant.currency)),
+    ),
   };
 }
 
@@ -124,7 +130,7 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
   const knowledgeBase = await getKnowledgeBase(tenant.id);
   if (!knowledgeBase) return null;
 
-  const catalog = toPublicCatalog(tenant, knowledgeBase.products || []);
+  const catalog = await toPublicCatalog(tenant, knowledgeBase.products || []);
   catalog.contact = {
     whatsappNumber: tenant.public_whatsapp_phone || undefined,
     instagramUrl: tenant.public_instagram_url || undefined,

@@ -13,8 +13,8 @@ describe('publicCatalogStore', () => {
     expect(normalizeSlug('áudio')).toBeNull();
   });
 
-  it('publica somente campos comerciais e filtra produtos inativos', () => {
-    const catalog = toPublicCatalog(
+  it('publica somente campos comerciais e filtra produtos inativos', async () => {
+    const catalog = await toPublicCatalog(
       { name: 'Monique', slug: 'monique', currency: 'PYG', locale: 'es-PY' },
       [
         {
@@ -26,7 +26,6 @@ describe('publicCatalogStore', () => {
           description: 'Cor natural e definida.',
           durationMinutes: 120,
           bookable: true,
-          exampleImageBase64: 'data:image/png;base64,private',
           exampleVideoId: 'private-video-id',
         },
         {
@@ -47,13 +46,14 @@ describe('publicCatalogStore', () => {
       currency: 'PYG',
       durationMinutes: 120,
       variants: undefined,
+      imageUrl: undefined,
     });
     expect(catalog).not.toHaveProperty('agentGoal');
     expect(catalog).not.toHaveProperty('pricingAndPolicies');
   });
 
-  it('preserva variantes comerciais sem transportar aliases ou mídia privada', () => {
-    const product = toPublicCatalogProduct(
+  it('preserva variantes comerciais sem transportar aliases ou mídia privada', async () => {
+    const product = await toPublicCatalogProduct(
       {
         name: 'Pestañas',
         aliases: ['Efecto 30+'],
@@ -69,5 +69,24 @@ describe('publicCatalogStore', () => {
       { code: 'Efecto 30+', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120 },
     ]);
     expect(product).not.toHaveProperty('aliases');
+  });
+
+  it('publica uma miniatura comprimida derivada da foto de exemplo, nunca o base64 original', async () => {
+    // PNG 1x1 mínimo válido — só precisa ser uma imagem decodificável pelo sharp.
+    const tinyPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const product = await toPublicCatalogProduct(
+      {
+        name: 'Cejas — Diseño & Tratamientos',
+        price: 'Gs 60.000',
+        exampleImageBase64: `data:image/png;base64,${tinyPngBase64}`,
+        exampleImageMimeType: 'image/png',
+      },
+      'PYG',
+    );
+
+    expect(product.imageUrl).toBeDefined();
+    expect(product.imageUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(product).not.toHaveProperty('exampleImageBase64');
   });
 });
