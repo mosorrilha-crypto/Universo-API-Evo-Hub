@@ -134,7 +134,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // credenciais (Meta/Evolution/Instagram) nem em dado de negócio (base de
   // conhecimento, conversas) — isso continua em rotas próprias.
   router.patch('/api/admin/tenants/:id', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
-    const { name, slug, currency, locale, segment } = req.body || {};
+    const { name, slug, currency, locale, segment, isActive } = req.body || {};
     const patch: Record<string, unknown> = {};
     if (name !== undefined) {
       if (!String(name).trim()) return res.status(400).json({ error: 'Campo "name" não pode ficar vazio.' });
@@ -144,6 +144,10 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (currency !== undefined) patch.currency = currency;
     if (locale !== undefined) patch.locale = locale;
     if (segment !== undefined) patch.segment = segment;
+    // Bloqueio de acesso (TASK-0070) — reversível, distinto do DELETE
+    // abaixo (que é irreversível e em cascata). Só desliga login novo dos
+    // operadores desse tenant (ver server/routes/auth.ts); não apaga nada.
+    if (isActive !== undefined) patch.is_active = Boolean(isActive);
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nenhum campo pra atualizar.' });
 
     const { data: tenant, error } = await db().from('tenants').update(patch).eq('id', req.params.id).select('*').maybeSingle();
@@ -174,6 +178,103 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
 
     const { error: deleteError } = await db().from('tenants').delete().eq('id', req.params.id);
     if (deleteError) return res.status(500).json({ error: deleteError.message });
+    res.json({ success: true });
+  }));
+
+  // ── Histórico de pagamento mensal do tenant ao Universo (TASK-0070) ────
+  // Cobrança do SAAS ao tenant (assinatura mensal) — distinta de
+  // financial_transactions, que é a cobrança do TENANT ao cliente final
+  // dele. Registro manual (sem gateway, mesma decisão de escopo de
+  // financial_transactions/Epic 4.4): um saas_admin marca cada mês.
+  router.get('/api/admin/tenants/:id/billing', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+    const { data, error } = await db()
+      .from('tenant_billing_records')
+      .select('*')
+      .eq('tenant_id', req.params.id)
+      .order('reference_month', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ records: data || [] });
+  }));
+
+  router.post('/api/admin/tenants/:id/billing', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { referenceMonth, amount, currency, status, note } = req.body || {};
+    if (!referenceMonth) return res.status(400).json({ error: 'Campo "referenceMonth" (AAAA-MM ou AAAA-MM-DD) é obrigatório.' });
+    if (amount === undefined || amount === null || Number.isNaN(Number(amount))) {
+      return res.status(400).json({ error: 'Campo "amount" é obrigatório e precisa ser numérico.' });
+    }
+    // Normaliza sempre pro dia 1 do mês (unique(tenant_id, reference_month))
+    // — quem manda "2026-08" ou "2026-08-15" cai no mesmo registro do mês.
+    const monthMatch = String(referenceMonth).match(/^(\d{4})-(\d{2})/);
+    if (!monthMatch) return res.status(400).json({ error: 'Formato de "referenceMonth" inválido — use AAAA-MM.' });
+    const normalizedMonth = `${monthMatch[1]}-${monthMatch[2]}-01`;
+    const statusValue = status || 'pendente';
+    if (!['pendente', 'pago', 'atrasado'].includes(statusValue)) {
+      return res.status(400).json({ error: `Status inválido: ${statusValue}` });
+    }
+
+    const { data, error } = await db()
+      .from('tenant_billing_records')
+      .insert({
+        tenant_id: req.params.id,
+        reference_month: normalizedMonth,
+        amount: Number(amount),
+        currency: currency || 'BRL',
+        status: statusValue,
+        paid_at: statusValue === 'pago' ? new Date().toISOString() : null,
+        note: note || null,
+        created_by: req.user?.id || null,
+      })
+      .select('*')
+      .single();
+    if (error) {
+      if (String((error as any).code) === '23505') {
+        return res.status(409).json({ error: 'Já existe um registro de cobrança pra esse tenant nesse mês — edite o existente em vez de criar outro.' });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+    res.status(201).json({ record: data });
+  }));
+
+  router.patch('/api/admin/tenants/:id/billing/:recordId', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+    const { status, amount, note, paidAt } = req.body || {};
+    const patch: Record<string, unknown> = {};
+    if (status !== undefined) {
+      if (!['pendente', 'pago', 'atrasado'].includes(status)) return res.status(400).json({ error: `Status inválido: ${status}` });
+      patch.status = status;
+      // Marcar como "pago" sem informar paidAt explicitamente registra agora
+      // — é a decisão humana acontecendo neste instante (mesmo padrão de
+      // verify-payment em conversations.ts: o clique é o registro).
+      if (status === 'pago' && paidAt === undefined) patch.paid_at = new Date().toISOString();
+    }
+    if (paidAt !== undefined) patch.paid_at = paidAt || null;
+    if (amount !== undefined) {
+      if (Number.isNaN(Number(amount))) return res.status(400).json({ error: 'Campo "amount" precisa ser numérico.' });
+      patch.amount = Number(amount);
+    }
+    if (note !== undefined) patch.note = note || null;
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nenhum campo pra atualizar.' });
+
+    const { data, error } = await db()
+      .from('tenant_billing_records')
+      .update(patch)
+      .eq('id', req.params.recordId)
+      .eq('tenant_id', req.params.id)
+      .select('*')
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: 'Registro de cobrança não encontrado.' });
+    res.json({ record: data });
+  }));
+
+  router.delete('/api/admin/tenants/:id/billing/:recordId', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+    const { error, data } = await db()
+      .from('tenant_billing_records')
+      .delete()
+      .eq('id', req.params.recordId)
+      .eq('tenant_id', req.params.id)
+      .select('id');
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data?.length) return res.status(404).json({ error: 'Registro de cobrança não encontrado.' });
     res.json({ success: true });
   }));
 
@@ -226,21 +327,52 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // corrigir isso sem alguém mexer no banco). Mesma regra de escopo/
   // escalonamento de privilégio da criação (POST acima): admin comum só
   // edita dentro do próprio tenant e nunca promove ninguém a saas_admin.
+  // Estendido (TASK-0070, pedido direto de chat: "trocar login de acesso e
+  // senha" na tela de gestão de tenants) pra aceitar também email/name/
+  // password, além da role já suportada. Continua um PATCH parcial — só os
+  // campos enviados são alterados, mesma convenção do PATCH de tenant acima.
   router.patch('/api/admin/operators/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { role } = req.body || {};
-    if (!['operator', 'manager', 'admin', 'saas_admin'].includes(role)) {
-      return res.status(400).json({ error: `Role inválida: ${role}` });
-    }
+    const { role, email, name, password } = req.body || {};
     const saasAdmin = isSaasAdmin(req);
-    if (!saasAdmin && role === 'saas_admin') {
-      return res.status(403).json({ error: 'Só saas_admin pode promover alguém a saas_admin.' });
+    const patch: Record<string, unknown> = {};
+
+    if (role !== undefined) {
+      if (!['operator', 'manager', 'admin', 'saas_admin'].includes(role)) {
+        return res.status(400).json({ error: `Role inválida: ${role}` });
+      }
+      if (!saasAdmin && role === 'saas_admin') {
+        return res.status(403).json({ error: 'Só saas_admin pode promover alguém a saas_admin.' });
+      }
+      patch.role = role;
     }
-    let query = db().from('operators').update({ role }).eq('id', req.params.id);
+    if (email !== undefined) {
+      if (!String(email).trim()) return res.status(400).json({ error: 'Campo "email" não pode ficar vazio.' });
+      patch.email = String(email).trim();
+    }
+    if (name !== undefined) {
+      if (!String(name).trim()) return res.status(400).json({ error: 'Campo "name" não pode ficar vazio.' });
+      patch.name = name;
+    }
+    if (password !== undefined) {
+      if (String(password).length < 6) return res.status(400).json({ error: 'Senha precisa ter pelo menos 6 caracteres.' });
+      patch.password_hash = await bcrypt.hash(String(password), 10);
+    }
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nenhum campo pra atualizar.' });
+
+    let query = db().from('operators').update(patch).eq('id', req.params.id);
     if (!saasAdmin) {
       query = query.eq('tenant_id', req.user?.tenantId);
     }
-    const { data, error } = await query.select('id, tenant_id, email, name, role, created_at').single();
-    if (error || !data) return res.status(404).json({ error: 'Operador não encontrado.' });
+    const { data, error } = await query.select('id, tenant_id, email, name, role, created_at').maybeSingle();
+    if (error) {
+      // e-mail único por tenant (unique(tenant_id, email), migration 0001) —
+      // devolve mensagem legível em vez do erro cru do Postgres.
+      if (String(error.message || '').includes('duplicate') || String((error as any).code) === '23505') {
+        return res.status(409).json({ error: 'Já existe um operador com esse e-mail neste tenant.' });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+    if (!data) return res.status(404).json({ error: 'Operador não encontrado.' });
     res.json({ operator: data });
   }));
 

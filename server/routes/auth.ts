@@ -53,6 +53,21 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
       const validPassword = await bcrypt.compare(password, operator.password_hash);
       if (!validPassword) throw new Error(genericError);
 
+      // Bloqueio de acesso do tenant (TASK-0070, tenants.is_active) — checado
+      // só DEPOIS da senha validar, pra não virar um jeito de descobrir se um
+      // tenant está bloqueado sem saber a senha de ninguém dele. Mensagem
+      // diferente de propósito aqui (não é genericError): quem já tem senha
+      // certa precisa saber que o problema é bloqueio, não credencial errada.
+      const { data: tenantRow, error: tenantError } = await supabase
+        .from('tenants')
+        .select('is_active')
+        .eq('id', operator.tenant_id)
+        .maybeSingle();
+      if (tenantError) throw new Error('Falha ao verificar o status do tenant.');
+      if (tenantRow && tenantRow.is_active === false) {
+        throw new Error('Acesso bloqueado. Fale com o administrador do sistema.');
+      }
+
       const token = jwt.sign(
         { id: operator.id, tenantId: operator.tenant_id, role: operator.role },
         jwtSecret,
