@@ -962,12 +962,19 @@ html[data-theme='dark'] .bg-emerald-500 {
   background-color: var(--action) !important;
 }
 
-/* Achado real ao trocar o acento do tema Limpo de verde pra azul: só
-   `.bg-emerald-500` tinha essa regra — `.bg-emerald-600` (usado por vários
-   botões primários no app, ex: LoginModal) nunca foi coberto por nenhum
-   tema, então ficava sempre com o verde padrão do Tailwind mesmo fora do
-   tema escuro/nativo (o tema Azul já existente tem essa mesma lacuna, fora
-   do escopo desta correção — só o Limpo é tocado aqui). */
+/* Normalização dos 4 temas (pedido do dono do produto, 25/08/2026): achado
+   real ao trocar o acento do tema Limpo de verde pra azul (TASK-0061) — só
+   `.bg-emerald-500` tinha essa regra. `.bg-emerald-600` é usado por DEZENAS
+   de botões primários no app (Button.tsx variant="primary", LoginModal,
+   OperatorCRM, FinancialDashboard, SaaSAdminDashboard, o próprio seletor de
+   tema do Header) e nunca foi coberto por nenhum tema — ficava sempre com o
+   verde padrão do Tailwind. Corrigido primeiro só pro Limpo, depois pro
+   Azul (achado colateral da mesma sessão); agora os 4 temas. */
+html[data-theme='light'] .bg-emerald-600,
+html[data-theme='dark'] .bg-emerald-600 {
+  background-color: var(--action) !important;
+}
+
 html[data-theme='clean'] .bg-emerald-600 {
   background-color: var(--action) !important;
 }
@@ -983,6 +990,17 @@ html[data-theme='dark'] .bg-emerald-500.text-white {
 }
 
 html[data-theme='clean'] .bg-emerald-600.text-slate-950 {
+  color: var(--action-contrast) !important;
+}
+
+/* Contraste, só no Claro: `--action` do tema Claro é um verde escuro
+   (#1C6B4B) — texto `text-slate-950` (quase preto, o padrão desses botões
+   em toda a aplicação) ficaria ilegível em cima dele sem essa correção. O
+   tema Escuro não precisa da mesma correção: `--action` dele é um verde
+   pastel claro (#5EBF92), que já contrasta bem com texto quase-preto sem
+   nenhuma mudança — mesma razão pela qual esse gap nunca foi notado lá. */
+html[data-theme='light'] .bg-emerald-500.text-slate-950,
+html[data-theme='light'] .bg-emerald-600.text-slate-950 {
   color: var(--action-contrast) !important;
 }
 
