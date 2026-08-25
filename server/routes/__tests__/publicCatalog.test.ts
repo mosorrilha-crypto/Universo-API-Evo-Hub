@@ -59,7 +59,7 @@ describe('GET /api/public/catalog/:slug', () => {
     expect(response.headers.get('cache-control')).toContain('max-age=60');
     const body = await response.json();
 
-    expect(body.catalog.tenant).toEqual({ name: 'Monique', slug: 'monique', currency: 'PYG', locale: 'es-PY' });
+    expect(body.catalog.tenant).toEqual({ name: 'Monique', slug: 'monique', currency: 'PYG', locale: 'es-PY', template: 'default' });
     expect(body.catalog.contact).toMatchObject({
       whatsappNumber: '595981436141',
       instagramUrl: 'https://instagram.com/pestanaspormonique',
