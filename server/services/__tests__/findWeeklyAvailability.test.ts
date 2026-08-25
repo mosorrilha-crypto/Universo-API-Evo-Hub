@@ -80,6 +80,21 @@ describe('findWeeklyAvailability', () => {
     expect(saturday?.slots).toEqual([{ start: '08:00', end: '13:00' }]);
   });
 
+  it('não oferece horário de hoje que já passou, mesmo livre no Google Calendar (achado real 25/08/2026)', async () => {
+    seedDb(MONIQUE_HOURS);
+    // Segunda 07:30-20:00, "agora" é 14:30 local (Asunción) — 07:30/08:00
+    // etc já passaram, mas nada está marcado como ocupado no Google.
+    vi.setSystemTime(new Date(localNaiveToUtcIso('2026-08-10T14:30:00', 'America/Asuncion')));
+
+    const result = await findWeeklyAvailability(TENANT_A, CALENDAR_CONFIG, 60);
+    const monday = result.find((d) => d.date === '2026-08-10')!;
+    const starts = monday.slots.map((s) => s.start);
+
+    expect(starts).not.toContain('07:30');
+    expect(starts).not.toContain('14:00'); // ainda dentro da hora atual, já passou
+    expect(starts).toContain('15:00'); // primeiro slot depois de "agora"
+  });
+
   it('slot ocupado no Google Calendar real não aparece na disponibilidade', async () => {
     seedDb(MONIQUE_HOURS);
     const busyStart = localNaiveToUtcIso('2026-08-15T09:00:00', 'America/Asuncion');
