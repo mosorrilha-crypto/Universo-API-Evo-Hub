@@ -323,12 +323,22 @@ async function computeAvailabilityForDates(
       .map((b) => ({ startMs: new Date(b.start!).getTime(), endMs: new Date(b.end!).getTime() }));
   });
 
+  // Achado real em produção (25/08/2026): candidato era gerado só a partir
+  // do expediente (abre/fecha), sem checar se o horário já passou — pro dia
+  // de hoje, um slot da manhã continuava "disponível" a tarde inteira até a
+  // agenda real do Google marcar como ocupado. O agente chegou a oferecer
+  // 08:30 pro cliente às 14:29 do mesmo dia. `slotStartMs` já é um
+  // timestamp absoluto (`localNaiveToUtcIso`), então comparar direto com
+  // `Date.now()` filtra isso sem precisar tratar "hoje" como caso especial —
+  // datas futuras nunca são afetadas.
+  const nowMs = Date.now();
   const result: WeeklyAvailabilityDay[] = [];
   for (const date of sortedDates) {
     const candidates = candidatesByDate.get(date)!;
     const freeSlots: WeeklyAvailabilitySlot[] = [];
     for (const c of candidates) {
       const slotStartMs = new Date(localNaiveToUtcIso(`${date}T${minutesToTime(c.startMin)}:00`, timezone)).getTime();
+      if (slotStartMs <= nowMs) continue;
       const slotEndMs = new Date(localNaiveToUtcIso(`${date}T${minutesToTime(c.endMin)}:00`, timezone)).getTime();
       const isFree = !busy.some((b) => slotStartMs < b.endMs && b.startMs < slotEndMs);
       if (isFree) freeSlots.push({ start: minutesToTime(c.startMin), end: minutesToTime(c.endMin) });
