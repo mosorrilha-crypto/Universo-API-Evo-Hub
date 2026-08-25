@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
 import { generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
@@ -128,6 +128,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // shouldBlockForAdsOnlyMode) — nunca contatos pessoais. Mensagem já
       // foi gravada acima (recordIncomingMessage, antes de chegar aqui) —
       // só a resposta automática fica em silêncio, nunca perde o dado.
+      //
+      // attachCatalogClickIfMatched roda sempre (mesmo fora do modo
+      // somente-anúncios) — liga a conversa a um clique real do catálogo
+      // quando reconhece o código de emojis na mensagem, independente do
+      // gate de ads_only abaixo (ver comentário na própria função).
+      await attachCatalogClickIfMatched(tenantId, phone, text);
       if (await shouldBlockForAdsOnlyMode(tenantId, phone, text)) return;
       const kb = await getKnowledgeBase(tenantId);
       const kbContext = formatKnowledgeBaseForPrompt(kb);

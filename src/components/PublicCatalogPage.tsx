@@ -233,14 +233,23 @@ function localizeCatalogText(value: string | undefined, language: CatalogLanguag
   return language === 'pt' ? (PT_CATALOG_TEXT[value] || value) : normalizeSpanishText(value);
 }
 
-function whatsappUrl(phone: string | undefined, productName: string | undefined, template: string | undefined, language: CatalogLanguage): string | null {
+/**
+ * Aponta pro backend (`/api/public/catalog/:slug/whatsapp-click`) em vez de
+ * direto pro `wa.me` — pedido real (25/08/2026): assim o clique é contado
+ * de verdade (independente de Meta Pixel) e a mensagem sai com um código
+ * curto de emojis embutido, que o agente reconhece na mensagem recebida
+ * pra ligar a conversa a este clique específico com certeza.
+ */
+function whatsappUrl(slug: string, phone: string | undefined, productName: string | undefined, template: string | undefined, language: CatalogLanguage): string | null {
   if (!phone) return null;
   const copy = COPY[language];
   const defaultMessage = productName ? copy.whatsappWithProduct(productName) : copy.whatsappGeneral;
   const message = language === 'es' && template
     ? (productName ? template.split('{produto}').join(productName) : template)
     : defaultMessage;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  const params = new URLSearchParams({ msg: message });
+  if (productName) params.set('product', productName);
+  return `/api/public/catalog/${encodeURIComponent(slug)}/whatsapp-click?${params.toString()}`;
 }
 
 function formatDuration(minutes?: number): string | null {
@@ -377,7 +386,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     );
   }
 
-  const generalWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral, language);
+  const generalWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral, language);
   const faqs = FAQS[language];
 
   return (
@@ -419,7 +428,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                   <div className="product-grid">
                     {products.map((product) => {
                       const localizedName = localizeCatalogText(product.name, language);
-                      const productWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language);
+                      const productWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language);
                       return (
                         <article className={`product-card${product.imageUrl ? ' has-image' : ''}`} key={`${category}-${product.name}`}>
                           {product.imageUrl && <img className="product-card-image" src={product.imageUrl} alt={localizedName} loading="lazy" />}

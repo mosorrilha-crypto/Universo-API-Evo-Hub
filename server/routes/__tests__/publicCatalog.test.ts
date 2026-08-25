@@ -91,3 +91,46 @@ describe('GET /api/public/catalog/:slug', () => {
     expect(missingResponse.status).toBe(404);
   });
 });
+
+describe('GET /api/public/catalog/:slug/whatsapp-click', () => {
+  it('registra o clique, redireciona (302) pro WhatsApp com o code de emojis embutido na mensagem', async () => {
+    const seed = {
+      tenants: [{
+        id: 'tenant-monique',
+        slug: 'monique',
+        public_catalog_enabled: true,
+        public_whatsapp_phone: '595981436141',
+      }],
+    };
+    ({ server, baseUrl } = await startServer(seed));
+
+    const response = await fetch(`${baseUrl}/api/public/catalog/monique/whatsapp-click?msg=${encodeURIComponent('Hola, quiero información sobre Combo Full Face')}&product=${encodeURIComponent('Combo Full Face')}`, { redirect: 'manual' });
+
+    expect(response.status).toBe(302);
+    const location = response.headers.get('location')!;
+    expect(location.startsWith('https://wa.me/595981436141?text=')).toBe(true);
+    const message = decodeURIComponent(location.split('text=')[1]);
+    expect(message.startsWith('Hola, quiero información sobre Combo Full Face ')).toBe(true);
+    expect(message).not.toBe('Hola, quiero información sobre Combo Full Face '); // tem algo (o code) depois do espaço
+  });
+
+  it('404 pra slug sem catálogo habilitado ou sem telefone configurado', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{ id: 'tenant-x', slug: 'sem-telefone', public_catalog_enabled: true, public_whatsapp_phone: null }],
+    }));
+
+    const noPhone = await fetch(`${baseUrl}/api/public/catalog/sem-telefone/whatsapp-click?msg=oi`, { redirect: 'manual' });
+    const missing = await fetch(`${baseUrl}/api/public/catalog/desconhecido/whatsapp-click?msg=oi`, { redirect: 'manual' });
+    expect(noPhone.status).toBe(404);
+    expect(missing.status).toBe(404);
+  });
+
+  it('400 quando a mensagem (msg) está ausente', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{ id: 'tenant-monique', slug: 'monique', public_catalog_enabled: true, public_whatsapp_phone: '595981436141' }],
+    }));
+
+    const response = await fetch(`${baseUrl}/api/public/catalog/monique/whatsapp-click`, { redirect: 'manual' });
+    expect(response.status).toBe(400);
+  });
+});
