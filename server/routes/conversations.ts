@@ -1441,6 +1441,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const doc = await getKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantOf(req), req.params.docId);
     if (!doc) return res.status(404).json({ error: 'Documento não encontrado.' });
     res.setHeader('Content-Type', doc.contentType);
+    // TASK-0074 (auditoria de egress, 25/08/2026) — mesmo padrão já usado
+    // em /api/media/:messageId: o id é estável e o conteúdo não muda sem
+    // reupload, então cache privado evita rebaixar de novo do Storage a
+    // cada abertura/preview.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Vary', 'Authorization');
     res.send(doc.buffer);
   }));
 
@@ -1521,6 +1527,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const video = await getKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantOf(req), req.params.videoId);
     if (!video) return res.status(404).json({ error: 'Vídeo não encontrado.' });
     res.setHeader('Content-Type', video.contentType);
+    // TASK-0074 (auditoria de egress, 25/08/2026) — vídeo pode ter vários MB
+    // e essa rota não tinha cache nenhum (diferente de /api/media/:messageId,
+    // que já tinha desde antes); cada preview no painel baixava de novo do
+    // Storage. Mesmo padrão de cache privado por id estável.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Vary', 'Authorization');
     res.send(video.buffer);
   }));
 
@@ -1572,6 +1584,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const file = await getKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantOf(req), req.params.fileId);
     if (!file) return res.status(404).json({ error: 'Arquivo não encontrado.' });
     res.setHeader('Content-Type', file.contentType);
+    // TASK-0074 (auditoria de egress, 25/08/2026) — mesmo padrão acima.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Vary', 'Authorization');
     res.send(file.buffer);
   }));
 
