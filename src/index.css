@@ -247,7 +247,7 @@ html[data-theme='light'] body {
 html[data-theme='clean'] body {
   color: #0F172A;
   background:
-    radial-gradient(circle at 7% -8%, rgba(16, 185, 129, 0.06), transparent 28rem),
+    radial-gradient(circle at 7% -8%, rgba(59, 130, 246, 0.06), transparent 28rem),
     radial-gradient(circle at 94% 4%, rgba(100, 116, 139, 0.04), transparent 25rem),
     var(--surface-deep);
 }
@@ -405,7 +405,7 @@ html[data-theme='light'] .custom-scrollbar {
 }
 
 html[data-theme='clean'] .custom-scrollbar {
-  scrollbar-color: #10B981 #F1F5F9;
+  scrollbar-color: #3B82F6 #F1F5F9;
 }
 
 html[data-theme='light'] .custom-scrollbar::-webkit-scrollbar-track {
@@ -424,7 +424,7 @@ html[data-theme='light'] .custom-scrollbar::-webkit-scrollbar-thumb {
 }
 
 html[data-theme='clean'] .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #10B981;
+  background: #3B82F6;
   box-shadow: none;
 }
 
@@ -560,7 +560,7 @@ html[data-theme='light'] .atendimento-signal { background:rgba(255,255,255,.86);
 html[data-theme='clean'] .atendimento-signal { background:rgba(255,255,255,.86); border-color:rgba(15, 23, 42, 0.08); }
 html[data-theme='light'] .atendimento-workspace__approval { color:#047857; background:rgba(16,185,129,.06); border-color:rgba(5,150,105,.2); }
 
-html[data-theme='clean'] .atendimento-workspace__approval { color:#047857; background:rgba(16,185,129,.06); border-color:rgba(5,150,105,.2); }
+html[data-theme='clean'] .atendimento-workspace__approval { color:#2563EB; background:rgba(59,130,246,.06); border-color:rgba(37,99,235,.2); }
 html[data-theme='blue'] .atendimento-workspace__header { background: linear-gradient(135deg, rgba(8,47,73,.95), rgba(15,64,100,.82)); border-color: rgba(56,189,248,.28); }
 html[data-theme='blue'] .atendimento-workspace__icon { background:linear-gradient(135deg,#0b78b5,#075985); }
 html[data-theme='blue'] .atendimento-workspace__eyebrow { color:#7dd3fc; }
@@ -702,7 +702,7 @@ html[data-theme='clean'] {
   --text-secondary: #64748B;
   --text-muted: #94A3B8;
   --text-label: #94A3B8;
-  --action: #047857;
+  --action: #2563EB;
   --action-contrast: #FFFFFF;
   --pending: #92400E;
   --pending-surface: #FFFBEB;
@@ -710,8 +710,8 @@ html[data-theme='clean'] {
   --danger-surface: #FEF2F2;
   --reason: #9A3412;
   --reason-surface: #FFF7ED;
-  --bubble-ai: #ECFDF5;
-  --bubble-ai-border: #A7F3D0;
+  --bubble-ai: #EFF6FF;
+  --bubble-ai-border: #BFDBFE;
   --bubble-client: #F5F6F8;
   --shadow-premium: 0 1px 2px rgba(0, 0, 0, .06);
 }
@@ -951,6 +951,16 @@ html[data-theme='dark'] .bg-emerald-500 {
   background-color: var(--action) !important;
 }
 
+/* Achado real ao trocar o acento do tema Limpo de verde pra azul: só
+   `.bg-emerald-500` tinha essa regra — `.bg-emerald-600` (usado por vários
+   botões primários no app, ex: LoginModal) nunca foi coberto por nenhum
+   tema, então ficava sempre com o verde padrão do Tailwind mesmo fora do
+   tema escuro/nativo (o tema Azul já existente tem essa mesma lacuna, fora
+   do escopo desta correção — só o Limpo é tocado aqui). */
+html[data-theme='clean'] .bg-emerald-600 {
+  background-color: var(--action) !important;
+}
+
 html[data-theme='light'] .bg-emerald-500.text-white,
 html[data-theme='dark'] .bg-emerald-500.text-white {
   color: var(--action-contrast) !important;
@@ -958,6 +968,10 @@ html[data-theme='dark'] .bg-emerald-500.text-white {
 
 html[data-theme='clean'] .bg-emerald-500.text-white,
 html[data-theme='dark'] .bg-emerald-500.text-white {
+  color: var(--action-contrast) !important;
+}
+
+html[data-theme='clean'] .bg-emerald-600.text-slate-950 {
   color: var(--action-contrast) !important;
 }
 
@@ -2081,7 +2095,7 @@ html[data-theme='light'] .quality-workspace__control-card h3 {
 }
 
 html[data-theme='clean'] .quality-workspace__control-card h3 {
-  color: #047857 !important;
+  color: #2563EB !important;
 }
 
 html[data-theme='light'] .quality-workspace__control-card > div:first-child p {
@@ -2098,8 +2112,8 @@ html[data-theme='light'] .quality-workspace__control-quote {
 }
 
 html[data-theme='clean'] .quality-workspace__control-quote {
-  background: #ECFDF5 !important;
-  border-color: #34D399 !important;
+  background: #EFF6FF !important;
+  border-color: #60A5FA !important;
 }
 
 html[data-theme='light'] .quality-workspace__control-quote p {
@@ -2107,7 +2121,7 @@ html[data-theme='light'] .quality-workspace__control-quote p {
 }
 
 html[data-theme='clean'] .quality-workspace__control-quote p {
-  color: #047857 !important;
+  color: #2563EB !important;
 }
 
 html[data-theme='light'] .quality-workspace__control-pill {
@@ -2139,7 +2153,7 @@ html[data-theme='light'] .quality-workspace__control-pill--amber > p:last-child 
 html[data-theme='clean'] .quality-workspace__control-pill--amber > p:last-child { color: #B45309 !important; }
 html[data-theme='light'] .quality-workspace__control-pill--emerald > p:last-child { color: #09734B !important; }
 
-html[data-theme='clean'] .quality-workspace__control-pill--emerald > p:last-child { color: #047857 !important; }
+html[data-theme='clean'] .quality-workspace__control-pill--emerald > p:last-child { color: #2563EB !important; }
 
 
 /* Qualidade IA — superfícies claras inspiradas no Atendimento validado.
@@ -2433,8 +2447,8 @@ html[data-theme='clean'] {
   --button-disabled-text: #64748B;
   --button-disabled-surface: #F5F6F8;
   --button-disabled-border: #E4E7EC;
-  --button-action: #047857;
-  --button-action-hover: #065F46;
+  --button-action: #2563EB;
+  --button-action-hover: #1D4ED8;
   --button-info: #0369A1;
   --button-info-hover: #075985;
   --button-warning: #B45309;
@@ -2650,7 +2664,7 @@ html[data-theme='clean'] button[class~='bg-emerald-500/10'],
 html[data-theme='clean'] button[class~='bg-emerald-500/15'],
 html[data-theme='clean'] [role='button'][class~='bg-emerald-500/5'],
 html[data-theme='clean'] [role='button'][class~='bg-emerald-500/10'],
-html[data-theme='clean'] [role='button'][class~='bg-emerald-500/15'] { background-color: #ECFDF5 !important; border-color: #34D399 !important; }
+html[data-theme='clean'] [role='button'][class~='bg-emerald-500/15'] { background-color: #EFF6FF !important; border-color: #60A5FA !important; }
 
 html[data-theme='light'] button[class~='bg-sky-500/5'],
 html[data-theme='light'] button[class~='bg-sky-500/10'],
@@ -2760,7 +2774,7 @@ html[data-theme='clean'] .text-emerald-50,
 html[data-theme='clean'] .text-emerald-100,
 html[data-theme='clean'] .text-emerald-200,
 html[data-theme='clean'] .text-emerald-300,
-html[data-theme='clean'] .text-emerald-400 { color: #047857 !important; }
+html[data-theme='clean'] .text-emerald-400 { color: #2563EB !important; }
 
 html[data-theme='light'] .text-sky-50,
 html[data-theme='light'] .text-sky-100,
@@ -2849,7 +2863,7 @@ html[data-theme='light'] .knowledge-workspace__audit {
 
 html[data-theme='clean'] .knowledge-workspace__audit {
   background: #FFFFFF !important;
-  border-color: #A7F3D0 !important;
+  border-color: #BFDBFE !important;
 }
 
 html[data-theme='light'] .knowledge-workspace__audit-metric {
@@ -2864,7 +2878,7 @@ html[data-theme='clean'] .knowledge-workspace__audit-metric {
 
 html[data-theme='light'] .knowledge-workspace__audit-metric.text-emerald-300 { color: #0A704C !important; }
 
-html[data-theme='clean'] .knowledge-workspace__audit-metric.text-emerald-300 { color: #047857 !important; }
+html[data-theme='clean'] .knowledge-workspace__audit-metric.text-emerald-300 { color: #2563EB !important; }
 html[data-theme='light'] .knowledge-workspace__audit-metric.text-sky-200 { color: #0D718A !important; }
 
 html[data-theme='clean'] .knowledge-workspace__audit-metric.text-sky-200 { color: #0369A1 !important; }
@@ -2881,13 +2895,13 @@ html[data-theme='light'] .knowledge-workspace__audit .border-emerald-500\/25 { b
 
 html[data-theme='clean'] .knowledge-workspace__audit .border-emerald-500\/15,
 html[data-theme='clean'] .knowledge-workspace__audit .border-emerald-500\/20,
-html[data-theme='clean'] .knowledge-workspace__audit .border-emerald-500\/25 { border-color: #34D399 !important; }
+html[data-theme='clean'] .knowledge-workspace__audit .border-emerald-500\/25 { border-color: #60A5FA !important; }
 
 html[data-theme='light'] .knowledge-workspace__audit .bg-emerald-500\/5,
 html[data-theme='light'] .knowledge-workspace__audit .bg-emerald-500\/10 { background-color: #EAF7F0 !important; }
 
 html[data-theme='clean'] .knowledge-workspace__audit .bg-emerald-500\/5,
-html[data-theme='clean'] .knowledge-workspace__audit .bg-emerald-500\/10 { background-color: #ECFDF5 !important; }
+html[data-theme='clean'] .knowledge-workspace__audit .bg-emerald-500\/10 { background-color: #EFF6FF !important; }
 
 html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/5,
 html[data-theme='light'] .knowledge-workspace__audit .bg-amber-400\/10,
@@ -2949,9 +2963,9 @@ html[data-theme='light'] .knowledge-workspace__catalog-summary {
 }
 
 html[data-theme='clean'] .knowledge-workspace__catalog-summary {
-  background: linear-gradient(135deg, #ECFDF5 0%, #FFFFFF 58%) !important;
-  border-color: #A7F3D0 !important;
-  box-shadow: 0 12px 30px rgba(16, 185, 129, 0.08) !important;
+  background: linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 58%) !important;
+  border-color: #BFDBFE !important;
+  box-shadow: 0 12px 30px rgba(59, 130, 246, 0.08) !important;
 }
 
 html[data-theme='light'] .knowledge-workspace__catalog-summary .text-white { color: #22241F !important; }
@@ -2977,7 +2991,7 @@ html[data-theme='clean'] .knowledge-workspace__catalog-metric {
 
 html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-emerald-500\/15 { background-color: #EAF7F0 !important; }
 
-html[data-theme='clean'] .knowledge-workspace__catalog-summary .bg-emerald-500\/15 { background-color: #ECFDF5 !important; }
+html[data-theme='clean'] .knowledge-workspace__catalog-summary .bg-emerald-500\/15 { background-color: #EFF6FF !important; }
 html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/10,
 html[data-theme='light'] .knowledge-workspace__catalog-summary .bg-amber-400\/15 { background-color: #FFF4D8 !important; }
 
@@ -3038,8 +3052,8 @@ html[data-theme='light'] .knowledge-workspace__variant-editor textarea:focus {
 html[data-theme='clean'] .knowledge-workspace__variant-editor input:focus,
 html[data-theme='clean'] .knowledge-workspace__variant-editor select:focus,
 html[data-theme='clean'] .knowledge-workspace__variant-editor textarea:focus {
-  border-color: #047857 !important;
-  outline: 2px solid rgba(5, 150, 105, 0.18) !important;
+  border-color: #2563EB !important;
+  outline: 2px solid rgba(37, 99, 235, 0.18) !important;
   outline-offset: 1px;
 }
 
@@ -3106,7 +3120,7 @@ html[data-theme='light'] .operations-quick-action:hover,
 html[data-theme='light'] .operations-priority-item:hover { background-color: #EAF7F0 !important; }
 
 html[data-theme='clean'] .operations-quick-action:hover,
-html[data-theme='clean'] .operations-priority-item:hover { background-color: #ECFDF5 !important; }
+html[data-theme='clean'] .operations-priority-item:hover { background-color: #EFF6FF !important; }
 
 html[data-theme='light'] .operations-quick-action > span:first-child {
   background-color: #E8F6EF !important;
@@ -3114,8 +3128,8 @@ html[data-theme='light'] .operations-quick-action > span:first-child {
 }
 
 html[data-theme='clean'] .operations-quick-action > span:first-child {
-  background-color: #ECFDF5 !important;
-  color: #047857 !important;
+  background-color: #EFF6FF !important;
+  color: #2563EB !important;
 }
 
 html[data-theme='light'] .operations-quick-action .text-slate-100,
@@ -3342,7 +3356,7 @@ html[data-theme='clean'] .bg-emerald-950\/40,
 html[data-theme='clean'] .bg-emerald-950\/50,
 html[data-theme='clean'] .bg-emerald-950\/60,
 html[data-theme='clean'] .bg-emerald-950\/80,
-html[data-theme='clean'] .bg-emerald-950\/90 { background-color: #ECFDF5 !important; }
+html[data-theme='clean'] .bg-emerald-950\/90 { background-color: #EFF6FF !important; }
 
 html[data-theme='light'] .bg-blue-950,
 html[data-theme='light'] .bg-blue-950\/20,
@@ -3429,8 +3443,8 @@ html[data-theme='blue'] {
    'light' (verde suave → branco), só trocando os tons quentes de light
    pelos neutros frios já usados no resto da paleta 'clean'. */
 html[data-theme='clean'] {
-  --surface-gradient: linear-gradient(112deg, #ECFDF5 0%, #F5F6F8 38%, #FAFBFC 76%, #FFFFFF 100%);
-  --surface-gradient-soft: linear-gradient(112deg, #F0FDF7 0%, #F8F9FA 42%, #FFFFFF 100%);
+  --surface-gradient: linear-gradient(112deg, #EFF6FF 0%, #F5F6F8 38%, #FAFBFC 76%, #FFFFFF 100%);
+  --surface-gradient-soft: linear-gradient(112deg, #EFF6FF 0%, #F8F9FA 42%, #FFFFFF 100%);
 }
 
 .operations-hero,
