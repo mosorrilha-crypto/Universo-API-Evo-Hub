@@ -47,6 +47,7 @@ interface PublicCatalog {
     whatsappMessageProduct?: string;
   };
   products: PublicCatalogProduct[];
+  pixelId?: string;
 }
 
 interface PublicCatalogPageProps {
@@ -256,6 +257,48 @@ function formatProductPrice(product: PublicCatalogProduct, language: CatalogLang
   return localizeCatalogText(product.price, language);
 }
 
+declare global {
+  interface Window {
+    fbq?: ((...args: unknown[]) => void) & { queue?: unknown[]; loaded?: boolean; version?: string };
+    _fbq?: Window['fbq'];
+  }
+}
+
+/**
+ * Base code padrão do Meta Pixel, injetada só uma vez (idempotente — várias
+ * chamadas com o mesmo pixelId, ex: StrictMode rodando o effect 2x, não
+ * duplicam o <script> nem re-inicializam). Fecha o funil desde o clique no
+ * anúncio: sem isso, uma campanha que manda tráfego pra este catálogo em vez
+ * de Clique-para-WhatsApp direto não tinha nenhum sinal de conversão real
+ * pra Meta otimizar, só visualização de página (ver publicCatalogStore.ts).
+ */
+function loadMetaPixel(pixelId: string): void {
+  if (window.fbq) {
+    window.fbq('init', pixelId);
+    window.fbq('track', 'PageView');
+    return;
+  }
+  const fbq: Window['fbq'] = function (...args: unknown[]) {
+    (fbq.queue ??= []).push(args);
+  } as Window['fbq'];
+  fbq!.queue = [];
+  fbq!.loaded = true;
+  fbq!.version = '2.0';
+  window.fbq = fbq;
+  window._fbq = fbq;
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+  document.head.appendChild(script);
+  window.fbq('init', pixelId);
+  window.fbq('track', 'PageView');
+}
+
+/** Clique num botão de WhatsApp do catálogo = intenção real de contato — evento padrão do Meta, não custom, pra poder ser usado direto como meta de otimização numa campanha. No-op silencioso se o tenant não tem pixel configurado. */
+function trackWhatsAppContact(): void {
+  window.fbq?.('track', 'Contact');
+}
+
 export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
   const [catalog, setCatalog] = useState<PublicCatalog | null>(null);
   const [loading, setLoading] = useState(true);
@@ -286,6 +329,10 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     document.title = `${catalog.tenant.name} | ${copy.documentTitle}`;
     return () => { document.title = previousTitle; };
   }, [catalog, copy.documentTitle]);
+
+  useEffect(() => {
+    if (catalog?.pixelId) loadMetaPixel(catalog.pixelId);
+  }, [catalog?.pixelId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -397,7 +444,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                                 ))}
                               </div>
                             )}
-                            {productWhatsapp && <a className="whatsapp-button" href={productWhatsapp} target="_blank" rel="noreferrer">{copy.whatsappProduct} <span aria-hidden="true">↗</span></a>}
+                            {productWhatsapp && <a className="whatsapp-button" href={productWhatsapp} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>{copy.whatsappProduct} <span aria-hidden="true">↗</span></a>}
                           </div>
                         </article>
                       );
@@ -440,14 +487,14 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
             {catalog.contact.hoursLabel && <p>{catalog.contact.hoursLabel}</p>}
           </div>
           <div className="footer-links">
-            {generalWhatsapp && <a href={generalWhatsapp} target="_blank" rel="noreferrer">WhatsApp</a>}
+            {generalWhatsapp && <a href={generalWhatsapp} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>WhatsApp</a>}
             {catalog.contact.instagramUrl && <a href={catalog.contact.instagramUrl} target="_blank" rel="noreferrer">Instagram</a>}
             {catalog.contact.locationMapsUrl && <a href={catalog.contact.locationMapsUrl} target="_blank" rel="noreferrer">{copy.footerMap}</a>}
           </div>
         </div>
       </footer>
 
-      {generalWhatsapp && <a className="sticky-whatsapp" href={generalWhatsapp} target="_blank" rel="noreferrer">{copy.stickyWhatsapp} <span aria-hidden="true">↗</span></a>}
+      {generalWhatsapp && <a className="sticky-whatsapp" href={generalWhatsapp} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>{copy.stickyWhatsapp} <span aria-hidden="true">↗</span></a>}
     </PageShell>
   );
 }
