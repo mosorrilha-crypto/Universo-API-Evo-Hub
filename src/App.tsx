@@ -19,7 +19,7 @@ import { OperatorCRM } from './components/OperatorCRM';
 import { EscalationsPanel } from './components/EscalationsPanel';
 import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
-import { AgentKnowledgeBaseView, moniqueStudioKnowledgeBase } from './components/AgentKnowledgeBase';
+import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKnowledgeBase';
 import { PublicCatalogSettings } from './components/PublicCatalogSettings';
 import { OperationsCenter } from './components/OperationsCenter';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
@@ -341,9 +341,14 @@ export const App: React.FC = () => {
   });
 
   // Agent Knowledge Base
+  // Bug real (25/08/2026): usava moniqueStudioKnowledgeBase (catálogo REAL
+  // da Monique, com dado bancário real dela) como fallback aqui — um tenant
+  // novo, sem cache ainda, mostrava o catálogo dela como se fosse próprio.
+  // emptyKnowledgeBase é o fallback correto; o catálogo de exemplo continua
+  // disponível só como preset explícito (AgentKnowledgeBase.tsx).
   const [knowledgeBase, setKnowledgeBase] = useState<AgentKnowledgeBase>(() => {
     const saved = localStorage.getItem(kbCacheKey(activeTenant.id));
-    return saved ? JSON.parse(saved) : moniqueStudioKnowledgeBase;
+    return saved ? JSON.parse(saved) : emptyKnowledgeBase;
   });
   // Bug real reportado (16/08/2026): imagem de produto salva no catálogo
   // "sumia" depois de atualizar a página. Causa: o cache local acima nunca
@@ -406,7 +411,7 @@ export const App: React.FC = () => {
     }
     setLeads([]);
     setTransactions([]);
-    setKnowledgeBase(moniqueStudioKnowledgeBase);
+    setKnowledgeBase(emptyKnowledgeBase);
     setSavedTranscripts([]);
     setEscalations([]);
   };
@@ -483,8 +488,16 @@ export const App: React.FC = () => {
     // conhecimento do tenant anterior (ainda em memória) até essa busca real
     // terminar, o que dava a sensação de bases "se misturando" ao trocar de
     // empresa no seletor.
+    // Bug real (25/08/2026): um tenant novo, criado agora, sem cache local
+    // ainda, caía no fallback moniqueStudioKnowledgeBase — o admin via o
+    // catálogo REAL da Monique (produtos, preços, dado bancário dela) como
+    // se fosse do tenant novo, por um instante até GET /api/knowledge-base
+    // responder (e, se a resposta real vier vazia — tenant sem linha em
+    // knowledge_base ainda — o guard abaixo nem troca esse estado, então
+    // ficava assim pra sempre, não só "por um instante"). emptyKnowledgeBase
+    // é o fallback correto.
     const cachedForTenant = localStorage.getItem(kbCacheKey(activeTenant.id));
-    setKnowledgeBase(cachedForTenant ? JSON.parse(cachedForTenant) : moniqueStudioKnowledgeBase);
+    setKnowledgeBase(cachedForTenant ? JSON.parse(cachedForTenant) : emptyKnowledgeBase);
     apiFetch('/api/knowledge-base')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
