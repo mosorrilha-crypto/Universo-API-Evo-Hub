@@ -501,13 +501,24 @@ html[data-theme='blue'] .custom-scrollbar { scrollbar-color: #1688c7 #0b2b47; }
 html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-track { background: #0b2b47; border-color: #215276; }
 html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-thumb { background: #1688c7; box-shadow: none; }
 html[data-theme='blue'] .bg-emerald-500 { background-color: #0b78b5 !important; }
+/* Achado real (mesmo da TASK-0061, tema Limpo): `.bg-emerald-600` (usado por
+   vários botões primários no app, ex: LoginModal) nunca teve regra aqui —
+   só `.bg-emerald-500` tinha. Botão de login ficava verde-Tailwind padrão
+   mesmo no tema Azul, contradizendo a própria identidade do tema. */
+html[data-theme='blue'] .bg-emerald-600 { background-color: #0b78b5 !important; }
+/* Contraste: o LoginModal usa `text-slate-950` (quase preto) sobre
+   `bg-emerald-600`, pensado pro verde-Tailwind claro padrão — sem isso o
+   texto ficaria ilegível sobre o azul #0b78b5 (bem mais escuro). */
+html[data-theme='blue'] .bg-emerald-500.text-slate-950,
+html[data-theme='blue'] .bg-emerald-600.text-slate-950 { color: #FFFFFF !important; }
 html[data-theme='blue'] .text-emerald-400,
 html[data-theme='blue'] .text-emerald-300 { color: #69d0ff !important; }
 html[data-theme='blue'] .border-emerald-500\/25,
 html[data-theme='blue'] .border-emerald-400\/25 { border-color: rgba(56, 189, 248, 0.42) !important; }
 html[data-theme='blue'] .bg-emerald-500\/10,
 html[data-theme='blue'] .bg-emerald-500\/15 { background-color: rgba(14, 165, 233, 0.16) !important; }
-html[data-theme='blue'] .hover\:bg-emerald-500:hover { background-color: #1596d0 !important; }
+html[data-theme='blue'] .hover\:bg-emerald-500:hover,
+html[data-theme='blue'] .hover\:bg-emerald-600:hover { background-color: #1596d0 !important; }
 
 /* Shell operacional compartilhado do Atendimento */
 .atendimento-workspace { display: flex; flex-direction: column; gap: .7rem; }
