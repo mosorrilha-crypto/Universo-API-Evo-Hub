@@ -12,7 +12,7 @@
 import { listUpcomingEvents, localNaiveToUtcIso, listConnectedCalendarTenants, type CalendarConfig } from './googleCalendar';
 import { listAllAppointments } from './appointmentStore';
 import { wasReminderSent, markReminderSent, type ReminderType } from './reminderStore';
-import { sendWhatsAppInteractiveButtons } from './metaSend';
+import { sendWhatsAppTemplateMessage } from './metaSend';
 import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForTenant } from './tenantResolver';
 import { getTenantBusinessHours, getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
@@ -24,6 +24,27 @@ import { startPeriodicJob } from './periodicJob';
 // comercial real deste tenant, usamos o offset IANA fixo UTC-3 explicitamente.
 const BUSINESS_TIMEZONE = 'Etc/GMT+3';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * Achado real CONFIRMADO em produção (20/08/2026): o lembrete usava
+ * mensagem livre com botões (`sendWhatsAppInteractiveButtons`) — só
+ * funciona DENTRO da janela de 24h desde a última mensagem do cliente
+ * (regra da própria Meta). Teste ao vivo: a Meta devolvia 200 na hora, mas
+ * ~4min depois chegava um webhook de status "failed" (código 131047,
+ * "Re-engagement message... more than 24 hours have passed") — a mensagem
+ * nunca aparecia no celular. Lembrete é por definição proativo (o cliente
+ * não acabou de escrever), então só um TEMPLATE aprovado funciona de
+ * verdade. Um template por idioma, cada um com 2 botões quick-reply fixos:
+ * ES corpo "¡Hola! Pasando para recordarte que tu turno es {{1}}, a las
+ * {{2}} 💛" — botões "Confirmar" / "Reprogramar". PT corpo "Oi! Passando
+ * pra lembrar que seu horário é {{1}}, às {{2}} 💛" — botões "Confirmar" /
+ * "Remarcar". {{1}} = dia (hoy/mañana ou hoje/amanhã conforme o tipo do
+ * lembrete), {{2}} = horário.
+ */
+const REMINDER_TEMPLATE: Record<ReminderLanguage, { name: string; language: string }> = {
+  es: { name: 'lembrete_agendamento_es', language: 'es' },
+  pt: { name: 'lembrete_agendamento_pt', language: 'pt_BR' },
+};
 
 interface DateParts {
   year: number;
@@ -159,33 +180,41 @@ async function checkAndSendRemindersForTenant(
     if (nowHHmm < earliestHHmm) continue; // fora do horário razoável pra mandar — tenta de novo no próximo tick
     if (await wasReminderSent(tenantId, event.id, type)) continue;
 
-    const message = language === 'es'
+    const dayWord = language === 'es'
+      ? (type === 'dia_anterior' ? 'mañana' : 'hoy')
+      : (type === 'dia_anterior' ? 'amanhã' : 'hoje');
+    // Texto livre — só usado no canal Evolution (Baileys não tem o conceito
+    // de template aprovado da Meta nem janela de 24h pra contornar).
+    const evolutionMessage = language === 'es'
       ? (type === 'dia_anterior'
         ? `¡Hola! Pasando para recordarte que tu turno es mañana, a las ${hora} 💛`
         : `¡Buen día! Solo confirmando: tu turno es hoy, a las ${hora} 💛`)
       : (type === 'dia_anterior'
         ? `Oi! Passando pra lembrar que seu horário é amanhã, às ${hora} 💛`
         : `Bom dia! Só confirmando: seu horário é hoje, às ${hora} 💛`);
-    const buttonLabels = language === 'es'
-      ? { confirmar: '✅ Confirmar', remarcar: '🔄 Reprogramar' }
-      : { confirmar: '✅ Confirmar', remarcar: '🔄 Remarcar' };
 
     try {
       let messageId: string | undefined;
       if (channel.provider === 'evolution') {
-        // Botões interativos são um recurso da Meta Cloud API — a Evolution
-        // API (Baileys) não tem o mesmo tipo de mensagem, então cai pro
+        // Botões interativos/template são um recurso da Meta Cloud API — a
+        // Evolution API (Baileys) não tem o mesmo conceito, então cai pro
         // texto simples equivalente.
-        await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, appt.phone, message);
+        await sendEvolutionTextMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, appt.phone, evolutionMessage);
       } else {
         // Achado no benchmark de mercado: a maior causa de no-show é
         // dificuldade de remarcar fora do horário comercial — botões deixam o
         // cliente resolver isso num toque, sem precisar digitar (e sem
         // precisar esperar alguém abrir o WhatsApp comercial pra ler).
-        const result = await sendWhatsAppInteractiveButtons(channel.metaPhoneNumberId, channel.metaAccessToken, appt.phone, message, [
-          { id: 'lembrete_confirmar', title: buttonLabels.confirmar },
-          { id: 'lembrete_remarcar', title: buttonLabels.remarcar },
-        ]);
+        const template = REMINDER_TEMPLATE[language];
+        const result = await sendWhatsAppTemplateMessage(
+          channel.metaPhoneNumberId,
+          channel.metaAccessToken,
+          appt.phone,
+          template.name,
+          template.language,
+          [dayWord, hora],
+          ['lembrete_confirmar', 'lembrete_remarcar']
+        );
         messageId = result?.messageId;
       }
       await markReminderSent(tenantId, event.id, type);

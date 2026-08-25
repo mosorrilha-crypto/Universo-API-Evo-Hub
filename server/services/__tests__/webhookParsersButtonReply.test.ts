@@ -39,4 +39,30 @@ describe('parseMetaWebhookPayload — resposta a botão interativo', () => {
     expect(msg.type).toBe('other');
     expect(msg.rawType).toBe('interactive');
   });
+
+  it('trata o toque num botão quick-reply de TEMPLATE (type: "button") como mensagem de texto normal', () => {
+    // Formato diferente do `interactive.button_reply` acima — a Meta manda
+    // isso quando o cliente toca um botão de um template aprovado enviado
+    // com sendWhatsAppTemplateMessage (ver reminderJob.ts), não um botão
+    // interativo de texto livre.
+    const [msg] = parseMetaWebhookPayload(metaPayload({
+      id: 'wamid-btn-3',
+      from: '595981234567',
+      type: 'button',
+      button: { text: 'Confirmar', payload: 'lembrete_confirmar' },
+    }));
+    expect(msg.type).toBe('text');
+    expect(msg.text).toBe('Confirmar');
+  });
+
+  it('cai em "other" quando é type "button" mas sem button.text', () => {
+    const [msg] = parseMetaWebhookPayload(metaPayload({
+      id: 'wamid-btn-4',
+      from: '595981234567',
+      type: 'button',
+      button: { payload: 'lembrete_confirmar' },
+    }));
+    expect(msg.type).toBe('other');
+    expect(msg.rawType).toBe('button');
+  });
 });

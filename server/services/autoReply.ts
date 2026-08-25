@@ -1698,6 +1698,30 @@ export async function generateAutoReplyForText(
       }
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
+      // Prevenção, não só correção (achado de benchmark externo, 25/08/2026):
+      // até aqui, a única defesa contra o especialista citar um horário
+      // inventado era o gate REATIVO abaixo (gera a resposta livre, depois
+      // compara o que foi citado contra confirmedTimes e corrige se bater
+      // errado) — o especialista só via os horários confirmados escondidos
+      // dentro de uma frase narrativa em `actionsSummary` ("Consultou
+      // disponibilidade da semana... 08:30, 13:30"), sem nenhuma instrução
+      // que o impedisse explicitamente de citar outro. Isso entrega a mesma
+      // lista como uma RESTRIÇÃO imperativa e inequívoca, separada da
+      // narrativa, ANTES da geração — reduz a frequência real com que o gate
+      // reativo precisa disparar, sem substituí-lo (ele continua exatamente
+      // como estava, como rede de segurança pros casos em que o modelo
+      // ignore a restrição mesmo assim).
+      //
+      // Só entra quando uma ferramenta rodou DE VERDADE nesta mensagem
+      // (result.actionsSummary.length), nunca só por existir um agendamento
+      // antigo (confirmedTimesFromExisting, ver runAgendamentoTools) — senão
+      // "quero remarcar" sem novo horário ainda receberia uma restrição
+      // dizendo pra só citar o horário ANTIGO, atrapalhando o especialista
+      // de simplesmente perguntar a nova data/hora desejada.
+      if (result.actionsSummary.length && confirmedTimes.length) {
+        const uniqueConfirmedTimes = [...new Set(confirmedTimes)].sort();
+        contextParts.push(`RESTRIÇÃO OBRIGATÓRIA DE HORÁRIO: os únicos horários que você pode citar nesta resposta são exatamente estes, sem exceção: ${uniqueConfirmedTimes.join(', ')}. Nunca cite um horário fora desta lista, nem aproximado ("por volta de", "cerca de") — se quiser considerar algo fora dela, não cite nenhum horário específico e diga que vai confirmar antes.`);
+      }
       agendamentoToolsRan = result.actionsSummary.length > 0;
       // A rotina de agenda já leu a fonte de verdade antes de decidir se o
       // calendário está conectado; entrega esse mesmo dado ao especialista.

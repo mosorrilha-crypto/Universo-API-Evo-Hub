@@ -69,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
   const [desktopMenuPosition, setDesktopMenuPosition] = useState<DesktopMenuPosition | null>(null);
   const isSpanish = language === 'es';
-  const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'blue' : 'dark');
+  const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'blue' : theme === 'blue' ? 'clean' : 'dark');
   // TASK-0038: liberar por papel real, não pela app estar instalada — ver
   // comentário equivalente em App.tsx.
   const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager');

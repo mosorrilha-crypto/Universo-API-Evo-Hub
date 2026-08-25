@@ -78,6 +78,13 @@ export function parseMetaWebhookPayload(body: any): ParsedIncomingMessage[] {
           // (router, especialista, ferramentas de agenda) nem precisa saber
           // que veio de um toque em botão em vez de digitação.
           parsed.push({ ...base, type: 'text', text: msg.interactive.button_reply.title });
+        } else if (msg.type === 'button' && msg.button?.text) {
+          // Resposta a um botão quick-reply de TEMPLATE (ver
+          // sendWhatsAppTemplateMessage com buttonPayloads, reminderJob.ts) —
+          // formato diferente do `interactive.button_reply` acima: a Meta
+          // manda `button.text`/`button.payload`, não `interactive`. Tratada
+          // igual, pelo mesmo motivo.
+          parsed.push({ ...base, type: 'text', text: msg.button.text });
         } else if (msg.type === 'image' && msg.image?.id) {
           parsed.push({ ...base, type: 'image', metaImage: { mediaId: msg.image.id, mimeType: msg.image.mime_type } });
         } else {

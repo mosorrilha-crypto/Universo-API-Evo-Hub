@@ -22,7 +22,7 @@ const listAllAppointments = vi.fn(async (tenantId: string) => [
 ]);
 const wasReminderSent = vi.fn(async () => false);
 const markReminderSent = vi.fn(async () => undefined);
-const sendWhatsAppInteractiveButtons = vi.fn(async () => ({ messageId: 'wamid.test' }));
+const sendWhatsAppTemplateMessage = vi.fn(async () => ({ messageId: 'wamid.test' }));
 const sendEvolutionTextMessage = vi.fn(async () => undefined);
 
 vi.mock('../googleCalendar', async (importOriginal) => {
@@ -31,7 +31,7 @@ vi.mock('../googleCalendar', async (importOriginal) => {
 });
 vi.mock('../appointmentStore', () => ({ listAllAppointments }));
 vi.mock('../reminderStore', () => ({ wasReminderSent, markReminderSent }));
-vi.mock('../metaSend', () => ({ sendWhatsAppInteractiveButtons }));
+vi.mock('../metaSend', () => ({ sendWhatsAppTemplateMessage }));
 vi.mock('../evolutionSend', () => ({ sendEvolutionTextMessage }));
 
 const { checkAndSendReminders } = await import('../reminderJob');
@@ -44,7 +44,7 @@ beforeEach(() => {
   listAllAppointments.mockClear();
   wasReminderSent.mockClear();
   markReminderSent.mockClear();
-  sendWhatsAppInteractiveButtons.mockClear();
+  sendWhatsAppTemplateMessage.mockClear();
   sendEvolutionTextMessage.mockClear();
 
   initDb(createFakeSupabase({
@@ -81,7 +81,9 @@ describe('reminderJob — roteamento por provedor (Evolution vs Meta)', () => {
       '595981111111', expect.any(String)
     );
 
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledTimes(1);
-    expect(sendWhatsAppInteractiveButtons).toHaveBeenCalledWith('shared-pn', 'shared-tok', '595982222222', expect.any(String), expect.any(Array));
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledWith(
+      'shared-pn', 'shared-tok', '595982222222', expect.any(String), expect.any(String), expect.any(Array), expect.any(Array)
+    );
   });
 });
