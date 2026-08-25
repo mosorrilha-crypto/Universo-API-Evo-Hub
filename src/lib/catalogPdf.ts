@@ -53,16 +53,22 @@ const FONT_LINK_ATTR = 'data-catalog-pdf-font';
 const CONTAINER_WIDTH_PX = 800;
 const CAPTURE_SCALE = 2;
 const IMAGE_TARGET_WIDTH = 640;
-const IMAGE_TARGET_HEIGHT = 480;
+const IMAGE_TARGET_HEIGHT = 800;
 
 /**
  * `AgentProduct.exampleImageBase64` é a foto original guardada inline sem
  * limite de tamanho (já chegou a ~3MB numa foto real da Monique) — usada
  * hoje só pra o agente mandar por WhatsApp. Comprime no navegador (canvas,
- * recorte 4:3 + reencode JPEG) antes de entrar no PDF, senão o arquivo final
+ * recorte 4:5 + reencode JPEG) antes de entrar no PDF, senão o arquivo final
  * ficaria pesado demais pra compartilhar. Roda client-side (não no backend,
  * como a miniatura do catálogo público) porque o painel autenticado já tem a
  * foto original carregada em memória — não precisa de mais uma chamada.
+ *
+ * 4:5 (não 4:3) de propósito: as fotos reais são tiradas na vertical, tipo
+ * celular (ex: 900x1600, ~9:16) — um recorte 4:3 (paisagem) exigia cortar
+ * mais da metade da altura da foto, e o resultado real (achado no catálogo
+ * em produção) cortava a sobrancelha/lábio fora e sobrava só cabelo/testa.
+ * 4:5 é o mesmo padrão de retrato do Instagram — exige um corte bem menor.
  */
 async function compressProductImageDataUri(product: AgentProduct): Promise<string | undefined> {
   if (!product.exampleImageBase64) return undefined;
