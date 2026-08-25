@@ -1,3 +1,7 @@
+/**
+ * Direção visual: Operação Serena — cada variação deve ter contexto próprio,
+ * com leitura leve e sem duplicar a explicação geral da família de serviços.
+ */
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 
 // Design direction: Atelier Bilíngue — editorial, sereno e acolhedor; conteúdo essencial
@@ -5,6 +9,7 @@ import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'r
 
 interface PublicCatalogVariant {
   code: string;
+  description?: string;
   dimensions?: string;
   litros?: number;
   price: string;
@@ -383,7 +388,10 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                               <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
                                 {product.variants.map((variant) => (
                                   <div className="variant-row" key={variant.code}>
-                                    <span>{localizeCatalogText(variant.code, language)}</span>
+                                    <div>
+                                      <span className="variant-name">{localizeCatalogText(variant.code, language)}</span>
+                                      {variant.description && <p className="variant-description">{localizeCatalogText(variant.description, language)}</p>}
+                                    </div>
                                     <strong>{localizeCatalogText(variant.price, language)}</strong>
                                   </div>
                                 ))}
@@ -580,7 +588,9 @@ function PageShell({ children }: { children: ReactNode }) {
         .price-row span { color: #987254; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
         .product-card p { flex: 1; margin: 16px 0 20px; }
         .variants { margin: 4px 0 18px; border-top: 1px solid rgba(78, 62, 49, .12); }
-        .variant-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(78, 62, 49, .12); color: #6f6258; font-size: 12px; }
+        .variant-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 11px 0; border-bottom: 1px solid rgba(78, 62, 49, .12); color: #6f6258; font-size: 12px; }
+        .variant-name { color: #473b33; font-weight: 600; }
+        .product-card .variant-description { margin: 4px 0 0; color: #7a6d63; font-size: 11px; line-height: 1.5; }
         .variant-row strong { color: #8d5c43; font-weight: 600; }
         .whatsapp-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: #c9987a; color: #fffdf9; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-decoration: none; text-transform: uppercase; transition: transform 160ms cubic-bezier(.23, 1, .32, 1), background 160ms cubic-bezier(.23, 1, .32, 1); }
         .whatsapp-button:hover { background: #b88063; }

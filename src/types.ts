@@ -154,6 +154,8 @@ export interface LeadAttribution {
 export interface ProductVariant {
   /** Nome/código da variante — o que o agente cita pro cliente e usa pra bater com o nome do serviço pedido (ex: "AC F400" num catálogo de piscinas, ou "Lash Lift" numa família de serviços). */
   code: string;
+  /** Explica o benefício, efeito ou diferença desta variação específica, sem repetir a descrição geral da família. */
+  description?: string;
   dimensions?: string;
   litros?: number;
   price: string;

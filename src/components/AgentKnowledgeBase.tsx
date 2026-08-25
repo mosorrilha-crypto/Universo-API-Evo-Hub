@@ -1,3 +1,7 @@
+/**
+ * Direção visual: Operação Serena — o editor de catálogo prioriza informação
+ * estruturada, leitura clara e edição previsível em desktop e celular.
+ */
 import React, { useState, useEffect, useMemo } from 'react';
 import { AgentKnowledgeBase, AgentProduct, ProductVariant, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
@@ -2149,7 +2153,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   <div className="space-y-1.5">
                     {!!prod.variants?.length && (
                       <p className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5 text-[10px] leading-4 text-cyan-200">
-                        Família com {prod.variants.length} variação(ões): o preço e a duração podem ficar somente em cada variação abaixo. O item pai organiza nome, descrição, mídia e aliases.
+                        Família com {prod.variants.length} variação(ões): preço, duração e descrição podem ficar em cada variação abaixo. O item pai mantém apenas a explicação geral, mídia e aliases da família.
                       </p>
                     )}
                     <input
@@ -2270,6 +2274,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
+                        <AutoResizeTextarea
+                          minRows={2}
+                          placeholder="Descrição desta variação (efeito, acabamento ou benefício)"
+                          value={variant.description || ''}
+                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'description', e.target.value)}
+                          title="Descrição exclusiva desta variação. Ela aparece no catálogo público e orienta o agente sem misturar todos os efeitos na descrição da família."
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-400/60"
+                        />
                         <div className="flex items-center gap-1.5">
                           <span className="text-[9px] font-semibold text-amber-300 whitespace-nowrap">Desconto temporário</span>
                           <input

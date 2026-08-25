@@ -12,6 +12,7 @@ import {
 
 export interface PublicCatalogVariant {
   code: string;
+  description?: string;
   dimensions?: string;
   litros?: number;
   price: string;
@@ -69,6 +70,7 @@ function publicVariant(variant: ProductVariant): PublicCatalogVariant {
   const amount = resolveVariantPriceAmount(variant);
   return {
     code: variant.code,
+    description: variant.description?.trim() || undefined,
     dimensions: variant.dimensions,
     litros: variant.litros,
     price: currentPrice,

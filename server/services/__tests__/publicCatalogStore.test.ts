@@ -60,13 +60,13 @@ describe('publicCatalogStore', () => {
         price: 'Consultar',
         category: 'Pestañas',
         description: 'Família de serviços.',
-        variants: [{ code: 'Efecto 30+', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120, bookable: false }],
+        variants: [{ code: 'Efecto 30+', description: 'Máximo volume e retenção de até 30 dias.', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120, bookable: false }],
       },
       'PYG',
     );
 
     expect(product.variants).toEqual([
-      { code: 'Efecto 30+', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120 },
+      { code: 'Efecto 30+', description: 'Máximo volume e retenção de até 30 dias.', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120 },
     ]);
     expect(product).not.toHaveProperty('aliases');
   });

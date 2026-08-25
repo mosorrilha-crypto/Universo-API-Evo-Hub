@@ -17,6 +17,8 @@ import { getDb } from './db';
 export interface ProductVariant {
   /** Código/nome do modelo (ex: "AC F400" num catálogo de piscinas, ou "Lash Lift" numa família de serviços) — o que o agente cita pro cliente e usa pra bater com o nome do serviço pedido, ver findProductMatch. */
   code: string;
+  /** Explicação comercial própria da variação (efeito, acabamento ou diferença), usada no catálogo público e no contexto do agente. */
+  description?: string;
   /** Medidas em texto livre (ex: "4,10x2,30m"), opcional. */
   dimensions?: string;
   /** Capacidade em litros, opcional. */
@@ -409,7 +411,7 @@ export function formatKnowledgeBaseForPrompt(kb: AgentKnowledgeBase | null): str
     const line = (p: AgentProduct) => {
       const variantsLine = p.variants?.length
         ? `\n  Tamanhos/modelos disponíveis (cote SEMPRE o preço do tamanho específico escolhido pelo cliente, nunca o preço genérico do produto):\n${p.variants
-            .map((v) => `    • ${v.code}${v.dimensions ? ` (${v.dimensions}${v.litros ? `, ${v.litros}L` : ''})` : ''}: ${resolveVariantPrice(v)}`)
+            .map((v) => `    • ${v.code}${v.dimensions ? ` (${v.dimensions}${v.litros ? `, ${v.litros}L` : ''})` : ''}: ${resolveVariantPrice(v)}${v.description?.trim() ? ` — ${v.description.trim()}` : ''}`)
             .join('\n')}`
         : '';
       const aliasesLine = p.aliases?.length ? ` — também conhecido como ${p.aliases.join(', ')}` : '';
