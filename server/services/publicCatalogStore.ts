@@ -52,6 +52,17 @@ export interface PublicCatalog {
     whatsappMessageProduct?: string;
   };
   products: PublicCatalogProduct[];
+  /**
+   * Pixel do Meta pro frontend rastrear visita/clique de WhatsApp nesta
+   * página — mesmo `capi_dataset_id` já usado pelo CAPI server-side
+   * (metaCapiService.ts) pro evento "Schedule"/"Purchase", reaproveitado
+   * aqui pra fechar o funil desde o clique no anúncio: sem isso, uma
+   * campanha que manda tráfego pra este catálogo (em vez de Clique-para-
+   * WhatsApp direto) não tinha nenhum sinal de conversão pra otimizar,
+   * só visualização de página. Ausente = tenant sem CAPI configurado,
+   * frontend simplesmente não carrega pixel nenhum.
+   */
+  pixelId?: string;
 }
 
 /**
@@ -142,6 +153,12 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
     whatsappMessageGeneral: tenant.public_whatsapp_message_general || undefined,
     whatsappMessageProduct: tenant.public_whatsapp_message_product || undefined,
   };
+
+  // Só o dataset_id (Pixel ID) vai pro cliente — nunca o capi_access_token,
+  // que é um segredo server-side (usado só por metaCapiService.ts).
+  const { data: metaCredentials } = await getDb().from('tenant_meta_credentials').select('capi_dataset_id').eq('tenant_id', tenant.id).maybeSingle();
+  catalog.pixelId = metaCredentials?.capi_dataset_id || undefined;
+
   return catalog;
 }
 
