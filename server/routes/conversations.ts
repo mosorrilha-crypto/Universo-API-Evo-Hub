@@ -1185,8 +1185,44 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
   // Base de conhecimento real do agente (objetivo, regras, preços, FAQ) —
   // usada como contexto nos prompts de resposta automática.
+  // Cache condicional por ETag (pedido direto de chat, 25/08/2026 —
+  // incidente real de cota do Supabase: a Base de Conhecimento da Monique
+  // sozinha pesa ~12MB, quase tudo foto de exemplo de produto inline em
+  // base64, e essa rota é chamada de novo — inteira — toda vez que a tela
+  // do painel abre/recarrega. Sem lead real nenhum ainda, só recarregar o
+  // painel repetidas vezes durante desenvolvimento/teste já bastou pra
+  // estourar a cota gratuita de saída (egress) do projeto.
+  //
+  // Em vez de mudar o formato salvo (arriscado — POST /api/knowledge-base
+  // faz upsert do objeto inteiro; qualquer troca de forma aqui exigiria
+  // reconciliar merge/remoção de foto com risco real de apagar imagem por
+  // engano), o fix é só de transporte: manda o `updated_at` como ETag; se o
+  // cliente já tem a versão mais recente (If-None-Match bate), responde 304
+  // sem corpo nenhum — sem mudar NADA do formato/contrato dos dados. Não
+  // altera em nada quem lê `getKnowledgeBase()` direto (autoReply.ts,
+  // publicCatalogStore.ts, firstContactMessage.ts) — só esta rota HTTP.
   router.get('/api/knowledge-base', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    res.json({ knowledgeBase: await getKnowledgeBase(tenantOf(req)) });
+    const { data: row, error } = await getDb()
+      .from('knowledge_base')
+      .select('data, updated_at')
+      .eq('tenant_id', tenantOf(req))
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+
+    const etag = `"kb-${tenantOf(req)}-${row?.updated_at || 'none'}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    // Sem isso, o cache HTTP do navegador (que não varia por header custom
+    // por padrão) podia devolver a Base de Conhecimento do tenant ERRADO
+    // pra um saas_admin depois de trocar de empresa no seletor — mesma
+    // classe de bug real já documentada (Header.tsx, achado 15/08/2026):
+    // X-Tenant-Id é o único jeito de saas_admin apontar pra outro tenant
+    // sem logar de novo (ver resolveTenantId em tenantContext.ts).
+    res.setHeader('Vary', 'Authorization, X-Tenant-Id');
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    res.json({ knowledgeBase: (row?.data as any) || null });
   }));
 
   router.post('/api/knowledge-base', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
