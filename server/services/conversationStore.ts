@@ -10,6 +10,7 @@ import { listLabels, listLabelsByConversationId } from './conversationLabelStore
 import { emitConversationUpdated } from './conversationEvents';
 import { registerPendingEcho } from './outboundEchoTracker';
 import { isAdsOnlyMode, getAdTriggerMessages, matchesAdTriggerMessage } from './agentStatus';
+import { matchCatalogClickCode, consumeCatalogClick } from './publicCatalogClickStore';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -348,6 +349,25 @@ export async function shouldBlockForAdsOnlyMode(tenantId: string, phone: string,
     return false;
   }
   return true;
+}
+
+/**
+ * Reconhecimento por clique real no catálogo (código de emojis embutido na
+ * mensagem, ver publicCatalogClickStore.ts) — chamado pra TODA mensagem de
+ * lead, independente do tenant estar em modo "somente anúncios" ou não.
+ * Diferente de `shouldBlockForAdsOnlyMode` (decide se a resposta automática
+ * fica em silêncio), esta função só liga o clique à conversa (analytics de
+ * "quantos cliques viraram conversa" — pedido real, 25/08/2026) — precisa
+ * rodar mesmo em tenants sem ads_only, senão essa contagem nunca fecha pra
+ * eles. Idempotente: não repete a busca se a conversa já foi ligada a um
+ * clique/gatilho antes.
+ */
+export async function attachCatalogClickIfMatched(tenantId: string, phone: string, text: string): Promise<void> {
+  if (await getConversationAdGreetingMatched(tenantId, phone)) return;
+  const clickMatch = await matchCatalogClickCode(tenantId, text);
+  if (!clickMatch) return;
+  await consumeCatalogClick(clickMatch.id, phone);
+  await markAdGreetingMatched(tenantId, phone);
 }
 
 /** ctwa_clid gravado pra essa conversa, se algum dia veio de um anúncio — null caso contrário (nunca inventar). */

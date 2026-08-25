@@ -1,7 +1,7 @@
 import type { GoogleGenAI } from '@google/genai';
 import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia } from './mediaDownload';
-import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode } from './conversationStore';
+import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from './conversationStore';
 import { emitAiReplyStatus } from './conversationEvents';
 import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles, type OutboundChannel } from './sendBubbles';
@@ -173,6 +173,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         // Mesmo gate do caminho de texto (ver webhooks.ts triggerAutoReply) —
         // modo "somente anúncios" também vale pra áudio, usando a
         // transcrição como o texto a comparar com os gatilhos configurados.
+        await attachCatalogClickIfMatched(tenantId, message.from, outcome.result.transcription);
         if (await shouldBlockForAdsOnlyMode(tenantId, message.from, outcome.result.transcription)) return;
         const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
         const segment = await getTenantSegment(tenantId);
