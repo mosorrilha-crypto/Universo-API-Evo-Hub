@@ -63,4 +63,31 @@ describe('Webhook Meta — validação fail-closed', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  /**
+   * Incidente real em produção (25/08/2026): a checagem acima rodava
+   * incondicionalmente pra TODAS as rotas de webhook, inclusive
+   * /api/webhooks/evolution — mas a Evolution API nunca envia
+   * x-hub-signature-256 (não é a Meta). Resultado: com META_APP_SECRET
+   * configurada, 100% das mensagens de tenants na Evolution API foram
+   * descartadas silenciosamente por ~62h (403 em toda entrega). Trava pra
+   * este cenário nunca mais passar despercebido.
+   */
+  it('aceita (200) um payload da Evolution API em /api/webhooks/evolution mesmo sem x-hub-signature-256', async () => {
+    const res = await fetch(`${baseUrl}/api/webhooks/evolution`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'CONNECTION_UPDATE', instance: 'tenant-teste', data: {} }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('continua exigindo (403) x-hub-signature-256 em /api/webhooks/meta mesmo com payload no formato Evolution', async () => {
+    const res = await fetch(`${baseUrl}/api/webhooks/meta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'CONNECTION_UPDATE', instance: 'tenant-teste', data: {} }),
+    });
+    expect(res.status).toBe(403);
+  });
 });

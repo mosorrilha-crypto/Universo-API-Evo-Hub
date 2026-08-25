@@ -567,17 +567,31 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
     });
   };
 
-  const handleWebhookPayload = async (req: any, res: any) => {
+  // `requireMetaSignature` distingue rotas que a Meta de fato assina
+  // (WhatsApp Cloud API oficial, Instagram) de rotas de outras origens que
+  // batem no mesmo handler genérico (Evolution API/Baileys, self-hosted).
+  // Incidente real em produção (25/08/2026, ~62h de mensagens descartadas
+  // em silêncio): antes desta distinção, esta checagem HMAC (fail-closed,
+  // corrigida em 13/08 pra não pular a validação quando o header vem
+  // ausente) rodava incondicionalmente pras 4 rotas — mas a Evolution API
+  // nunca envia `x-hub-signature-256`/`x-hub-signature` (não é a Meta, é um
+  // gateway próprio autenticado por `apikey`), então assim que
+  // META_APP_SECRET passou a estar configurada de verdade em produção,
+  // TODO webhook da Evolution começou a ser rejeitado com 403 — não só o de
+  // quem tentasse forjar payload, também o tráfego real. A verificação de
+  // assinatura só faz sentido pra quem a Meta realmente assina.
+  const handleWebhookPayload = async (req: any, res: any, requireMetaSignature: boolean) => {
     // Achado numa auditoria externa: a checagem só rodava "se o header
     // vier" — um POST sem x-hub-signature-256/x-hub-signature pulava a
     // validação inteira e era processado como legítimo (fail-open), mesmo
     // com o app secret configurado. Isso permitia forjar mensagens de
     // WhatsApp inteiras só omitindo o header. Corrigido pra fail-closed:
-    // com o secret configurado, o header é obrigatório.
+    // com o secret configurado, o header é obrigatório — mas só pras
+    // rotas que a Meta realmente assina (ver `requireMetaSignature` acima).
     const signatureHeader = (req.headers['x-hub-signature-256'] || req.headers['x-hub-signature']) as string | undefined;
     const appSecret = metaAppSecret;
 
-    if (appSecret) {
+    if (requireMetaSignature && appSecret) {
       if (!signatureHeader) {
         console.warn('❌ Webhook Meta: assinatura ausente com app secret configurado. Rejeitando requisição.');
         return res.status(403).json({ error: 'Assinatura ausente.' });
@@ -699,22 +713,27 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   };
 
   // Webhook Routes (Supports /webhook, /api/webhooks/meta, /api/webhooks/evolution, /api/webhooks/whatsapp)
+  // `/api/webhooks/evolution` é a única rota que a Evolution API de fato
+  // chama (ver `setEvolutionWebhook` em admin.ts) — ela nunca assina com
+  // HMAC da Meta, então não exige a assinatura. As demais são rotas da
+  // Meta (WhatsApp Cloud API oficial/Instagram) ou aliases legados dela,
+  // que a Meta sempre assina — mantêm a exigência.
   router.get('/webhook', handleWebhookVerification);
-  router.post('/webhook', handleWebhookPayload);
+  router.post('/webhook', (req, res) => handleWebhookPayload(req, res, true));
 
   router.get('/api/webhooks/meta', handleWebhookVerification);
-  router.post('/api/webhooks/meta', handleWebhookPayload);
+  router.post('/api/webhooks/meta', (req, res) => handleWebhookPayload(req, res, true));
 
   router.get('/api/webhooks/evolution', handleWebhookVerification);
-  router.post('/api/webhooks/evolution', handleWebhookPayload);
+  router.post('/api/webhooks/evolution', (req, res) => handleWebhookPayload(req, res, false));
 
   router.get('/api/webhooks/whatsapp', handleWebhookVerification);
-  router.post('/api/webhooks/whatsapp', handleWebhookPayload);
+  router.post('/api/webhooks/whatsapp', (req, res) => handleWebhookPayload(req, res, true));
 
   // Alias só pra clareza ao cadastrar o webhook do produto Instagram no App
   // da Meta — mesmo handler genérico acima, que já despacha por body.object.
   router.get('/api/webhooks/instagram', handleWebhookVerification);
-  router.post('/api/webhooks/instagram', handleWebhookPayload);
+  router.post('/api/webhooks/instagram', (req, res) => handleWebhookPayload(req, res, true));
 
   return router;
 }
