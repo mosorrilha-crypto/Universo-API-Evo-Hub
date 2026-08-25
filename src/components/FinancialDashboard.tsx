@@ -79,6 +79,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const currentUser = propCurrentUser || { name: 'Operador Admin', id: 'op_1' };
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [isModalOpen, setIsModalOpen] = useState(!!initialSelectedLead);
 
   // New Transaction Form State
@@ -87,7 +88,11 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   const [amount, setAmount] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Transferência Bancária');
   const [status, setStatus] = useState<PaymentStatus>('pago');
+  const [entryType, setEntryType] = useState<'income' | 'expense'>('income');
   const [justCreated, setJustCreated] = useState<FinancialTransaction | null>(null);
+
+  /** Registros legados sem entryType são receita por padrão (ver types.ts). */
+  const isIncome = (t: FinancialTransaction) => (t.entryType ?? 'income') === 'income';
 
   /** Formata na moeda real do tenant — nunca R$/pt-BR fixo (achado real: negócio roda em PYG, não BRL). Intl já cuida de casas decimais certas por moeda (PYG não usa centavos, por exemplo). */
   const formatMoney = (value: number) =>
@@ -100,7 +105,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
       t.leadPhone.includes(searchTerm);
 
     const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesType = typeFilter === 'all' || (typeFilter === 'income' ? isIncome(t) : !isIncome(t));
+    return matchesSearch && matchesStatus && matchesType;
   });
 
   // KPI Calculations — todos derivados de dado real (`transactions`), nunca
@@ -108,14 +114,19 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
   // deste painel mostrava "ROI do Meta Ads 4.8x" e "+18,4% vs mês anterior"
   // como strings fixas no JSX, sem nenhuma fonte de dado real por trás —
   // removidos, não substituídos por outra invenção.
-  const totalPaidRevenue = transactions.filter((t) => t.status === 'pago').reduce((acc, t) => acc + t.amount, 0);
-  const totalPendingRevenue = transactions.filter((t) => t.status === 'pendente' || t.status === 'atrasado').reduce((acc, t) => acc + t.amount, 0);
-  const paidCount = transactions.filter((t) => t.status === 'pago').length;
+  // Todos os agregados de "receita" filtram entryType === 'income': antes um
+  // lançamento de despesa paga inflava "Receita Confirmada" (o filtro só
+  // olhava o status, nunca o tipo do lançamento).
+  const totalPaidRevenue = transactions.filter((t) => isIncome(t) && t.status === 'pago').reduce((acc, t) => acc + t.amount, 0);
+  const totalPendingRevenue = transactions.filter((t) => isIncome(t) && (t.status === 'pendente' || t.status === 'atrasado')).reduce((acc, t) => acc + t.amount, 0);
+  const paidCount = transactions.filter((t) => isIncome(t) && t.status === 'pago').length;
   const ticketMedio = paidCount > 0 ? totalPaidRevenue / paidCount : 0;
+  const totalPaidExpenses = transactions.filter((t) => !isIncome(t) && t.status === 'pago').reduce((acc, t) => acc + t.amount, 0);
+  const netProfit = totalPaidRevenue - totalPaidExpenses;
 
   const now = new Date();
   const paidThisMonthCount = transactions.filter((t) => {
-    if (t.status !== 'pago') return false;
+    if (!isIncome(t) || t.status !== 'pago') return false;
     const d = new Date(t.date);
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   }).length;
@@ -133,7 +144,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     }
     const byKey = new Map(days.map((d) => [d.key, d]));
     for (const t of transactions) {
-      if (t.status !== 'pago') continue;
+      if (!isIncome(t) || t.status !== 'pago') continue;
       const key = new Date(t.date).toISOString().slice(0, 10);
       const bucket = byKey.get(key);
       if (bucket) bucket.receita += t.amount;
@@ -144,11 +155,12 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
 
   // Breakdown real por forma de pagamento — o dado que mais importa pro
   // pedido de "controle de transferências bancárias manuais": quanto entrou
-  // via transferência vs PIX vs outros métodos.
+  // via transferência vs PIX vs outros métodos. Só receita — despesa não
+  // participa desse breakdown (é sobre o que entrou, não o que saiu).
   const paymentMethodBreakdown = useMemo(() => {
     const totals = new Map<string, number>();
     for (const t of transactions) {
-      if (t.status !== 'pago') continue;
+      if (!isIncome(t) || t.status !== 'pago') continue;
       totals.set(t.paymentMethod, (totals.get(t.paymentMethod) || 0) + t.amount);
     }
     return Array.from(totals.entries())
@@ -161,6 +173,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
     setAmount('');
     setPaymentMethod('Transferência Bancária');
     setStatus('pago');
+    setEntryType('income');
     setSelectedLeadId(initialSelectedLead?.id || (leads[0]?.id || ''));
   };
 
@@ -184,6 +197,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
       date: new Date().toISOString(),
       operatorName: currentUser.name,
       channel: 'Registro manual',
+      entryType,
     };
 
     setSubmitError(null);
@@ -322,6 +336,28 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
           <div className="text-2xl font-black text-sky-300">{paidThisMonthCount}</div>
           <p className="text-[10px] text-slate-500 mt-2">Transações pagas neste mês</p>
         </div>
+
+        <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span>Despesas Pagas</span>
+            <div className="p-2 bg-rose-500/10 rounded-lg text-rose-400">
+              <Trash2 className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-black text-rose-400">{formatMoney(totalPaidExpenses)}</div>
+          <p className="text-[10px] text-slate-500 mt-2">Lançamentos operacionais confirmados</p>
+        </div>
+
+        <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl shadow-lg">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span>Lucro Líquido</span>
+            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+          </div>
+          <div className={`text-2xl font-black ${netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatMoney(netProfit)}</div>
+          <p className="text-[10px] text-slate-500 mt-2">Receita paga − despesas pagas</p>
+        </div>
       </div>
 
       {/* RECHARTS GRAPHS SECTION */}
@@ -442,6 +478,16 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
               <option value="atrasado">Atrasado</option>
               <option value="cancelado">Cancelado</option>
             </select>
+
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+            >
+              <option value="all">Todos os Tipos</option>
+              <option value="income">Receita</option>
+              <option value="expense">Despesa</option>
+            </select>
           </div>
         </div>
 
@@ -454,6 +500,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 <th className="p-3.5">Produto / Serviço</th>
                 <th className="p-3.5">Valor</th>
                 <th className="p-3.5">Método</th>
+                <th className="p-3.5">Tipo</th>
                 <th className="p-3.5">Status</th>
                 <th className="p-3.5">Origem</th>
                 <th className="p-3.5 text-right">Ação</th>
@@ -462,7 +509,7 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
             <tbody className="divide-y divide-slate-800/80">
               {filteredTransactions.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-500">
+                  <td colSpan={9} className="p-8 text-center text-slate-500">
                     {transactions.length === 0
                       ? 'Nenhum registro ainda — vendas confirmadas por comprovante no WhatsApp entram aqui automaticamente, ou registre uma manualmente.'
                       : 'Nenhum registro bate com o filtro/busca.'}
@@ -484,8 +531,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     {tx.productName}
                   </td>
 
-                  <td className="p-3.5 font-bold text-white text-sm">
-                    {formatMoney(tx.amount)}
+                  <td className={`p-3.5 font-bold text-sm ${isIncome(tx) ? 'text-white' : 'text-rose-400'}`}>
+                    {isIncome(tx) ? '' : '− '}{formatMoney(tx.amount)}
                   </td>
 
                   <td className="p-3.5">
@@ -493,6 +540,18 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                       {PAYMENT_METHOD_ICON[tx.paymentMethod]}
                       {tx.paymentMethod}
                     </span>
+                  </td>
+
+                  <td className="p-3.5">
+                    {isIncome(tx) ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                        Receita
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-950 text-rose-300 border border-rose-800">
+                        Despesa
+                      </span>
+                    )}
                   </td>
 
                   <td className="p-3.5">{getStatusBadge(tx.status)}</td>
@@ -561,13 +620,45 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 <Landmark className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">Registrar Transferência / Venda</h2>
-                <p className="text-xs text-slate-400">Lance uma venda já confirmada (ex: comprovante de transferência conferido fora do WhatsApp)</p>
+                <h2 className="text-base font-bold text-white">{entryType === 'expense' ? 'Registrar Despesa' : 'Registrar Transferência / Venda'}</h2>
+                <p className="text-xs text-slate-400">
+                  {entryType === 'expense'
+                    ? 'Lance uma despesa operacional do negócio (ex: aluguel, insumos, taxa)'
+                    : 'Lance uma venda já confirmada (ex: comprovante de transferência conferido fora do WhatsApp)'}
+                </p>
               </div>
             </div>
 
             {!justCreated ? (
               <form onSubmit={handleRegisterTransaction} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Tipo de Lançamento</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEntryType('income')}
+                      className={`py-2 rounded-xl text-xs font-bold border transition-all ${
+                        entryType === 'income'
+                          ? 'bg-emerald-600 border-emerald-500 text-slate-950'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Receita
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEntryType('expense')}
+                      className={`py-2 rounded-xl text-xs font-bold border transition-all ${
+                        entryType === 'expense'
+                          ? 'bg-rose-600 border-rose-500 text-slate-950'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Despesa
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Lead / Cliente</label>
                   <select
@@ -585,12 +676,14 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Descrição do Produto / Serviço</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    {entryType === 'expense' ? 'Descrição da Despesa' : 'Descrição do Produto / Serviço'}
+                  </label>
                   <input
                     type="text"
                     value={productName}
                     onChange={(e) => setProductName(e.target.value)}
-                    placeholder="Ex: Corte + Escova"
+                    placeholder={entryType === 'expense' ? 'Ex: Aluguel do salão' : 'Ex: Corte + Escova'}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
                     required
                   />
@@ -632,8 +725,8 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                     onChange={(e) => setStatus(e.target.value as PaymentStatus)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="pago">Pago (comprovante já conferido)</option>
-                    <option value="pendente">Pendente (ainda a receber)</option>
+                    <option value="pago">{entryType === 'expense' ? 'Pago (já quitada)' : 'Pago (comprovante já conferido)'}</option>
+                    <option value="pendente">{entryType === 'expense' ? 'Pendente (ainda a pagar)' : 'Pendente (ainda a receber)'}</option>
                   </select>
                 </div>
 
