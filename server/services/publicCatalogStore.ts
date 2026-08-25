@@ -39,6 +39,7 @@ export interface PublicCatalog {
     slug: string;
     currency: string;
     locale: string;
+    template?: 'default' | 'beauty_concierge' | 'gold_catalog';
   };
   contact: {
     whatsappNumber?: string;
@@ -107,7 +108,7 @@ export async function toPublicCatalogProduct(product: AgentProduct, tenantCurren
 }
 
 export async function toPublicCatalog(
-  tenant: { name: string; slug: string; currency: string; locale: string },
+  tenant: { name: string; slug: string; currency: string; locale: string; public_catalog_template?: string },
   products: AgentProduct[],
 ): Promise<PublicCatalog> {
   return {
@@ -116,6 +117,7 @@ export async function toPublicCatalog(
       slug: tenant.slug,
       currency: tenant.currency,
       locale: tenant.locale,
+      template: tenant.public_catalog_template === 'gold_catalog' || tenant.public_catalog_template === 'beauty_concierge' ? tenant.public_catalog_template : 'default',
     },
     contact: {},
     // `active:false` é a mesma regra usada pelo agente: produto pausado não
@@ -134,7 +136,7 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
 
   const { data: tenant, error } = await getDb()
     .from('tenants')
-    .select('id, name, slug, currency, locale, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
+    .select('id, name, slug, currency, locale, public_catalog_enabled, public_catalog_template, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
     .eq('slug', normalizedSlug)
     .maybeSingle();
   if (error) throw error;

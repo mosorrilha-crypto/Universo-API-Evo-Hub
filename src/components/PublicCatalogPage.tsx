@@ -390,7 +390,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
   const faqs = FAQS[language];
 
   return (
-    <PageShell>
+    <PageShell template={catalog.tenant.template}>
       <CatalogHeader catalogName={catalog.tenant.name} language={language} onLanguageChange={setLanguage} />
       <main id="inicio">
         <section className="catalog-hero">
@@ -583,9 +583,9 @@ function Step({ number, title, text }: { number: string; title: string; text: st
   return <div className="step"><span className="step-number">{number}</span><h3>{title}</h3><p>{text}</p></div>;
 }
 
-function PageShell({ children }: { children: ReactNode }) {
+function PageShell({ children, template = 'default' }: { children: ReactNode; template?: 'default' | 'beauty_concierge' | 'gold_catalog' }) {
   return (
-    <div className="catalog-page">
+    <div className={`catalog-page catalog-template-${template}`}>
       <style>{`
         /* Atelier Bilíngue: contraste sereno, tipografia editorial e estados de espera acolhedores. */
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&display=swap');

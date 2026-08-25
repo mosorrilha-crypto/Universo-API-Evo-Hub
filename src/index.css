@@ -3525,3 +3525,21 @@ html[data-theme='clean'] {
     box-shadow: none !important;
   }
 }
+
+/* Catálogo público por tenant: gold_catalog é opt-in e não altera o template padrão. */
+.catalog-template-gold_catalog { background: #0a0908 !important; color: #f7efe2; }
+.catalog-template-gold_catalog .catalog-header { background: rgba(10, 9, 8, .92); border-color: rgba(232, 185, 94, .22); }
+.catalog-template-gold_catalog .brand, .catalog-template-gold_catalog .header-cta { color: #f7efe2; }
+.catalog-template-gold_catalog .brand-mark { border-color: #c99539; color: #e8b95e; }
+.catalog-template-gold_catalog .catalog-hero { background: radial-gradient(circle at 75% 18%, rgba(178,112,28,.26), transparent 36%), #0a0908; }
+.catalog-template-gold_catalog .catalog-hero h1, .catalog-template-gold_catalog .steps-section h2, .catalog-template-gold_catalog .services-section h2, .catalog-template-gold_catalog .faq-section h2 { color: #f7efe2; }
+.catalog-template-gold_catalog .catalog-hero h1 em, .catalog-template-gold_catalog .catalog-hero h1 i, .catalog-template-gold_catalog .steps-section h2 em, .catalog-template-gold_catalog .services-section h2 em, .catalog-template-gold_catalog .faq-section h2 em { color: #e8b95e; }
+.catalog-template-gold_catalog .eyebrow, .catalog-template-gold_catalog .product-dot, .catalog-template-gold_catalog .step-number { color: #e8b95e; }
+.catalog-template-gold_catalog .hero-sub, .catalog-template-gold_catalog .step p, .catalog-template-gold_catalog .faq-item p { color: #cdbfae; }
+.catalog-template-gold_catalog .hero-link, .catalog-template-gold_catalog .price-row strong { color: #e8b95e; border-color: #c99539; }
+.catalog-template-gold_catalog .steps-section, .catalog-template-gold_catalog .faq-section { background: #15100c; }
+.catalog-template-gold_catalog .services-section { background: #f3eadc; color: #21170f; }
+.catalog-template-gold_catalog .services-section h2, .catalog-template-gold_catalog .services-section .group-title, .catalog-template-gold_catalog .services-section .product-card h4 { color: #21170f; }
+.catalog-template-gold_catalog .product-card { background: #fffaf1; border-color: rgba(133,91,31,.28); }
+.catalog-template-gold_catalog .catalog-footer { background: #0a0908; color: #cdbfae; border-color: rgba(232,185,94,.18); }
+.catalog-template-gold_catalog .sticky-whatsapp { background: #e8b95e; color: #150f08; box-shadow: 0 12px 34px rgba(232,185,94,.22); }

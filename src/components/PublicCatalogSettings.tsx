@@ -6,6 +6,7 @@ import type { AgentProduct } from '../types';
 
 interface PublicCatalogFormState {
   enabled: boolean;
+  template: 'default' | 'beauty_concierge' | 'gold_catalog';
   whatsappPhone: string;
   instagramUrl: string;
   locationMapsUrl: string;
@@ -17,6 +18,7 @@ interface PublicCatalogFormState {
 
 const EMPTY_FORM: PublicCatalogFormState = {
   enabled: false,
+  template: 'default',
   whatsappPhone: '',
   instagramUrl: '',
   locationMapsUrl: '',
@@ -68,6 +70,7 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
         if (cancelled || !data) return;
         setForm({
           enabled: !!data.enabled,
+          template: data.template === 'gold_catalog' || data.template === 'beauty_concierge' ? data.template : 'default',
           whatsappPhone: data.whatsappPhone || '',
           instagramUrl: data.instagramUrl || '',
           locationMapsUrl: data.locationMapsUrl || '',
@@ -202,6 +205,17 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Modelo visual do catálogo" hint="A escolha vale apenas para a empresa ativa. O Catálogo Dourado é exclusivo da Monique; outras empresas podem permanecer no modelo padrão.">
+              <select
+                className={inputClass}
+                value={form.template}
+                onChange={(e) => setForm((prev) => ({ ...prev, template: e.target.value as PublicCatalogFormState['template'] }))}
+              >
+                <option value="default">Padrão do Universo</option>
+                <option value="beauty_concierge">Beauty Concierge</option>
+                <option value="gold_catalog">Catálogo Dourado — exclusivo Monique</option>
+              </select>
+            </Field>
             <Field label="WhatsApp para o botão de contato" hint="Código do país + número, sem espaços ou símbolos (ex: 595981436141).">
               <input
                 className={inputClass}
