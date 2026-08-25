@@ -194,7 +194,15 @@ export const Header: React.FC<HeaderProps> = ({
     </div>
   ) : null;
 
-  return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md">
+  // Bug real reportado (25/08/2026): no iPhone (PWA "adicionado à Tela de
+  // Início", viewport-fit=cover já configurado em index.html), este header
+  // fixo no topo (sticky top-0) renderizava colado no topo físico da tela,
+  // por baixo da barra de status do iOS (relógio/bateria/sinal) — o logo
+  // "Universo" e o botão de menu ficavam parcialmente cobertos e o toque no
+  // menu não registrava. env(safe-area-inset-top) é 0 em navegador normal
+  // (não muda nada fora de PWA em tela cheia/notch), então esse padding só
+  // entra em ação exatamente no caso que quebrava.
+  return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">
         <div className="flex min-w-0 items-center gap-2"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-4 h-4" /></div><span className="truncate text-sm font-bold text-white">Universo</span></div>
