@@ -3425,7 +3425,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onClick={() => setActiveTabFilter('all')}
                 className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'all'
-                    ? 'bg-[#00a884] text-slate-950 font-bold'
+                    ? 'bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
@@ -3435,7 +3435,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onClick={() => setActiveTabFilter('unread')}
                 className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'unread'
-                    ? 'bg-[#00a884] text-slate-950 font-bold'
+                    ? 'bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
