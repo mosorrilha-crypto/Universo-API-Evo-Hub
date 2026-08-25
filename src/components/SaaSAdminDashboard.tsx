@@ -29,7 +29,11 @@ import {
   Loader2,
   Camera,
   Pencil,
-  Trash2
+  Trash2,
+  Lock,
+  Unlock,
+  CreditCard,
+  KeyRound
 } from 'lucide-react';
 
 /**
@@ -1061,6 +1065,132 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
     }
   };
 
+  // Bloqueio de acesso reversível (TASK-0070) — desliga login de todo
+  // operador desse tenant sem apagar nada (diferente de "Excluir" acima,
+  // que é irreversível e em cascata).
+  const [busyBlockTenantId, setBusyBlockTenantId] = useState<string | null>(null);
+  const handleToggleTenantBlock = async (t: { id: string; name: string; isActive: boolean }) => {
+    const action = t.isActive ? 'bloquear' : 'reativar';
+    if (!window.confirm(`Confirma ${action} o acesso de "${t.name}"? ${t.isActive ? 'Nenhum operador desse tenant vai conseguir logar até você reativar.' : 'O login volta a funcionar imediatamente.'}`)) return;
+    setBusyBlockTenantId(t.id);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${t.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !t.isActive }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await fetchRealTenants();
+    } catch (err: any) {
+      alert(`Falha ao ${action} o tenant: ${err.message || 'tente de novo.'}`);
+    } finally {
+      setBusyBlockTenantId(null);
+    }
+  };
+
+  // Histórico de pagamento mensal do tenant ao Universo (TASK-0070) —
+  // cobrança do SAAS ao tenant, distinta do Financeiro do tenant (que é a
+  // cobrança do tenant ao cliente final dele). Registro manual, sem
+  // gateway (mesma decisão de escopo do Financeiro — ver CLAUDE.md).
+  interface TenantBillingRecord {
+    id: string;
+    reference_month: string;
+    amount: number;
+    currency: string;
+    status: 'pendente' | 'pago' | 'atrasado';
+    paid_at: string | null;
+    note: string | null;
+  }
+  const [billingTenant, setBillingTenant] = useState<{ id: string; name: string } | null>(null);
+  const [billingRecords, setBillingRecords] = useState<TenantBillingRecord[]>([]);
+  const [isLoadingBilling, setIsLoadingBilling] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const [newBillingMonth, setNewBillingMonth] = useState('');
+  const [newBillingAmount, setNewBillingAmount] = useState('');
+  const [newBillingCurrency, setNewBillingCurrency] = useState('BRL');
+  const [isSavingBillingRecord, setIsSavingBillingRecord] = useState(false);
+  const [busyBillingRecordId, setBusyBillingRecordId] = useState<string | null>(null);
+
+  const fetchBillingRecords = async (tenantId: string) => {
+    setIsLoadingBilling(true);
+    setBillingError(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/billing`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setBillingRecords(data.records || []);
+    } catch (err: any) {
+      setBillingError(err.message || 'Falha ao carregar o histórico de pagamento.');
+    } finally {
+      setIsLoadingBilling(false);
+    }
+  };
+
+  const openBillingModal = (t: { id: string; name: string }) => {
+    setBillingTenant(t);
+    setNewBillingMonth('');
+    setNewBillingAmount('');
+    fetchBillingRecords(t.id);
+  };
+
+  const handleAddBillingRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!billingTenant || !newBillingMonth || !newBillingAmount) return;
+    setIsSavingBillingRecord(true);
+    setBillingError(null);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${billingTenant.id}/billing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenceMonth: newBillingMonth, amount: Number(newBillingAmount), currency: newBillingCurrency }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setBillingRecords((prev) => [data.record, ...prev]);
+      setNewBillingMonth('');
+      setNewBillingAmount('');
+    } catch (err: any) {
+      setBillingError(err.message || 'Falha ao registrar a cobrança.');
+    } finally {
+      setIsSavingBillingRecord(false);
+    }
+  };
+
+  const handleUpdateBillingStatus = async (record: TenantBillingRecord, status: TenantBillingRecord['status']) => {
+    if (!billingTenant) return;
+    setBusyBillingRecordId(record.id);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${billingTenant.id}/billing/${record.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setBillingRecords((prev) => prev.map((r) => (r.id === record.id ? data.record : r)));
+    } catch (err: any) {
+      alert(`Falha ao atualizar o status: ${err.message || 'tente de novo.'}`);
+    } finally {
+      setBusyBillingRecordId(null);
+    }
+  };
+
+  const handleDeleteBillingRecord = async (record: TenantBillingRecord) => {
+    if (!billingTenant) return;
+    if (!window.confirm('Apagar esse registro de cobrança? Essa ação não pode ser desfeita.')) return;
+    setBusyBillingRecordId(record.id);
+    try {
+      const res = await apiFetch(`/api/admin/tenants/${billingTenant.id}/billing/${record.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setBillingRecords((prev) => prev.filter((r) => r.id !== record.id));
+    } catch (err: any) {
+      alert(`Falha ao apagar o registro: ${err.message || 'tente de novo.'}`);
+    } finally {
+      setBusyBillingRecordId(null);
+    }
+  };
+
   const fetchOperators = async () => {
     setIsLoadingUsers(true);
     try {
@@ -1163,6 +1293,61 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       alert(`Não foi possível atualizar a função: ${err?.message || 'tente de novo.'}`);
     } finally {
       setSavingRoleForUserId(null);
+    }
+  };
+
+  // Trocar login (e-mail) e/ou senha de um operador (TASK-0070, pedido
+  // direto de chat) — antes só dava pra corrigir via SQL direto no banco,
+  // mesmo gap que já existia pra troca de função (comentário acima).
+  const [editingCredentialsUser, setEditingCredentialsUser] = useState<{ id: string; email: string; name: string } | null>(null);
+  const [credentialsEmailDraft, setCredentialsEmailDraft] = useState('');
+  const [credentialsPasswordDraft, setCredentialsPasswordDraft] = useState('');
+  const [isSavingCredentials, setIsSavingCredentials] = useState(false);
+  const [credentialsError, setCredentialsError] = useState<string | null>(null);
+
+  const openEditCredentials = (u: UserProfile) => {
+    setCredentialsError(null);
+    setCredentialsEmailDraft(u.email);
+    setCredentialsPasswordDraft('');
+    setEditingCredentialsUser({ id: u.id, email: u.email, name: u.name });
+  };
+
+  const handleSaveCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCredentialsUser) return;
+    const patch: Record<string, string> = {};
+    if (credentialsEmailDraft.trim() && credentialsEmailDraft.trim() !== editingCredentialsUser.email) {
+      patch.email = credentialsEmailDraft.trim();
+    }
+    if (credentialsPasswordDraft.trim()) {
+      if (credentialsPasswordDraft.trim().length < 6) {
+        setCredentialsError('Senha precisa ter pelo menos 6 caracteres.');
+        return;
+      }
+      patch.password = credentialsPasswordDraft.trim();
+    }
+    if (Object.keys(patch).length === 0) {
+      setCredentialsError('Nada pra salvar — mude o e-mail ou preencha uma senha nova.');
+      return;
+    }
+    setIsSavingCredentials(true);
+    setCredentialsError(null);
+    try {
+      const res = await apiFetch(`/api/admin/operators/${editingCredentialsUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (patch.email) {
+        setUsersList((prev) => prev.map((u) => (u.id === editingCredentialsUser.id ? { ...u, email: patch.email! } : u)));
+      }
+      setEditingCredentialsUser(null);
+    } catch (err: any) {
+      setCredentialsError(err.message || 'Falha ao salvar as credenciais.');
+    } finally {
+      setIsSavingCredentials(false);
     }
   };
 
@@ -1405,7 +1590,11 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                           <h3 className="truncate text-sm font-bold text-white">{t.name}</h3>
                           <p className="mt-0.5 truncate font-mono text-[10px] text-slate-500">{t.slug || t.id}</p>
                         </div>
-                        {t.whatsappConnected ? (
+                        {!t.isActive ? (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-500/10 px-2 py-1 text-[10px] font-semibold text-rose-300">
+                            <Lock className="h-3 w-3" /> Bloqueado
+                          </span>
+                        ) : t.whatsappConnected ? (
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-300">
                             <CheckCircle2 className="h-3 w-3" /> Conectado
                           </span>
@@ -1420,9 +1609,20 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                         <span><span className="mr-1 uppercase tracking-wide text-slate-600">Moeda</span>{t.currency} / {t.locale}</span>
                         <span><span className="mr-1 uppercase tracking-wide text-slate-600">Criado</span>{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</span>
                       </div>
-                      <div className="mt-2 flex items-center gap-1.5 border-t border-slate-800/70 pt-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-slate-800/70 pt-2">
                         <button type="button" onClick={() => openEditTenant(t)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
                           <Pencil className="h-3 w-3" /> Editar
+                        </button>
+                        <button type="button" onClick={() => openBillingModal(t)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
+                          <CreditCard className="h-3 w-3" /> Pagamentos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleTenantBlock(t)}
+                          disabled={busyBlockTenantId === t.id}
+                          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold disabled:opacity-50 ${t.isActive ? 'bg-amber-950/60 text-amber-300 hover:bg-amber-900/60' : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60'}`}
+                        >
+                          {t.isActive ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />} {t.isActive ? 'Bloquear' : 'Reativar'}
                         </button>
                         <button type="button" onClick={() => openDeleteTenant(t)} className="inline-flex items-center gap-1 rounded-lg bg-rose-950/60 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-900/60">
                           <Trash2 className="h-3 w-3" /> Excluir
@@ -1454,7 +1654,9 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                           <td className="p-3 text-slate-300">{t.segment || '—'}</td>
                           <td className="p-3 text-slate-300">{t.currency} / {t.locale}</td>
                           <td className="p-3">
-                            {t.whatsappConnected ? (
+                            {!t.isActive ? (
+                              <span className="flex items-center gap-1 text-[10px] text-rose-400"><Lock className="h-3 w-3" /> Bloqueado</span>
+                            ) : t.whatsappConnected ? (
                               <span className="flex items-center gap-1 text-[10px] text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Conectado</span>
                             ) : (
                               <span className="flex items-center gap-1 text-[10px] text-slate-500"><AlertCircle className="h-3 w-3" /> Não conectado</span>
@@ -1462,9 +1664,21 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                           </td>
                           <td className="p-3 text-slate-400">{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</td>
                           <td className="p-3">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <button type="button" onClick={() => openEditTenant(t)} title="Editar empresa" className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
                                 <Pencil className="h-3 w-3" /> Editar
+                              </button>
+                              <button type="button" onClick={() => openBillingModal(t)} title="Histórico de pagamento" className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
+                                <CreditCard className="h-3 w-3" /> Pagamentos
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTenantBlock(t)}
+                                disabled={busyBlockTenantId === t.id}
+                                title={t.isActive ? 'Bloquear acesso' : 'Reativar acesso'}
+                                className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold disabled:opacity-50 ${t.isActive ? 'bg-amber-950/60 text-amber-300 hover:bg-amber-900/60' : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60'}`}
+                              >
+                                {t.isActive ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />} {t.isActive ? 'Bloquear' : 'Reativar'}
                               </button>
                               <button type="button" onClick={() => openDeleteTenant(t)} title="Excluir empresa" className="inline-flex items-center gap-1 rounded-lg bg-rose-950/60 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-900/60">
                                 <Trash2 className="h-3 w-3" /> Excluir
@@ -1584,6 +1798,133 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               {isDeletingTenant ? 'Excluindo...' : 'Excluir permanentemente'}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Histórico de pagamento mensal do tenant ao Universo (TASK-0070) */}
+      {billingTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setBillingTenant(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-white"><CreditCard className="h-4 w-4 text-emerald-400" /> Pagamentos — {billingTenant.name}</h3>
+              <button type="button" onClick={() => setBillingTenant(null)} className="text-slate-500 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+            <p className="text-[11px] text-slate-500">Registro manual da cobrança do Universo a este tenant (não é o Financeiro do próprio negócio dele). Sem gateway — cada mês é marcado à mão.</p>
+            {billingError && <div className="rounded-lg border border-red-800 bg-red-950/60 p-2.5 text-xs text-red-300">{billingError}</div>}
+
+            <form onSubmit={handleAddBillingRecord} className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+              <div>
+                <label className="mb-1 block text-[10px] text-slate-400">Mês de referência</label>
+                <input type="month" value={newBillingMonth} onChange={(e) => setNewBillingMonth(e.target.value)} required className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] text-slate-400">Valor</label>
+                <input type="number" step="0.01" min="0" value={newBillingAmount} onChange={(e) => setNewBillingAmount(e.target.value)} required className="w-24 rounded-lg border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] text-slate-400">Moeda</label>
+                <select value={newBillingCurrency} onChange={(e) => setNewBillingCurrency(e.target.value)} className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none">
+                  <option value="BRL">BRL</option>
+                  <option value="PYG">PYG</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <button type="submit" disabled={isSavingBillingRecord} className="flex items-center gap-1 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-600 disabled:opacity-50">
+                {isSavingBillingRecord ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Registrar
+              </button>
+            </form>
+
+            <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-800">
+              {isLoadingBilling ? (
+                <div className="flex items-center justify-center p-6 text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /></div>
+              ) : billingRecords.length === 0 ? (
+                <p className="p-4 text-center text-xs text-slate-500">Nenhum pagamento registrado ainda.</p>
+              ) : (
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950 text-[10px] uppercase text-slate-500">
+                    <tr>
+                      <th className="p-2">Mês</th>
+                      <th className="p-2">Valor</th>
+                      <th className="p-2">Status</th>
+                      <th className="p-2 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {billingRecords.map((r) => {
+                      const statusColors: Record<string, string> = {
+                        pago: 'bg-emerald-950 text-emerald-300 border-emerald-800/80',
+                        pendente: 'bg-amber-950 text-amber-300 border-amber-800/80',
+                        atrasado: 'bg-rose-950 text-rose-300 border-rose-800/80',
+                      };
+                      return (
+                        <tr key={r.id}>
+                          <td className="p-2">{new Date(`${r.reference_month}T00:00:00`).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })}</td>
+                          <td className="p-2 font-mono">{r.currency} {Number(r.amount).toFixed(2)}</td>
+                          <td className="p-2">
+                            <select
+                              value={r.status}
+                              disabled={busyBillingRecordId === r.id}
+                              onChange={(e) => handleUpdateBillingStatus(r, e.target.value as TenantBillingRecord['status'])}
+                              className={`rounded border px-1.5 py-0.5 text-[10px] font-bold disabled:opacity-50 ${statusColors[r.status]}`}
+                            >
+                              <option value="pendente">Pendente</option>
+                              <option value="pago">Pago</option>
+                              <option value="atrasado">Atrasado</option>
+                            </select>
+                          </td>
+                          <td className="p-2 text-right">
+                            <button type="button" onClick={() => handleDeleteBillingRecord(r)} disabled={busyBillingRecordId === r.id} className="rounded-lg p-1 text-slate-500 hover:bg-rose-950/60 hover:text-rose-300 disabled:opacity-50" title="Apagar registro">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trocar login (e-mail)/senha de um operador (TASK-0070) */}
+      {editingCredentialsUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !isSavingCredentials && setEditingCredentialsUser(null)}>
+          <form onSubmit={handleSaveCredentials} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-white"><KeyRound className="h-4 w-4 text-emerald-400" /> Login e senha — {editingCredentialsUser.name}</h3>
+              <button type="button" onClick={() => setEditingCredentialsUser(null)} className="text-slate-500 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+            {credentialsError && <div className="rounded-lg border border-red-800 bg-red-950/60 p-2.5 text-xs text-red-300">{credentialsError}</div>}
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">E-mail (login)</label>
+              <input
+                type="email"
+                value={credentialsEmailDraft}
+                onChange={(e) => setCredentialsEmailDraft(e.target.value)}
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-slate-400">Nova senha (deixe em branco pra manter a atual)</label>
+              <input
+                type="password"
+                value={credentialsPasswordDraft}
+                onChange={(e) => setCredentialsPasswordDraft(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSavingCredentials}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 py-2.5 text-xs font-bold text-white transition-all hover:bg-emerald-600 disabled:opacity-50"
+            >
+              {isSavingCredentials ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {isSavingCredentials ? 'Salvando...' : 'Salvar'}
+            </button>
+          </form>
         </div>
       )}
 
@@ -2136,6 +2477,13 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                               </span>
                             </td>
                             <td className="p-3 text-right">
+                              <button
+                                onClick={() => openEditCredentials(usr)}
+                                className="mr-1.5 p-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg transition-colors cursor-pointer"
+                                title="Trocar login (e-mail) e/ou senha"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 onClick={() => handleDeleteUser(usr.id, usr.name)}
                                 className="p-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg transition-colors cursor-pointer"

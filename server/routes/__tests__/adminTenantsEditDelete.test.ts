@@ -86,6 +86,35 @@ describe('PATCH /api/admin/tenants/:id', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  // TASK-0070 — bloqueio de acesso reversível (tenants.is_active), distinto
+  // do DELETE abaixo (irreversível/em cascata).
+  it('bloqueia o acesso do tenant (isActive: false)', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', is_active: true }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: false }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tenant.is_active).toBe(false);
+  });
+
+  it('reativa o tenant (isActive: true)', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', is_active: false }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: true }),
+    });
+    const body = await res.json();
+    expect(body.tenant.is_active).toBe(true);
+  });
 });
 
 describe('DELETE /api/admin/tenants/:id', () => {

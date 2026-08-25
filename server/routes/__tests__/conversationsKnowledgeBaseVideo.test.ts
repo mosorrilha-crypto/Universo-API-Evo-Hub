@@ -183,6 +183,15 @@ describe('GET /api/knowledge-base/videos/:videoId', () => {
     expect(res.headers.get('content-type')).toBe('video/mp4');
   });
 
+  // TASK-0074 (auditoria de egress do Supabase, 25/08/2026) — essa rota não
+  // tinha cache nenhum; cada preview no painel baixava o vídeo de novo do
+  // Storage. Mesmo padrão já usado em /api/media/:messageId.
+  it('manda Cache-Control privado (id estável, não muda sem reupload)', async () => {
+    const res = await fetch(`${baseUrl}/api/knowledge-base/videos/video-existing`);
+    expect(res.headers.get('cache-control')).toBe('private, max-age=3600');
+    expect(res.headers.get('vary')).toBe('Authorization');
+  });
+
   it('404 quando o vídeo não existe', async () => {
     const res = await fetch(`${baseUrl}/api/knowledge-base/videos/video-nao-existe`);
     expect(res.status).toBe(404);

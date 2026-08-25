@@ -57,6 +57,16 @@ function renderHeader() {
 
 afterEach(() => cleanup());
 
+// Bug real reportado (25/08/2026): no iPhone em PWA (tela cheia, notch/Dynamic
+// Island), o header sticky ficava colado atrás da barra de status do iOS —
+// logo e botão de menu parcialmente cobertos, toque no menu não registrava.
+// Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>
+// (ver Header.tsx). Sem teste automatizado aqui de propósito — o parser de
+// CSS do jsdom (`cssstyle`) rejeita `env(...)` como valor inválido e nem
+// chega a gravar no atributo `style`, então qualquer asserção sobre o DOM
+// desse valor daria falso negativo (testado, confirmado). `env()` com
+// fallback pra 0px fora de safe-area é suporte padrão de todo browser
+// moderno (Safari iOS incluso, é justamente o caso que motivou o fix).
 describe('menu Empresas no desktop', () => {
   it('abre e expõe todas as opções administrativas para saas_admin', async () => {
     const user = userEvent.setup();

@@ -25,6 +25,8 @@ export interface RealTenant {
   locale: string;
   createdAt: string;
   whatsappConnected: boolean;
+  /** TASK-0070 — bloqueio de acesso reversível (tenants.is_active). false = login recusado pra todo operador desse tenant. */
+  isActive: boolean;
 }
 
 let tenants: RealTenant[] = [];
@@ -71,6 +73,7 @@ export function refetchRealTenants(): Promise<void> {
         locale: t.locale,
         createdAt: t.created_at,
         whatsappConnected: !!t.whatsappConnected,
+        isActive: t.is_active !== false,
       }));
     })
     .catch((err) => {
