@@ -139,9 +139,9 @@ function buildSuggestionPrompt(input: ReplySuggestionInput): string {
 
 Regras obrigatórias:
 - Responda no mesmo idioma da última mensagem da cliente. Se for espanhol, use espanhol paraguaio natural com voseo; nunca misture português em uma frase em espanhol.
-- Corrija o motivo apontado pelo revisor e não repita o erro do rascunho.
-- Não invente preço, duração, serviço, horário, localização, pagamento, disponibilidade ou política. Use somente o contexto fornecido.
-- Se faltar informação essencial, faça uma pergunta objetiva em vez de afirmar algo.
+- Corrija SÓ o que o motivo do revisor aponta como errado — não é pra reescrever do zero. Se um preço, horário, serviço ou outro dado do rascunho bloqueado bate com o CONTEXTO PERMITIDO DO NEGÓCIO abaixo, MANTENHA esse dado na sua sugestão; descartar informação correta não é uma correção.
+- Não invente nem repita preço, duração, serviço, horário, localização, pagamento ou disponibilidade que NÃO esteja confirmado no contexto fornecido.
+- Se faltar informação essencial pra responder por completo, faça a pergunta objetiva que falta ADEMAIS de manter o que já está confirmado — não vire a resposta inteira numa pergunta se parte dela já pode ser respondida com o contexto.
 - Se a cliente ainda não informou o nome e a próxima ação depender disso, peça o nome antes de avançar.
 - Não solicite senha, documento, código, token ou outros dados sensíveis.
 - Não pressione a cliente a agendar nem transforme uma pergunta informativa em confirmação de agenda.
@@ -183,7 +183,9 @@ export async function generateCorrectedReplySuggestion(
   if (deps.groqApiKey) {
     try {
       const result = await callGroqJsonCompletion(deps.groqApiKey, prompt);
-      return parseReplySuggestion(result.parsed, 'groq-suggestion');
+      const suggestion = parseReplySuggestion(result.parsed, 'groq-suggestion');
+      if (matchesCustomerLanguage(input.customerMessage, suggestion.text)) return suggestion;
+      console.warn('⚠️ [Sugestão supervisionada] Groq trocou o idioma da cliente na sugestão — tentando Gemini.');
     } catch (error: any) {
       console.warn(`⚠️ [Sugestão supervisionada] Groq indisponível, tentando Gemini: ${error?.message || error}`);
     }
@@ -196,13 +198,45 @@ export async function generateCorrectedReplySuggestion(
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0 },
       }), 12_000);
-      return parseReplySuggestion(JSON.parse(response.text || '{}'), 'gemini-suggestion');
+      const suggestion = parseReplySuggestion(JSON.parse(response.text || '{}'), 'gemini-suggestion');
+      if (matchesCustomerLanguage(input.customerMessage, suggestion.text)) return suggestion;
+      console.warn('⚠️ [Sugestão supervisionada] Gemini trocou o idioma da cliente na sugestão — bloqueio permanece.');
     } catch (error: any) {
       console.warn(`⚠️ [Sugestão supervisionada] Gemini indisponível: ${error?.message || error}`);
     }
   }
 
   return null;
+}
+
+/**
+ * Mesma checagem já usada em `ruleVerdict` pro rascunho original (linha
+ * ~91) — achado real (26/08/2026): a sugestão supervisionada respondeu em
+ * português numa conversa em espanhol, violando a própria regra de idioma
+ * do prompt (`buildSuggestionPrompt`). Modelos pequenos/baratos (Groq,
+ * gemini-3.5-flash-lite) às vezes não seguem essa regra mesmo escrita
+ * explicitamente — validar o resultado é mais confiável que só pedir no
+ * prompt.
+ */
+/**
+ * Sinal de português mais genérico que `hasPortugueseSignal` (que só cobre
+ * vocabulário de negócio, tipo "agendamento"/"sobrancelhas") — pega
+ * palavras/diacríticos comuns do português que não aparecem em espanhol,
+ * mesmo numa frase genérica como "Qual é o teu nome" (achado real: a versão
+ * restrita ao vocabulário de negócio não capturava esse caso).
+ */
+function looksGenerallyPortuguese(text: string): boolean {
+  // Diacríticos exclusivos do português (ã/õ não existem em espanhol) —
+  // checados no texto original, já que normalize() abaixo remove acentos.
+  if (/[ãõ]/i.test(String(text || ''))) return true;
+  // Palavras que não têm equivalente igual em espanhol (evita falso positivo
+  // com termos que existem nos dois idiomas, tipo "esta"/"aqui"/"poder").
+  return /\b(voce|nao|isso|muito|obrigad|qual|pra|teu|tua)\b/i.test(normalize(text));
+}
+
+function matchesCustomerLanguage(customerMessage: string, suggestionText: string): boolean {
+  if (hasSpanishSignal(customerMessage) && looksGenerallyPortuguese(suggestionText) && !hasSpanishSignal(suggestionText)) return false;
+  return true;
 }
 
 function parseReviewerDecision(value: unknown, source: ReplySafetySource): ReplySafetyVerdict {
