@@ -90,6 +90,24 @@ describe('revisor pré-envio de respostas automáticas', () => {
     expect(suggestion).toBeNull();
   });
 
+  it('informa ao segundo revisor a ação de agenda planejada, ainda sem execução', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ approved: true, severity: 'low', reason: 'Plano e resposta consistentes.' }) });
+    const verdict = await reviewAutoReplyBeforeSend({
+      customerMessage: 'Quiero el turno de las diez.',
+      draftBubbles: ['Perfecto, te dejo reservado para las 10:00.'],
+      isBookingFlow: true,
+      plannedCalendarActions: ['Planejou reservar "Lash Lift" para 2026-09-02T10:00:00 depois da aprovação do revisor pré-envio.'],
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(verdict.approved).toBe(true);
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('Planejou reservar "Lash Lift"'),
+    }));
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('ainda NÃO foram executadas'),
+    }));
+  });
+
   it('aceita a aprovação estruturada do segundo agente', async () => {
     const ai: any = {
       models: {

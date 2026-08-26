@@ -37,7 +37,7 @@ vi.mock('../knowledgeBaseStore', () => ({
   findProductDurationMinutes: vi.fn(() => undefined),
 }));
 
-const { generateAutoReplyForText } = await import('../autoReply');
+const { executeApprovedCalendarActions, generateAutoReplyForText } = await import('../autoReply');
 
 const CALENDAR_CONFIG = { clientId: 'id', clientSecret: 'secret', redirectUri: 'https://x/redirect' };
 
@@ -82,9 +82,17 @@ describe('generateAutoReplyForText — cancelamento sensível a antecedência (E
       '595981234567', CALENDAR_CONFIG
     );
 
+    const execution = await executeApprovedCalendarActions(
+      'tenant-a',
+      '595981234567',
+      CALENDAR_CONFIG,
+      result?.deferredCalendarActions,
+      'Cliente',
+    );
+
     expect(cancelCalendarEvent).not.toHaveBeenCalled();
     expect(clearAppointmentForPhone).not.toHaveBeenCalled();
-    expect(result?.needsHumanConfirmation).toBe(true);
+    expect(execution.hadError).toBe(true);
   });
 
   it('com menos de 24h de antecedência, cancela direto sem escalar por isso', async () => {
@@ -97,8 +105,16 @@ describe('generateAutoReplyForText — cancelamento sensível a antecedência (E
       '595981234567', CALENDAR_CONFIG
     );
 
+    const execution = await executeApprovedCalendarActions(
+      'tenant-a',
+      '595981234567',
+      CALENDAR_CONFIG,
+      result?.deferredCalendarActions,
+      'Cliente',
+    );
+
     expect(cancelCalendarEvent).toHaveBeenCalledWith('tenant-a', CALENDAR_CONFIG, 'evt-2');
     expect(clearAppointmentForPhone).toHaveBeenCalled();
-    expect(result?.needsHumanConfirmation).toBe(false);
+    expect(execution.hadError).toBe(false);
   });
 });

@@ -41,7 +41,7 @@ vi.mock('../knowledgeBaseStore', () => ({
   findProductDurationMinutes: vi.fn(() => undefined),
 }));
 
-const { generateAutoReplyForText } = await import('../autoReply');
+const { executeApprovedCalendarActions, generateAutoReplyForText } = await import('../autoReply');
 
 const CALENDAR_CONFIG = { clientId: 'id', clientSecret: 'secret', redirectUri: 'https://x/redirect' };
 
@@ -89,10 +89,11 @@ describe('criar_agendamento — nunca sobrescreve um agendamento ativo (auditori
     createCalendarEvent.mockClear();
     createAppointmentHold.mockClear();
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
+    await executeApprovedCalendarActions('tenant-a', '595981234567', CALENDAR_CONFIG, result?.deferredCalendarActions, 'Cliente');
 
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(createAppointmentHold).toHaveBeenCalledTimes(1);
@@ -107,10 +108,11 @@ describe('criar_agendamento — nunca sobrescreve um agendamento ativo (auditori
     createCalendarEvent.mockClear();
     createAppointmentHold.mockClear();
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
+    await executeApprovedCalendarActions('tenant-a', '595981234567', CALENDAR_CONFIG, result?.deferredCalendarActions, 'Cliente');
 
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(createAppointmentHold).toHaveBeenCalledTimes(1);
@@ -159,10 +161,11 @@ describe('criar_agendamento — gate de pagamento (issue #279): nunca apaga um c
     createCalendarEvent.mockClear();
     createAppointmentHold.mockClear();
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', makeFakeAiCriarAgendamento(), 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
+    await executeApprovedCalendarActions('tenant-a', '595981234567', CALENDAR_CONFIG, result?.deferredCalendarActions, 'Cliente');
 
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(createAppointmentHold).toHaveBeenCalledTimes(1);
