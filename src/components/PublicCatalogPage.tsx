@@ -30,12 +30,15 @@ interface PublicCatalogProduct {
   imageUrl?: string;
 }
 
+type CatalogTemplate = 'default' | 'beauty_concierge' | 'gold_catalog';
+
 interface PublicCatalog {
   tenant: {
     name: string;
     slug: string;
     currency: string;
     locale: string;
+    template?: CatalogTemplate;
   };
   contact: {
     whatsappNumber?: string;
@@ -583,9 +586,13 @@ function Step({ number, title, text }: { number: string; title: string; text: st
   return <div className="step"><span className="step-number">{number}</span><h3>{title}</h3><p>{text}</p></div>;
 }
 
-function PageShell({ children, template = 'default' }: { children: ReactNode; template?: 'default' | 'beauty_concierge' | 'gold_catalog' }) {
+function PageShell({ children, template = 'default' }: { children: ReactNode; template?: CatalogTemplate }) {
+  // O backend pode evoluir antes de todos os clientes terem recebido o bundle novo.
+  // Um valor desconhecido nunca deve resultar em uma árvore vazia ou em uma classe
+  // arbitrária; o conteúdo continua disponível com o tema padrão.
+  const safeTemplate: CatalogTemplate = template === 'gold_catalog' || template === 'beauty_concierge' ? template : 'default';
   return (
-    <div className={`catalog-page catalog-template-${template}`}>
+    <div className={`catalog-page catalog-template-${safeTemplate}`}>
       <style>{`
         /* Atelier Bilíngue: contraste sereno, tipografia editorial e estados de espera acolhedores. */
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&display=swap');
