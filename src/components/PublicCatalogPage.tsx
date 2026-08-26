@@ -233,7 +233,7 @@ function normalizeSpanishText(value: string): string {
     .replaceAll('varia por efecto', 'varía según el efecto');
 }
 
-function localizeCatalogText(value: string | undefined, language: CatalogLanguage): string {
+function localizePublicCatalogText(value: string | undefined, language: CatalogLanguage): string {
   if (!value) return '';
   return language === 'pt' ? (PT_CATALOG_TEXT[value] || value) : normalizeSpanishText(value);
 }
@@ -268,7 +268,7 @@ function formatDuration(minutes?: number): string | null {
 
 function formatProductPrice(product: PublicCatalogProduct, language: CatalogLanguage): string {
   if (!product.price) return language === 'pt' ? 'Consultar' : 'Consultar';
-  return localizeCatalogText(product.price, language);
+  return localizePublicCatalogText(product.price, language);
 }
 
 declare global {
@@ -429,10 +429,10 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
             <div className="product-groups">
               {groupedProducts.map(([category, products]) => (
                 <section className="product-group" key={category}>
-                  <h3 className="group-title">{localizeCatalogText(category, language)}</h3>
+                  <h3 className="group-title">{localizePublicCatalogText(category, language)}</h3>
                   <div className="product-grid">
                     {products.map((product) => {
-                      const localizedName = localizeCatalogText(product.name, language);
+                      const localizedName = localizePublicCatalogText(product.name, language);
                       const productWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language);
                       return (
                         <article className={`product-card${product.imageUrl ? ' has-image' : ''}`} key={`${category}-${product.name}`}>
@@ -444,16 +444,16 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                             </div>
                             <h4>{localizedName}</h4>
                             <div className="price-row"><strong>{formatProductPrice(product, language)}</strong><span>{copy.from}</span></div>
-                            {product.description && <p>{localizeCatalogText(product.description, language)}</p>}
+                            {product.description && <p>{localizePublicCatalogText(product.description, language)}</p>}
                             {product.variants && product.variants.length > 0 && (
                               <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
                                 {product.variants.map((variant) => (
                                   <div className="variant-row" key={variant.code}>
                                     <div>
-                                      <span className="variant-name">{localizeCatalogText(variant.code, language)}</span>
-                                      {variant.description && <p className="variant-description">{localizeCatalogText(variant.description, language)}</p>}
+                                      <span className="variant-name">{localizePublicCatalogText(variant.code, language)}</span>
+                                      {variant.description && <p className="variant-description">{localizePublicCatalogText(variant.description, language)}</p>}
                                     </div>
-                                    <strong>{localizeCatalogText(variant.price, language)}</strong>
+                                    <strong>{localizePublicCatalogText(variant.price, language)}</strong>
                                   </div>
                                 ))}
                               </div>
