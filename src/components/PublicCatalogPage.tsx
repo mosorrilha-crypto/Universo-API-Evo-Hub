@@ -41,15 +41,12 @@ interface PublicBeforeAfterPair {
   caption?: string;
 }
 
-type CatalogTemplate = 'default' | 'beauty_concierge' | 'gold_catalog';
-
 interface PublicCatalog {
   tenant: {
     name: string;
     slug: string;
     currency: string;
     locale: string;
-    template?: CatalogTemplate;
   };
   contact: {
     whatsappNumber?: string;
@@ -648,11 +645,9 @@ function Step({ number, title, text }: { number: string; title: string; text: st
   return <div className="step"><span className="step-number">{number}</span><h3>{title}</h3><p>{text}</p></div>;
 }
 
-function PageShell({ children, template = 'default' }: { children: ReactNode; template?: CatalogTemplate }) {
-  // Um valor novo do backend não pode deixar a árvore pública vazia.
-  const safeTemplate: CatalogTemplate = template === 'gold_catalog' || template === 'beauty_concierge' ? template : 'default';
+function PageShell({ children, template = 'default' }: { children: ReactNode; template?: 'default' | 'beauty_concierge' | 'gold_catalog' }) {
   return (
-    <div className={`catalog-page catalog-template-${safeTemplate}`}>
+    <div className={`catalog-page catalog-template-${template}`}>
       <style>{`
         /* Atelier Bilíngue: contraste sereno, tipografia editorial e estados de espera acolhedores. */
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&display=swap');
