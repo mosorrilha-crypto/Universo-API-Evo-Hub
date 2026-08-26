@@ -822,7 +822,10 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     res.json({
       knowledgeBase: {
         ...kb,
-        products: (kb.products || []).map(({ exampleVideoId, ...product }) => product),
+        products: (kb.products || []).map(({ exampleVideoId, variants, ...product }) => ({
+          ...product,
+          variants: variants?.map(({ exampleVideoId: _variantVideoId, ...variant }) => variant),
+        })),
         firstContactBlocks: (kb.firstContactBlocks || []).filter((block) => block.type === 'text' || block.type === 'image'),
       },
     });

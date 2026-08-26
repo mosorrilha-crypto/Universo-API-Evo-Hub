@@ -12,6 +12,7 @@ import {
   isNonBookableProduct,
   findProductDurationMinutes,
   findProductMatch,
+  collectReferencedVideoIds,
   type AgentKnowledgeBase,
   type AgentProduct,
 } from '../knowledgeBaseStore';
@@ -69,6 +70,20 @@ describe('formatKnowledgeBaseForPrompt', () => {
     expect(text).toContain('Modelo compacto para quintais menores.');
     expect(text).toContain('AC F500');
     expect(text).toContain('Gs 15.000.000');
+  });
+});
+
+describe('collectReferencedVideoIds', () => {
+  it('mantém o vídeo usado por uma variação para que o salvamento não o trate como órfão', () => {
+    const ids = collectReferencedVideoIds({
+      products: [{
+        name: 'Pestañas',
+        price: 'Consultar',
+        variants: [{ code: 'Efecto Foxy', price: 'Gs 200.000', exampleVideoId: 'video-foxy' }],
+      }],
+    });
+
+    expect(ids).toEqual(new Set(['video-foxy']));
   });
 });
 

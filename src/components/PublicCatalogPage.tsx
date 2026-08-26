@@ -10,6 +10,8 @@ import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'r
 interface PublicCatalogVariant {
   code: string;
   description?: string;
+  imageUrl?: string;
+  whatsappMessage?: string;
   dimensions?: string;
   litros?: number;
   price: string;
@@ -442,15 +444,21 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                             {product.description && <p>{localizeCatalogText(product.description, language)}</p>}
                             {product.variants && product.variants.length > 0 && (
                               <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
-                                {product.variants.map((variant) => (
+                                {product.variants.map((variant) => {
+                                  const localizedVariantName = localizeCatalogText(variant.code, language);
+                                  const variantWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, `${localizedName} — ${localizedVariantName}`, variant.whatsappMessage || catalog.contact.whatsappMessageProduct, language);
+                                  return (
                                   <div className="variant-row" key={variant.code}>
                                     <div>
+                                      {variant.imageUrl && <img className="variant-image" src={variant.imageUrl} alt={localizedVariantName} loading="lazy" />}
                                       <span className="variant-name">{localizeCatalogText(variant.code, language)}</span>
                                       {variant.description && <p className="variant-description">{localizeCatalogText(variant.description, language)}</p>}
+                                      {variantWhatsapp && <a className="variant-whatsapp" href={variantWhatsapp} target="_blank" rel="noreferrer">{copy.whatsappProduct} <span aria-hidden="true">↗</span></a>}
                                     </div>
                                     <strong>{localizeCatalogText(variant.price, language)}</strong>
                                   </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             )}
                             {productWhatsapp && <a className="whatsapp-button" href={productWhatsapp} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>{copy.whatsappProduct} <span aria-hidden="true">↗</span></a>}
@@ -646,7 +654,9 @@ function PageShell({ children, template = 'default' }: { children: ReactNode; te
         .variants { margin: 4px 0 18px; border-top: 1px solid rgba(78, 62, 49, .12); }
         .variant-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 11px 0; border-bottom: 1px solid rgba(78, 62, 49, .12); color: #6f6258; font-size: 12px; }
         .variant-name { color: #473b33; font-weight: 600; }
+        .variant-image { float: left; width: 42px; height: 42px; margin: 1px 9px 4px 0; border: 1px solid rgba(78, 62, 49, .16); object-fit: cover; }
         .product-card .variant-description { margin: 4px 0 0; color: #7a6d63; font-size: 11px; line-height: 1.5; }
+        .variant-whatsapp { display: inline-flex; margin-top: 8px; color: #8d5c43; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-decoration: underline; text-underline-offset: 3px; text-transform: uppercase; }
         .variant-row strong { color: #8d5c43; font-weight: 600; }
         .whatsapp-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: #c9987a; color: #fffdf9; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-decoration: none; text-transform: uppercase; transition: transform 160ms cubic-bezier(.23, 1, .32, 1), background 160ms cubic-bezier(.23, 1, .32, 1); }
         .whatsapp-button:hover { background: #b88063; }

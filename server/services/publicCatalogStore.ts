@@ -13,6 +13,10 @@ import {
 export interface PublicCatalogVariant {
   code: string;
   description?: string;
+  /** Miniatura pública e comprimida da foto exclusiva da variação. */
+  imageUrl?: string;
+  /** Template de WhatsApp específico do efeito/modelo; não expõe dados internos do agente. */
+  whatsappMessage?: string;
   dimensions?: string;
   litros?: number;
   price: string;
@@ -77,12 +81,14 @@ function normalizeSlug(slug: string): string | null {
   return /^[a-z0-9][a-z0-9-]{0,79}$/.test(normalized) ? normalized : null;
 }
 
-function publicVariant(variant: ProductVariant): PublicCatalogVariant {
+async function publicVariant(variant: ProductVariant): Promise<PublicCatalogVariant> {
   const currentPrice = resolveVariantPrice(variant);
   const amount = resolveVariantPriceAmount(variant);
   return {
     code: variant.code,
     description: variant.description?.trim() || undefined,
+    imageUrl: await buildCatalogThumbnail(variant.exampleImageBase64),
+    whatsappMessage: variant.whatsappMessage?.trim() || undefined,
     dimensions: variant.dimensions,
     litros: variant.litros,
     price: currentPrice,
@@ -102,7 +108,7 @@ export async function toPublicCatalogProduct(product: AgentProduct, tenantCurren
     priceAmount: amount > 0 ? amount : undefined,
     currency: product.currency || tenantCurrency,
     durationMinutes: product.durationMinutes,
-    variants: product.variants?.map(publicVariant),
+    variants: product.variants ? await Promise.all(product.variants.map(publicVariant)) : undefined,
     imageUrl: await buildCatalogThumbnail(product.exampleImageBase64),
   };
 }

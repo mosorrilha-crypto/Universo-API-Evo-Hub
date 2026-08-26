@@ -19,6 +19,16 @@ export interface ProductVariant {
   code: string;
   /** Explicação comercial própria da variação (efeito, acabamento ou diferença), usada no catálogo público e no contexto do agente. */
   description?: string;
+  /** Foto exclusiva desta variação, usada quando a cliente escolhe um efeito/modelo específico. */
+  exampleImageBase64?: string;
+  exampleImageMimeType?: string;
+  /** Vídeo exclusivo desta variação, armazenado fora do JSON da Base de Conhecimento. */
+  exampleVideoId?: string;
+  exampleVideoMimeType?: string;
+  exampleVideoFileName?: string;
+  exampleVideoSizeBytes?: number;
+  /** Mensagem comercial pré-preenchida do WhatsApp para uma consulta por esta variação. */
+  whatsappMessage?: string;
   /** Medidas em texto livre (ex: "4,10x2,30m"), opcional. */
   dimensions?: string;
   /** Capacidade em litros, opcional. */
@@ -252,6 +262,9 @@ export function collectReferencedVideoIds(kb: AgentKnowledgeBase | null): Set<st
   const ids = new Set<string>();
   for (const product of kb?.products || []) {
     if (product.exampleVideoId) ids.add(product.exampleVideoId);
+    for (const variant of product.variants || []) {
+      if (variant.exampleVideoId) ids.add(variant.exampleVideoId);
+    }
   }
   for (const block of kb?.firstContactBlocks || []) {
     if (block.videoId) ids.add(block.videoId);

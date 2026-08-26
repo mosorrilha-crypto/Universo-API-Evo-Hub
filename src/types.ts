@@ -156,6 +156,16 @@ export interface ProductVariant {
   code: string;
   /** Explica o benefício, efeito ou diferença desta variação específica, sem repetir a descrição geral da família. */
   description?: string;
+  /** Foto exclusiva da variação, usada no catálogo e no envio manual quando o cliente pede exatamente este efeito/modelo. */
+  exampleImageBase64?: string;
+  exampleImageMimeType?: string;
+  /** Vídeo exclusivo da variação; o binário permanece no Storage e a KB guarda somente a referência. */
+  exampleVideoId?: string;
+  exampleVideoMimeType?: string;
+  exampleVideoFileName?: string;
+  exampleVideoSizeBytes?: number;
+  /** Texto pré-preenchido no WhatsApp quando o catálogo público recebe uma consulta por esta variação. `{produto}` é substituído pelo nome exibido. */
+  whatsappMessage?: string;
   dimensions?: string;
   litros?: number;
   price: string;

@@ -52,7 +52,9 @@ describe('publicCatalogStore', () => {
     expect(catalog).not.toHaveProperty('pricingAndPolicies');
   });
 
-  it('preserva variantes comerciais sem transportar aliases ou mídia privada', async () => {
+  it('preserva foto pública comprimida e mensagem comercial por variante sem transportar o vídeo privado', async () => {
+    const tinyPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
     const product = await toPublicCatalogProduct(
       {
         name: 'Pestañas',
@@ -60,14 +62,32 @@ describe('publicCatalogStore', () => {
         price: 'Consultar',
         category: 'Pestañas',
         description: 'Família de serviços.',
-        variants: [{ code: 'Efecto 30+', description: 'Máximo volume e retenção de até 30 dias.', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120, bookable: false }],
+        variants: [{
+          code: 'Efecto 30+',
+          description: 'Máximo volume e retenção de até 30 dias.',
+          whatsappMessage: 'Hola, quiero información sobre {produto}.',
+          exampleImageBase64: `data:image/png;base64,${tinyPngBase64}`,
+          exampleImageMimeType: 'image/png',
+          exampleVideoId: 'private-variant-video-id',
+          price: 'Gs 350.000',
+          priceAmount: 350000,
+          durationMinutes: 120,
+          bookable: false,
+        }],
       },
       'PYG',
     );
 
-    expect(product.variants).toEqual([
-      { code: 'Efecto 30+', description: 'Máximo volume e retenção de até 30 dias.', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120 },
-    ]);
+    expect(product.variants?.[0]).toMatchObject({
+      code: 'Efecto 30+',
+      description: 'Máximo volume e retenção de até 30 dias.',
+      whatsappMessage: 'Hola, quiero información sobre {produto}.',
+      price: 'Gs 350.000',
+      priceAmount: 350000,
+      durationMinutes: 120,
+      imageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+    });
+    expect(product.variants?.[0]).not.toHaveProperty('exampleVideoId');
     expect(product).not.toHaveProperty('aliases');
   });
 

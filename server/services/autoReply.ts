@@ -1393,8 +1393,8 @@ async function runMidiaTool(
   groqApiKey?: string
 ): Promise<{ actionsSummary: string[] }> {
   const kb = await getKnowledgeBase(tenantId);
-  const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64);
-  const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId);
+  const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64 || p.variants?.some((variant) => variant.exampleImageBase64));
+  const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId || p.variants?.some((variant) => variant.exampleVideoId));
   if (!productsWithPhoto.length && !productsWithVideo.length) return { actionsSummary: [] };
 
   const historyText = buildHistoryText(history);
@@ -1462,13 +1462,14 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
   // findProductMatch (knowledgeBaseStore.ts) é a mesma resolução usada nos
   // outros 6 pontos que buscam produto por nome vindo de texto livre da IA
   // (duração, bookable, financeiro, Meta CAPI) — inclusive resolve pelo
-  // código de uma VARIANTE dentro de uma família (mídia sempre mora no
-  // produto pai, nunca na variante).
-  const matchedProduct = findProductMatch(kb, nomeProduto)?.product;
+  // código de uma VARIANTE. Quando ela tiver sua própria mídia, ela deve ter
+  // prioridade; o material da família é apenas fallback.
+  const matched = findProductMatch(kb, nomeProduto);
 
   if (call.name === 'enviar_video_exemplo') {
-    const product = matchedProduct?.exampleVideoId ? matchedProduct : undefined;
-    if (!product?.exampleVideoId) {
+    const videoMedia = matched?.variant?.exampleVideoId ? matched.variant : matched?.product?.exampleVideoId ? matched.product : undefined;
+    const mediaName = matched?.variant?.exampleVideoId ? matched.variant.code : matched?.product?.name;
+    if (!videoMedia?.exampleVideoId || !mediaName) {
       console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: "${nomeProduto}" não bateu com nenhum produto com vídeo cadastrado (tenant=${tenantId}). Catálogo com vídeo: [${productsWithVideo.map((p) => p.name).join(', ')}]`);
       // Achado real em produção (Monique, 20/08/2026): cliente pediu foto/vídeo
       // duma CATEGORIA genérica ("Pestañas", "cílios"), não do nome exato de um
@@ -1479,14 +1480,14 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       // helper noMidiaActionResult acima).
       return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com vídeo cadastrado — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem vídeo de exemplo. Serviços com vídeo real disponível: ${productsWithVideo.map((p) => p.name).join(', ')}.`] };
     }
-    const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, product.exampleVideoId);
+    const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, videoMedia.exampleVideoId);
     if (!video) {
-      return { actionsSummary: [`Tentou enviar vídeo de "${product.name}" mas o arquivo não foi encontrado no Storage.`] };
+      return { actionsSummary: [`Tentou enviar vídeo de "${mediaName}" mas o arquivo não foi encontrado no Storage.`] };
     }
 
     try {
-      const mimeType = product.exampleVideoMimeType || video.contentType;
-      const filename = product.exampleVideoFileName || `${product.name}.mp4`;
+      const mimeType = videoMedia.exampleVideoMimeType || video.contentType;
+      const filename = videoMedia.exampleVideoFileName || `${mediaName}.mp4`;
 
       if (mediaConfig.provider === 'evolution') {
         await sendEvolutionMediaMessage(
@@ -1497,11 +1498,11 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
           video.buffer.toString('base64'),
           mimeType,
           filename,
-          product.name
+          mediaName
         );
       } else {
         const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
-        await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
+        await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, mediaName);
       }
 
       // Achado real em produção (15/08/2026, Clic Piscinas): o vídeo abria
@@ -1514,10 +1515,10 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, videoMessageId, video.buffer.toString('base64'), mimeType);
       await recordOutgoingMessage(tenantId, phone, {
         type: 'file',
-        text: `🎥 Vídeo de exemplo: ${product.name}`,
+        text: `🎥 Vídeo de exemplo: ${mediaName}`,
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       }, 'ai', undefined, undefined, videoMessageId);
-      return { actionsSummary: [`Enviou o vídeo de exemplo real de "${product.name}" pro cliente agora.`] };
+      return { actionsSummary: [`Enviou o vídeo de exemplo real de "${mediaName}" pro cliente agora.`] };
     } catch (err: any) {
       // Achado real em produção (20/08/2026): esse catch nunca logava nada —
       // uma falha real de envio (upload rejeitado pela Meta, timeout, mídia
@@ -1526,13 +1527,14 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       // e zero "não bateu com nenhum produto" nos logs de 7 dias, mesmo com
       // clientes reais pedindo foto de serviços que TINHAM foto cadastrada,
       // só fazia sentido por uma falha exatamente aqui, nunca logada.
-      console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: falha ao enviar vídeo de "${product.name}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
-      return { actionsSummary: [`Tentou enviar o vídeo de "${product.name}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };
+      console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: falha ao enviar vídeo de "${mediaName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+      return { actionsSummary: [`Tentou enviar o vídeo de "${mediaName}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };
     }
   }
 
-  const product = matchedProduct?.exampleImageBase64 ? matchedProduct : undefined;
-  if (!product?.exampleImageBase64) {
+  const photoMedia = matched?.variant?.exampleImageBase64 ? matched.variant : matched?.product?.exampleImageBase64 ? matched.product : undefined;
+  const photoName = matched?.variant?.exampleImageBase64 ? matched.variant.code : matched?.product?.name;
+  if (!photoMedia?.exampleImageBase64 || !photoName) {
     console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: "${nomeProduto}" não bateu com nenhum produto com foto cadastrada (tenant=${tenantId}). Catálogo com foto: [${productsWithPhoto.map((p) => p.name).join(', ')}]`);
     // Mesmo achado do bloco de vídeo acima — nome_produto pode ser uma
     // categoria genérica ("Pestañas") em vez do nome exato de um produto do
@@ -1542,8 +1544,8 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
   }
 
   try {
-    const mimeType = product.exampleImageMimeType || 'image/jpeg';
-    const filename = `${product.name}.jpg`;
+    const mimeType = photoMedia.exampleImageMimeType || 'image/jpeg';
+    const filename = `${photoName}.jpg`;
 
     if (mediaConfig.provider === 'evolution') {
       await sendEvolutionMediaMessage(
@@ -1551,30 +1553,30 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
         mediaConfig.evolutionApiUrl,
         mediaConfig.evolutionApiKey,
         phone,
-        product.exampleImageBase64,
+        photoMedia.exampleImageBase64,
         mimeType,
         filename,
-        product.name
+        photoName
       );
     } else {
-      const mediaBuffer = Buffer.from(product.exampleImageBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      const mediaBuffer = Buffer.from(photoMedia.exampleImageBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
       const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, mediaBuffer, mimeType, filename);
-      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, product.name);
+      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, photoName);
     }
 
     await recordOutgoingMessage(tenantId, phone, {
       type: 'image',
-      text: `📷 Foto de exemplo: ${product.name}`,
+      text: `📷 Foto de exemplo: ${photoName}`,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     }, 'ai');
-    return { actionsSummary: [`Enviou a foto de exemplo real de "${product.name}" pro cliente agora.`] };
+    return { actionsSummary: [`Enviou a foto de exemplo real de "${photoName}" pro cliente agora.`] };
   } catch (err: any) {
     // Mesmo achado do catch de vídeo acima — nunca logava nada, então uma
     // falha real de upload/envio (a foto real da Monique pode passar de
     // 3MB em base64 — perto do limite de mídia da própria Meta) ficava
     // invisível pra sempre, só virava um texto genérico pro cliente.
-    console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: falha ao enviar foto de "${product.name}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
-    return { actionsSummary: [`Tentou enviar a foto de "${product.name}" mas falhou (${err.message}) — não prometa que a foto foi enviada.`] };
+    console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: falha ao enviar foto de "${photoName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+    return { actionsSummary: [`Tentou enviar a foto de "${photoName}" mas falhou (${err.message}) — não prometa que a foto foi enviada.`] };
   }
 }
 

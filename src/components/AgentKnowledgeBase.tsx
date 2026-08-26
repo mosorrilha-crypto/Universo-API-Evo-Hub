@@ -890,6 +890,26 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const handleVariantImageChange = (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result);
+      setFormData((prev) => ({
+        ...prev,
+        products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
+          ...product,
+          variants: product.variants.map((variant, variantIndex) => variantIndex === index
+            ? { ...variant, exampleImageBase64: base64, exampleImageMimeType: file.type }
+            : variant),
+        }),
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const MAX_VIDEO_INPUT_SIZE_MB = 35; // teto do arquivo ORIGINAL antes de converter (ex: .MOV do iPhone) — mesmo valor de MAX_VIDEO_INPUT_BYTES no servidor; o servidor converte pro limite final de 16MB da Meta se precisar
   const [uploadingVideoForId, setUploadingVideoForId] = useState<string | null>(null);
   const [previewingVideoId, setPreviewingVideoId] = useState<string | null>(null);
@@ -947,6 +967,50 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       }));
     } catch (err: any) {
       console.error('Falha ao enviar vídeo:', err);
+      alert(`Não foi possível enviar o vídeo: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingVideoForId(null);
+    }
+  };
+
+  const handleVariantVideoUpload = async (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('video/')) {
+      alert(`Arquivo não é um vídeo (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_VIDEO_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Vídeo maior que ${MAX_VIDEO_INPUT_SIZE_MB}MB. Comprima ou corte antes de enviar.`);
+      return;
+    }
+    const uploadKey = `variant:${productId}:${index}`;
+    const oldVideoId = formData.products.find((product) => product.id === productId)?.variants?.[index]?.exampleVideoId;
+    setUploadingVideoForId(uploadKey);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64, oldVideoId }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { videoId, mimeType, fileName, sizeBytes } = await res.json();
+      setFormData((prev) => ({
+        ...prev,
+        products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
+          ...product,
+          variants: product.variants.map((variant, variantIndex) => variantIndex === index
+            ? { ...variant, exampleVideoId: videoId, exampleVideoMimeType: mimeType, exampleVideoFileName: fileName, exampleVideoSizeBytes: sizeBytes }
+            : variant),
+        }),
+      }));
+    } catch (err: any) {
+      console.error('Falha ao enviar vídeo da variação:', err);
       alert(`Não foi possível enviar o vídeo: ${err.message || 'tente novamente'}.`);
     } finally {
       setUploadingVideoForId(null);
@@ -2307,6 +2371,26 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           value={variant.description || ''}
                           onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'description', e.target.value)}
                           title="Descrição exclusiva desta variação. Ela aparece no catálogo público e orienta o agente sem misturar todos os efeitos na descrição da família."
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-400/60"
+                        />
+                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 p-2">
+                          {variant.exampleImageBase64 && <img src={variant.exampleImageBase64} alt={`Foto de ${variant.code || 'variação'}`} className="h-9 w-9 rounded-md border border-slate-700 object-cover" />}
+                          <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-sky-300 hover:text-sky-200">
+                            <ImageIcon className="h-3 w-3" /> {variant.exampleImageBase64 ? 'Trocar foto' : 'Foto desta variação'}
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleVariantImageChange(prod.id, vIndex, e)} />
+                          </label>
+                          <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-emerald-300 hover:text-emerald-200">
+                            <Video className="h-3 w-3" /> {uploadingVideoForId === `variant:${prod.id}:${vIndex}` ? 'Enviando vídeo…' : variant.exampleVideoId ? 'Trocar vídeo' : 'Vídeo desta variação'}
+                            <input type="file" accept="video/*" className="hidden" disabled={uploadingVideoForId === `variant:${prod.id}:${vIndex}`} onChange={(e) => handleVariantVideoUpload(prod.id, vIndex, e)} />
+                          </label>
+                          {variant.exampleVideoId && <button type="button" onClick={() => handlePreviewProductVideo(variant.exampleVideoId!)} className="inline-flex items-center gap-1 text-[9px] font-semibold text-slate-300 hover:text-white"><Play className="h-3 w-3" /> Ver vídeo</button>}
+                        </div>
+                        <AutoResizeTextarea
+                          minRows={2}
+                          placeholder="Mensagem de WhatsApp desta variação. Use {produto} para inserir o nome do efeito."
+                          value={variant.whatsappMessage || ''}
+                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'whatsappMessage', e.target.value)}
+                          title="Esta mensagem aparece no WhatsApp quando a cliente consulta esta variação específica."
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-400/60"
                         />
                         <div className="flex items-center gap-1.5">
