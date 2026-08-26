@@ -960,7 +960,10 @@ export const App: React.FC = () => {
       />
 
       {activeTab !== 'whatsapp' && (
-        <FloatingAttendanceButton onOpen={() => handleSetActiveTab('whatsapp')} />
+        <FloatingAttendanceButton
+          storageKey={`floating_attendance_position:${currentUser?.id || 'guest'}`}
+          onOpen={() => handleSetActiveTab('whatsapp')}
+        />
       )}
 
       {/* Main Content Area */}
