@@ -23,6 +23,7 @@ import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKn
 import { PublicCatalogSettings } from './components/PublicCatalogSettings';
 import { OperationsCenter } from './components/OperationsCenter';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
+import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
 import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
@@ -957,6 +958,10 @@ export const App: React.FC = () => {
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
       />
+
+      {activeTab !== 'whatsapp' && (
+        <FloatingAttendanceButton onOpen={() => handleSetActiveTab('whatsapp')} />
+      )}
 
       {/* Main Content Area */}
       <main className="app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8">
