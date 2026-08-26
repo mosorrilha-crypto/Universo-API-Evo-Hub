@@ -1197,6 +1197,10 @@ export const App: React.FC = () => {
             products={knowledgeBase.products || []}
             activeProductCount={(knowledgeBase.products || []).filter((product) => product.active !== false).length}
             onGoToKnowledgeBase={() => handleSetActiveTab('knowledge')}
+            onGoToConversation={(phone) => {
+              setWhatsAppOpenLead({ phone, requestId: Date.now() });
+              handleSetActiveTab('whatsapp');
+            }}
           />
         )}
 

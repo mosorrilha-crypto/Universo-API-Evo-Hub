@@ -90,6 +90,8 @@ interface PublicCatalogSettingsProps {
   /** Quantos produtos da Base de Conhecimento aparecem no catálogo público hoje (mesmo filtro `active !== false` do backend) — deixa claro que esta aba não cadastra produto, só publica o que já está na Base de Conhecimento. */
   activeProductCount: number;
   onGoToKnowledgeBase: () => void;
+  /** Troca pra aba WhatsApp e abre a conversa deste telefone — mesmo mecanismo do botão "Voltar pra conversa" em Escalonamentos (App.tsx). */
+  onGoToConversation?: (phone: string) => void;
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -149,7 +151,7 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
  * publicCatalogClickStore.ts no backend). Busca só quando a aba é aberta,
  * não no carregamento da tela de configuração inteira.
  */
-function CatalogPerformanceTab() {
+function CatalogPerformanceTab({ onGoToConversation }: { onGoToConversation?: (phone: string) => void }) {
   const [analytics, setAnalytics] = useState<CatalogClickAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -281,11 +283,22 @@ function CatalogPerformanceTab() {
                       <p className="text-slate-200 font-semibold truncate">{lead.phone}</p>
                       <p className="text-slate-500 truncate">{lead.product || 'Geral (botão sem produto específico)'} · {formatDateTime(lead.matchedAt)}</p>
                     </div>
-                    {lead.source && (
-                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400 font-semibold whitespace-nowrap">
-                        {CATALOG_SOURCE_LABEL[lead.source] || lead.source}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {lead.source && (
+                        <span className="px-2 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400 font-semibold whitespace-nowrap">
+                          {CATALOG_SOURCE_LABEL[lead.source] || lead.source}
+                        </span>
+                      )}
+                      {onGoToConversation && (
+                        <button
+                          type="button"
+                          onClick={() => onGoToConversation(lead.phone)}
+                          className="px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-semibold whitespace-nowrap hover:bg-emerald-500/20 transition-all"
+                        >
+                          Ir para conversa
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -320,7 +333,7 @@ function CatalogPerformanceTab() {
   );
 }
 
-export function PublicCatalogSettings({ tenantSlug, tenantName, products, activeProductCount, onGoToKnowledgeBase }: PublicCatalogSettingsProps) {
+export function PublicCatalogSettings({ tenantSlug, tenantName, products, activeProductCount, onGoToKnowledgeBase, onGoToConversation }: PublicCatalogSettingsProps) {
   const [tab, setTab] = useState<'settings' | 'performance'>('settings');
   const [form, setForm] = useState<PublicCatalogFormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
@@ -481,7 +494,7 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
         </button>
       </div>
 
-      {tab === 'performance' && <CatalogPerformanceTab />}
+      {tab === 'performance' && <CatalogPerformanceTab onGoToConversation={onGoToConversation} />}
 
       {tab === 'settings' && (loading ? (
         <div className="p-6 text-sm text-slate-400 flex items-center gap-2">
