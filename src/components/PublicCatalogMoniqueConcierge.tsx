@@ -146,6 +146,23 @@ export function PublicCatalogMoniqueConcierge() {
   const selectedObjective = useMemo(() => objectives.find((item) => item.id === objective), [objective]);
   const instagramUrl = catalog?.contact.instagramUrl || FALLBACK_INSTAGRAM;
 
+  /**
+   * Achado real (26/08/2026): um clique em "Encontrar mi servicio" rola a página
+   * suavemente até a triagem (`scroll-behavior: smooth`); se a pessoa toca de novo
+   * antes da rolagem terminar, o toque cai em qualquer card que estiver embaixo do
+   * dedo naquele instante — normalmente o primeiro da Etapa 1 — selecionando um
+   * objetivo sem intenção. Trava os cards por um instante depois de qualquer link
+   * pra `#triagem`, liberando assim que o `scrollend` disparar (ou por timeout, pra
+   * navegadores sem suporte a `scrollend`).
+   */
+  const [suppressObjectiveClicks, setSuppressObjectiveClicks] = useState(false);
+  const handleTriageAnchorClick = () => {
+    setSuppressObjectiveClicks(true);
+    const clear = () => setSuppressObjectiveClicks(false);
+    const timeoutId = window.setTimeout(clear, 900);
+    window.addEventListener('scrollend', () => { window.clearTimeout(timeoutId); clear(); }, { once: true });
+  };
+
   useEffect(() => {
     const previousTitle = document.title;
     const previousLang = document.documentElement.lang;
@@ -375,18 +392,18 @@ export function PublicCatalogMoniqueConcierge() {
             <span><strong>Monique</strong><small>BEAUTY STUDIO</small></span>
           </a>
           <nav className="hidden items-center gap-7 text-[10px] font-bold uppercase tracking-[.14em] text-[#596575] md:flex">
-            <a href="#triagem">Triagem</a>
+            <a href="#triagem" onClick={handleTriageAnchorClick}>Triagem</a>
             <a href="#servicios">Servicios</a>
             <a href="#resultados">Resultados</a>
           </nav>
-          <a href="#triagem" className="header-cta hidden md:inline-flex">Encontrar mi servicio <ArrowRight size={14} /></a>
+          <a href="#triagem" onClick={handleTriageAnchorClick} className="header-cta hidden md:inline-flex">Encontrar mi servicio <ArrowRight size={14} /></a>
           <button onClick={() => setMenuOpen(!menuOpen)} className="md:hidden" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}>
             {menuOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
         </div>
         {menuOpen && (
           <div className="container mobile-menu md:hidden">
-            <a href="#triagem" onClick={() => setMenuOpen(false)}>Triagem</a>
+            <a href="#triagem" onClick={() => { setMenuOpen(false); handleTriageAnchorClick(); }}>Triagem</a>
             <a href="#servicios" onClick={() => setMenuOpen(false)}>Servicios</a>
             <a href="#resultados" onClick={() => setMenuOpen(false)}>Resultados</a>
           </div>
@@ -399,7 +416,7 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="kicker"><Sparkles size={14} /> Beauty Concierge para vos · Luque</span>
             <h1>Un momento para vos, <span>un resultado que te acompaña.</span></h1>
             <p>Entre trabajo, compromisos y mil pendientes, también merecés sentirte lista sin pasar horas frente al espejo. Encontrá tu servicio en menos de un minuto.</p>
-            <a href="#triagem" className="primary-cta">Encontrar mi servicio <ArrowRight size={16} /></a>
+            <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Encontrar mi servicio <ArrowRight size={16} /></a>
             <div className="trust-row">
               <span><ShieldCheck size={15} /> Cuidado y evaluación</span>
               <span><Clock3 size={15} /> Más tiempo para vos</span>
@@ -418,7 +435,7 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="kicker"><span className="gold-rule" /> Oferta especial · evaluación</span>
             <h2>Un cuidado completo para entrar en tu <span>próxima etapa.</span></h2>
             <p>Conocé el Combo Full Face y recibí orientación personalizada antes de confirmar. La seña y el horario se coordinan por WhatsApp.</p>
-            <a href="#triagem" className="primary-cta">Agendar mi evaluación <ArrowRight size={16} /></a>
+            <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Agendar mi evaluación <ArrowRight size={16} /></a>
           </div>
           <div className="gold-promo-media">
             <img src="/monique-novo/promo-combo-full-face.jpg" alt="Arte promocional do Combo Full Face" />
@@ -449,7 +466,7 @@ export function PublicCatalogMoniqueConcierge() {
                 <p className="helper">Pensá en cómo querés salir del estudio y elegí la opción que más se acerca a vos.</p>
                 <div className="option-grid">
                   {objectives.map((item) => (
-                    <button key={item.id} onClick={() => setObjective(item.id)} className={objective === item.id ? 'option selected' : 'option'}>
+                    <button key={item.id} onClick={() => { if (!suppressObjectiveClicks) setObjective(item.id); }} className={objective === item.id ? 'option selected' : 'option'}>
                       <span className="option-icon">{objective === item.id ? <Check size={17} /> : item.id === 'natural' ? 'N' : item.id === 'practical' ? 'T' : item.id === 'brows' ? 'C' : 'L'}</span>
                       <span><b>{item.title}</b><small>{item.text}</small></span>
                     </button>
@@ -579,7 +596,7 @@ export function PublicCatalogMoniqueConcierge() {
             <h2>Un rato para vos.<br /><span>Un resultado que te acompaña.</span></h2>
             <p>Si todavía tenés dudas, la triagem te ayuda a encontrar un punto de partida pensado para tu rutina.</p>
           </div>
-          <a href="#triagem" className="light-cta">Volver a la triagem <ArrowRight size={16} /></a>
+          <a href="#triagem" onClick={handleTriageAnchorClick} className="light-cta">Volver a la triagem <ArrowRight size={16} /></a>
         </div>
       </section>
       <footer className="footer">
