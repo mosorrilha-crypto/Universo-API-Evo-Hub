@@ -23,6 +23,7 @@ import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, findProductMatch, resolveProductAmountByName } from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, updateFinancialTransactionBySourceRef, isDuplicateSourceRefError } from '../services/financialStore';
+import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -68,6 +69,8 @@ interface ConversationsRouterDeps {
   groqApiKey?: string;
   /** Issue #182 — cadastro manual de agendamento cria um evento real no Google Calendar, mesmo caminho que a ferramenta criar_agendamento da IA usa. */
   googleClientId?: string;
+  /** Injeção de teste; produção resolve o entitlement no contexto RLS do tenant. */
+  isFinancialModuleEnabled?: () => Promise<boolean>;
   googleClientSecret?: string;
   googleRedirectUri?: string;
 }
@@ -93,8 +96,9 @@ function tenantOf(req: AuthenticatedRequest): string {
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri, isFinancialModuleEnabled }: ConversationsRouterDeps): Router {
   const router = Router();
+  const financialModuleEnabled = isFinancialModuleEnabled || isFinancialModuleEnabledForCurrentTenant;
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
 
   /**
@@ -963,7 +967,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // A central cria uma cobrança pendente já no agendamento confirmado. A
     // referência apt:<eventId> é a mesma usada na aprovação do comprovante,
     // portanto nunca há lançamento duplicado quando o pagamento for baixado.
-    if (typeof amount === 'number') {
+    if (typeof amount === 'number' && await financialModuleEnabled()) {
       const conversation = await getConversation(tenantId, phone);
       await createFinancialTransaction(tenantId, {
         id: crypto.randomUUID(),
@@ -1033,6 +1037,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   ): Promise<void> {
     if (!appointment.eventId) return; // sem evento real, sem referência estável pra deduplicar
     try {
+      if (!(await financialModuleEnabled())) return;
       const [kb, conversation] = await Promise.all([
         getKnowledgeBase(tenantId),
         getConversation(tenantId, phone),

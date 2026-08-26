@@ -11,9 +11,12 @@ import {
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireRole, resolveTenantId } from '../middleware/rbac';
+import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 
 interface FinancialRouterDeps {
   authenticateToken: RequestHandler;
+  /** Injeção de teste; em produção a decisão sempre vem do entitlement do tenant corrente. */
+  isFinancialModuleEnabled?: (req: AuthenticatedRequest) => Promise<boolean>;
 }
 
 /** tenantId de verdade da requisição — vem do JWT, exceto pra saas_admin usando o seletor de tenant do painel (ver resolveTenantId em middleware/rbac.ts). */
@@ -25,21 +28,39 @@ const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Ca
 const PAYMENT_STATUSES: PaymentStatus[] = ['pago', 'pendente', 'atrasado', 'cancelado'];
 const ENTRY_TYPES: FinancialEntryType[] = ['income', 'expense'];
 
+function requireFinancialModule(isFinancialModuleEnabled?: FinancialRouterDeps['isFinancialModuleEnabled']) {
+  return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
+    // Resolve primeiro o tenant para respeitar o seletor permitido do
+    // saas_admin e sincronizar o contexto RLS antes de consultar o contrato.
+    tenantOf(req);
+    const enabled = isFinancialModuleEnabled
+      ? await isFinancialModuleEnabled(req)
+      : await isFinancialModuleEnabledForCurrentTenant();
+    if (!enabled) {
+      return res.status(403).json({
+        error: 'O módulo Financeiro não está habilitado para esta empresa. Solicite a liberação ao administrador da plataforma.',
+        code: 'financial_module_disabled',
+      });
+    }
+    next();
+  });
+}
+
 /**
  * Achado real em produção: o Financeiro (FinancialDashboard.tsx) era 100%
  * mock/localStorage — cobrança gerada nunca sobrevivia a um cache limpo nem
  * aparecia pra outro operador do mesmo tenant. Ver
  * supabase/migrations/0024_financial_transactions.sql pro design completo.
  */
-export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps): Router {
+export function createFinancialRouter({ authenticateToken, isFinancialModuleEnabled }: FinancialRouterDeps): Router {
   const router = Router();
 
-  router.get('/api/financial/transactions', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/financial/transactions', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const transactions = await listFinancialTransactions(tenantOf(req));
     res.json({ transactions });
   }));
 
-  router.post('/api/financial/transactions', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/financial/transactions', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType } = req.body || {};
 
     if (typeof id !== 'string' || !id.trim()) return res.status(400).json({ error: 'id é obrigatório.' });
@@ -71,7 +92,7 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
     res.json({ transaction });
   }));
 
-  router.patch('/api/financial/transactions/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/financial/transactions/:id', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status } = req.body || {};
     if (!PAYMENT_STATUSES.includes(status)) {
       return res.status(400).json({ error: `status inválido — esperado um de: ${PAYMENT_STATUSES.join(', ')}.` });
@@ -81,7 +102,7 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
     res.json({ transaction });
   }));
 
-  router.delete('/api/financial/transactions/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/financial/transactions/:id', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteFinancialTransaction(tenantOf(req), req.params.id);
     res.json({ success: true });
   }));

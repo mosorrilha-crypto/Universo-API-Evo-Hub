@@ -135,6 +135,58 @@ async function requirePlan(planId: string) {
   return data as { id: string; key: string; name: string; version: number; status: string };
 }
 
+/**
+ * Financeiro é opt-in comercial: tenants novos nascem sem a capacidade e só o
+ * fluxo administrativo SaaS pode criar uma exceção que a habilite. Tenants
+ * existentes não são alterados automaticamente para evitar retirar operação
+ * em uso durante a migração.
+ */
+async function disableFinancialModuleByDefault(tenantId: string, actorId: string) {
+  const db = getPlatformDb();
+  const { data: feature, error: featureError } = await db
+    .from('features')
+    .select('id')
+    .eq('key', 'sales.financial')
+    .eq('status', 'active')
+    .maybeSingle();
+  if (featureError) throw new Error(featureError.message);
+  if (!feature) return;
+
+  const { data: existing, error: existingError } = await db
+    .from('tenant_feature_overrides')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('feature_id', feature.id)
+    .is('revoked_at', null)
+    .limit(1);
+  if (existingError) throw new Error(existingError.message);
+  if (existing?.length) return;
+
+  const { data: override, error: insertError } = await db
+    .from('tenant_feature_overrides')
+    .insert({
+      tenant_id: tenantId,
+      feature_id: feature.id,
+      enabled: false,
+      config: {},
+      reason: 'Financeiro é opcional e inicia desabilitado; a ativação depende do Admin SaaS.',
+      created_by: actorId,
+    })
+    .select('id, feature_id, enabled, reason')
+    .single();
+  if (insertError) throw new Error(insertError.message);
+
+  const { error: auditError } = await db.from('tenant_entitlement_audit').insert({
+    tenant_id: tenantId,
+    feature_id: feature.id,
+    action: 'override_created',
+    after_state: override,
+    actor_id: actorId,
+    reason: 'Financeiro opcional desabilitado na criação do tenant.',
+  });
+  if (auditError) throw new Error(auditError.message);
+}
+
 export async function listEntitlementCatalog() {
   const db = getPlatformDb();
   const [{ data: features, error: featuresError }, { data: plans, error: plansError }] = await Promise.all([
@@ -256,6 +308,7 @@ export async function changeTenantSubscription({ tenantId, planId, status = 'act
     request_id: requestId || null,
   });
   if (auditError) throw new Error(auditError.message);
+  await disableFinancialModuleByDefault(tenantId, actorId);
   return subscription;
 }
 

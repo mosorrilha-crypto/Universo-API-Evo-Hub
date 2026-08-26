@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import { listConversations } from '../services/conversationStore';
 import { listCrmLeadStates, upsertCrmLeadState, deleteCrmLeadState, type CrmLeadState } from '../services/crmStore';
 import { createFinancialTransaction, isDuplicateSourceRefError } from '../services/financialStore';
+import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId } from '../middleware/rbac';
@@ -9,6 +10,8 @@ import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 
 interface CrmRouterDeps {
   authenticateToken: RequestHandler;
+  /** Injeção de teste; produção resolve o entitlement no contexto RLS do tenant. */
+  isFinancialModuleEnabled?: () => Promise<boolean>;
 }
 
 /** tenantId de verdade da requisição — vem do JWT, exceto pra saas_admin usando o seletor de tenant do painel (ver resolveTenantId em middleware/rbac.ts). */
@@ -31,9 +34,10 @@ function tenantOf(req: AuthenticatedRequest): string {
  * tenant (migration 0037) — reenviar o mesmo PATCH (retry, ou marcar "ganho"
  * de novo) nunca duplica a cobrança, só é engolido em silêncio.
  */
-async function recordFinancialTransactionForWonDeal(tenantId: string, state: CrmLeadState): Promise<void> {
+async function recordFinancialTransactionForWonDeal(tenantId: string, state: CrmLeadState, isFinancialModuleEnabled: () => Promise<boolean>): Promise<void> {
   if (state.dealValue === undefined || state.dealValue === null) return; // sem valor negociado, nada a cobrar ainda
   try {
+    if (!(await isFinancialModuleEnabled())) return;
     await createFinancialTransaction(tenantId, {
       id: crypto.randomUUID(),
       leadId: state.phone,
@@ -54,8 +58,9 @@ async function recordFinancialTransactionForWonDeal(tenantId: string, state: Crm
   }
 }
 
-export function createCrmRouter({ authenticateToken }: CrmRouterDeps): Router {
+export function createCrmRouter({ authenticateToken, isFinancialModuleEnabled }: CrmRouterDeps): Router {
   const router = Router();
+  const financialModuleEnabled = isFinancialModuleEnabled || isFinancialModuleEnabledForCurrentTenant;
 
   // Combina toda conversa real com o estado de CRM já registrado (se houver)
   // + leads cadastrados manualmente sem conversa nenhuma ainda. Conversa sem
@@ -116,7 +121,7 @@ export function createCrmRouter({ authenticateToken }: CrmRouterDeps): Router {
     const state = await upsertCrmLeadState(tenantId, req.params.phone, patch);
 
     if (patch.stage === 'ganho') {
-      await recordFinancialTransactionForWonDeal(tenantId, state);
+      await recordFinancialTransactionForWonDeal(tenantId, state, financialModuleEnabled);
     }
 
     try {

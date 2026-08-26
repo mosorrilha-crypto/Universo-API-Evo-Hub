@@ -24,6 +24,7 @@ interface OperationsCenterProps {
   escalations: EscalationInfo[];
   knowledgeBase: AgentKnowledgeBase;
   businessHours: BusinessHours;
+  canSeeAgenda: boolean;
   canSeeFinancial: boolean;
   canSeeAdminTools: boolean;
   onNavigate: (tab: ActiveTab) => void;
@@ -51,6 +52,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   escalations,
   knowledgeBase,
   businessHours,
+  canSeeAgenda,
   canSeeFinancial,
   canSeeAdminTools,
   onNavigate,
@@ -117,7 +119,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   const quickActions = [
     { label: t('openConversations'), description: t('openConversationsDetail'), icon: MessageSquare, tab: 'whatsapp' as ActiveTab, visible: true },
     { label: t('viewSalesPipeline'), description: t('opportunitiesInProgress', { count: summary.openLeads.length }), icon: UsersRound, tab: 'crm' as ActiveTab, visible: true },
-    { label: t('organizeSchedule'), description: t('organizeScheduleDetail'), icon: CalendarClock, tab: 'agenda' as ActiveTab, visible: canSeeFinancial },
+    { label: t('organizeSchedule'), description: t('organizeScheduleDetail'), icon: CalendarClock, tab: 'agenda' as ActiveTab, visible: canSeeAgenda },
     { label: t('followGrowth'), description: t('followGrowthDetail'), icon: Sparkles, tab: 'attribution' as ActiveTab, visible: canSeeAdminTools },
   ].filter((action) => action.visible);
 
@@ -177,7 +179,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         <MetricCard label={t('humanPending')} value={summary.unresolved.length} detail={t('humanPendingDetail')} icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
         <MetricCard label={t('leadsInProgress')} value={summary.openLeads.length} detail={t('leadsInProgressDetail')} icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
         <MetricCard label={t('nextActions')} value={summary.uncompletedTasks.length} detail={t('nextActionsDetail')} icon={<Clock3 className="h-4 w-4" />} tone="sky" onClick={() => onNavigate('crm')} />
-        <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('financial')} disabled={!canSeeFinancial} />
+        {canSeeFinancial && <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => onNavigate('financial')} />}
       </div>
 
       <section className="operations-smart-queue rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="smart-queue-heading">

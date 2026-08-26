@@ -25,7 +25,7 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
-  app.use(createCrmRouter({ authenticateToken: fakeAuthenticateToken as any }));
+  app.use(createCrmRouter({ authenticateToken: fakeAuthenticateToken as any, isFinancialModuleEnabled: async () => true }));
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
     res.status(500).json({ error: err?.message || 'Erro interno do servidor.' });
