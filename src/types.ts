@@ -608,6 +608,8 @@ export interface EscalationInfo {
   serviceWindowExpiresAt?: string;
   /** Casos de pagamento, revisão do dono e retorno de cliente usam políticas e SLA distintos. */
   kind?: 'general' | 'payment_proof' | 'owner_review' | 'customer_reply';
+  /** Rascunho que a IA tentou mandar e o revisor pré-envio bloqueou (TASK-0093). */
+  blockedDraft?: string;
   /** Sugestão corrigida gerada sob demanda; nunca enviada automaticamente. */
   suggestedReply?: string;
   suggestedReplyAt?: string;

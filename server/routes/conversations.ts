@@ -27,7 +27,8 @@ import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours }
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
-import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
+import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
+import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
 import { listOperationEvents } from '../services/operationEventStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
@@ -1603,7 +1604,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // pelo agente). Paraguai aparece primeiro (preferência de negócio atual).
   router.get('/api/escalations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
-    const escalations = await listEscalations(tenantId);
+    const escalations = await listEscalations(tenantId, { includeArchived: req.query.includeArchived === 'true' });
     // Issue #97 — timer de janela de 24h no card, pro operador saber se a
     // resposta dele (própria ou via orientação pra IA) sai como texto livre
     // agora ou precisa esperar o template de reengajamento primeiro. Só
@@ -1644,6 +1645,46 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     });
     if (!e) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ escalation: e });
+  }));
+
+  router.post('/api/escalations/:id/restore', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const e = await restoreEscalation(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!e) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ escalation: e });
+  }));
+
+  // TASK-0093 — operador aprovou (como está ou editado) o rascunho que a IA
+  // tentou mandar e o revisor pré-envio bloqueou; o texto já foi enviado ao
+  // cliente pelo painel (mesmo caminho de POST /api/conversations/:phone/send
+  // usado por qualquer resposta manual do operador) ANTES desta chamada —
+  // aqui só fecha o caso e grava o exemplo aprovado, que passa a ser
+  // injetado no contexto dinâmico de mensagens futuras parecidas
+  // (approvedReplyExampleStore.ts). Nunca disponível pra payment_proof —
+  // esse tipo já tem seus próprios botões de confirmar/rejeitar.
+  router.post('/api/escalations/:id/approve-and-resolve', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const approvedReply = typeof req.body?.approvedReply === 'string' ? req.body.approvedReply.trim() : '';
+    if (!approvedReply) return res.status(400).json({ error: 'Campo "approvedReply" é obrigatório.' });
+    const escalation = await getEscalation(tenantId, req.params.id);
+    if (!escalation) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    if (escalation.resolved) return res.status(409).json({ error: 'Este escalonamento já foi resolvido.' });
+    if (escalation.kind === 'payment_proof') {
+      return res.status(400).json({ error: 'Comprovantes exigem os botões de confirmar/rejeitar pagamento, não este fluxo.' });
+    }
+    await saveApprovedReplyExample(tenantId, {
+      escalationId: escalation.id,
+      customerMessage: escalation.lastMessage || '',
+      approvedReply,
+      reviewerReason: escalation.reason,
+      actorId: req.user?.id,
+    });
+    const resolved = await resolveEscalation(tenantId, req.params.id, {
+      actor: { id: req.user?.id },
+      resolutionCode: 'approved_and_sent',
+      resolutionNote: approvedReply.slice(0, 500),
+    });
+    if (!resolved) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ escalation: resolved });
   }));
 
   // Issue #97 — operador deixa uma orientação em vez de assumir a conversa

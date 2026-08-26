@@ -634,7 +634,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     const fetchEscalations = () => {
-      apiFetch('/api/escalations')
+      apiFetch('/api/escalations?includeArchived=true')
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!data?.escalations || cancelled) return;
@@ -841,10 +841,56 @@ export const App: React.FC = () => {
     try {
       const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setEscalations((prev) => prev.filter((e) => e.id !== id));
+      // Arquiva sem apagar (deleteEscalation no backend) — fica visível na
+      // aba Arquivados em vez de sumir da lista local até o próximo poll.
+      setEscalations((prev) => prev.map((e) => (e.id === id ? { ...e, status: 'archived' } : e)));
     } catch (err) {
       console.error('Falha ao remover escalonamento:', err);
       showToast('Não foi possível remover esse escalonamento. Tente de novo.');
+    }
+  };
+
+  const handleRestoreEscalation = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+      showToast('Escalonamento restaurado para a fila.');
+    } catch (err) {
+      console.error('Falha ao restaurar escalonamento:', err);
+      showToast('Não foi possível restaurar esse escalonamento. Tente de novo.');
+    }
+  };
+
+  // Envia o texto aprovado (rascunho bloqueado ou sugestão, como está ou
+  // editado) pelo mesmo caminho real de envio do operador (POST .../send) —
+  // só depois de confirmado que a mensagem saiu de verdade é que o
+  // escalonamento fecha e vira exemplo aprovado pro agente (TASK-0093).
+  const handleApproveAndSendEscalation = async (id: string, phone: string, text: string): Promise<boolean> => {
+    try {
+      const sendRes = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const sendData = await sendRes.json().catch(() => null);
+      if (!sendRes.ok) throw new Error(sendData?.error || `HTTP ${sendRes.status}`);
+
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/approve-and-resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approvedReply: text }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setEscalations((prev) => prev.map((e) => (e.id === id ? data.escalation : e)));
+      showToast('Resposta aprovada enviada e caso resolvido. O exemplo já vale para conversas parecidas.');
+      return true;
+    } catch (err: any) {
+      console.error('Falha ao aprovar e enviar resposta:', err);
+      showToast(err?.message || 'Não foi possível enviar a resposta agora. Tente de novo.');
+      return false;
     }
   };
 
@@ -1211,6 +1257,8 @@ export const App: React.FC = () => {
             onGenerateReplySuggestion={handleGenerateReplySuggestion}
             onReplySuggestionFeedback={handleReplySuggestionFeedback}
             onResolvePayment={handleResolvePaymentEscalation}
+            onApproveAndSend={handleApproveAndSendEscalation}
+            onRestore={handleRestoreEscalation}
             onGoToConversation={(phone) => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
               handleSetActiveTab('whatsapp');

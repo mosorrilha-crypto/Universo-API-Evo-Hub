@@ -251,7 +251,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
             `Revisor pré-envio bloqueou a resposta automática (${safety.source}, risco ${safety.severity}): ${safety.reason} Rascunho bloqueado: ${blockedDraft}`,
             text,
             'general',
-            { sourceKey: reviewerEscalationSourceKey(phone), priority: 'high' }
+            { sourceKey: reviewerEscalationSourceKey(phone), priority: 'high', blockedDraft }
           );
           console.warn(`🛡️ [Revisor pré-envio] tenant=${tenantId} bloqueou resposta para ${phone}: ${safety.reason}`);
           emitAiReplyStatus(tenantId, phone, 'safety_blocked');
