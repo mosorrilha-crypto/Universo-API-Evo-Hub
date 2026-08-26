@@ -495,7 +495,13 @@ html[data-theme='blue'] .text-\[\#e9edef\] { color: #e8f4ff !important; }
 html[data-theme='blue'] .text-slate-400,
 html[data-theme='blue'] .text-slate-500,
 html[data-theme='blue'] .text-slate-600,
-html[data-theme='blue'] .placeholder-slate-400 { color: #9fc1da !important; }
+html[data-theme='blue'] .placeholder-slate-400,
+/* Bug real reportado (25/08/2026, print do celular): campo de variação do
+   catálogo (ex: "Descrição desta variação") usa placeholder-slate-500/600,
+   não coberto aqui — texto do placeholder ficava quase ilegível (cinza
+   padrão do Tailwind) contra o fundo azul-marinho escuro do tema Azul. */
+html[data-theme='blue'] .placeholder-slate-500,
+html[data-theme='blue'] .placeholder-slate-600 { color: #9fc1da !important; }
 
 html[data-theme='blue'] .custom-scrollbar { scrollbar-color: #1688c7 #0b2b47; }
 html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-track { background: #0b2b47; border-color: #215276; }
@@ -767,7 +773,11 @@ html[data-theme='dark'] .border-slate-700\/80 { border-color: #26313A !important
 html[data-theme='dark'] .text-slate-400,
 html[data-theme='dark'] .text-slate-500,
 html[data-theme='dark'] .text-slate-600,
-html[data-theme='dark'] .placeholder-slate-400 { color: #A7B4BE !important; }
+html[data-theme='dark'] .placeholder-slate-400,
+/* Mesmo gap do tema Azul (ver comentário lá) — placeholder-slate-500/600
+   nunca tinha cobertura aqui, só placeholder-slate-400. */
+html[data-theme='dark'] .placeholder-slate-500,
+html[data-theme='dark'] .placeholder-slate-600 { color: #A7B4BE !important; }
 html[data-theme='dark'] .bg-emerald-500 { background-color: var(--action) !important; }
 html[data-theme='dark'] .text-emerald-400,
 html[data-theme='dark'] .text-emerald-300 { color: var(--action) !important; }

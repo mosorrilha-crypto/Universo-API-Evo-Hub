@@ -446,7 +446,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                               <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
                                 {product.variants.map((variant) => {
                                   const localizedVariantName = localizeCatalogText(variant.code, language);
-                                  const variantWhatsapp = whatsappUrl(catalog.contact.whatsappNumber, `${localizedName} — ${localizedVariantName}`, variant.whatsappMessage || catalog.contact.whatsappMessageProduct, language);
+                                  const variantWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, `${localizedName} — ${localizedVariantName}`, variant.whatsappMessage || catalog.contact.whatsappMessageProduct, language);
                                   return (
                                   <div className="variant-row" key={variant.code}>
                                     <div>
