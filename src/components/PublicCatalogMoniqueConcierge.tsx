@@ -20,29 +20,96 @@ function InstagramIcon({ size = 15 }: { size?: number }) {
   );
 }
 
-const WHATSAPP = 'https://wa.me/595994798081';
-const INSTAGRAM = 'https://instagram.com/pestanaspormonique';
+/** Este segundo catálogo mostra sempre o mesmo tenant capturado (Monique) — rota fixa `/catalogo/monique-teste/novo`. */
+const CATALOG_SLUG = 'monique-teste';
+
+/** Só como placeholder de contato enquanto o catálogo real ainda não carregou — nunca preço/produto fictício. */
+const FALLBACK_INSTAGRAM = 'https://instagram.com/pestanaspormonique';
+
+interface CatalogVariant {
+  code: string;
+  description?: string;
+  price: string;
+  durationMinutes?: number;
+  whatsappMessage?: string;
+}
+
+interface CatalogProduct {
+  name: string;
+  category?: string;
+  description?: string;
+  price: string;
+  durationMinutes?: number;
+  variants?: CatalogVariant[];
+}
+
+interface PublicCatalogResponse {
+  tenant: { name: string; slug: string };
+  contact: {
+    whatsappNumber?: string;
+    instagramUrl?: string;
+    whatsappMessageGeneral?: string;
+    whatsappMessageProduct?: string;
+  };
+  products: CatalogProduct[];
+  pixelId?: string;
+}
+
+declare global {
+  interface Window {
+    fbq?: ((...args: unknown[]) => void) & { queue?: unknown[]; loaded?: boolean; version?: string };
+    _fbq?: Window['fbq'];
+  }
+}
+
+/** Base code padrão do Meta Pixel — idempotente, mesmo padrão usado no catálogo existente (`PublicCatalogPage.tsx`). */
+function loadMetaPixel(pixelId: string): void {
+  if (window.fbq) {
+    window.fbq('init', pixelId);
+    window.fbq('track', 'PageView');
+    return;
+  }
+  const fbq: Window['fbq'] = function (...args: unknown[]) {
+    (fbq.queue ??= []).push(args);
+  } as Window['fbq'];
+  fbq!.queue = [];
+  fbq!.loaded = true;
+  fbq!.version = '2.0';
+  window.fbq = fbq;
+  window._fbq = fbq;
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+  document.head.appendChild(script);
+  window.fbq('init', pixelId);
+  window.fbq('track', 'PageView');
+}
+
+function trackWhatsAppContact(): void {
+  window.fbq?.('track', 'Contact');
+}
+
+function formatDuration(minutes?: number): string | null {
+  if (!minutes || minutes <= 0) return null;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (!hours) return `${minutes} min`;
+  if (!rest) return `${hours} h`;
+  return `${hours} h ${rest} min`;
+}
+
+/** Aponta pro backend (`/api/public/catalog/:slug/whatsapp-click`), igual ao catálogo existente: clique é contado de verdade e a mensagem sai com um código de rastreio embutido. */
+function whatsappClickUrl(message: string, productName?: string): string {
+  const params = new URLSearchParams({ msg: message });
+  if (productName) params.set('product', productName);
+  return `/api/public/catalog/${encodeURIComponent(CATALOG_SLUG)}/whatsapp-click?${params.toString()}`;
+}
 
 const objectives = [
   { id: 'natural', title: 'Quiero verme arreglada sin maquillarme', text: 'Un resultado suave para sentirte linda sin verte producida.', recommendation: 'Lash Lift o Diseño con Hilo' },
   { id: 'practical', title: 'Quiero sentirme lista cada mañana', text: 'Menos tiempo frente al espejo y más tiempo para vos.', recommendation: 'Lash Lift, Browlamination o Combo' },
   { id: 'brows', title: 'Quiero volver a reconocer mi mirada', text: 'Una mirada más equilibrada, sin perder tu expresión.', recommendation: 'Diseño, Henna o Microshading' },
   { id: 'lips', title: 'Quiero recuperar color y definición', text: 'Labios más definidos, con evaluación previa y expectativas reales.', recommendation: 'Microlips o Neutralización' },
-];
-
-const services = [
-  { category: 'Pestañas', name: 'Lash Lift', detail: 'Resultado natural, sin extensión.', price: 'Gs 140.000', duration: '90 min' },
-  { category: 'Pestañas', name: 'Efecto Volumen Brasileño', detail: 'Volumen marcado con acabado ligero.', price: 'Gs 200.000', duration: '90 min' },
-  { category: 'Pestañas', name: 'Efecto Rímel', detail: 'Volumen leve para todos los días.', price: 'Gs 220.000', duration: '120 min' },
-  { category: 'Cejas', name: 'Diseño Tradicional con Hilo', detail: 'Depilación de precisión con hilo.', price: 'Gs 60.000', duration: '30 min' },
-  { category: 'Cejas', name: 'Diseño con Henna', detail: 'Probá la forma antes de algo permanente.', price: 'Gs 80.000', duration: '30 min' },
-  { category: 'Cejas', name: 'Browlamination + Coloración', detail: 'Pelitos peinados, fijados y con color.', price: 'Gs 150.000', duration: '90 min' },
-  { category: 'Micropigmentación', name: 'Cejas Microshading o Microblading', detail: 'La técnica se define en la evaluación.', price: 'Gs 550.000', duration: '120 min' },
-  { category: 'Micropigmentación', name: 'Microlips Labios', detail: 'Color natural y definido, según tu estilo.', price: 'Gs 550.000', duration: '120 min' },
-  { category: 'Micropigmentación', name: 'Neutralización', detail: 'Corrige tonos no deseados de una micropigmentación anterior.', price: 'Gs 450.000', duration: '120 min' },
-  { category: 'Combos', name: 'Combo Full Face', detail: 'Cejas, labios y pestañas en la misma sesión.', price: 'Gs 1.200.000', duration: '4 h' },
-  { category: 'Combos', name: 'Combo Micro Cejas + Labios', detail: 'Cejas y labios en la misma sesión.', price: 'Gs 850.000', duration: '3 h 30 min' },
-  { category: 'Combos', name: 'Combo Micro Cejas + Pestañas', detail: 'Cejas y pestañas en la misma sesión.', price: 'Gs 600.000', duration: '3 h' },
 ];
 
 const resultImages = [
@@ -61,7 +128,10 @@ export function PublicCatalogMoniqueConcierge() {
   const [message, setMessage] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [sent, setSent] = useState(false);
+  const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
+  const [productsError, setProductsError] = useState(false);
   const selectedObjective = useMemo(() => objectives.find((item) => item.id === objective), [objective]);
+  const instagramUrl = catalog?.contact.instagramUrl || FALLBACK_INSTAGRAM;
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -79,11 +149,28 @@ export function PublicCatalogMoniqueConcierge() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/public/catalog/${encodeURIComponent(CATALOG_SLUG)}`, { headers: { Accept: 'application/json' } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('fetch failed');
+        return response.json() as Promise<{ catalog: PublicCatalogResponse }>;
+      })
+      .then((payload) => { if (!cancelled) setCatalog(payload.catalog); })
+      .catch(() => { if (!cancelled) setProductsError(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (catalog?.pixelId) loadMetaPixel(catalog.pixelId);
+  }, [catalog?.pixelId]);
+
   function submit(event: FormEvent) {
     event.preventDefault();
     const summary = selectedObjective?.recommendation || 'orientación sobre servicios';
     const text = `Hola Monique, soy ${name}. Mi objetivo es: ${selectedObjective?.title || 'todavía no estoy segura'}. Me interesa: ${summary}. ¿Es mi primera vez? ${previousWork === 'No' ? 'Sí' : 'No'}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
-    window.open(`${WHATSAPP}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    window.open(whatsappClickUrl(text), '_blank', 'noopener,noreferrer');
+    trackWhatsAppContact();
     setSent(true);
   }
 
@@ -323,11 +410,11 @@ export function PublicCatalogMoniqueConcierge() {
         <div className="container">
           <div className="section-heading">
             <div><span className="section-number">02</span><h2>Resultados reales,<br /><span>expectativas honestas.</span></h2></div>
-            <a href={INSTAGRAM} target="_blank" rel="noreferrer" className="text-link"><InstagramIcon /> Ver Instagram</a>
+            <a href={instagramUrl} target="_blank" rel="noreferrer" className="text-link"><InstagramIcon /> Ver Instagram</a>
           </div>
           <div className="results-grid">
             {resultImages.map((image, index) => (
-              <a key={image.src} href={INSTAGRAM} target="_blank" rel="noreferrer" className={index === 0 ? 'result-card featured' : 'result-card'}>
+              <a key={image.src} href={instagramUrl} target="_blank" rel="noreferrer" className={index === 0 ? 'result-card featured' : 'result-card'}>
                 <img src={image.src} alt={image.alt} />
                 <span>{image.label}</span>
               </a>
@@ -342,19 +429,31 @@ export function PublicCatalogMoniqueConcierge() {
             <div><span className="section-number">03</span><h2>Catálogo claro.<br /><span>Elegí con confianza.</span></h2></div>
             <p>Precios, duración y objetivo de cada servicio en una sola vista.</p>
           </div>
-          <div className="catalog-grid">
-            {services.map((service) => (
-              <article className="service-card" key={service.name}>
-                <div className="service-meta"><span>{service.category}</span><span><Clock3 size={12} /> {service.duration}</span></div>
-                <h3>{service.name}</h3>
-                <p>{service.detail}</p>
-                <div className="service-bottom">
-                  <b>{service.price}</b>
-                  <a href={`${WHATSAPP}?text=${encodeURIComponent(`Hola Monique, me interesa ${service.name}. Quiero saber si es para mí.`)}`} target="_blank" rel="noreferrer">Consultar <ArrowRight size={13} /></a>
-                </div>
-              </article>
-            ))}
-          </div>
+          {!catalog && !productsError && <p className="helper">Cargando servicios y precios...</p>}
+          {productsError && <p className="helper">No se pudieron cargar los servicios en este momento. Probá de nuevo en unos minutos.</p>}
+          {catalog && (
+            <div className="catalog-grid">
+              {catalog.products.map((service) => {
+                const consultMessage = catalog.contact.whatsappMessageProduct
+                  ? catalog.contact.whatsappMessageProduct.split('{produto}').join(service.name)
+                  : `Hola Monique, me interesa ${service.name}. Quiero saber si es para mí.`;
+                return (
+                  <article className="service-card" key={service.name}>
+                    <div className="service-meta">
+                      <span>{service.category || 'Servicios'}</span>
+                      {formatDuration(service.durationMinutes) && <span><Clock3 size={12} /> {formatDuration(service.durationMinutes)}</span>}
+                    </div>
+                    <h3>{service.name}</h3>
+                    {service.description && <p>{service.description}</p>}
+                    <div className="service-bottom">
+                      <b>{service.price}</b>
+                      <a href={whatsappClickUrl(consultMessage, service.name)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
           <details className="policy-box">
             <summary>Información importante antes de confirmar <ChevronDown size={16} /></summary>
             <div>
@@ -379,7 +478,7 @@ export function PublicCatalogMoniqueConcierge() {
         <div className="container flex flex-col justify-between gap-3 sm:flex-row">
           <span>Monique Sorrilha Beauty Studio</span>
           <span>Luque · Paraguay</span>
-          <a href={INSTAGRAM} target="_blank" rel="noreferrer">@pestanaspormonique</a>
+          <a href={instagramUrl} target="_blank" rel="noreferrer">@pestanaspormonique</a>
         </div>
       </footer>
     </main>
