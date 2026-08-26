@@ -10,8 +10,11 @@ import {
   CircleDollarSign,
   Clock3,
   MoreHorizontal,
+  Pause,
+  Play,
   Plus,
   ReceiptText,
+  Repeat,
   Trash2,
   UserRound,
   WalletCards,
@@ -19,7 +22,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 import { summarizeFinancialTransactions } from '../lib/agendaFinanceiroMetrics';
-import type { FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, UserProfile } from '../types';
+import type { FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, RecurringExpense, UserProfile } from '../types';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 
 type CenterView = 'agenda' | 'financial';
@@ -50,6 +53,11 @@ interface AgendaFinanceiroCenterProps {
   onUpdateTransactionStatus: (id: string, status: PaymentStatus) => Promise<void> | void;
   onDeleteTransaction: (id: string) => Promise<void> | void;
   onToast: (message: string) => void;
+  /** Despesas recorrentes (TASK-0097) — só usado no scope="financial"; opcional pra não quebrar o uso em scope="agenda". */
+  recurringExpenses?: RecurringExpense[];
+  onAddRecurringExpense?: (input: { description: string; amount: number; paymentMethod: PaymentMethod; dayOfMonth: number }) => Promise<boolean>;
+  onToggleRecurringExpense?: (id: string, active: boolean) => void;
+  onDeleteRecurringExpense?: (id: string) => void;
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
@@ -83,6 +91,10 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   onUpdateTransactionStatus,
   onDeleteTransaction,
   onToast,
+  recurringExpenses = [],
+  onAddRecurringExpense,
+  onToggleRecurringExpense,
+  onDeleteRecurringExpense,
 }) => {
   const { language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -99,7 +111,9 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   const [appointmentDialog, setAppointmentDialog] = useState<AppointmentDialogState | null>(null);
   const [transactionDialog, setTransactionDialog] = useState<'income' | 'expense' | null>(null);
   const [paymentDialog, setPaymentDialog] = useState<CalendarEvent | null>(null);
+  const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submittingRecurring, setSubmittingRecurring] = useState(false);
 
   const formatMoney = (amount: number) => new Intl.NumberFormat(displayLocale, { style: 'currency', currency }).format(amount);
   const monthLabel = calendarDate.toLocaleDateString(displayLocale, { month: 'long', year: 'numeric' });
@@ -285,6 +299,32 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     }
   };
 
+  const saveRecurringExpense = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!onAddRecurringExpense) return;
+    const form = new FormData(event.currentTarget);
+    const description = String(form.get('description') || '').trim();
+    const amount = Number(form.get('amount') || 0);
+    const dayOfMonth = Number(form.get('dayOfMonth') || 0);
+    if (!description || !Number.isFinite(amount) || amount <= 0 || !Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 28) return;
+    setSubmittingRecurring(true);
+    const created = await onAddRecurringExpense({
+      description,
+      amount,
+      paymentMethod: String(form.get('paymentMethod') || 'Transferência Bancária') as PaymentMethod,
+      dayOfMonth,
+    });
+    setSubmittingRecurring(false);
+    if (created) setRecurringDialogOpen(false);
+  };
+
+  const confirmDeleteRecurringExpense = (expense: RecurringExpense) => {
+    if (!onDeleteRecurringExpense) return;
+    if (window.confirm(isSpanish ? `¿Eliminar el gasto recurrente “${expense.description}”? Esta acción no se puede deshacer.` : `Excluir a despesa recorrente “${expense.description}”? Esta ação não pode ser desfeita.`)) {
+      onDeleteRecurringExpense(expense.id);
+    }
+  };
+
   const quickComplete = async (calendarEvent: CalendarEvent) => {
     try {
       await callEventAction(`/api/google-calendar/events/${encodeURIComponent(calendarEvent.id)}/complete`, 'POST', { completed: !calendarEvent.completed });
@@ -411,9 +451,56 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
 
       {view === 'financial' && <section className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-bold text-white">{isSpanish ? 'Flujo financiero' : 'Fluxo financeiro'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Ingresos vinculados a la agenda, registros manuales y gastos operativos.' : 'Receitas vinculadas à agenda, lançamentos manuais e despesas operacionais.'}</p></div><div className="flex flex-wrap gap-2"><select value={period} onChange={(event) => setPeriod(event.target.value as 'month' | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="month">{isSpanish ? 'Mes actual' : 'Mês atual'}</option><option value="all">{isSpanish ? 'Todo el historial' : 'Todo histórico'}</option></select><select value={transactionType} onChange={(event) => setTransactionType(event.target.value as 'all' | 'income' | 'expense')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los tipos' : 'Todos os tipos'}</option><option value="income">{isSpanish ? 'Ingresos' : 'Receitas'}</option><option value="expense">{isSpanish ? 'Gastos' : 'Despesas'}</option></select><select value={transactionStatus} onChange={(event) => setTransactionStatus(event.target.value as PaymentStatus | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los estados' : 'Todos os status'}</option>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select><button type="button" onClick={() => setTransactionDialog('income')} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/15"><Plus className="mr-1 inline h-3.5 w-3.5" />{isSpanish ? 'Ingreso adicional' : 'Receita avulsa'}</button></div></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Previsto' : 'Previsto'}</p><p className="mt-1 text-sm font-black text-slate-200">{formatMoney(financial.projectedIncome)}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Ingresos' : 'Receitas'}</p><p className="mt-1 text-sm font-black text-emerald-300">{financial.incomeCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Por cobrar' : 'A receber'}</p><p className="mt-1 text-sm font-black text-amber-200">{financial.pendingCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Cobrado' : 'Recebido'}</p><p className="mt-1 text-sm font-black text-sky-200">{financial.collectionRate === null ? '—' : new Intl.NumberFormat(displayLocale, { style: 'percent', maximumFractionDigits: 0 }).format(financial.collectionRate)}</p></div></div><div className="responsive-table-scroll hidden overflow-x-auto sm:block"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="pb-3 font-bold">{isSpanish ? 'Fecha' : 'Data'}</th><th className="pb-3 font-bold">{isSpanish ? 'Cliente / descripción' : 'Cliente / descrição'}</th><th className="pb-3 font-bold">{isSpanish ? 'Tipo' : 'Tipo'}</th><th className="pb-3 font-bold">{isSpanish ? 'Estado' : 'Status'}</th><th className="pb-3 text-right font-bold">{isSpanish ? 'Valor' : 'Valor'}</th><th className="pb-3" /></tr></thead><tbody className="divide-y divide-slate-800/80">{visibleTransactions.length ? visibleTransactions.map((transaction) => <tr key={transaction.id} className="transition-colors hover:bg-slate-800/30"><td className="py-3.5 text-slate-400">{new Date(transaction.date).toLocaleDateString(displayLocale)}</td><td className="py-3.5"><p className="font-bold text-slate-200">{transaction.productName}</p><p className="mt-0.5 text-[10px] text-slate-500">{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto operativo' : 'Despesa operacional') : transaction.leadName}</p></td><td className="py-3.5"><span className={`inline-flex items-center gap-1 font-bold ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? <ArrowDownRight className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto' : 'Despesa') : (isSpanish ? 'Ingreso' : 'Receita')}</span></td><td className="py-3.5"><select value={transaction.status} onChange={(event) => onUpdateTransactionStatus(transaction.id, event.target.value as PaymentStatus)} aria-label={`${isSpanish ? 'Estado de' : 'Status de'} ${transaction.productName}`} className={`rounded-full border px-2 py-1 text-[10px] font-bold outline-none ${statusStyle[transaction.status]}`}>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select></td><td className={`py-3.5 text-right font-black ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? '-' : '+'}{formatMoney(transaction.amount)}</td><td className="py-3.5 text-right"><button type="button" onClick={() => confirmDeleteTransaction(transaction)} className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Eliminar registro' : 'Excluir lançamento'}><Trash2 className="h-3.5 w-3.5" /></button></td></tr>) : <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</td></tr>}</tbody></table></div><div className="space-y-2 sm:hidden">{visibleTransactions.length ? visibleTransactions.map((transaction) => <div key={transaction.id}><FinancialTransactionCard transaction={transaction} currency={currency} displayLocale={displayLocale} isSpanish={isSpanish} onUpdateStatus={onUpdateTransactionStatus} onDelete={() => confirmDeleteTransaction(transaction)} /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</p>}</div></section>}
 
+      {view === 'financial' && onAddRecurringExpense && (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 font-bold text-white"><Repeat className="h-4 w-4 text-emerald-300" />{isSpanish ? 'Gastos recurrentes' : 'Despesas recorrentes'}</h2>
+              <p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Gastos fijos (alquiler, suscripciones...) que se lanzan solos todo mes en el día de vencimiento — sin volver a escribirlos.' : 'Despesas fixas (aluguel, assinaturas...) que se lançam sozinhas todo mês no dia de vencimento — sem precisar digitar de novo.'}</p>
+            </div>
+            <button type="button" onClick={() => setRecurringDialogOpen(true)} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/15">
+              <Plus className="mr-1 inline h-3.5 w-3.5" />{isSpanish ? 'Nuevo gasto recurrente' : 'Nova despesa recorrente'}
+            </button>
+          </div>
+
+          {recurringExpenses.length === 0 ? (
+            <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'Todavía no hay gastos recurrentes cadastrados.' : 'Ainda não há despesas recorrentes cadastradas.'}</p>
+          ) : (
+            <div className="space-y-2">
+              {recurringExpenses.map((expense) => (
+                <div key={expense.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${expense.active ? 'border-slate-800 bg-slate-950/55' : 'border-slate-800/60 bg-slate-950/30 opacity-60'}`}>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-200">{expense.description}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-500">
+                      {isSpanish ? `Vence el día ${expense.dayOfMonth} de cada mes · ${expense.paymentMethod}` : `Vence todo dia ${expense.dayOfMonth} · ${expense.paymentMethod}`}
+                      {expense.lastGeneratedMonth ? ` · ${isSpanish ? 'último lanzamiento' : 'último lançamento'}: ${expense.lastGeneratedMonth}` : ''}
+                      {!expense.active ? ` · ${isSpanish ? 'pausado' : 'pausado'}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-sm font-black text-rose-300">{formatMoney(expense.amount)}</span>
+                    {onToggleRecurringExpense && (
+                      <button type="button" onClick={() => onToggleRecurringExpense(expense.id, !expense.active)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={expense.active ? (isSpanish ? 'Pausar' : 'Pausar') : (isSpanish ? 'Retomar' : 'Retomar')}>
+                        {expense.active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      </button>
+                    )}
+                    {onDeleteRecurringExpense && (
+                      <button type="button" onClick={() => confirmDeleteRecurringExpense(expense)} className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Eliminar' : 'Excluir'}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {appointmentDialog && <AppointmentDialog dialog={appointmentDialog} leads={leads} currency={currency} isSpanish={isSpanish} onClose={() => setAppointmentDialog(null)} onSubmit={saveAppointment} submitting={submitting} />}
       {transactionDialog && <TransactionDialog kind={transactionDialog} leads={leads} currency={currency} isSpanish={isSpanish} onClose={() => setTransactionDialog(null)} onSubmit={saveTransaction} submitting={submitting} />}
       {paymentDialog && <PaymentDialog event={paymentDialog} currency={currency} isSpanish={isSpanish} onClose={() => setPaymentDialog(null)} onSubmit={savePayment} submitting={submitting} />}
+      {recurringDialogOpen && <RecurringExpenseDialog currency={currency} isSpanish={isSpanish} onClose={() => setRecurringDialogOpen(false)} onSubmit={saveRecurringExpense} submitting={submittingRecurring} />}
     </div>
   );
 };
@@ -456,6 +543,22 @@ function TransactionDialog({ kind, leads, currency, isSpanish, onClose, onSubmit
   const isExpense = kind === 'expense';
   const paymentLabel = (method: PaymentMethod) => isSpanish ? ({ 'Transferência Bancária': 'Transferencia bancaria', 'Cartão de Crédito': 'Tarjeta de crédito', 'Boleto Bancário': 'Boleta bancaria', 'Link WhatsApp': 'Enlace de WhatsApp', PIX: 'PIX' }[method] || method) : method;
   return <DialogShell title={isExpense ? (isSpanish ? 'Registrar gasto' : 'Registrar despesa') : (isSpanish ? 'Registrar ingreso adicional' : 'Registrar receita avulsa')} description={isExpense ? (isSpanish ? 'Registrá una salida operativa que no provino de un agendamiento.' : 'Controle uma saída operacional que não veio de um agendamento.') : (isSpanish ? 'Registrá un ingreso externo sin duplicar los cobros de la agenda.' : 'Registre uma receita externa sem duplicar cobranças da agenda.')} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5">{!isExpense && <Field label={isSpanish ? 'Cliente del CRM' : 'Cliente do CRM'}><select name="clientId" defaultValue="" className={inputClass}><option value="">{isSpanish ? 'Cliente sin registro' : 'Cliente sem cadastro'}</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field>}<Field label={isSpanish ? 'Descripción' : 'Descrição'}><input name="description" required placeholder={isExpense ? (isSpanish ? 'Ej.: Compra de materiales' : 'Ex.: Compra de materiais') : (isSpanish ? 'Ej.: Venta presencial' : 'Ex.: Venda presencial')} className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor' : 'Valor'} (${currency})`}><input name="amount" type="number" min="0.01" step="0.01" required className={inputClass} /></Field><Field label={isSpanish ? 'Forma' : 'Forma'}><select name="paymentMethod" className={inputClass}>{PAYMENT_METHODS.map((method) => <option key={method}>{paymentLabel(method)}</option>)}</select></Field></div><Field label={isSpanish ? 'Estado' : 'Status'}><select name="status" defaultValue="pago" className={inputClass}><option value="pago">{isSpanish ? 'Cobrado / confirmado' : 'Pago / confirmado'}</option>{!isExpense && <option value="pendente">{isSpanish ? 'Pendiente' : 'Pendente'}</option>}</select></Field><button type="submit" disabled={submitting} className={`w-full rounded-xl py-3 text-xs font-black transition-opacity disabled:opacity-50 ${isExpense ? 'bg-rose-300 text-rose-950' : 'bg-emerald-400 text-slate-950'}`}>{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : isExpense ? (isSpanish ? 'Registrar gasto' : 'Registrar despesa') : (isSpanish ? 'Registrar ingreso' : 'Registrar receita')}</button></form></DialogShell>;
+}
+
+function RecurringExpenseDialog({ currency, isSpanish, onClose, onSubmit, submitting }: { currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
+  const paymentLabel = (method: PaymentMethod) => isSpanish ? ({ 'Transferência Bancária': 'Transferencia bancaria', 'Cartão de Crédito': 'Tarjeta de crédito', 'Boleto Bancário': 'Boleta bancaria', 'Link WhatsApp': 'Enlace de WhatsApp', PIX: 'PIX' }[method] || method) : method;
+  return <DialogShell title={isSpanish ? 'Nuevo gasto recurrente' : 'Nova despesa recorrente'} description={isSpanish ? 'Se lanza solo, todo mes, en el día elegido — no hace falta registrarlo de nuevo.' : 'Lança sozinha, todo mês, no dia escolhido — não precisa registrar de novo.'} onClose={onClose}>
+    <form onSubmit={onSubmit} className="space-y-4 pt-5">
+      <Field label={isSpanish ? 'Descripción' : 'Descrição'}><input name="description" required placeholder={isSpanish ? 'Ej.: Alquiler del local' : 'Ex.: Aluguel do salão'} className={inputClass} /></Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label={`${isSpanish ? 'Valor' : 'Valor'} (${currency})`}><input name="amount" type="number" min="0.01" step="0.01" required className={inputClass} /></Field>
+        <Field label={isSpanish ? 'Día de vencimiento' : 'Dia de vencimento'}><input name="dayOfMonth" type="number" min="1" max="28" required defaultValue="5" className={inputClass} /></Field>
+      </div>
+      <Field label={isSpanish ? 'Forma' : 'Forma'}><select name="paymentMethod" className={inputClass}>{PAYMENT_METHODS.map((method) => <option key={method}>{paymentLabel(method)}</option>)}</select></Field>
+      <p className="text-[10px] leading-relaxed text-slate-500">{isSpanish ? 'Los días 29, 30 y 31 no están disponibles (algunos meses no los tienen) — el gasto se lanza como pagado en el día elegido.' : 'Os dias 29, 30 e 31 não estão disponíveis (nem todo mês tem) — a despesa é lançada como paga no dia escolhido.'}</p>
+      <button type="submit" disabled={submitting} className="w-full rounded-xl bg-rose-300 py-3 text-xs font-black text-rose-950 transition-opacity disabled:opacity-50">{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : (isSpanish ? 'Registrar gasto recurrente' : 'Registrar despesa recorrente')}</button>
+    </form>
+  </DialogShell>;
 }
 
 function PaymentDialog({ event, currency, isSpanish, onClose, onSubmit, submitting }: { event: CalendarEvent; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) { const paymentLabel = (method: PaymentMethod) => isSpanish ? ({ 'Transferência Bancária': 'Transferencia bancaria', 'Cartão de Crédito': 'Tarjeta de crédito', 'Boleto Bancário': 'Boleta bancaria', 'Link WhatsApp': 'Enlace de WhatsApp', PIX: 'PIX' }[method] || method) : method; return <DialogShell title={isSpanish ? 'Cobro del agendamiento' : 'Cobrança do agendamento'} description={isSpanish ? 'Este cobro usa la referencia del evento y se actualiza sin crear un registro duplicado.' : 'Esta cobrança usa a referência do evento e é atualizada sem criar um lançamento duplicado.'} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5"><p className="rounded-xl bg-slate-950 p-3 text-sm font-bold text-white">{event.summary}</p><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor' : 'Valor'} (${currency})`}><input name="amount" type="number" min="0" step="0.01" required defaultValue={event.payment?.amount ?? ''} className={inputClass} /></Field><Field label={isSpanish ? 'Forma' : 'Forma'}><select name="paymentMethod" defaultValue={event.payment?.paymentMethod || 'PIX'} className={inputClass}>{PAYMENT_METHODS.map((method) => <option key={method}>{paymentLabel(method)}</option>)}</select></Field></div><Field label={isSpanish ? 'Situación' : 'Situação'}><select name="status" defaultValue={event.payment?.status || 'pendente'} className={inputClass}><option value="pago">{isSpanish ? 'Cobrado' : 'Recebido'}</option><option value="pendente">{isSpanish ? 'Por cobrar' : 'A receber'}</option><option value="atrasado">{isSpanish ? 'Atrasado' : 'Em atraso'}</option><option value="cancelado">{isSpanish ? 'Cancelado' : 'Cancelado'}</option></select></Field><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 disabled:opacity-50">{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : (isSpanish ? 'Guardar cobro' : 'Salvar cobrança')}</button></form></DialogShell>; }

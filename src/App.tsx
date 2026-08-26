@@ -5,6 +5,7 @@ import {
   UserProfile,
   LeadInfo,
   FinancialTransaction,
+  RecurringExpense,
   AgentKnowledgeBase,
   BusinessHours,
   SavedTranscriptItem,
@@ -341,6 +342,11 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Despesas recorrentes (TASK-0097) — cadastro, não precisa do mesmo cache
+  // local otimista dos leads/transações (baixo volume, sem tela offline
+  // dedicada); busca do zero a cada troca de tenant e após qualquer CRUD.
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
+
   // Agent Knowledge Base
   // Bug real (25/08/2026): usava moniqueStudioKnowledgeBase (catálogo REAL
   // da Monique, com dado bancário real dela) como fallback aqui — um tenant
@@ -628,6 +634,22 @@ export const App: React.FC = () => {
     fetchFinancialTransactions();
     const interval = setInterval(fetchFinancialTransactions, 8000);
     return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
+  // Despesas recorrentes (TASK-0097) — baixo volume/baixa frequência de
+  // mudança, não precisa do polling de 8s dos leads/transações; refetchRecurringExpenses
+  // é chamada de novo depois de qualquer CRUD abaixo.
+  const refetchRecurringExpenses = React.useCallback(() => {
+    apiFetch('/api/financial/recurring-expenses')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.recurringExpenses) setRecurringExpenses(data.recurringExpenses as RecurringExpense[]);
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    refetchRecurringExpenses();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenant.id]);
 
@@ -970,6 +992,57 @@ export const App: React.FC = () => {
     showToast('Fatura excluída');
   };
 
+  // Despesas recorrentes (TASK-0097) — sempre persiste no servidor primeiro
+  // (mesmo padrão de handleAddTransaction acima), depois refaz a busca em
+  // vez de aplicar local: baixo volume, sem necessidade de otimismo aqui.
+  const handleAddRecurringExpense = async (input: { description: string; amount: number; paymentMethod: FinancialTransaction['paymentMethod']; dayOfMonth: number }): Promise<boolean> => {
+    try {
+      const res = await apiFetch('/api/financial/recurring-expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao cadastrar despesa recorrente:', err);
+      showToast('Não foi possível cadastrar a despesa recorrente. Tente de novo.');
+      return false;
+    }
+    refetchRecurringExpenses();
+    showToast('Despesa recorrente cadastrada.');
+    return true;
+  };
+
+  const handleToggleRecurringExpense = async (id: string, active: boolean) => {
+    try {
+      const res = await apiFetch(`/api/financial/recurring-expenses/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao pausar/retomar despesa recorrente:', err);
+      showToast('Não foi possível atualizar a despesa recorrente. Tente de novo.');
+      return;
+    }
+    setRecurringExpenses((prev) => prev.map((r) => (r.id === id ? { ...r, active } : r)));
+    showToast(active ? 'Despesa recorrente retomada.' : 'Despesa recorrente pausada.');
+  };
+
+  const handleDeleteRecurringExpense = async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/financial/recurring-expenses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Falha ao excluir despesa recorrente:', err);
+      showToast('Não foi possível excluir a despesa recorrente. Tente de novo.');
+      return;
+    }
+    setRecurringExpenses((prev) => prev.filter((r) => r.id !== id));
+    showToast('Despesa recorrente excluída.');
+  };
+
   const handleSelectTenant = (tenant: Tenant) => {
     setActiveTenant(tenant);
     safeSetLocalStorage(ACTIVE_TENANT_OVERRIDE_KEY, tenant.id);
@@ -1149,6 +1222,10 @@ export const App: React.FC = () => {
             currency={activeTenant.currency}
             locale={activeTenant.locale}
             onToast={showToast}
+            recurringExpenses={recurringExpenses}
+            onAddRecurringExpense={handleAddRecurringExpense}
+            onToggleRecurringExpense={handleToggleRecurringExpense}
+            onDeleteRecurringExpense={handleDeleteRecurringExpense}
           />
           </OperationsModuleFrame>
         )}

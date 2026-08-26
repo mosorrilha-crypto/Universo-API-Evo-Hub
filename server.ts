@@ -34,6 +34,7 @@ import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob'
 import { startEvolutionConnectionAlertJob } from './server/services/evolutionConnectionAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
+import { startRecurringExpenseJob } from './server/services/recurringExpenseJob';
 import { initWebPush } from './server/services/webPush';
 import { notifySystemError } from './server/services/systemErrorAlertService';
 import { configureAdminAlertChannel } from './server/services/adminAlertChannel';
@@ -261,6 +262,13 @@ async function startServer() {
   // precisa reaparecer como livre pra outro cliente depois do prazo (2h).
   // Ver server/services/heldAppointmentExpiryJob.ts.
   startHeldAppointmentExpiryJob();
+
+  // Job em background que gera automaticamente a financial_transaction de
+  // cada despesa recorrente cadastrada (aluguel, assinatura...) no dia de
+  // vencimento configurado (TASK-0097) — sem isso o operador precisaria
+  // digitar a mesma despesa fixa todo mês em "Registrar Despesa". Ver
+  // server/services/recurringExpenseJob.ts.
+  startRecurringExpenseJob();
 
   // Servir Vite middleware em desenvolvimento ou arquivos estáticos em produção
   if (!config.isProduction) {

@@ -8,6 +8,12 @@ import {
   type PaymentStatus,
   type FinancialEntryType,
 } from '../services/financialStore';
+import {
+  listRecurringExpenses,
+  createRecurringExpense,
+  updateRecurringExpense,
+  deleteRecurringExpense,
+} from '../services/recurringExpenseStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireRole, resolveTenantId } from '../middleware/rbac';
@@ -83,6 +89,68 @@ export function createFinancialRouter({ authenticateToken }: FinancialRouterDeps
 
   router.delete('/api/financial/transactions/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteFinancialTransaction(tenantOf(req), req.params.id);
+    res.json({ success: true });
+  }));
+
+  // Despesas recorrentes (TASK-0097) — cadastra uma vez, o job diário
+  // (recurringExpenseJob.ts) gera a financial_transaction sozinho todo mês
+  // no dia de vencimento. Ver recurringExpenseStore.ts.
+  router.get('/api/financial/recurring-expenses', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const recurringExpenses = await listRecurringExpenses(tenantOf(req));
+    res.json({ recurringExpenses });
+  }));
+
+  router.post('/api/financial/recurring-expenses', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { description, amount, paymentMethod, dayOfMonth } = req.body || {};
+    if (typeof description !== 'string' || !description.trim()) return res.status(400).json({ error: 'description é obrigatório.' });
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount precisa ser um número maior que zero.' });
+    if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
+    if (typeof dayOfMonth !== 'number' || !Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 28) {
+      return res.status(400).json({ error: 'dayOfMonth precisa ser um número inteiro entre 1 e 28.' });
+    }
+
+    const recurringExpense = await createRecurringExpense(tenantOf(req), {
+      description: description.trim(),
+      amount,
+      paymentMethod,
+      dayOfMonth,
+    });
+    res.status(201).json({ recurringExpense });
+  }));
+
+  router.patch('/api/financial/recurring-expenses/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { description, amount, paymentMethod, dayOfMonth, active } = req.body || {};
+    const patch: Parameters<typeof updateRecurringExpense>[2] = {};
+    if (description !== undefined) {
+      if (typeof description !== 'string' || !description.trim()) return res.status(400).json({ error: 'description, quando informado, precisa ser texto não vazio.' });
+      patch.description = description.trim();
+    }
+    if (amount !== undefined) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount, quando informado, precisa ser um número maior que zero.' });
+      patch.amount = amount;
+    }
+    if (paymentMethod !== undefined) {
+      if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
+      patch.paymentMethod = paymentMethod;
+    }
+    if (dayOfMonth !== undefined) {
+      if (typeof dayOfMonth !== 'number' || !Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 28) {
+        return res.status(400).json({ error: 'dayOfMonth, quando informado, precisa ser um número inteiro entre 1 e 28.' });
+      }
+      patch.dayOfMonth = dayOfMonth;
+    }
+    if (active !== undefined) {
+      if (typeof active !== 'boolean') return res.status(400).json({ error: 'active, quando informado, precisa ser booleano.' });
+      patch.active = active;
+    }
+
+    const recurringExpense = await updateRecurringExpense(tenantOf(req), req.params.id, patch);
+    if (!recurringExpense) return res.status(404).json({ error: 'Despesa recorrente não encontrada.' });
+    res.json({ recurringExpense });
+  }));
+
+  router.delete('/api/financial/recurring-expenses/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    await deleteRecurringExpense(tenantOf(req), req.params.id);
     res.json({ success: true });
   }));
 
