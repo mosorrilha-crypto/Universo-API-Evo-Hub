@@ -224,6 +224,8 @@ const PT_CATALOG_TEXT: Record<string, string> = {
   'Browlamination + Coloración': 'Brow Lamination + Coloração',
 };
 
+// Mantemos esta normalização local e total para que o catálogo público continue
+// independente de dados opcionais ou variações antigas do backend.
 function normalizeSpanishText(value: string): string {
   return value
     .replaceAll('varia por efeito', 'varía según el efecto')
