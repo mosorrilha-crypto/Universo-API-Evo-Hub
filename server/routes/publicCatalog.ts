@@ -2,7 +2,7 @@ import { Router, type Request } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { publicCatalogRateLimiter } from '../middleware/rateLimit';
 import { getPublicCatalogBySlug } from '../services/publicCatalogStore';
-import { resolveCatalogWhatsappTarget, recordCatalogWhatsappClick } from '../services/publicCatalogClickStore';
+import { resolveCatalogWhatsappTarget, recordCatalogWhatsappClick, type CatalogClickSource } from '../services/publicCatalogClickStore';
 
 /** Limite generoso o bastante pra qualquer mensagem pré-preenchida real, mas evita abuso (payload gigante inflando a tabela de cliques). */
 const MAX_CLICK_MESSAGE_LENGTH = 500;
@@ -37,8 +37,9 @@ export function createPublicCatalogRouter(): Router {
     const baseMessage = rawMessage.slice(0, MAX_CLICK_MESSAGE_LENGTH).trim();
     if (!baseMessage) return res.status(400).json({ error: 'Mensagem ausente.' });
     const product = typeof req.query.product === 'string' ? req.query.product.slice(0, 200) : undefined;
+    const source: CatalogClickSource | undefined = req.query.source === 'novo' ? 'novo' : req.query.source === 'legacy' ? 'legacy' : undefined;
 
-    const click = await recordCatalogWhatsappClick(target.tenantId, baseMessage, product);
+    const click = await recordCatalogWhatsappClick(target.tenantId, baseMessage, product, source);
     res.redirect(302, `https://wa.me/${target.whatsappNumber}?text=${encodeURIComponent(click.message)}`);
   }));
 

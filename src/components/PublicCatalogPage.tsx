@@ -264,7 +264,7 @@ function whatsappUrl(slug: string, phone: string | undefined, productName: strin
   const message = language === 'es' && template
     ? (productName ? template.split('{produto}').join(productName) : template)
     : defaultMessage;
-  const params = new URLSearchParams({ msg: message });
+  const params = new URLSearchParams({ msg: message, source: 'legacy' });
   if (productName) params.set('product', productName);
   return `/api/public/catalog/${encodeURIComponent(slug)}/whatsapp-click?${params.toString()}`;
 }

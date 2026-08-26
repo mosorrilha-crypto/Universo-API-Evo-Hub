@@ -94,11 +94,11 @@ describe('GET /api/public-catalog-settings/analytics', () => {
   it('agrega os cliques do próprio tenant — totais, últimos 7/30 dias, por produto e recentes', async () => {
     const now = new Date();
     supabase.__tables.public_catalog_whatsapp_clicks = [
-      { id: 'click-1', tenant_id: TENANT_A, code: '💕', product: 'Combo Full Face', message: 'oi 💕', created_at: now.toISOString(), matched_at: now.toISOString(), matched_phone: '595981111111' },
-      { id: 'click-2', tenant_id: TENANT_A, code: '🌸', product: 'Combo Full Face', message: 'oi 🌸', created_at: now.toISOString(), matched_at: null, matched_phone: null },
-      { id: 'click-3', tenant_id: TENANT_A, code: '✨', product: null, message: 'oi ✨', created_at: now.toISOString(), matched_at: null, matched_phone: null },
+      { id: 'click-1', tenant_id: TENANT_A, code: '💕', product: 'Combo Full Face', source: 'legacy', message: 'oi 💕', created_at: now.toISOString(), matched_at: now.toISOString(), matched_phone: '595981111111' },
+      { id: 'click-2', tenant_id: TENANT_A, code: '🌸', product: 'Combo Full Face', source: 'novo', message: 'oi 🌸', created_at: now.toISOString(), matched_at: null, matched_phone: null },
+      { id: 'click-3', tenant_id: TENANT_A, code: '✨', product: null, source: null, message: 'oi ✨', created_at: now.toISOString(), matched_at: null, matched_phone: null },
       // outro tenant — nunca deve aparecer no relatório do TENANT_A
-      { id: 'click-4', tenant_id: TENANT_B, code: '🦋', product: 'Combo Full Face', message: 'oi 🦋', created_at: now.toISOString(), matched_at: now.toISOString(), matched_phone: '595982222222' },
+      { id: 'click-4', tenant_id: TENANT_B, code: '🦋', product: 'Combo Full Face', source: 'novo', message: 'oi 🦋', created_at: now.toISOString(), matched_at: now.toISOString(), matched_phone: '595982222222' },
     ];
 
     const res = await fetch(`${baseUrl}/api/public-catalog-settings/analytics`);
@@ -112,6 +112,13 @@ describe('GET /api/public-catalog-settings/analytics', () => {
       expect.arrayContaining([
         { product: 'Combo Full Face', clicks: 2, matched: 1 },
         { product: 'Geral (botão sem produto específico)', clicks: 1, matched: 0 },
+      ])
+    );
+    // clique sem source (null, ex: anterior a esta coluna) conta como "legacy" — junto com click-1
+    expect(body.bySource).toEqual(
+      expect.arrayContaining([
+        { source: 'legacy', clicks: 2, matched: 1 },
+        { source: 'novo', clicks: 1, matched: 0 },
       ])
     );
     expect(body.recent).toHaveLength(3);
