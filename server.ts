@@ -23,6 +23,7 @@ import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
 import { createQualityAuditRouter } from './server/routes/qualityAudit';
 import { createPublicCatalogRouter } from './server/routes/publicCatalog';
+import { createCommercialOfferRouter } from './server/routes/commercialOffer';
 import { createEntitlementsRouter } from './server/routes/entitlements';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
@@ -114,6 +115,7 @@ async function startServer() {
   // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
   // slug e só publica tenants explicitamente habilitados na migration 0042.
   app.use(createPublicCatalogRouter());
+  app.use(createCommercialOfferRouter());
 
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
   app.use(createEntitlementsRouter({ authenticateToken }));

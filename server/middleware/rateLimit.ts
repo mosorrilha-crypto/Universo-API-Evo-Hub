@@ -30,3 +30,13 @@ export const publicCatalogRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Muitas consultas ao catálogo. Aguarde um minuto e tente novamente.' },
 });
+
+// Interesse comercial é escrita pública e recebe limite mais conservador que
+// consultas de catálogo, evitando spam sem impedir um visitante legítimo.
+export const commercialInterestRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas solicitações a partir desta conexão. Aguarde uma hora e tente novamente.' },
+});
