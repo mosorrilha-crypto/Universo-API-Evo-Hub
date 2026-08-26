@@ -123,6 +123,25 @@ describe('GET /api/public-catalog-settings/analytics', () => {
     );
     expect(body.recent).toHaveLength(3);
     expect(body.recent.some((r: any) => r.matchedPhone === '595982222222')).toBe(false);
+    // lista de números (leads) — só clique com matched_phone, nunca de outro tenant
+    expect(body.leads).toEqual([
+      { phone: '595981111111', product: 'Combo Full Face', source: 'legacy', matchedAt: now.toISOString() },
+    ]);
+  });
+
+  it('lead com o mesmo telefone clicando mais de uma vez aparece uma vez só, com o clique mais recente', async () => {
+    const older = new Date(Date.now() - 60_000);
+    const newer = new Date();
+    supabase.__tables.public_catalog_whatsapp_clicks = [
+      { id: 'click-1', tenant_id: TENANT_A, code: '💕', product: 'Combo Full Face', source: 'legacy', message: 'oi', created_at: older.toISOString(), matched_at: older.toISOString(), matched_phone: '595981111111' },
+      { id: 'click-2', tenant_id: TENANT_A, code: '🌸', product: 'Microlips Labios', source: 'novo', message: 'oi', created_at: newer.toISOString(), matched_at: newer.toISOString(), matched_phone: '595981111111' },
+    ];
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings/analytics`);
+    const body = await res.json();
+    expect(body.leads).toEqual([
+      { phone: '595981111111', product: 'Microlips Labios', source: 'novo', matchedAt: newer.toISOString() },
+    ]);
   });
 
   it('sem clique nenhum, devolve tudo zerado sem lançar erro', async () => {
@@ -132,6 +151,7 @@ describe('GET /api/public-catalog-settings/analytics', () => {
     expect(body.totalClicks).toBe(0);
     expect(body.byProduct).toEqual([]);
     expect(body.recent).toEqual([]);
+    expect(body.leads).toEqual([]);
   });
 });
 
