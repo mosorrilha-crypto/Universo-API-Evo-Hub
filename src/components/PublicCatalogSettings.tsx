@@ -13,9 +13,14 @@ interface CatalogClickProductStats extends CatalogClickWindowStats {
   product: string;
 }
 
+interface CatalogClickSourceStats extends CatalogClickWindowStats {
+  source: string;
+}
+
 interface CatalogClickRecentEntry {
   id: string;
   product?: string;
+  source?: string;
   createdAt: string;
   matchedAt?: string;
   matchedPhone?: string;
@@ -27,8 +32,14 @@ interface CatalogClickAnalytics {
   last7d: CatalogClickWindowStats;
   last30d: CatalogClickWindowStats;
   byProduct: CatalogClickProductStats[];
+  bySource: CatalogClickSourceStats[];
   recent: CatalogClickRecentEntry[];
 }
+
+const CATALOG_SOURCE_LABEL: Record<string, string> = {
+  legacy: 'Catálogo original',
+  novo: 'Segundo catálogo (Beauty Concierge)',
+};
 
 interface PublicCatalogFormState {
   enabled: boolean;
@@ -159,6 +170,21 @@ function CatalogPerformanceTab() {
         <StatCard label="Últimos 7 dias" value={String(analytics.last7d.clicks)} hint={`${analytics.last7d.matched} viraram conversa`} />
         <StatCard label="Últimos 30 dias" value={String(analytics.last30d.clicks)} hint={`${analytics.last30d.matched} viraram conversa`} />
       </div>
+
+      {analytics.bySource.length > 1 && (
+        <div>
+          <p className="text-xs font-semibold text-slate-300 mb-2">Catálogo original x segundo catálogo</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {analytics.bySource.map((row) => (
+              <div key={row.source} className="p-4 rounded-xl bg-slate-950 border border-slate-800">
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">{CATALOG_SOURCE_LABEL[row.source] || row.source}</p>
+                <p className="text-2xl font-bold text-white mt-1">{row.clicks} <span className="text-xs font-normal text-slate-500">cliques</span></p>
+                <p className="text-[11px] text-slate-500 mt-0.5">{row.matched} viraram conversa · taxa de {conversionRateLabel(row.clicks, row.matched)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {analytics.totalClicks === 0 ? (
         <p className="p-4 text-xs text-slate-400 bg-slate-950 border border-slate-800 rounded-xl">

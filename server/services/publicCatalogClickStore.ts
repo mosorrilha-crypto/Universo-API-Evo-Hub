@@ -66,6 +66,9 @@ export interface CatalogWhatsappClick {
   message: string;
 }
 
+/** Páginas de catálogo público que já geram clique hoje — ver TASK-0087/0094 (segundo catálogo). */
+export type CatalogClickSource = 'legacy' | 'novo';
+
 /**
  * Grava o clique e devolve a mensagem final (original + code) pra montar a
  * URL de redirect — gera um code novo até não colidir com outro code ainda
@@ -73,7 +76,7 @@ export interface CatalogWhatsappClick {
  * mesmo code por coincidência; com 12^3 combinações e volume real baixo,
  * normalmente acerta de primeira).
  */
-export async function recordCatalogWhatsappClick(tenantId: string, baseMessage: string, product?: string): Promise<CatalogWhatsappClick> {
+export async function recordCatalogWhatsappClick(tenantId: string, baseMessage: string, product?: string, source?: CatalogClickSource): Promise<CatalogWhatsappClick> {
   const db = getPlatformDb();
   let code = generateCuteCode();
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -89,6 +92,7 @@ export async function recordCatalogWhatsappClick(tenantId: string, baseMessage: 
     code,
     product: product || null,
     message,
+    source: source || null,
     created_at: new Date().toISOString(),
     matched_at: null,
     matched_phone: null,
@@ -136,9 +140,15 @@ export interface CatalogClickProductStats extends CatalogClickWindowStats {
   product: string;
 }
 
+/** `source` chega como veio gravado no clique — "legacy"/"novo"/null (anterior à coluna ou não informado). */
+export interface CatalogClickSourceStats extends CatalogClickWindowStats {
+  source: string;
+}
+
 export interface CatalogClickRecentEntry {
   id: string;
   product?: string;
+  source?: string;
   createdAt: string;
   matchedAt?: string;
   matchedPhone?: string;
@@ -150,6 +160,8 @@ export interface CatalogClickAnalytics {
   last7d: CatalogClickWindowStats;
   last30d: CatalogClickWindowStats;
   byProduct: CatalogClickProductStats[];
+  /** Comparação entre páginas de catálogo (TASK-0087/0094) — "Catálogo original" quando `source` vem null/"legacy". */
+  bySource: CatalogClickSourceStats[];
   /** Últimos 20 cliques, mais recente primeiro — visão rápida de "o que está acontecendo agora" na aba de Desempenho. */
   recent: CatalogClickRecentEntry[];
 }
@@ -175,6 +187,7 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
   const last7d: CatalogClickWindowStats = { clicks: 0, matched: 0 };
   const last30d: CatalogClickWindowStats = { clicks: 0, matched: 0 };
   const productMap = new Map<string, CatalogClickWindowStats>();
+  const sourceMap = new Map<string, CatalogClickWindowStats>();
   let totalMatched = 0;
 
   for (const row of rows) {
@@ -190,14 +203,24 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
       if (isMatched) last30d.matched++;
     }
     const productKey = row.product || 'Geral (botão sem produto específico)';
-    const entry = productMap.get(productKey) || { clicks: 0, matched: 0 };
-    entry.clicks++;
-    if (isMatched) entry.matched++;
-    productMap.set(productKey, entry);
+    const productEntry = productMap.get(productKey) || { clicks: 0, matched: 0 };
+    productEntry.clicks++;
+    if (isMatched) productEntry.matched++;
+    productMap.set(productKey, productEntry);
+
+    const sourceKey = row.source === 'novo' ? 'novo' : 'legacy';
+    const sourceEntry = sourceMap.get(sourceKey) || { clicks: 0, matched: 0 };
+    sourceEntry.clicks++;
+    if (isMatched) sourceEntry.matched++;
+    sourceMap.set(sourceKey, sourceEntry);
   }
 
   const byProduct = Array.from(productMap.entries())
     .map(([product, stats]) => ({ product, ...stats }))
+    .sort((a, b) => b.clicks - a.clicks);
+
+  const bySource = Array.from(sourceMap.entries())
+    .map(([source, stats]) => ({ source, ...stats }))
     .sort((a, b) => b.clicks - a.clicks);
 
   const recent: CatalogClickRecentEntry[] = [...rows]
@@ -206,10 +229,11 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
     .map((row) => ({
       id: row.id,
       product: row.product || undefined,
+      source: row.source || undefined,
       createdAt: row.created_at,
       matchedAt: row.matched_at || undefined,
       matchedPhone: row.matched_phone || undefined,
     }));
 
-  return { totalClicks: rows.length, totalMatched, last7d, last30d, byProduct, recent };
+  return { totalClicks: rows.length, totalMatched, last7d, last30d, byProduct, bySource, recent };
 }

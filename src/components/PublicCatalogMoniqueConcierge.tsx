@@ -113,7 +113,7 @@ function formatDuration(minutes?: number): string | null {
 
 /** Aponta pro backend (`/api/public/catalog/:slug/whatsapp-click`), igual ao catálogo existente: clique é contado de verdade e a mensagem sai com um código de rastreio embutido. */
 function whatsappClickUrl(message: string, productName?: string): string {
-  const params = new URLSearchParams({ msg: message });
+  const params = new URLSearchParams({ msg: message, source: 'novo' });
   if (productName) params.set('product', productName);
   return `/api/public/catalog/${encodeURIComponent(CATALOG_SLUG)}/whatsapp-click?${params.toString()}`;
 }
