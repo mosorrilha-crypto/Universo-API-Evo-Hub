@@ -89,6 +89,10 @@ export interface FinancialTransaction {
   sourceRef?: string;
   /** Receita vinculada a atendimento/cobrança ou despesa operacional avulsa. Registros legados são receita por padrão. */
   entryType?: 'income' | 'expense';
+  /** Classificação e conta selecionadas no módulo Financeiro, quando aplicáveis. */
+  categoryId?: string;
+  accountId?: string;
+  notes?: string;
 }
 
 /** Despesa fixa (aluguel, assinatura...) cadastrada uma vez — o job diário gera a FinancialTransaction correspondente sozinho todo mês no dia de vencimento (dayOfMonth). Ver server/services/recurringExpenseJob.ts. */

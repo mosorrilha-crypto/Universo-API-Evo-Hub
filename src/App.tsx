@@ -19,6 +19,7 @@ import OperationsModuleFrame from './components/OperationsModuleFrame';
 import { OperatorCRM } from './components/OperatorCRM';
 import { EscalationsPanel } from './components/EscalationsPanel';
 import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
+import { FinancialOperationsCenter } from './components/FinancialOperationsCenter';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKnowledgeBase';
 import { PublicCatalogSettings } from './components/PublicCatalogSettings';
@@ -1271,6 +1272,11 @@ export const App: React.FC = () => {
             onAddRecurringExpense={handleAddRecurringExpense}
             onToggleRecurringExpense={handleToggleRecurringExpense}
             onDeleteRecurringExpense={handleDeleteRecurringExpense}
+          />
+          <FinancialOperationsCenter
+            currency={activeTenant.currency}
+            locale={activeTenant.locale}
+            onToast={showToast}
           />
           </OperationsModuleFrame>
         )}
