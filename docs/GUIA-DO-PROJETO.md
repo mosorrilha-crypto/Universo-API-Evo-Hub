@@ -86,6 +86,11 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 
 ## Mudanças recentes relevantes (não é auditoria completa, só registro)
 
+**26/08/2026 (TASK-0100 — identidade canônica de celular brasileiro no Evolution):**
+- Um teste prático autorizado no tenant Monique confirmou o envio Evolution até o aparelho e a resposta até o banco. O painel parecia não receber a resposta porque a Evolution devolveu o mesmo celular brasileiro em formato legado, sem o nono dígito móvel, criando uma segunda conversa para o mesmo contato.
+- `webhookParsers.ts` agora converte esse caso antes de resolver tenant, gravar mensagem ou rodar automação: somente números brasileiros `55 + DDD + assinante móvel de oito dígitos iniciado entre 6 e 9` recebem o nono dígito; linhas fixas e números de outros países não mudam. A correção é prospectiva e cobre também o fallback `@lid` da Evolution.
+- As conversas históricas criadas durante o teste não foram fundidas automaticamente: mensagens e etiquetas existentes seguem intactas até haver uma decisão explícita para consolidação de dados em produção.
+
 **26/08/2026 (TASK-0091 — planos comerciais e página pública de oferta):**
 - Foram aplicadas em produção as migrations `0054_commercial_offer_plans_and_pilot.sql` e `0055_commercial_interest_requests.sql`. Elas materializam os planos Essencial (Gs. 349.000/mês) e Profissional (Gs. 649.000/mês), com 13 regras de feature cada, e uma tabela privada para contatos que manifestam interesse comercial.
 - O tenant **Piloto Comercial Essencial** foi provisionado intencionalmente como `is_active=false`, com assinatura `trial` no Essencial e sem telefone, token, operador, canal ou dados de clientes. Nenhum tenant em operação foi alterado.
