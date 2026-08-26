@@ -154,6 +154,14 @@ export interface CatalogClickRecentEntry {
   matchedPhone?: string;
 }
 
+/** Um lead = um número de telefone real que mandou a mensagem e foi reconhecido pelo `code` do clique. */
+export interface CatalogClickLead {
+  phone: string;
+  product?: string;
+  source?: string;
+  matchedAt: string;
+}
+
 export interface CatalogClickAnalytics {
   totalClicks: number;
   totalMatched: number;
@@ -164,6 +172,13 @@ export interface CatalogClickAnalytics {
   bySource: CatalogClickSourceStats[];
   /** Últimos 20 cliques, mais recente primeiro — visão rápida de "o que está acontecendo agora" na aba de Desempenho. */
   recent: CatalogClickRecentEntry[];
+  /**
+   * Números reais que vieram pelo catálogo (pedido real, 26/08/2026) — só cliques que viraram
+   * conversa de verdade (`matched_phone` presente), um por telefone (mais recente vence se o
+   * mesmo número clicou mais de uma vez), mais recente primeiro. Pra exportar/copiar como lista
+   * de contatos, sem precisar vasculhar "Cliques recentes" um por um.
+   */
+  leads: CatalogClickLead[];
 }
 
 /**
@@ -235,5 +250,19 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
       matchedPhone: row.matched_phone || undefined,
     }));
 
-  return { totalClicks: rows.length, totalMatched, last7d, last30d, byProduct, bySource, recent };
+  const leadByPhone = new Map<string, CatalogClickLead>();
+  for (const row of rows) {
+    if (!row.matched_phone || !row.matched_at) continue;
+    const existing = leadByPhone.get(row.matched_phone);
+    if (existing && existing.matchedAt >= row.matched_at) continue;
+    leadByPhone.set(row.matched_phone, {
+      phone: row.matched_phone,
+      product: row.product || undefined,
+      source: row.source || undefined,
+      matchedAt: row.matched_at,
+    });
+  }
+  const leads = Array.from(leadByPhone.values()).sort((a, b) => b.matchedAt.localeCompare(a.matchedAt));
+
+  return { totalClicks: rows.length, totalMatched, last7d, last30d, byProduct, bySource, recent, leads };
 }

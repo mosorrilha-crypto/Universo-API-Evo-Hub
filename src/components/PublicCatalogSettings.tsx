@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { BarChart3, Download, ExternalLink, Link2, Loader2, Save, Settings } from 'lucide-react';
+import { BarChart3, Check, Copy, Download, ExternalLink, Link2, Loader2, Save, Settings } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 import { downloadCatalogPdf } from '../lib/catalogPdf';
 import type { AgentProduct } from '../types';
@@ -26,6 +26,13 @@ interface CatalogClickRecentEntry {
   matchedPhone?: string;
 }
 
+interface CatalogClickLead {
+  phone: string;
+  product?: string;
+  source?: string;
+  matchedAt: string;
+}
+
 interface CatalogClickAnalytics {
   totalClicks: number;
   totalMatched: number;
@@ -34,6 +41,7 @@ interface CatalogClickAnalytics {
   byProduct: CatalogClickProductStats[];
   bySource: CatalogClickSourceStats[];
   recent: CatalogClickRecentEntry[];
+  leads: CatalogClickLead[];
 }
 
 const CATALOG_SOURCE_LABEL: Record<string, string> = {
@@ -106,6 +114,24 @@ function conversionRateLabel(clicks: number, matched: number): string {
   return `${Math.round((matched / clicks) * 100)}%`;
 }
 
+function downloadLeadsCsv(leads: CatalogClickLead[]): void {
+  const header = 'Telefone,Data,Produto,Origem\n';
+  const rows = leads
+    .map((lead) => {
+      const source = lead.source ? CATALOG_SOURCE_LABEL[lead.source] || lead.source : 'Catálogo original';
+      const product = (lead.product || 'Geral').replace(/"/g, '""');
+      return `"${lead.phone}","${formatDateTime(lead.matchedAt)}","${product}","${source}"`;
+    })
+    .join('\n');
+  const blob = new Blob([`${header}${rows}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `leads-catalogo-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
@@ -127,6 +153,17 @@ function CatalogPerformanceTab() {
   const [analytics, setAnalytics] = useState<CatalogClickAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLeads = async (leads: CatalogClickLead[]) => {
+    try {
+      await navigator.clipboard.writeText(leads.map((lead) => lead.phone).join('\n'));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Sem permissão de clipboard (ex: contexto não seguro) — usuária ainda pode exportar CSV.
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -214,6 +251,46 @@ function CatalogPerformanceTab() {
               </tbody>
             </table>
           </div>
+
+          {analytics.leads.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-xs font-semibold text-slate-300">Números que vieram pelo catálogo ({analytics.leads.length})</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyLeads(analytics.leads)}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold flex items-center gap-1.5 transition-all"
+                  >
+                    {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    {copied ? 'Copiado' : 'Copiar números'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadLeadsCsv(analytics.leads)}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-800 text-slate-200 text-[11px] font-semibold flex items-center gap-1.5 transition-all"
+                  >
+                    <Download className="w-3 h-3" /> Exportar CSV
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-800 divide-y divide-slate-800 max-h-64 overflow-y-auto">
+                {analytics.leads.map((lead) => (
+                  <div key={lead.phone} className="px-3 py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <p className="text-slate-200 font-semibold truncate">{lead.phone}</p>
+                      <p className="text-slate-500 truncate">{lead.product || 'Geral (botão sem produto específico)'} · {formatDateTime(lead.matchedAt)}</p>
+                    </div>
+                    {lead.source && (
+                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400 font-semibold whitespace-nowrap">
+                        {CATALOG_SOURCE_LABEL[lead.source] || lead.source}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <p className="text-xs font-semibold text-slate-300 mb-2">Cliques recentes</p>
