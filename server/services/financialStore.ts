@@ -28,6 +28,9 @@ export interface FinancialTransactionRecord {
   sourceRef?: string;
   /** Receita vinculada a uma venda/agendamento ou despesa operacional avulsa. */
   entryType: FinancialEntryType;
+  categoryId?: string;
+  accountId?: string;
+  notes?: string;
 }
 
 type FinancialTransactionRow = {
@@ -46,10 +49,13 @@ type FinancialTransactionRow = {
   payment_link_url: string | null;
   source_ref: string | null;
   entry_type: FinancialEntryType | null;
+  category_id: string | null;
+  account_id: string | null;
+  notes: string | null;
 };
 
 const FINANCIAL_TRANSACTION_COLUMNS =
-  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url, source_ref, entry_type';
+  'id, lead_id, lead_name, lead_phone, product_name, amount, payment_method, status, date, operator_name, channel, pix_qr_code, payment_link_url, source_ref, entry_type, category_id, account_id, notes';
 
 function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTransactionRecord {
   return {
@@ -68,6 +74,9 @@ function toFinancialTransactionRecord(row: FinancialTransactionRow): FinancialTr
     paymentLinkUrl: row.payment_link_url ?? undefined,
     sourceRef: row.source_ref ?? undefined,
     entryType: row.entry_type || 'income',
+    categoryId: row.category_id ?? undefined,
+    accountId: row.account_id ?? undefined,
+    notes: row.notes ?? undefined,
   };
 }
 
@@ -99,6 +108,9 @@ export interface CreateFinancialTransactionInput {
   paymentLinkUrl?: string;
   sourceRef?: string;
   entryType?: FinancialEntryType;
+  categoryId?: string;
+  accountId?: string;
+  notes?: string;
 }
 
 /** true quando o erro é a constraint única (tenant_id, source_ref) da migration 0037 — sinal de que essa transação já foi criada antes (reentrega/retry), nunca um erro real. Quem chama pra criação automática (ver conversations.ts verify-payment) deve tratar isso como sucesso silencioso, não propagar. */
@@ -135,6 +147,9 @@ export async function createFinancialTransaction(
       payment_link_url: input.paymentLinkUrl,
       source_ref: input.sourceRef,
       entry_type: input.entryType || 'income',
+      category_id: input.categoryId,
+      account_id: input.accountId,
+      notes: input.notes,
     })
     .select(FINANCIAL_TRANSACTION_COLUMNS)
     .single();

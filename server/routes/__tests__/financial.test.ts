@@ -316,6 +316,43 @@ describe('DELETE /api/financial/transactions/:id', () => {
   });
 });
 
+describe('estrutura operacional do Financeiro', () => {
+  it('cria categoria, conta, item e recebe uma compra com estoque e despesa rastreáveis', async () => {
+    const categoryRes = await fetch(`${baseUrl}/api/financial/categories`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Insumos', kind: 'cost' }),
+    });
+    expect(categoryRes.status).toBe(201);
+
+    const accountRes = await fetch(`${baseUrl}/api/financial/accounts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Caixa principal', accountType: 'cash', openingBalance: 500 }),
+    });
+    expect(accountRes.status).toBe(201);
+
+    const itemRes = await fetch(`${baseUrl}/api/financial/inventory/items`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Henna', sku: 'HENNA-01', itemType: 'supply', unit: 'un', reorderPoint: 2 }),
+    });
+    const { item } = await itemRes.json();
+    expect(itemRes.status).toBe(201);
+
+    const purchaseRes = await fetch(`${baseUrl}/api/financial/purchases`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ supplierName: 'Fornecedor Beauty', paymentMethod: 'PIX', items: [{ inventoryItemId: item.id, quantity: 4, unitCost: 12 }] }),
+    });
+    const { purchase } = await purchaseRes.json();
+    expect(purchaseRes.status).toBe(201);
+
+    const receiveRes = await fetch(`${baseUrl}/api/financial/purchases/${purchase.id}/receive`, { method: 'POST' });
+    expect(receiveRes.status).toBe(200);
+
+    const inventoryRes = await fetch(`${baseUrl}/api/financial/inventory/items`);
+    const inventoryData = await inventoryRes.json();
+    expect(inventoryData.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: item.id, onHandQuantity: 4, averageUnitCost: 12 })]));
+
+    const transactionsRes = await fetch(`${baseUrl}/api/financial/transactions`);
+    const transactionsData = await transactionsRes.json();
+    expect(transactionsData.transactions).toEqual(expect.arrayContaining([expect.objectContaining({ entryType: 'expense', amount: 48, productName: 'Compra de estoque — Fornecedor Beauty' })]));
+  });
+});
+
 describe('isolamento entre tenants', () => {
   it('tenant B nunca vê transações do tenant A', async () => {
     function otherTenantAuth(req: any, _res: any, next: any) {
@@ -344,7 +381,7 @@ describe('isolamento entre tenants', () => {
     }
     const app2 = express();
     app2.use(express.json());
-    app2.use(createFinancialRouter({ authenticateToken: otherTenantAuth as any }));
+    app2.use(createFinancialRouter({ authenticateToken: otherTenantAuth as any, isFinancialModuleEnabled: async () => true }));
     const server2 = await new Promise<Server>((resolve) => {
       const s = app2.listen(0, () => resolve(s));
     });

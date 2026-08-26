@@ -17,7 +17,7 @@ class FakeQueryBuilder {
   constructor(
     private rows: Row[],
     private op: 'select' | 'insert' | 'update' | 'delete' | 'upsert',
-    private payload?: Row,
+    private payload?: Row | Row[],
     private upsertOpts?: { onConflict?: string }
   ) {}
 
@@ -73,9 +73,10 @@ class FakeQueryBuilder {
       return { data: this.rows.filter((row) => this.matches(row)), error: null };
     }
     if (this.op === 'insert') {
-      const newRow: Row = { id: randomUUID(), ...this.payload };
-      this.rows.push(newRow);
-      return { data: [newRow], error: null };
+      const payloads = Array.isArray(this.payload) ? this.payload : [this.payload];
+      const newRows = payloads.map((payload) => ({ id: randomUUID(), ...payload }));
+      this.rows.push(...newRows);
+      return { data: newRows, error: null };
     }
     if (this.op === 'update') {
       const matched = this.rows.filter((row) => this.matches(row));
@@ -90,13 +91,13 @@ class FakeQueryBuilder {
     // upsert
     const conflictCols = (this.upsertOpts?.onConflict || '').split(',').filter(Boolean);
     const existing = conflictCols.length
-      ? this.rows.find((row) => conflictCols.every((col) => row[col] === this.payload?.[col]))
+      ? this.rows.find((row) => conflictCols.every((col) => row[col] === (this.payload as Row | undefined)?.[col]))
       : undefined;
     if (existing) {
-      Object.assign(existing, this.payload);
+      Object.assign(existing, this.payload as Row);
       return { data: [existing], error: null };
     }
-    const newRow: Row = { ...this.payload };
+    const newRow: Row = { ...(this.payload as Row) };
     this.rows.push(newRow);
     return { data: [newRow], error: null };
   }
@@ -153,7 +154,7 @@ export function createFakeSupabase(seed: Tables = {}) {
         : (tables[table] || (tables[table] = []));
       return {
         select: (columns?: string) => new FakeQueryBuilder(rows, 'select').select(columns),
-        insert: (payload: Row) => new FakeQueryBuilder(rows, 'insert', payload),
+        insert: (payload: Row | Row[]) => new FakeQueryBuilder(rows, 'insert', payload),
         update: (payload: Row) => new FakeQueryBuilder(rows, 'update', payload),
         delete: () => new FakeQueryBuilder(rows, 'delete'),
         upsert: (payload: Row, opts?: { onConflict?: string }) => new FakeQueryBuilder(rows, 'upsert', payload, opts),

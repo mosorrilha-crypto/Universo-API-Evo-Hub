@@ -14,6 +14,23 @@ import {
   updateRecurringExpense,
   deleteRecurringExpense,
 } from '../services/recurringExpenseStore';
+import {
+  listFinancialCategories,
+  createFinancialCategory,
+  listFinancialAccounts,
+  createFinancialAccount,
+  listInventoryItems,
+  createInventoryItem,
+  listStockMovements,
+  createStockAdjustment,
+  listPurchaseOrders,
+  createPurchaseOrder,
+  receivePurchaseOrder,
+  type FinancialCategoryKind,
+  type FinancialAccountType,
+  type InventoryItemType,
+  type StockMovementType,
+} from '../services/financialOperationsStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireRole, resolveTenantId } from '../middleware/rbac';
@@ -33,6 +50,10 @@ function tenantOf(req: AuthenticatedRequest): string {
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['pago', 'pendente', 'atrasado', 'cancelado'];
 const ENTRY_TYPES: FinancialEntryType[] = ['income', 'expense'];
+const CATEGORY_KINDS: FinancialCategoryKind[] = ['income', 'expense', 'cost'];
+const ACCOUNT_TYPES: FinancialAccountType[] = ['cash', 'bank', 'digital_wallet', 'card'];
+const INVENTORY_ITEM_TYPES: InventoryItemType[] = ['product', 'supply'];
+const STOCK_ADJUSTMENT_TYPES: Extract<StockMovementType, 'adjustment_in' | 'adjustment_out' | 'loss'>[] = ['adjustment_in', 'adjustment_out', 'loss'];
 
 function requireFinancialModule(isFinancialModuleEnabled?: FinancialRouterDeps['isFinancialModuleEnabled']) {
   return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
@@ -67,7 +88,7 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
   }));
 
   router.post('/api/financial/transactions', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType } = req.body || {};
+    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType, categoryId, accountId, notes } = req.body || {};
 
     if (typeof id !== 'string' || !id.trim()) return res.status(400).json({ error: 'id é obrigatório.' });
     if (typeof leadId !== 'string' || !leadId.trim()) return res.status(400).json({ error: 'leadId é obrigatório.' });
@@ -94,6 +115,9 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
       pixQrCode: typeof pixQrCode === 'string' ? pixQrCode : undefined,
       paymentLinkUrl: typeof paymentLinkUrl === 'string' ? paymentLinkUrl : undefined,
       entryType: resolvedEntryType,
+      categoryId: typeof categoryId === 'string' && categoryId ? categoryId : undefined,
+      accountId: typeof accountId === 'string' && accountId ? accountId : undefined,
+      notes: typeof notes === 'string' && notes.trim() ? notes.trim() : undefined,
     });
     res.json({ transaction });
   }));
@@ -113,15 +137,97 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
     res.json({ success: true });
   }));
 
+  router.get('/api/financial/categories', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ categories: await listFinancialCategories(tenantOf(req)) });
+  }));
+
+  router.post('/api/financial/categories', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { name, kind, color } = req.body || {};
+    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) return res.status(400).json({ error: 'name precisa ter entre 2 e 80 caracteres.' });
+    if (!CATEGORY_KINDS.includes(kind)) return res.status(400).json({ error: `kind inválido — esperado um de: ${CATEGORY_KINDS.join(', ')}.` });
+    if (color !== undefined && (typeof color !== 'string' || color.length > 20)) return res.status(400).json({ error: 'color, quando informado, precisa ser texto curto.' });
+    res.status(201).json({ category: await createFinancialCategory(tenantOf(req), { name: name.trim(), kind, color }) });
+  }));
+
+  router.get('/api/financial/accounts', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ accounts: await listFinancialAccounts(tenantOf(req)) });
+  }));
+
+  router.post('/api/financial/accounts', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { name, accountType, openingBalance } = req.body || {};
+    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 80) return res.status(400).json({ error: 'name precisa ter entre 2 e 80 caracteres.' });
+    if (!ACCOUNT_TYPES.includes(accountType)) return res.status(400).json({ error: `accountType inválido — esperado um de: ${ACCOUNT_TYPES.join(', ')}.` });
+    if (typeof openingBalance !== 'number' || !Number.isFinite(openingBalance)) return res.status(400).json({ error: 'openingBalance precisa ser um número.' });
+    res.status(201).json({ account: await createFinancialAccount(tenantOf(req), { name: name.trim(), accountType, openingBalance }) });
+  }));
+
+  router.get('/api/financial/inventory/items', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ items: await listInventoryItems(tenantOf(req)) });
+  }));
+
+  router.post('/api/financial/inventory/items', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { name, sku, itemType, unit, reorderPoint } = req.body || {};
+    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 120) return res.status(400).json({ error: 'name precisa ter entre 2 e 120 caracteres.' });
+    if (sku !== undefined && (typeof sku !== 'string' || sku.trim().length > 80)) return res.status(400).json({ error: 'sku, quando informado, precisa ter até 80 caracteres.' });
+    if (!INVENTORY_ITEM_TYPES.includes(itemType)) return res.status(400).json({ error: `itemType inválido — esperado um de: ${INVENTORY_ITEM_TYPES.join(', ')}.` });
+    if (typeof unit !== 'string' || !unit.trim() || unit.trim().length > 16) return res.status(400).json({ error: 'unit é obrigatório e deve ter até 16 caracteres.' });
+    if (typeof reorderPoint !== 'number' || !Number.isFinite(reorderPoint) || reorderPoint < 0) return res.status(400).json({ error: 'reorderPoint precisa ser um número não negativo.' });
+    res.status(201).json({ item: await createInventoryItem(tenantOf(req), { name: name.trim(), sku: sku?.trim() || undefined, itemType, unit: unit.trim(), reorderPoint }) });
+  }));
+
+  router.get('/api/financial/inventory/movements', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const inventoryItemId = typeof req.query.inventoryItemId === 'string' ? req.query.inventoryItemId : undefined;
+    res.json({ movements: await listStockMovements(tenantOf(req), inventoryItemId) });
+  }));
+
+  router.post('/api/financial/inventory/adjustments', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { inventoryItemId, movementType, quantity, unitCost, reason } = req.body || {};
+    if (typeof inventoryItemId !== 'string' || !inventoryItemId) return res.status(400).json({ error: 'inventoryItemId é obrigatório.' });
+    if (!STOCK_ADJUSTMENT_TYPES.includes(movementType)) return res.status(400).json({ error: `movementType inválido — esperado um de: ${STOCK_ADJUSTMENT_TYPES.join(', ')}.` });
+    if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity <= 0) return res.status(400).json({ error: 'quantity precisa ser um número maior que zero.' });
+    if (unitCost !== undefined && (typeof unitCost !== 'number' || !Number.isFinite(unitCost) || unitCost < 0)) return res.status(400).json({ error: 'unitCost, quando informado, precisa ser um número não negativo.' });
+    if (typeof reason !== 'string' || !reason.trim()) return res.status(400).json({ error: 'reason é obrigatório.' });
+    try {
+      res.status(201).json({ movement: await createStockAdjustment(tenantOf(req), { inventoryItemId, movementType, quantity, unitCost, reason: reason.trim() }) });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Não foi possível registrar o ajuste.' });
+    }
+  }));
+
+  router.get('/api/financial/purchases', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ purchases: await listPurchaseOrders(tenantOf(req)) });
+  }));
+
+  router.post('/api/financial/purchases', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { supplierName, paymentMethod, notes, items } = req.body || {};
+    if (typeof supplierName !== 'string' || supplierName.trim().length < 2 || supplierName.trim().length > 120) return res.status(400).json({ error: 'supplierName precisa ter entre 2 e 120 caracteres.' });
+    if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
+    if (notes !== undefined && (typeof notes !== 'string' || notes.length > 1000)) return res.status(400).json({ error: 'notes, quando informado, precisa ter até 1000 caracteres.' });
+    if (!Array.isArray(items) || items.length === 0 || items.some((item) => !item || typeof item.inventoryItemId !== 'string' || typeof item.quantity !== 'number' || !Number.isFinite(item.quantity) || item.quantity <= 0 || typeof item.unitCost !== 'number' || !Number.isFinite(item.unitCost) || item.unitCost < 0)) return res.status(400).json({ error: 'items deve ter ao menos um item com inventoryItemId, quantity e unitCost válidos.' });
+    try {
+      res.status(201).json({ purchase: await createPurchaseOrder(tenantOf(req), { supplierName: supplierName.trim(), paymentMethod, notes, items }) });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Não foi possível criar a compra.' });
+    }
+  }));
+
+  router.post('/api/financial/purchases/:id/receive', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    try {
+      res.json({ purchase: await receivePurchaseOrder(tenantOf(req), req.params.id) });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Não foi possível receber a compra.' });
+    }
+  }));
+
   // Despesas recorrentes (TASK-0097) — cadastra uma vez, o job diário
   // (recurringExpenseJob.ts) gera a financial_transaction sozinho todo mês
   // no dia de vencimento. Ver recurringExpenseStore.ts.
-  router.get('/api/financial/recurring-expenses', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/financial/recurring-expenses', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const recurringExpenses = await listRecurringExpenses(tenantOf(req));
     res.json({ recurringExpenses });
   }));
 
-  router.post('/api/financial/recurring-expenses', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/financial/recurring-expenses', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { description, amount, paymentMethod, dayOfMonth } = req.body || {};
     if (typeof description !== 'string' || !description.trim()) return res.status(400).json({ error: 'description é obrigatório.' });
     if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount precisa ser um número maior que zero.' });
@@ -139,7 +245,7 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
     res.status(201).json({ recurringExpense });
   }));
 
-  router.patch('/api/financial/recurring-expenses/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/financial/recurring-expenses/:id', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { description, amount, paymentMethod, dayOfMonth, active } = req.body || {};
     const patch: Parameters<typeof updateRecurringExpense>[2] = {};
     if (description !== undefined) {
@@ -170,7 +276,7 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
     res.json({ recurringExpense });
   }));
 
-  router.delete('/api/financial/recurring-expenses/:id', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/financial/recurring-expenses/:id', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteRecurringExpense(tenantOf(req), req.params.id);
     res.json({ success: true });
   }));
