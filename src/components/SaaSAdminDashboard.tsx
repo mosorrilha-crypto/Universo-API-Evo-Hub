@@ -3,6 +3,7 @@ import { Tenant, UserProfile, UserRole, TenantTokenTelemetry, ProviderBreakdown,
 import { apiFetch } from '../lib/apiClient';
 import { useRealTenants } from '../hooks/useRealTenants';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
+import { TenantEntitlementsModal } from './TenantEntitlementsModal';
 import {
   Building2,
   DollarSign,
@@ -998,6 +999,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [editingTenant, setEditingTenant] = useState<{ id: string; name: string; slug: string; segment: string; currency: string; locale: string } | null>(null);
   const [isSavingTenantEdit, setIsSavingTenantEdit] = useState(false);
   const [tenantEditError, setTenantEditError] = useState<string | null>(null);
+  const [entitlementsTenant, setEntitlementsTenant] = useState<{ id: string; name: string } | null>(null);
 
   const openEditTenant = (t: (typeof realTenants)[number]) => {
     setTenantEditError(null);
@@ -1616,6 +1618,9 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                         <button type="button" onClick={() => openBillingModal(t)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
                           <CreditCard className="h-3 w-3" /> Pagamentos
                         </button>
+                        <button type="button" onClick={() => setEntitlementsTenant({ id: t.id, name: t.name })} className="inline-flex items-center gap-1 rounded-lg bg-sky-950/60 px-2 py-1 text-[10px] font-semibold text-sky-200 hover:bg-sky-900/60">
+                          <Layers className="h-3 w-3" /> Capacidades
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleToggleTenantBlock(t)}
@@ -1671,6 +1676,9 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                               <button type="button" onClick={() => openBillingModal(t)} title="Histórico de pagamento" className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
                                 <CreditCard className="h-3 w-3" /> Pagamentos
                               </button>
+                              <button type="button" onClick={() => setEntitlementsTenant({ id: t.id, name: t.name })} title="Plano e capacidades" className="inline-flex items-center gap-1 rounded-lg bg-sky-950/60 px-2 py-1 text-[10px] font-semibold text-sky-200 hover:bg-sky-900/60">
+                                <Layers className="h-3 w-3" /> Capacidades
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleToggleTenantBlock(t)}
@@ -1695,6 +1703,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {entitlementsTenant && <TenantEntitlementsModal tenant={entitlementsTenant} onClose={() => setEntitlementsTenant(null)} />}
 
       {editingTenant && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !isSavingTenantEdit && setEditingTenant(null)}>
