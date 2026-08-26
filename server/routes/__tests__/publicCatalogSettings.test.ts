@@ -73,7 +73,6 @@ describe('GET /api/public-catalog-settings', () => {
     expect(body).toEqual({
       slug: 'tenant-a-slug',
       enabled: false,
-      template: 'default',
       whatsappPhone: '',
       instagramUrl: '',
       locationMapsUrl: '',
@@ -136,7 +135,6 @@ describe('PUT /api/public-catalog-settings', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: true,
-        template: 'gold_catalog',
         whatsappPhone: '595981436141',
         instagramUrl: 'https://instagram.com/pestanaspormonique',
         locationMapsUrl: 'https://maps.example/x',
@@ -151,7 +149,6 @@ describe('PUT /api/public-catalog-settings', () => {
     const get = await fetch(`${baseUrl}/api/public-catalog-settings`);
     const body = await get.json();
     expect(body.enabled).toBe(true);
-    expect(body.template).toBe('gold_catalog');
     expect(body.whatsappPhone).toBe('595981436141');
     expect(body.instagramUrl).toBe('https://instagram.com/pestanaspormonique');
     expect(body.whatsappMessageGeneral).toBe('Hola, quiero info general.');
@@ -167,15 +164,6 @@ describe('PUT /api/public-catalog-settings', () => {
 
     const tenantBRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_B);
     expect(tenantBRow.public_whatsapp_phone).toBe('5551234');
-  });
-
-  it('modelo de catálogo inválido é rejeitado com 400', async () => {
-    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: true, template: 'gold_catalog_hacker' }),
-    });
-    expect(res.status).toBe(400);
   });
 
   it('campo "enabled" ausente/não-booleano é rejeitado com 400', async () => {
