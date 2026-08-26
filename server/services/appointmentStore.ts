@@ -4,7 +4,7 @@
  * "lembrar" ou inventar um eventId. Migrado pra tabela Postgres
  * `appointments` (Bloco 2.A), chave (tenant_id, phone).
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 import { withStructuredLog } from './structuredLog';
 
 export type PaymentStatus = 'awaiting_payment' | 'pending_verification' | 'verified' | 'confirmed' | 'rejected';
@@ -262,7 +262,7 @@ export async function findOverlappingHold(tenantId: string, phone: string, start
 
 /** Todos os tenant_id distintos com ao menos uma reserva (issue #289) já vencida — usado pelo job de expiração (heldAppointmentExpiryJob.ts). */
 export async function listTenantIdsWithExpiredHolds(): Promise<string[]> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db.from('appointments').select('tenant_id').eq('payment_status', 'awaiting_payment').lt('held_until', new Date().toISOString());
   if (error) throw error;
   const ids = new Set(((data || []) as { tenant_id: string }[]).map((row) => row.tenant_id));
@@ -329,7 +329,7 @@ export async function markPaymentPendingAlerted(tenantId: string, phone: string)
 
 /** Todos os tenant_id distintos com ao menos um agendamento com pagamento pendente de verificação — usado pelo job de alerta (issue #98). */
 export async function listTenantIdsWithPendingPaymentVerification(): Promise<string[]> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db.from('appointments').select('tenant_id').eq('payment_status', 'pending_verification');
   if (error) throw error;
   const ids = new Set(((data || []) as { tenant_id: string }[]).map((row) => row.tenant_id));

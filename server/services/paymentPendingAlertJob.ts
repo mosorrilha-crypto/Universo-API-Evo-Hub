@@ -26,6 +26,7 @@ import {
 import { getConversation } from './conversationStore';
 import { logEscalation } from './escalationStore';
 import { startPeriodicJob } from './periodicJob';
+import { runWithTenantDbContext } from './tenantDbContext';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_THRESHOLD_MS = 2 * 60 * 60 * 1000;
@@ -82,7 +83,7 @@ export async function checkPaymentPendingAndAlert(deps: PaymentPendingAlertJobDe
     return;
   }
   for (const tenantId of tenantIds) {
-    await checkPaymentPendingForTenant(tenantId, thresholdMs);
+    await runWithTenantDbContext({ tenantId, source: 'job' }, () => checkPaymentPendingForTenant(tenantId, thresholdMs));
   }
 }
 

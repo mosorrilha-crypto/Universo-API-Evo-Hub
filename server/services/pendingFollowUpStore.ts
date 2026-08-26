@@ -6,7 +6,7 @@
  * sumiu). Nunca reabre contato sozinho — server/services/pendingFollowUpJob.ts
  * é quem escala pro operador humano via Escalonamentos quando vence.
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 
 export type PendingFollowUpKind = 'owner_review' | 'customer_reply';
 
@@ -111,7 +111,7 @@ export async function clearPendingFollowUp(tenantId: string, phone: string, kind
 
 /** Todo tenant com pelo menos um acompanhamento ainda não alertado — pro job iterar sem varrer tenant por tenant à toa. */
 export async function listTenantIdsWithPendingFollowUps(): Promise<string[]> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db.from('pending_followups').select('tenant_id');
   if (error) throw error;
   const ids = ((data as { tenant_id: string }[] | null) || []).map((r) => r.tenant_id);

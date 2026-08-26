@@ -9,7 +9,7 @@
  * a mesma mensagem (retry por timeout), createPreReservation não duplica a
  * linha — devolve a existente.
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 
 export type PreReservationStatus = 'pending' | 'confirmed' | 'expired' | 'cancelled';
 
@@ -138,7 +138,7 @@ export async function markFollowUpAlerted(tenantId: string, id: string): Promise
  * follow-up itera por essa lista em vez de listConnectedCalendarTenants().
  */
 export async function listTenantIdsWithPendingPreReservations(): Promise<string[]> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db.from('pre_reservations').select('tenant_id').eq('status', 'pending');
   if (error) throw error;
   const ids = new Set(((data || []) as { tenant_id: string }[]).map((row) => row.tenant_id));

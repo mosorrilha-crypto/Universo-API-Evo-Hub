@@ -11,7 +11,7 @@
  */
 import { google } from 'googleapis';
 import jwt from 'jsonwebtoken';
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 import { getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
 import { withStructuredLog } from './structuredLog';
 
@@ -104,7 +104,7 @@ export async function isGoogleCalendarConnected(tenantId: string): Promise<boole
 
 /** Todos os tenants com um Google Calendar conectado agora — usado pelo job de lembretes (Bloco 2.C) pra iterar por tenant em vez de rodar uma vez só globalmente. */
 export async function listConnectedCalendarTenants(): Promise<string[]> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db.from('tenant_calendar_tokens').select('tenant_id');
   if (error) throw error;
   return (data || []).map((row) => row.tenant_id as string);

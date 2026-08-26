@@ -22,7 +22,8 @@
  * padrão de paused_alert_sent_at em agentPausedAlertJob.ts) — reconectar
  * limpa os dois marcadores, permitindo alertar de novo numa queda futura.
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
+import { runWithTenantDbContext } from './tenantDbContext';
 import { sendWhatsAppTemplateMessage } from './metaSend';
 import { resolveMetaCredentialsForTenant } from './tenantResolver';
 import { sendPushToTenant } from './webPush';
@@ -138,7 +139,7 @@ async function checkOneTenant(row: EvolutionCredentialRow, deps: EvolutionConnec
 
 /** Uma passada do job — exportada separada do setInterval pra ser chamada diretamente nos testes. */
 export async function checkEvolutionConnectionsAndAlert(deps: EvolutionConnectionAlertJobDeps = {}): Promise<void> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db
     .from('tenant_evolution_credentials')
     .select('tenant_id, instance_name, api_url, api_key, last_connection_state, disconnected_since, disconnected_alert_sent_at');
@@ -149,7 +150,7 @@ export async function checkEvolutionConnectionsAndAlert(deps: EvolutionConnectio
   const rows = (data as EvolutionCredentialRow[]) || [];
   for (const row of rows) {
     try {
-      await checkOneTenant(row, deps);
+      await runWithTenantDbContext({ tenantId: row.tenant_id, source: 'job' }, () => checkOneTenant(row, deps));
     } catch (err) {
       console.warn(`⚠️  [Alerta conexão WhatsApp] tenant=${row.tenant_id} falha ao processar:`, (err as Error).message);
     }

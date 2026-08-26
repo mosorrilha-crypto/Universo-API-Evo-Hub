@@ -16,7 +16,8 @@
  * disparo já passou e ninguém tratou nesta instância — cobre exatamente o
  * caso do restart no meio da janela.
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
+import { runWithTenantDbContext } from './tenantDbContext';
 import type { ResolvedTenant } from './tenantResolver';
 
 // Dez segundos capturam complementos naturais enviados após a primeira frase
@@ -125,18 +126,20 @@ async function deletePersistedBuffer(tenantId: string, phone: string): Promise<v
 export function startBufferRecoverySweeper(onFlush: (phone: string) => FlushCallback): void {
   const sweep = async () => {
     try {
-      const db = getDb();
+      const db = getPlatformDb();
       const nowIso = new Date().toISOString();
       const { data, error } = await db.from('pending_message_buffers').select('*').lt('flush_at', nowIso);
       if (error || !data) return;
       for (const row of data as any[]) {
         const key = bufferKey(row.tenant_id, row.phone);
         if (buffers.has(key)) continue; // já em andamento nesta mesma instância, não duplica
-        await deletePersistedBuffer(row.tenant_id, row.phone);
-        const texts: string[] = Array.isArray(row.texts) ? row.texts : [];
-        if (!texts.length) continue;
-        console.warn(`⚠️  [Buffer de rajada] Recuperando marca presa de um restart anterior pra ${row.phone} (tenant=${row.tenant_id}).`);
-        onFlush(row.phone)(texts.join('\n'), row.contact_name ?? undefined, row.last_message_id, texts.length, row.resolved_tenant as ResolvedTenant);
+        await runWithTenantDbContext({ tenantId: row.tenant_id, source: 'job' }, async () => {
+          await deletePersistedBuffer(row.tenant_id, row.phone);
+          const texts: string[] = Array.isArray(row.texts) ? row.texts : [];
+          if (!texts.length) return;
+          console.warn(`⚠️  [Buffer de rajada] Recuperando marca presa de um restart anterior pra ${row.phone} (tenant=${row.tenant_id}).`);
+          onFlush(row.phone)(texts.join('\n'), row.contact_name ?? undefined, row.last_message_id, texts.length, row.resolved_tenant as ResolvedTenant);
+        });
       }
     } catch (err: any) {
       console.warn('⚠️  [Buffer de rajada] Falha na varredura de recuperação:', err.message);
