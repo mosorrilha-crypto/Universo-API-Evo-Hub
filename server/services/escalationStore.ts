@@ -35,6 +35,8 @@ export interface Escalation {
   operatorReply?: string;
   operatorReplyAt?: string;
   operatorReplyConsumedAt?: string;
+  /** Rascunho que a IA tentou mandar e o revisor pré-envio bloqueou (TASK-0093) — estruturado, não extraído de `reason` por regex. */
+  blockedDraft?: string;
   /** Sugestão corrigida gerada sob demanda; nunca é enviada automaticamente. */
   suggestedReply?: string;
   suggestedReplyAt?: string;
@@ -58,6 +60,8 @@ export interface LogEscalationOptions {
   dueAt?: string;
   actor?: EscalationActor;
   guidanceContextHash?: string;
+  /** Rascunho que a IA tentou mandar e foi bloqueado pelo revisor pré-envio (TASK-0093). */
+  blockedDraft?: string;
 }
 
 export interface ResolveEscalationOptions {
@@ -80,6 +84,7 @@ type EscalationRow = {
   operator_reply_at: string | null;
   operator_reply_consumed_at: string | null;
   kind: EscalationKind | null;
+  blocked_draft?: string | null;
   suggested_reply?: string | null;
   suggested_reply_at?: string | null;
   suggested_reply_status?: ReplySuggestionStatus | null;
@@ -114,6 +119,7 @@ function toEscalation(row: EscalationRow): Escalation {
     resolved: row.resolved || status === 'resolved',
     createdAt: row.created_at,
     kind: row.kind || 'general',
+    blockedDraft: row.blocked_draft || undefined,
     status,
     priority: row.priority || 'medium',
     dueAt: row.due_at || undefined,
@@ -257,6 +263,7 @@ export async function logEscalation(
       priority,
       due_at: options.dueAt || (wasResolved ? defaultDueAt(priority) : existing.due_at || defaultDueAt(priority)),
       status: wasResolved ? 'open' as EscalationStatus : existing.status || 'open',
+      blocked_draft: options.blockedDraft ?? existing.blocked_draft ?? null,
       resolved: false,
       resolved_at: wasResolved ? null : existing.resolved_at || null,
       resolved_by: wasResolved ? null : existing.resolved_by || null,
@@ -289,6 +296,7 @@ export async function logEscalation(
     resolved: false,
     created_at: now,
     kind,
+    blocked_draft: options.blockedDraft || null,
     status: 'open' as EscalationStatus,
     priority,
     due_at: options.dueAt || defaultDueAt(priority),
@@ -327,12 +335,12 @@ function statusRank(status: EscalationStatus): number {
   return ({ open: 0, assigned: 1, awaiting_customer: 2, resolved: 3, archived: 4 } as const)[status];
 }
 
-export async function listEscalations(tenantId: string): Promise<Escalation[]> {
+export async function listEscalations(tenantId: string, options: { includeArchived?: boolean } = {}): Promise<Escalation[]> {
   const { data, error } = await getDb().from('escalations').select('*').eq('tenant_id', tenantId);
   if (error) throw error;
   return ((data as EscalationRow[]) || [])
     .map(toEscalation)
-    .filter((item) => !item.deletedAt)
+    .filter((item) => options.includeArchived || !item.deletedAt)
     .sort((a, b) => {
       const statusDelta = statusRank(a.status) - statusRank(b.status);
       if (statusDelta) return statusDelta;
@@ -439,6 +447,20 @@ export async function deleteEscalation(tenantId: string, id: string, actor?: Esc
   await appendAuditEvent(tenantId, id, 'archived', {}, actor);
   recordEscalationOperation(tenantId, escalation, 'escalation_archived');
   return true;
+}
+
+/** Traz de volta um caso arquivado — reabre como pendente pra reaparecer na fila normal. */
+export async function restoreEscalation(tenantId: string, id: string, actor?: EscalationActor): Promise<Escalation | undefined> {
+  const { data, error } = await getDb().from('escalations').update({
+    status: 'open' as EscalationStatus,
+    deleted_at: null,
+  }).eq('tenant_id', tenantId).eq('id', id).select('*').maybeSingle();
+  if (error) throw error;
+  if (!data) return undefined;
+  const escalation = toEscalation(data as EscalationRow);
+  await appendAuditEvent(tenantId, id, 'restored', {}, actor);
+  recordEscalationOperation(tenantId, escalation, 'escalation_restored');
+  return escalation;
 }
 
 /** A orientação humana expira após 48h e fica ligada ao contexto que a originou. */

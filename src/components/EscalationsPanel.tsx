@@ -4,6 +4,7 @@ import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
   AlertTriangle,
   Archive,
+  ArchiveRestore,
   CheckCircle2,
   Clock,
   Copy,
@@ -16,6 +17,7 @@ import {
   Phone,
   RefreshCw,
   Send,
+  ShieldAlert,
   Sparkles,
   TimerReset,
   UserRoundCheck,
@@ -34,6 +36,10 @@ interface EscalationsPanelProps {
   /** Registra edição, cópia ou descarte sem salvar o texto no evento de auditoria. */
   onReplySuggestionFeedback?: (id: string, suggestion: string, status: 'edited' | 'copied' | 'discarded') => Promise<EscalationInfo | null>;
   onResolvePayment?: (id: string, phone: string, status: 'verified' | 'rejected', reply?: string) => void;
+  /** Envia o texto aprovado (rascunho bloqueado ou sugestão, como está ou editado) direto pro cliente e fecha o caso. */
+  onApproveAndSend?: (id: string, phone: string, text: string) => Promise<boolean>;
+  /** Traz um caso arquivado de volta pra fila de pendentes. */
+  onRestore?: (id: string) => void;
 }
 
 function toWaMeLink(phone: string): string {
@@ -80,22 +86,27 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
   onGenerateReplySuggestion,
   onReplySuggestionFeedback,
   onResolvePayment,
+  onApproveAndSend,
+  onRestore,
 }) => {
-  const [filter, setFilter] = useState<'pending' | 'resolved'>('pending');
+  const [filter, setFilter] = useState<'pending' | 'resolved' | 'archived'>('pending');
   const [replyDraftById, setReplyDraftById] = useState<Record<string, string>>({});
   const [openReplyId, setOpenReplyId] = useState<string | null>(null);
   const [openSuggestionId, setOpenSuggestionId] = useState<string | null>(null);
   const [suggestionDraftById, setSuggestionDraftById] = useState<Record<string, string>>({});
   const [suggestionBusyId, setSuggestionBusyId] = useState<string | null>(null);
+  const [approveBusyId, setApproveBusyId] = useState<string | null>(null);
 
-  const { pending, resolved, visible, overdue } = useMemo(() => {
+  const { pending, resolved, archived, visible, overdue } = useMemo(() => {
     const current = escalations.filter((e) => e.status !== 'archived');
     const pendingItems = current.filter((e) => !e.resolved && e.status !== 'resolved');
     const resolvedItems = current.filter((e) => e.resolved || e.status === 'resolved');
+    const archivedItems = escalations.filter((e) => e.status === 'archived');
     return {
       pending: pendingItems,
       resolved: resolvedItems,
-      visible: filter === 'pending' ? pendingItems : resolvedItems,
+      archived: archivedItems,
+      visible: filter === 'pending' ? pendingItems : filter === 'resolved' ? resolvedItems : archivedItems,
       overdue: pendingItems.filter((e) => e.dueAt && new Date(e.dueAt).getTime() < Date.now()).length,
     };
   }, [escalations, filter]);
@@ -121,6 +132,7 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
           <div className="flex rounded-xl border border-slate-700 bg-slate-950 p-1">
             <button onClick={() => setFilter('pending')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>Pendentes ({pending.length})</button>
             <button onClick={() => setFilter('resolved')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'resolved' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>Resolvidos ({resolved.length})</button>
+            <button onClick={() => setFilter('archived')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'archived' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>Arquivados ({archived.length})</button>
           </div>
         </div>
       </header>
@@ -128,14 +140,15 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
       {visible.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-10 text-center">
           <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-400" />
-          <p className="mt-3 text-sm font-bold text-slate-100">{filter === 'pending' ? 'Nenhum escalonamento pendente.' : 'Nenhum escalonamento resolvido ainda.'}</p>
+          <p className="mt-3 text-sm font-bold text-slate-100">{filter === 'pending' ? 'Nenhum escalonamento pendente.' : filter === 'resolved' ? 'Nenhum escalonamento resolvido ainda.' : 'Nenhum escalonamento arquivado.'}</p>
           <p className="mt-1 text-xs text-slate-500">A fila será atualizada quando houver uma nova decisão humana necessária.</p>
         </div>
       ) : (
         <div className="space-y-3">
           {visible.map((e) => {
             const priority = priorityMeta[e.priority || 'medium'];
-            const isPending = !e.resolved && e.status !== 'resolved';
+            const isPending = !e.resolved && e.status !== 'resolved' && e.status !== 'archived';
+            const isArchived = e.status === 'archived';
             const isOverdue = Boolean(isPending && e.dueAt && new Date(e.dueAt).getTime() < Date.now());
             return (
               <article key={e.id} className={`rounded-2xl border bg-slate-900/90 p-4 shadow-md shadow-slate-950/15 ${isOverdue ? 'border-rose-500/35' : 'border-slate-800'}`}>
@@ -149,6 +162,12 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                     </div>
                     <p className="mt-1.5 text-sm font-medium text-amber-200">{e.reason}</p>
                     {e.lastMessage && <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-slate-400"><MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>“{e.lastMessage}”</span></p>}
+                    {e.blockedDraft && (
+                      <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/5 p-2 text-xs leading-relaxed text-rose-100/90">
+                        <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-300" />
+                        <span><span className="font-bold">Rascunho da IA (bloqueado):</span> “{e.blockedDraft}”</span>
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
                       <span className="inline-flex items-center gap-1 text-slate-500"><Clock className="h-3 w-3" /> Criado {timeAgo(e.createdAt)}</span>
                       {isPending && e.dueAt && <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-semibold ${isOverdue ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-slate-700 bg-slate-950 text-slate-300'}`}><AlertTriangle className="h-3 w-3" /> SLA {formatRemaining(e.dueAt)}</span>}
@@ -174,8 +193,14 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                           <div><p className="flex items-center gap-1.5 text-xs font-bold text-sky-100"><Sparkles className="h-3.5 w-3.5" /> Sugestão supervisionada</p><p className="mt-0.5 text-[10px] text-slate-400">Nada é enviado automaticamente. Revise, edite, copie ou descarte.</p></div>
                           <button type="button" disabled={suggestionBusyId === e.id} onClick={async () => { setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-[10px] font-bold text-sky-100 disabled:opacity-50"><RefreshCw className={`h-3 w-3 ${suggestionBusyId === e.id ? 'animate-spin' : ''}`} /> Gerar</button>
                         </div>
-                        <AutoResizeTextarea value={suggestionDraftById[e.id] ?? e.suggestedReply ?? ''} onChange={(event) => setSuggestionDraftById((previous) => ({ ...previous, [e.id]: event.target.value }))} placeholder="A sugestão aparecerá aqui para sua revisão." minRows={3} maxLength={900} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
+                        <AutoResizeTextarea value={suggestionDraftById[e.id] ?? e.suggestedReply ?? e.blockedDraft ?? ''} onChange={(event) => setSuggestionDraftById((previous) => ({ ...previous, [e.id]: event.target.value }))} placeholder="A sugestão aparecerá aqui para sua revisão." minRows={3} maxLength={900} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
+                        {onApproveAndSend && e.serviceWindowExpiresAt && !e.withinServiceWindow && (
+                          <p className="text-[10px] font-semibold text-amber-300">Janela de 24h fechada — não dá pra mandar texto livre agora. Use "Orientar IA" (retoma quando o cliente escrever de novo) ou o template de reengajamento.</p>
+                        )}
                         <div className="flex flex-wrap gap-2">
+                          {onApproveAndSend && (
+                            <button type="button" disabled={approveBusyId === e.id || suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? e.blockedDraft ?? '').trim() || (Boolean(e.serviceWindowExpiresAt) && !e.withinServiceWindow)} onClick={async () => { const text = (suggestionDraftById[e.id] ?? e.suggestedReply ?? e.blockedDraft ?? '').trim(); if (!text) return; setApproveBusyId(e.id); try { const sent = await onApproveAndSend(e.id, e.phone, text); if (sent) { setSuggestionDraftById((previous) => ({ ...previous, [e.id]: '' })); setOpenSuggestionId(null); } } finally { setApproveBusyId(null); } }} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"><Send className="h-3 w-3" /> {approveBusyId === e.id ? 'Enviando…' : 'Aprovar e enviar'}</button>
+                          )}
                           <button type="button" disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()} onClick={async () => { const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim(); if (!suggestion) return; setSuggestionBusyId(e.id); try { const updated = await onReplySuggestionFeedback(e.id, suggestion, 'edited'); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || suggestion })); } finally { setSuggestionBusyId(null); } }} className="rounded-lg bg-slate-800 px-3 py-1.5 text-[10px] font-bold text-slate-100 disabled:opacity-40">Salvar edição</button>
                           <button type="button" disabled={suggestionBusyId === e.id || !(suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim()} onClick={async () => { const suggestion = (suggestionDraftById[e.id] ?? e.suggestedReply ?? '').trim(); if (!suggestion) return; setSuggestionBusyId(e.id); try { await navigator.clipboard?.writeText(suggestion); await onReplySuggestionFeedback(e.id, suggestion, 'copied'); } finally { setSuggestionBusyId(null); } }} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-[10px] font-bold text-white disabled:opacity-40"><Copy className="h-3 w-3" /> Copiar</button>
                           <button type="button" disabled={suggestionBusyId === e.id} onClick={async () => { setSuggestionBusyId(e.id); try { await onReplySuggestionFeedback(e.id, '', 'discarded'); setSuggestionDraftById((previous) => ({ ...previous, [e.id]: '' })); setOpenSuggestionId(null); } finally { setSuggestionBusyId(null); } }} className="rounded-lg px-3 py-1.5 text-[10px] font-bold text-rose-300 disabled:opacity-40">Descartar</button>
@@ -191,11 +216,15 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                       <button onClick={() => onResolvePayment(e.id, e.phone, 'verified')} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar pagamento</button>
                       <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/20"><XCircle className="h-3.5 w-3.5" /> Rejeitar</button>
                     </> : isPending ? <>
-                      {onGenerateReplySuggestion && onReplySuggestionFeedback && <button onClick={async () => { const shouldOpen = openSuggestionId !== e.id; setOpenSuggestionId(shouldOpen ? e.id : null); if (!shouldOpen || e.suggestedReply) return; setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} disabled={suggestionBusyId === e.id} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> {e.suggestedReply ? 'Revisar sugestão' : 'Gerar sugestão'}</button>}
+                      {onGenerateReplySuggestion && onReplySuggestionFeedback && <button onClick={async () => { const shouldOpen = openSuggestionId !== e.id; setOpenSuggestionId(shouldOpen ? e.id : null); if (!shouldOpen || e.suggestedReply || e.blockedDraft) return; setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} disabled={suggestionBusyId === e.id} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> {e.suggestedReply ? 'Revisar sugestão' : e.blockedDraft ? 'Revisar rascunho' : 'Gerar sugestão'}</button>}
                       {onSubmitOperatorReply && <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20"><MessageCircleReply className="h-3.5 w-3.5" /> Orientar IA</button>}
                       <button onClick={() => onResolve(e.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Resolver</button>
                     </> : null}
-                    <button onClick={() => onDelete(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500 hover:text-white"><Archive className="h-3.5 w-3.5" /> Arquivar</button>
+                    {isArchived && onRestore ? (
+                      <button onClick={() => onRestore(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-emerald-500/35 hover:text-emerald-200"><ArchiveRestore className="h-3.5 w-3.5" /> Restaurar</button>
+                    ) : !isArchived ? (
+                      <button onClick={() => onDelete(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500 hover:text-white"><Archive className="h-3.5 w-3.5" /> Arquivar</button>
+                    ) : null}
                   </div>
                 </div>
               </article>

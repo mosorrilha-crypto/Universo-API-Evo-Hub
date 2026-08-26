@@ -27,6 +27,7 @@ import { withStructuredLog } from './structuredLog';
 import { buildAgentContextPack, deriveContactMemoryPatch, loadAgentContextPack, type AgentContextPack } from './agentContextPack';
 import { upsertContactAgentMemory } from './contactAgentMemoryStore';
 import { recordAgentTurnTrace } from './agentTurnTraceStore';
+import { listRecentApprovedReplyExamples, formatApprovedReplyExamplesForPrompt } from './approvedReplyExampleStore';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -1768,7 +1769,14 @@ export async function generateAutoReplyForText(
     const operatorGuidanceContext = operatorGuidance
       ? `Um atendente humano deixou esta orientação pra você usar ao responder (siga-a ao montar a resposta, sem citar que veio de um "atendente" ou de uma "nota" — fale diretamente com o cliente): "${operatorGuidance}"`
       : undefined;
-    const combinedExtraContext = [extraContext, operatorGuidanceContext].filter(Boolean).join('\n');
+    // TASK-0093 — exemplos que um operador revisou e aprovou de verdade
+    // (nunca escritos pela própria IA), alimentados só depois de um
+    // escalonamento resolvido via "Aprovar e enviar" no painel. Melhor
+    // esforço: uma falha aqui nunca deve travar a resposta normal.
+    const approvedExamplesContext = await listRecentApprovedReplyExamples(tenantId)
+      .then(formatApprovedReplyExamplesForPrompt)
+      .catch(() => '');
+    const combinedExtraContext = [extraContext, operatorGuidanceContext, approvedExamplesContext].filter(Boolean).join('\n');
     // Única fonte de horário de funcionamento que o agente consulta, pra
     // QUALQUER tipo de mensagem — não só agendamento (ver
     // formatBusinessHoursForPrompt em tenantProfileStore.ts). Antes disso um
