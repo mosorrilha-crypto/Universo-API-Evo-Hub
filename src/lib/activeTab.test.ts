@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { parseStoredActiveTab } from './activeTab';
 
 describe('parseStoredActiveTab', () => {
-  it('restaura uma aba válida', () => {
+  it('restaura abas válidas independentes', () => {
+    expect(parseStoredActiveTab('agenda')).toBe('agenda');
     expect(parseStoredActiveTab('financial')).toBe('financial');
     expect(parseStoredActiveTab('whatsapp')).toBe('whatsapp');
   });
 
-  it('migra a preferência antiga de Integrações para Atendimento', () => {
+  it('migra preferências de telas descontinuadas para o destino equivalente', () => {
     expect(parseStoredActiveTab('integration')).toBe('whatsapp');
+    expect(parseStoredActiveTab('agenda_financeiro')).toBe('agenda');
   });
 
   it('usa home para valor ausente ou inválido', () => {

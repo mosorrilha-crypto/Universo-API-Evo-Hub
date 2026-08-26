@@ -84,6 +84,13 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 
 ## Mudanças recentes relevantes (não é auditoria completa, só registro)
 
+**26/08/2026 (TASK-0084 — navegação operacional e separação de Agenda/Financeiro):**
+- A barra principal foi reorganizada por intenção de trabalho: **Hoje**, **Conversas**, **Vendas**, **Agenda**, **Financeiro** e, para administradores, **Crescimento**. Agenda fica imediatamente após Vendas para acompanhar o fluxo comercial até o horário confirmado.
+- **Agenda** e **Financeiro** deixaram de ser uma tela combinada. As duas superfícies reaproveitam os mesmos dados e ações já validados, mas cada uma mostra só sua rotina: calendário e próximos atendimentos na Agenda; receitas, despesas e cobranças em aberto no Financeiro.
+- A preferência persistida `agenda_financeiro` é migrada automaticamente para `agenda`, sem levar usuários a uma rota inexistente após atualização.
+- Configurações administrativas foram agrupadas em **Configurar** (Agente & catálogo, Catálogo público e Qualidade do agente); **Plataforma** contém somente Empresas para `saas_admin`. A tela de Pendências continua acessível por atalhos operacionais, sem competir com a navegação principal.
+- Implementação em `Header.tsx`, `AgendaFinanceiroCenter.tsx`, `App.tsx`, `OperationsCenter.tsx` e `activeTab.ts`, com atualização de testes. Validações locais: lint, suíte com 182 arquivos/948 testes e build concluídos sem erro.
+
 **26/08/2026 (TASK-0083 — RLS efetivo quebrava boot e jobs de fundo):**
 - Commit `2aea569` ("feat: enforce tenant RLS runtime context", direto na `main`, sem TASK-XXXX/PR — origem fora do fluxo normal de sessão) endureceu o RLS: `getDb()` passou a exigir um `TenantDbContext` (chave publicável + JWT curto assinado, não mais service key) e a recusar rodar sem `SUPABASE_PUBLISHABLE_KEY`/`SUPABASE_JWT_SECRET` configuradas. Duas quebras reais em produção na sequência, ambas confirmadas por log real (`mcp__Render__list_logs`), não suspeita:
   1. **Boot travado (~15min):** as duas env vars não foram configuradas no Render ANTES do merge — `loadConfig` lançava e o processo saía (`Application exited early`), deploy ficava em `update_failed`. Site continuou no ar (zero-downtime do Render manteve a build antiga), mas nem o RLS nem um PR seguinte (#428, TASK-0082) chegaram a produção até as variáveis serem configuradas (`SUPABASE_PUBLISHABLE_KEY` via `mcp__Supabase__get_publishable_keys`; `SUPABASE_JWT_SECRET` só o dono do produto tinha acesso, veio do Supabase Dashboard → API Keys → JWT Keys) e um novo deploy disparado.

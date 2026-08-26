@@ -6,8 +6,8 @@ const ACTIVE_TAB_VALUES: readonly ActiveTab[] = [
   'home',
   'whatsapp',
   'crm',
+  'agenda',
   'financial',
-  'agenda_financeiro',
   'saas',
   'attribution',
   'knowledge',
@@ -17,8 +17,8 @@ const ACTIVE_TAB_VALUES: readonly ActiveTab[] = [
 ];
 
 export function parseStoredActiveTab(value: string | null): ActiveTab {
-  // Integrações deixou de ser uma tela de operação. Migra a preferência antiga
-  // para Atendimento para que um refresh não reabra uma página descontinuada.
+  // Migra preferências de rotas descontinuadas para o destino operacional equivalente.
   if (value === 'integration') return 'whatsapp';
+  if (value === 'agenda_financeiro') return 'agenda';
   return value && ACTIVE_TAB_VALUES.includes(value as ActiveTab) ? value as ActiveTab : 'home';
 }

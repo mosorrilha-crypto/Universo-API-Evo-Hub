@@ -7,7 +7,6 @@ import { ActiveTab, Tenant, UserProfile } from '../types';
 import { hasRoleAtLeast } from '../lib/roles';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
-  Archive,
   Brain,
   CalendarDays,
   CheckCircle2,
@@ -23,10 +22,12 @@ import {
   MessageSquare,
   Moon,
   ShieldCheck,
+  Settings2,
   Sparkles,
   Sun,
   Target,
   User,
+  WalletCards,
   X,
 } from 'lucide-react';
 
@@ -43,6 +44,7 @@ interface HeaderProps {
 }
 
 type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
+type ToolsMenuKind = 'configuration' | 'platform';
 type DesktopMenuPosition = { top: number; left: number };
 
 const firstName = (name?: string | null) => (name || 'Operador').trim().split(/\s+/)[0] || 'Operador';
@@ -62,10 +64,11 @@ export const Header: React.FC<HeaderProps> = ({
   const tabsRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const mobileTenantMenuRef = useRef<HTMLDivElement>(null);
-  const adminToolsButtonRef = useRef<HTMLButtonElement>(null);
+  const configurationButtonRef = useRef<HTMLButtonElement>(null);
+  const platformButtonRef = useRef<HTMLButtonElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [isAdminToolsMenuOpen, setIsAdminToolsMenuOpen] = useState(false);
+  const [openToolsMenu, setOpenToolsMenu] = useState<'configuration' | 'platform' | null>(null);
   const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
   const [desktopMenuPosition, setDesktopMenuPosition] = useState<DesktopMenuPosition | null>(null);
   const isSpanish = language === 'es';
@@ -77,28 +80,28 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: 'Atención, CRM, agenda, caja y conversiones en un solo lugar', today: 'Hoy', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda y Caja', growth: 'Crecimiento', quality: 'Calidad de IA', knowledge: 'Conocimiento', catalog: 'Catálogo', escalations: 'Pendientes', companies: 'Empresas', adminGroup: 'Administración', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: 'Atendimento, CRM, agenda, caixa e conversões em um só lugar', today: 'Hoje', chat: 'WhatsApp', sales: 'CRM', schedule: 'Agenda & Caixa', growth: 'Crescimento', quality: 'Qualidade IA', knowledge: 'Conhecimento', catalog: 'Catálogo', escalations: 'Pendências', companies: 'Empresas', adminGroup: 'Administração', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   const primaryNavigation: NavigationItem[] = [
     { id: 'home', label: copy.today, icon: <Home className="w-4 h-4" /> },
-    { id: 'whatsapp', label: copy.chat, icon: <MessageSquare className="w-4 h-4" /> },
+    { id: 'whatsapp', label: copy.conversations, icon: <MessageSquare className="w-4 h-4" /> },
     { id: 'crm', label: copy.sales, icon: <Kanban className="w-4 h-4" /> },
-    ...(canSeeFinancial ? [{ id: 'agenda_financeiro' as ActiveTab, label: copy.schedule, icon: <CalendarDays className="w-4 h-4" /> }] : []),
+    ...(canSeeFinancial ? [{ id: 'agenda' as ActiveTab, label: copy.schedule, icon: <CalendarDays className="w-4 h-4" /> }, { id: 'financial' as ActiveTab, label: copy.financial, icon: <WalletCards className="w-4 h-4" /> }] : []),
+    ...(canSeeAdminTools ? [{ id: 'attribution' as ActiveTab, label: copy.growth, icon: <Target className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
-  const adminNavigation: NavigationItem[] = canSeeAdminTools ? [
-    { id: 'escalations', label: copy.escalations, icon: <Archive className="w-4 h-4" />, accent: 'amber' },
-  ] : [];
-  const adminToolsNavigation: NavigationItem[] = canSeeAdminTools ? [
-    ...(canSeeSaasMaster ? [{ id: 'saas' as ActiveTab, label: copy.companies, icon: <Layers className="w-4 h-4" /> }] : []),
-    { id: 'attribution', label: copy.growth, icon: <Target className="w-4 h-4" /> },
+  const configurationNavigation: NavigationItem[] = canSeeAdminTools ? [
+    { id: 'knowledge', label: copy.agentCatalog, icon: <Brain className="w-4 h-4" /> },
+    { id: 'catalog', label: copy.publicCatalog, icon: <Link2 className="w-4 h-4" /> },
     { id: 'quality', label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' },
-    { id: 'knowledge', label: copy.knowledge, icon: <Brain className="w-4 h-4" /> },
-    { id: 'catalog', label: copy.catalog, icon: <Link2 className="w-4 h-4" /> },
   ] : [];
-  const isAdminToolsActive = adminToolsNavigation.some((item) => item.id === activeTab);
+  const platformNavigation: NavigationItem[] = canSeeSaasMaster ? [
+    { id: 'saas', label: copy.companies, icon: <Layers className="w-4 h-4" /> },
+  ] : [];
+  const isConfigurationActive = configurationNavigation.some((item) => item.id === activeTab);
+  const isPlatformActive = platformNavigation.some((item) => item.id === activeTab);
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -108,18 +111,19 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isProfileMenuOpen]);
 
   useEffect(() => {
-    if (!isAdminToolsMenuOpen) return;
+    if (!openToolsMenu) return;
     const close = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (!target.closest('[data-admin-tools-menu]')) setIsAdminToolsMenuOpen(false);
+      if (!target.closest('[data-tools-menu]')) setOpenToolsMenu(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsAdminToolsMenuOpen(false);
-        adminToolsButtonRef.current?.focus();
+        const trigger = openToolsMenu === 'configuration' ? configurationButtonRef.current : platformButtonRef.current;
+        setOpenToolsMenu(null);
+        trigger?.focus();
       }
     };
-    const closeOnViewportChange = () => setIsAdminToolsMenuOpen(false);
+    const closeOnViewportChange = () => setOpenToolsMenu(null);
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', closeOnEscape);
     window.addEventListener('resize', closeOnViewportChange);
@@ -130,7 +134,7 @@ export const Header: React.FC<HeaderProps> = ({
       window.removeEventListener('resize', closeOnViewportChange);
       window.removeEventListener('scroll', closeOnViewportChange, true);
     };
-  }, [isAdminToolsMenuOpen]);
+  }, [openToolsMenu]);
 
   useEffect(() => {
     if (!isMobileTenantMenuOpen) return;
@@ -151,13 +155,14 @@ export const Header: React.FC<HeaderProps> = ({
   const selectTab = (tab: ActiveTab) => {
     setActiveTab(tab);
     setIsMobileMenuOpen(false);
-    setIsAdminToolsMenuOpen(false);
+    setOpenToolsMenu(null);
     setIsMobileTenantMenuOpen(false);
   };
   const scrollTabs = (direction: 'left' | 'right') => tabsRef.current?.scrollBy({ left: direction === 'left' ? -320 : 320, behavior: 'smooth' });
-  const toggleAdminToolsMenu = (placement: 'mobile' | 'desktop') => {
-    if (placement === 'desktop' && !isAdminToolsMenuOpen) {
-      const triggerBounds = adminToolsButtonRef.current?.getBoundingClientRect();
+  const toggleToolsMenu = (kind: ToolsMenuKind, placement: 'mobile' | 'desktop') => {
+    if (placement === 'desktop' && openToolsMenu !== kind) {
+      const trigger = kind === 'configuration' ? configurationButtonRef.current : platformButtonRef.current;
+      const triggerBounds = trigger?.getBoundingClientRect();
       if (triggerBounds) {
         setDesktopMenuPosition({
           top: triggerBounds.bottom + 8,
@@ -165,7 +170,7 @@ export const Header: React.FC<HeaderProps> = ({
         });
       }
     }
-    setIsAdminToolsMenuOpen((value) => !value);
+    setOpenToolsMenu((value) => value === kind ? null : kind);
   };
   const tabClass = (item: NavigationItem) => {
     if (activeTab !== item.id) return 'text-slate-300 hover:text-white hover:bg-slate-800/80';
@@ -174,25 +179,30 @@ export const Header: React.FC<HeaderProps> = ({
     return 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/40';
   };
   const renderTab = (item: NavigationItem) => <button key={item.id} type="button" onClick={() => selectTab(item.id)} className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors ${tabClass(item)}`}><span className={activeTab === item.id ? 'text-current' : item.accent === 'sky' ? 'text-sky-300' : item.accent === 'amber' ? 'text-amber-300' : 'text-emerald-400'}>{item.icon}</span><span>{item.label}</span>{item.id === 'whatsapp' && savedCount > 0 && <span className="rounded-full bg-black/15 px-1.5 py-0.5 text-[10px] font-bold">{savedCount}</span>}</button>;
-  const renderAdminTool = (item: NavigationItem) => <button key={item.id} type="button" onClick={() => selectTab(item.id)} role="menuitem" className={`inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${activeTab === item.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}><span className={activeTab === item.id ? 'text-emerald-300' : item.accent === 'sky' ? 'text-sky-300' : 'text-slate-400'}>{item.icon}</span><span className="truncate">{item.label}</span>{activeTab === item.id && <CheckCircle2 className="ml-auto h-3.5 w-3.5 shrink-0 text-emerald-400" />}</button>;
+  const renderSubmenuItem = (item: NavigationItem) => <button key={item.id} type="button" onClick={() => selectTab(item.id)} role="menuitem" className={`inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${activeTab === item.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}><span className={activeTab === item.id ? 'text-emerald-300' : item.accent === 'sky' ? 'text-sky-300' : 'text-slate-400'}>{item.icon}</span><span className="truncate">{item.label}</span>{activeTab === item.id && <CheckCircle2 className="ml-auto h-3.5 w-3.5 shrink-0 text-emerald-400" />}</button>;
 
-  const renderAdminToolsMenu = (placement: 'mobile' | 'desktop') => canSeeAdminTools ? (
-    <div className={placement === 'desktop' ? 'relative shrink-0' : 'w-full'} data-admin-tools-menu>
-      <button
-        type="button"
-        ref={placement === 'desktop' ? adminToolsButtonRef : undefined}
-        onClick={() => toggleAdminToolsMenu(placement)}
-        aria-haspopup="menu"
-        aria-expanded={isAdminToolsMenuOpen}
-        aria-controls={`admin-tools-menu-${placement}`}
-        className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${isAdminToolsActive ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/40' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'} ${placement === 'mobile' ? 'w-full justify-between' : ''}`}
-      >
-        <span className="inline-flex items-center gap-2"><Layers className="h-4 w-4 text-emerald-300" /><span>{canSeeSaasMaster ? copy.companies : copy.adminGroup}</span></span>
-        <ChevronDown className={`h-4 w-4 transition-transform ${isAdminToolsMenuOpen ? 'rotate-180' : ''}`} />
-      </button>
-      {isAdminToolsMenuOpen && (placement === 'mobile' || desktopMenuPosition) && <div id={`admin-tools-menu-${placement}`} className={`${placement === 'desktop' ? 'fixed z-50 w-64' : 'mt-2 w-full'} rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl`} style={placement === 'desktop' ? desktopMenuPosition : undefined} role="menu" aria-label={canSeeSaasMaster ? copy.companies : copy.adminGroup}>{adminToolsNavigation.map(renderAdminTool)}</div>}
-    </div>
-  ) : null;
+  const renderToolsMenu = (kind: ToolsMenuKind, placement: 'mobile' | 'desktop', label: string, items: NavigationItem[], isActive: boolean) => {
+    if (!items.length) return null;
+    const isOpen = openToolsMenu === kind;
+    const triggerRef = kind === 'configuration' ? configurationButtonRef : platformButtonRef;
+    return (
+      <div className={placement === 'desktop' ? 'relative shrink-0' : 'w-full'} data-tools-menu>
+        <button
+          type="button"
+          ref={placement === 'desktop' ? triggerRef : undefined}
+          onClick={() => toggleToolsMenu(kind, placement)}
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          aria-controls={`${kind}-menu-${placement}`}
+          className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${isActive ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/40' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'} ${placement === 'mobile' ? 'w-full justify-between' : ''}`}
+        >
+          <span className="inline-flex items-center gap-2"><Settings2 className={`h-4 w-4 ${isActive ? 'text-emerald-100' : 'text-emerald-300'}`} /><span>{label}</span></span>
+          <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {isOpen && (placement === 'mobile' || desktopMenuPosition) && <div id={`${kind}-menu-${placement}`} className={`${placement === 'desktop' ? 'fixed z-50 w-64' : 'mt-2 w-full'} rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl`} style={placement === 'desktop' ? desktopMenuPosition : undefined} role="menu" aria-label={label}>{items.map(renderSubmenuItem)}</div>}
+      </div>
+    );
+  };
 
   // Bug real reportado (25/08/2026): no iPhone (PWA "adicionado à Tela de
   // Início", viewport-fit=cover já configurado em index.html), este header
@@ -206,10 +216,10 @@ export const Header: React.FC<HeaderProps> = ({
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">
         <div className="flex min-w-0 items-center gap-2"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-4 h-4" /></div><span className="truncate text-sm font-bold text-white">Universo</span></div>
-        <div className="flex items-center gap-1"><button type="button" onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')} className="rounded-md border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-200" title={isSpanish ? 'Português' : 'Español'}>{isSpanish ? 'PT' : 'ES'}</button><button type="button" onClick={toggleTheme} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800" title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button><button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setIsAdminToolsMenuOpen(false); setIsMobileTenantMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}</button></div>
+        <div className="flex items-center gap-1"><button type="button" onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')} className="rounded-md border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-200" title={isSpanish ? 'Português' : 'Español'}>{isSpanish ? 'PT' : 'ES'}</button><button type="button" onClick={toggleTheme} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800" title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button><button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setOpenToolsMenu(null); setIsMobileTenantMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}</button></div>
       </div>
       {isMobileMenuOpen && <div className="border-t border-slate-800 pb-3 pt-2 md:hidden">
-        <div className="flex flex-col gap-1 pb-1">{primaryNavigation.map(renderTab)}{adminNavigation.map(renderTab)}{renderAdminToolsMenu('mobile')}</div>
+        <div className="flex flex-col gap-1 pb-1">{primaryNavigation.map(renderTab)}{renderToolsMenu('configuration', 'mobile', copy.configure, configurationNavigation, isConfigurationActive)}{renderToolsMenu('platform', 'mobile', copy.platformGroup, platformNavigation, isPlatformActive)}</div>
         <div className="relative mt-3 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" ref={mobileTenantMenuRef}>
           <div className="flex items-center justify-between gap-2">
             {canSeeSaasMaster && tenants.length > 1 ? (
@@ -295,7 +305,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         ))}
       </div>
-      <div className="hidden items-center border-t border-slate-800/80 py-1.5 md:flex"><button type="button" onClick={() => scrollTabs('left')} className="mr-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.previous}><ChevronLeft className="w-4 h-4" /></button><div ref={tabsRef} className="flex w-full items-center gap-1 overflow-x-auto scroll-smooth py-0.5">{primaryNavigation.map(renderTab)}{adminNavigation.map(renderTab)}{renderAdminToolsMenu('desktop')}</div><button type="button" onClick={() => scrollTabs('right')} className="ml-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.next}><ChevronRight className="w-4 h-4" /></button></div>
+      <div className="hidden items-center border-t border-slate-800/80 py-1.5 md:flex"><button type="button" onClick={() => scrollTabs('left')} className="mr-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.previous}><ChevronLeft className="w-4 h-4" /></button><div ref={tabsRef} className="flex w-full items-center gap-1 overflow-x-auto scroll-smooth py-0.5">{primaryNavigation.map(renderTab)}{renderToolsMenu('configuration', 'desktop', copy.configure, configurationNavigation, isConfigurationActive)}{renderToolsMenu('platform', 'desktop', copy.platformGroup, platformNavigation, isPlatformActive)}</div><button type="button" onClick={() => scrollTabs('right')} className="ml-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.next}><ChevronRight className="w-4 h-4" /></button></div>
     </div>
   </header>;
 };

@@ -60,42 +60,44 @@ afterEach(() => cleanup());
 // Bug real reportado (25/08/2026): no iPhone em PWA (tela cheia, notch/Dynamic
 // Island), o header sticky ficava colado atrás da barra de status do iOS —
 // logo e botão de menu parcialmente cobertos, toque no menu não registrava.
-// Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>
-// (ver Header.tsx). Sem teste automatizado aqui de propósito — o parser de
-// CSS do jsdom (`cssstyle`) rejeita `env(...)` como valor inválido e nem
-// chega a gravar no atributo `style`, então qualquer asserção sobre o DOM
-// desse valor daria falso negativo (testado, confirmado). `env()` com
-// fallback pra 0px fora de safe-area é suporte padrão de todo browser
-// moderno (Safari iOS incluso, é justamente o caso que motivou o fix).
-describe('menu Empresas no desktop', () => {
-  it('abre e expõe todas as opções administrativas para saas_admin', async () => {
+// Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>.
+describe('grupos de navegação no desktop', () => {
+  it('agrupa a configuração do agente e o catálogo no menu Configurar', async () => {
     const user = userEvent.setup();
     renderHeader();
 
-    await user.click(screen.getByRole('button', { name: 'Empresas' }));
+    const trigger = screen.getByRole('button', { name: 'Configurar' });
+    await user.click(trigger);
 
-    const menu = screen.getByRole('menu', { name: 'Empresas' });
-    expect(menu).not.toBeNull();
+    const menu = screen.getByRole('menu', { name: 'Configurar' });
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'Empresas',
-      'Crescimento',
-      'Qualidade IA',
-      'Conhecimento',
-      'Catálogo',
+      'Agente & catálogo',
+      'Catálogo público',
+      'Qualidade do agente',
     ]);
   });
 
-  it('fecha com Escape e devolve o foco ao gatilho', async () => {
+  it('mantém a gestão multi-tenant isolada no menu Plataforma', async () => {
     const user = userEvent.setup();
     renderHeader();
 
-    const trigger = screen.getByRole('button', { name: 'Empresas' });
+    await user.click(screen.getByRole('button', { name: 'Plataforma' }));
+
+    const menu = screen.getByRole('menu', { name: 'Plataforma' });
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Empresas']);
+  });
+
+  it('fecha Configurar com Escape e devolve o foco ao gatilho', async () => {
+    const user = userEvent.setup();
+    renderHeader();
+
+    const trigger = screen.getByRole('button', { name: 'Configurar' });
     await user.click(trigger);
-    expect(screen.getByRole('menu', { name: 'Empresas' })).not.toBeNull();
+    expect(screen.getByRole('menu', { name: 'Configurar' })).not.toBeNull();
 
     await user.keyboard('{Escape}');
 
-    expect(screen.queryByRole('menu', { name: 'Empresas' })).toBeNull();
+    expect(screen.queryByRole('menu', { name: 'Configurar' })).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 });
