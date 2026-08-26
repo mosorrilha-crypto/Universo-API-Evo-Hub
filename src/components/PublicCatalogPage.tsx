@@ -3,7 +3,6 @@
  * com leitura leve e sem duplicar a explicação geral da família de serviços.
  */
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
-import { GoldCatalogTemplate } from './GoldCatalogTemplate';
 
 // Design direction: Atelier Bilíngue — editorial, sereno e acolhedor; conteúdo essencial
 // aparece antes dos dados dinâmicos e a escolha ES/PT é imediata, discreta e acessível.
@@ -21,7 +20,7 @@ interface PublicCatalogVariant {
   durationMinutes?: number;
 }
 
-export interface PublicCatalogProduct {
+interface PublicCatalogProduct {
   name: string;
   category?: string;
   description?: string;
@@ -44,7 +43,7 @@ interface PublicBeforeAfterPair {
 
 type CatalogTemplate = 'default' | 'beauty_concierge' | 'gold_catalog';
 
-export interface PublicCatalog {
+interface PublicCatalog {
   tenant: {
     name: string;
     slug: string;
@@ -69,7 +68,7 @@ interface PublicCatalogPageProps {
   slug: string;
 }
 
-export type CatalogLanguage = 'es' | 'pt';
+type CatalogLanguage = 'es' | 'pt';
 
 const LANGUAGE_STORAGE_KEY = 'monique-catalog-language';
 
@@ -446,10 +445,6 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
 
   const generalWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral, language);
   const faqs = FAQS[language];
-
-  if (catalog.tenant.template === 'gold_catalog') {
-    return <GoldCatalogTemplate catalog={catalog} slug={slug} language={language} onLanguageChange={setLanguage} />;
-  }
 
   return (
     <PageShell template={catalog.tenant.template}>
