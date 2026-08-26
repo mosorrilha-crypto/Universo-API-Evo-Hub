@@ -10,7 +10,7 @@
  * DEFAULT_GLOBAL_LAYER hardcoded em autoReply.ts — nunca deixa o agente sem
  * nenhuma camada Global no ar só porque a linha do banco está vazia.
  */
-import { getDb } from './db';
+import { getPlatformDb } from './db';
 import { invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 
 const ROW_ID = 'global';
@@ -50,7 +50,7 @@ Conteúdo pessoal/romântico dirigido a você mesma (declaração de amor, elogi
 IMPORTANTE: Você atende APENAS o negócio cujo contexto foi carregado nesta sessão. Nunca use informação de outro negócio, mesmo que pareça similar. Se não tiver certeza de um dado, diga que vai confirmar e retorne.`;
 
 export async function getGlobalPromptLayerOverride(): Promise<string | null> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data } = await db.from('global_prompt_layer').select('content').eq('id', ROW_ID).maybeSingle();
   const content = data?.content as string | null | undefined;
   return content?.trim() ? content : null;
@@ -64,7 +64,7 @@ export interface GlobalPromptLayerRow {
 }
 
 export async function getGlobalPromptLayerRow(): Promise<GlobalPromptLayerRow> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data } = await db.from('global_prompt_layer').select('content, updated_at, updated_by').eq('id', ROW_ID).maybeSingle();
   return {
     content: (data?.content as string | null) ?? null,
@@ -76,7 +76,7 @@ export async function getGlobalPromptLayerRow(): Promise<GlobalPromptLayerRow> {
 
 /** `content: null` reseta pro padrão hardcoded (DEFAULT_GLOBAL_LAYER) — não apaga a linha, só limpa o override. */
 export async function setGlobalPromptLayer(content: string | null, updatedBy: string): Promise<void> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { error } = await db
     .from('global_prompt_layer')
     .upsert({ id: ROW_ID, content: content?.trim() || null, updated_at: new Date().toISOString(), updated_by: updatedBy }, { onConflict: 'id' });

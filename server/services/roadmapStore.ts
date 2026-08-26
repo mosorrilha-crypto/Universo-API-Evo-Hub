@@ -9,7 +9,7 @@
  * Não é por tenant — é o backlog do SaaS inteiro (ver migration
  * 0028_roadmap_items.sql).
  */
-import { getDb } from './db';
+import { getPlatformDb } from './db';
 
 export type RoadmapPriority = 'alta' | 'media' | 'baixa';
 export type RoadmapStatus = 'pendente' | 'concluido';
@@ -44,7 +44,7 @@ function mapRow(row: any): RoadmapItem {
 
 /** Pendentes primeiro (por prioridade, depois mais recente primeiro), concluídas por último — ordenado em JS porque o fake de teste não implementa ORDER BY de verdade, e assim o comportamento é idêntico em teste e produção. */
 export async function listRoadmapItems(): Promise<RoadmapItem[]> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db.from('roadmap_items').select('*');
   if (error) throw error;
   const items = (data || []).map(mapRow);
@@ -63,7 +63,7 @@ export async function createRoadmapItem(input: {
   imageBase64?: string | null;
   createdBy: string;
 }): Promise<RoadmapItem> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db
     .from('roadmap_items')
     .insert({
@@ -84,7 +84,7 @@ export async function updateRoadmapItem(
   id: string,
   patch: Partial<{ title: string; description: string; priority: RoadmapPriority; status: RoadmapStatus; imageBase64: string | null }>
 ): Promise<RoadmapItem | null> {
-  const db = getDb();
+  const db = getPlatformDb();
   const updatePayload: Record<string, any> = { updated_at: new Date().toISOString() };
   if (patch.title !== undefined) updatePayload.title = patch.title;
   if (patch.description !== undefined) updatePayload.description = patch.description;
@@ -97,7 +97,7 @@ export async function updateRoadmapItem(
 }
 
 export async function deleteRoadmapItem(id: string): Promise<void> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { error } = await db.from('roadmap_items').delete().eq('id', id);
   if (error) throw error;
 }
