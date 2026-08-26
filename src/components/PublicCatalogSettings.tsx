@@ -1,8 +1,34 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Download, ExternalLink, Link2, Loader2, Save } from 'lucide-react';
+import { BarChart3, Download, ExternalLink, Link2, Loader2, Save, Settings } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 import { downloadCatalogPdf } from '../lib/catalogPdf';
 import type { AgentProduct } from '../types';
+
+interface CatalogClickWindowStats {
+  clicks: number;
+  matched: number;
+}
+
+interface CatalogClickProductStats extends CatalogClickWindowStats {
+  product: string;
+}
+
+interface CatalogClickRecentEntry {
+  id: string;
+  product?: string;
+  createdAt: string;
+  matchedAt?: string;
+  matchedPhone?: string;
+}
+
+interface CatalogClickAnalytics {
+  totalClicks: number;
+  totalMatched: number;
+  last7d: CatalogClickWindowStats;
+  last30d: CatalogClickWindowStats;
+  byProduct: CatalogClickProductStats[];
+  recent: CatalogClickRecentEntry[];
+}
 
 interface PublicCatalogFormState {
   enabled: boolean;
@@ -53,7 +79,139 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 const inputClass =
   'w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60';
 
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function conversionRateLabel(clicks: number, matched: number): string {
+  if (!clicks) return '—';
+  return `${Math.round((matched / clicks) * 100)}%`;
+}
+
+function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="p-4 rounded-xl bg-slate-950 border border-slate-800">
+      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-bold text-white mt-1">{value}</p>
+      {hint && <p className="text-[11px] text-slate-500 mt-0.5">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * Aba "Desempenho" (pedido real, 25/08/2026) — responde "quantas pessoas
+ * clicaram nos botões de WhatsApp do catálogo" e "quantos desses cliques
+ * viraram conversa de verdade", sem depender de Meta Pixel/Windsor.ai (ver
+ * publicCatalogClickStore.ts no backend). Busca só quando a aba é aberta,
+ * não no carregamento da tela de configuração inteira.
+ */
+function CatalogPerformanceTab() {
+  const [analytics, setAnalytics] = useState<CatalogClickAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch('/api/public-catalog-settings/analytics')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data) => {
+        if (!cancelled) setAnalytics(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError('Não foi possível carregar o desempenho do catálogo.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="p-6 text-sm text-slate-400 flex items-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> Carregando desempenho do catálogo…
+      </div>
+    );
+  }
+  if (error || !analytics) {
+    return <p className="p-4 text-xs text-red-400">{error || 'Sem dados disponíveis.'}</p>;
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard label="Cliques (90 dias)" value={String(analytics.totalClicks)} />
+        <StatCard
+          label="Viraram conversa"
+          value={String(analytics.totalMatched)}
+          hint={`Taxa de ${conversionRateLabel(analytics.totalClicks, analytics.totalMatched)}`}
+        />
+        <StatCard label="Últimos 7 dias" value={String(analytics.last7d.clicks)} hint={`${analytics.last7d.matched} viraram conversa`} />
+        <StatCard label="Últimos 30 dias" value={String(analytics.last30d.clicks)} hint={`${analytics.last30d.matched} viraram conversa`} />
+      </div>
+
+      {analytics.totalClicks === 0 ? (
+        <p className="p-4 text-xs text-slate-400 bg-slate-950 border border-slate-800 rounded-xl">
+          Nenhum clique registrado ainda nos botões de WhatsApp do catálogo. Assim que alguém clicar, aparece aqui.
+        </p>
+      ) : (
+        <>
+          <div className="rounded-xl border border-slate-800 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-950 text-slate-400">
+                <tr>
+                  <th className="text-left font-semibold px-3 py-2">Produto</th>
+                  <th className="text-right font-semibold px-3 py-2">Cliques</th>
+                  <th className="text-right font-semibold px-3 py-2">Viraram conversa</th>
+                  <th className="text-right font-semibold px-3 py-2">Taxa</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {analytics.byProduct.map((row) => (
+                  <tr key={row.product} className="text-slate-200">
+                    <td className="px-3 py-2">{row.product}</td>
+                    <td className="px-3 py-2 text-right">{row.clicks}</td>
+                    <td className="px-3 py-2 text-right">{row.matched}</td>
+                    <td className="px-3 py-2 text-right">{conversionRateLabel(row.clicks, row.matched)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-300 mb-2">Cliques recentes</p>
+            <div className="rounded-xl border border-slate-800 divide-y divide-slate-800">
+              {analytics.recent.map((entry) => (
+                <div key={entry.id} className="px-3 py-2.5 flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <p className="text-slate-200 truncate">{entry.product || 'Geral (botão sem produto específico)'}</p>
+                    <p className="text-slate-500">{formatDateTime(entry.createdAt)}</p>
+                  </div>
+                  {entry.matchedAt ? (
+                    <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-semibold whitespace-nowrap">
+                      Virou conversa{entry.matchedPhone ? ` · ${entry.matchedPhone}` : ''}
+                    </span>
+                  ) : (
+                    <span className="flex-shrink-0 px-2 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400 font-semibold whitespace-nowrap">
+                      Ainda não
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function PublicCatalogSettings({ tenantSlug, tenantName, products, activeProductCount, onGoToKnowledgeBase }: PublicCatalogSettingsProps) {
+  const [tab, setTab] = useState<'settings' | 'performance'>('settings');
   const [form, setForm] = useState<PublicCatalogFormState>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -167,7 +325,26 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
         </div>
       </div>
 
-      {loading ? (
+      <div className="flex gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800 w-fit">
+        <button
+          type="button"
+          onClick={() => setTab('settings')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${tab === 'settings' ? 'bg-sky-500/20 text-sky-200 border border-sky-500/30' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          <Settings className="w-3.5 h-3.5" /> Configuração
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('performance')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${tab === 'performance' ? 'bg-sky-500/20 text-sky-200 border border-sky-500/30' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          <BarChart3 className="w-3.5 h-3.5" /> Desempenho
+        </button>
+      </div>
+
+      {tab === 'performance' && <CatalogPerformanceTab />}
+
+      {tab === 'settings' && (loading ? (
         <div className="p-6 text-sm text-slate-400 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" /> Carregando configuração do catálogo…
         </div>
@@ -295,7 +472,7 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
             </button>
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }

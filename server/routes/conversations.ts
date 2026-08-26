@@ -44,6 +44,7 @@ import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive } from '../services/autoReply';
+import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -1326,6 +1327,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       whatsappMessageGeneral: data?.public_whatsapp_message_general || '',
       whatsappMessageProduct: data?.public_whatsapp_message_product || '',
     });
+  }));
+
+  // Relatório de "leads do catálogo" (pedido real, 25/08/2026) — aba de
+  // Desempenho na tela de configuração do catálogo (PublicCatalogSettings.tsx).
+  router.get('/api/public-catalog-settings/analytics', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const analytics = await getCatalogClickAnalytics(tenantOf(req));
+    res.json(analytics);
   }));
 
   router.put('/api/public-catalog-settings', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {

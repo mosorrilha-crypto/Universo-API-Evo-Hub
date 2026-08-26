@@ -124,3 +124,92 @@ export async function consumeCatalogClick(clickId: string, phone: string): Promi
     matched_phone: phone,
   }).eq('id', clickId);
 }
+
+const ANALYTICS_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+export interface CatalogClickWindowStats {
+  clicks: number;
+  matched: number;
+}
+
+export interface CatalogClickProductStats extends CatalogClickWindowStats {
+  product: string;
+}
+
+export interface CatalogClickRecentEntry {
+  id: string;
+  product?: string;
+  createdAt: string;
+  matchedAt?: string;
+  matchedPhone?: string;
+}
+
+export interface CatalogClickAnalytics {
+  totalClicks: number;
+  totalMatched: number;
+  last7d: CatalogClickWindowStats;
+  last30d: CatalogClickWindowStats;
+  byProduct: CatalogClickProductStats[];
+  /** Últimos 20 cliques, mais recente primeiro — visão rápida de "o que está acontecendo agora" na aba de Desempenho. */
+  recent: CatalogClickRecentEntry[];
+}
+
+/**
+ * Relatório de "leads do catálogo" (pedido real, 25/08/2026) — dá pra aba
+ * de Desempenho responder "quantas pessoas clicaram" e "quantos desses
+ * cliques viraram conversa de verdade", sem precisar de Meta Pixel/Windsor.
+ * Janela de 90 dias é só limite de custo da consulta (tabela cresce sem
+ * fim); os totais "all-time" de fato ficam de fora por enquanto — se algum
+ * dia importar, dá pra trocar por um `count` agregado no banco.
+ */
+export async function getCatalogClickAnalytics(tenantId: string): Promise<CatalogClickAnalytics> {
+  const db = getDb();
+  const since = new Date(Date.now() - ANALYTICS_WINDOW_MS).toISOString();
+  const { data } = await db.from('public_catalog_whatsapp_clicks').select('*').eq('tenant_id', tenantId).gte('created_at', since);
+  const rows: any[] = data || [];
+
+  const now = Date.now();
+  const since7 = now - 7 * 24 * 60 * 60 * 1000;
+  const since30 = now - 30 * 24 * 60 * 60 * 1000;
+
+  const last7d: CatalogClickWindowStats = { clicks: 0, matched: 0 };
+  const last30d: CatalogClickWindowStats = { clicks: 0, matched: 0 };
+  const productMap = new Map<string, CatalogClickWindowStats>();
+  let totalMatched = 0;
+
+  for (const row of rows) {
+    const createdMs = new Date(row.created_at).getTime();
+    const isMatched = !!row.matched_at;
+    if (isMatched) totalMatched++;
+    if (createdMs >= since7) {
+      last7d.clicks++;
+      if (isMatched) last7d.matched++;
+    }
+    if (createdMs >= since30) {
+      last30d.clicks++;
+      if (isMatched) last30d.matched++;
+    }
+    const productKey = row.product || 'Geral (botão sem produto específico)';
+    const entry = productMap.get(productKey) || { clicks: 0, matched: 0 };
+    entry.clicks++;
+    if (isMatched) entry.matched++;
+    productMap.set(productKey, entry);
+  }
+
+  const byProduct = Array.from(productMap.entries())
+    .map(([product, stats]) => ({ product, ...stats }))
+    .sort((a, b) => b.clicks - a.clicks);
+
+  const recent: CatalogClickRecentEntry[] = [...rows]
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, 20)
+    .map((row) => ({
+      id: row.id,
+      product: row.product || undefined,
+      createdAt: row.created_at,
+      matchedAt: row.matched_at || undefined,
+      matchedPhone: row.matched_phone || undefined,
+    }));
+
+  return { totalClicks: rows.length, totalMatched, last7d, last30d, byProduct, recent };
+}
