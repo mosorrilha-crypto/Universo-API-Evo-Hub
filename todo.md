@@ -50,3 +50,10 @@
 - [x] Registrar a decisão do validador para auditoria no painel de escalonamentos.
 - [x] Cobrir aprovação, bloqueio e escalonamento por testes automatizados e publicar a proteção.
 - [ ] Revisar a experiência visual e entregar a atualização no repositório Universo.
+- [x] PR2/#96: revisar o comentário de aprovação da PR1 e os contratos atuais de RBAC, rotas e persistência.
+- [x] PR2/#96: definir a validação explícita dos oito payloads documentais da Base de Conhecimento.
+- [x] PR2/#96: implementar store de rascunho, publicação versionada e eventos de auditoria com tenant derivado do JWT.
+- [x] PR2/#96: expor rotas autenticadas para listar, consultar, salvar rascunho, publicar e consultar auditoria.
+- [x] PR2/#96: garantir publicação somente por `admin`/`saas_admin`, sem aceitar `tenant_id` externo nem sobrescrever publicação.
+- [x] PR2/#96: cobrir autorização, isolamento, conflito, auditoria e exclusão de rascunhos do caminho publicado.
+- [x] PR2/#96: validar lint, testes e build; atualizar documentação e registrar a entrega para revisão humana.

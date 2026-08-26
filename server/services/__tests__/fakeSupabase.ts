@@ -159,6 +159,83 @@ export function createFakeSupabase(seed: Tables = {}) {
         upsert: (payload: Row, opts?: { onConflict?: string }) => new FakeQueryBuilder(rows, 'upsert', payload, opts),
       };
     },
+    rpc(functionName: string, args: Record<string, any>) {
+      if (functionName === 'save_knowledge_base_document_draft') {
+        const documents = tables.knowledge_base_documents || (tables.knowledge_base_documents = []);
+        const events = tables.knowledge_base_document_events || (tables.knowledge_base_document_events = []);
+        const matchingDocuments = documents.filter((row) => row.document_type === args.p_document_type);
+        const draft = matchingDocuments.find((row) => row.status === 'draft');
+        return {
+          async single() {
+            const now = new Date().toISOString();
+            const saved = draft || {
+              id: randomUUID(),
+              tenant_id: matchingDocuments[0]?.tenant_id || 'tenant-a',
+              document_type: args.p_document_type,
+              version: Math.max(0, ...matchingDocuments.map((row) => Number(row.version) || 0)) + 1,
+              status: 'draft',
+              created_at: now,
+              created_by: args.p_actor_id,
+            };
+            Object.assign(saved, { data: args.p_data, updated_at: now, updated_by: args.p_actor_id });
+            if (!draft) documents.push(saved);
+            events.push({
+              id: randomUUID(),
+              tenant_id: saved.tenant_id,
+              document_id: saved.id,
+              document_type: saved.document_type,
+              version: saved.version,
+              event_type: draft ? 'draft_updated' : 'draft_created',
+              actor_id: args.p_actor_id,
+              created_at: now,
+            });
+            return { data: saved, error: null };
+          },
+        };
+      }
+
+      if (functionName !== 'publish_knowledge_base_document') {
+        return {
+          async single() {
+            return { data: null, error: { message: `RPC não suportado no fake: ${functionName}` } };
+          },
+        };
+      }
+
+      const documents = tables.knowledge_base_documents || (tables.knowledge_base_documents = []);
+      const events = tables.knowledge_base_document_events || (tables.knowledge_base_document_events = []);
+      const draft = documents.find((row) => row.document_type === args.p_document_type && row.status === 'draft');
+      if (!draft) {
+        return {
+          async single() {
+            return { data: null, error: { code: 'P0002', message: 'Não existe rascunho para publicar' } };
+          },
+        };
+      }
+
+      return {
+        async single() {
+          const now = new Date().toISOString();
+          for (const document of documents) {
+            if (document.tenant_id === draft.tenant_id && document.document_type === draft.document_type && document.status === 'published') {
+              Object.assign(document, { status: 'archived', updated_at: now, updated_by: args.p_actor_id });
+            }
+          }
+          Object.assign(draft, { status: 'published', updated_at: now, updated_by: args.p_actor_id, published_at: now, published_by: args.p_actor_id });
+          events.push({
+            id: randomUUID(),
+            tenant_id: draft.tenant_id,
+            document_id: draft.id,
+            document_type: draft.document_type,
+            version: draft.version,
+            event_type: 'published',
+            actor_id: args.p_actor_id,
+            created_at: now,
+          });
+          return { data: draft, error: null };
+        },
+      };
+    },
     __tables: tables,
   } as any;
 }

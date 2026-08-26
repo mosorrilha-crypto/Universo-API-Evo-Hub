@@ -1,4 +1,4 @@
-import { Router, type RequestHandler } from 'express';
+import { Router, type RequestHandler, type Response } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import {
@@ -21,7 +21,21 @@ import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage,
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { resolveCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
-import { getKnowledgeBase, setKnowledgeBase, collectReferencedVideoIds, formatKnowledgeBaseForPrompt, findProductMatch, resolveProductAmountByName } from '../services/knowledgeBaseStore';
+import {
+  getKnowledgeBase,
+  setKnowledgeBase,
+  collectReferencedVideoIds,
+  formatKnowledgeBaseForPrompt,
+  findProductMatch,
+  resolveProductAmountByName,
+  getKnowledgeBaseDocumentState,
+  listKnowledgeBaseDocumentEvents,
+  listKnowledgeBaseDocumentStates,
+  parseKnowledgeBaseDocumentType,
+  publishKnowledgeBaseDocument,
+  saveKnowledgeBaseDocumentDraft,
+  KnowledgeBaseDocumentValidationError,
+} from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, updateFinancialTransactionBySourceRef, isDuplicateSourceRefError } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
@@ -89,6 +103,19 @@ interface ConversationsRouterDeps {
  */
 function tenantOf(req: AuthenticatedRequest): string {
   return resolveTenantId(req);
+}
+
+/** Traduz erros esperados da API tipada em respostas estáveis, sem expor stack ou detalhes do banco. */
+function sendKnowledgeBaseDocumentError(res: Response, error: unknown): Response {
+  if (error instanceof KnowledgeBaseDocumentValidationError) {
+    return res.status(400).json({ error: error.message });
+  }
+  const code = (error as { code?: string } | null)?.code;
+  if (code === '42501') return res.status(403).json({ error: 'Permissão insuficiente pra publicar este documento.' });
+  if (code === 'P0002') return res.status(409).json({ error: 'Não existe rascunho para publicar este documento.' });
+  if (code === '23505') return res.status(409).json({ error: 'Conflito de versão; atualize a tela e tente novamente.' });
+  console.error('❌ [Base de Conhecimento tipada]', error);
+  return res.status(500).json({ error: 'Não foi possível concluir a operação na Base de Conhecimento.' });
 }
 
 /**
@@ -1247,6 +1274,56 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
     await Promise.all(orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)));
     res.json({ success: true });
+  }));
+
+  // ISSUE-0096 / PR2 — API administrativa de documentos tipados. Não substitui
+  // GET/POST /api/knowledge-base: o agente e o painel legado seguem no blob
+  // até o corte de runtime aprovado em PR4. Por conter rascunhos internos,
+  // toda a superfície é exclusiva de admin/saas_admin.
+  router.get('/api/knowledge-base/documents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    try {
+      res.json({ documents: await listKnowledgeBaseDocumentStates(tenantOf(req)) });
+    } catch (error) {
+      return sendKnowledgeBaseDocumentError(res, error);
+    }
+  }));
+
+  router.get('/api/knowledge-base/documents/:documentType', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    try {
+      const documentType = parseKnowledgeBaseDocumentType(req.params.documentType);
+      res.json(await getKnowledgeBaseDocumentState(tenantOf(req), documentType));
+    } catch (error) {
+      return sendKnowledgeBaseDocumentError(res, error);
+    }
+  }));
+
+  router.put('/api/knowledge-base/documents/:documentType/draft', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    try {
+      const documentType = parseKnowledgeBaseDocumentType(req.params.documentType);
+      const document = await saveKnowledgeBaseDocumentDraft(tenantOf(req), documentType, req.body?.data, req.user!.id);
+      res.json({ document });
+    } catch (error) {
+      return sendKnowledgeBaseDocumentError(res, error);
+    }
+  }));
+
+  router.post('/api/knowledge-base/documents/:documentType/publish', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    try {
+      const documentType = parseKnowledgeBaseDocumentType(req.params.documentType);
+      const document = await publishKnowledgeBaseDocument(tenantOf(req), documentType, req.user!.id);
+      res.json({ document });
+    } catch (error) {
+      return sendKnowledgeBaseDocumentError(res, error);
+    }
+  }));
+
+  router.get('/api/knowledge-base/documents/:documentType/events', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    try {
+      const documentType = parseKnowledgeBaseDocumentType(req.params.documentType);
+      res.json({ events: await listKnowledgeBaseDocumentEvents(tenantOf(req), documentType) });
+    } catch (error) {
+      return sendKnowledgeBaseDocumentError(res, error);
+    }
   }));
 
   // Camada 1 (regras universais) por tenant (18/08/2026) — leitura sempre
