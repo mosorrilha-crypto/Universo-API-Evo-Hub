@@ -11,7 +11,7 @@ import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhon
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
 import { getKnowledgeBase, resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
-import { createPreReservation } from './preReservationStore';
+import { createPreReservation, updatePreReservationStatus } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
@@ -73,6 +73,19 @@ function hasMediaSendConfig(mediaConfig?: MediaSendConfig): boolean {
 export type ConversationPhase = 'abertura' | 'informacao' | 'objecao' | 'fechamento';
 export type AgentType = 'triagem' | 'faq' | 'agendamento' | 'reclamacao';
 
+type DeferredCalendarActionName = 'criar_agendamento' | 'remarcar_agendamento' | 'cancelar_agendamento' | 'criar_pre_reserva';
+
+/**
+ * Efeito de agenda decidido pelo modelo, mas ainda NÃO executado. O chamador
+ * só pode executar esta ação depois da aprovação explícita do revisor
+ * pré-envio; assim uma reserva nunca sobrevive a uma mensagem bloqueada.
+ */
+export interface DeferredCalendarAction {
+  name: DeferredCalendarActionName;
+  args: Record<string, unknown>;
+  summary: string;
+}
+
 export interface AutoReplyResult {
   phase: ConversationPhase;
   bubbles: string[];
@@ -92,6 +105,8 @@ export interface AutoReplyResult {
   stopAutoReply: boolean;
   /** ms gastos na chamada de roteamento — usado pra descontar do atraso de digitação da 1ª bolha, compensando a latência extra do router. */
   routerElapsedMs: number;
+  /** Ações de agenda pendentes de aprovação do revisor; nunca foram executadas na geração do rascunho. */
+  deferredCalendarActions?: DeferredCalendarAction[];
   /**
    * Nome que a cliente disse na conversa (não veio do perfil do WhatsApp) —
    * quem chama deve persistir isso na conversa (mesmo campo que já guarda o
@@ -1139,12 +1154,47 @@ async function executeCalendarTool(
   }
 }
 
+const DEFERRED_CALENDAR_ACTION_NAMES = new Set<DeferredCalendarActionName>([
+  'criar_agendamento',
+  'remarcar_agendamento',
+  'cancelar_agendamento',
+  'criar_pre_reserva',
+]);
+
+function isDeferredCalendarActionName(name: string): name is DeferredCalendarActionName {
+  return DEFERRED_CALENDAR_ACTION_NAMES.has(name as DeferredCalendarActionName);
+}
+
+function planCalendarAction(name: DeferredCalendarActionName, args: Record<string, unknown>): {
+  action: DeferredCalendarAction;
+  response: Record<string, unknown>;
+  summary: string;
+  confirmedTimesHHmm?: string[];
+} {
+  const startIso = typeof args.data_hora_inicio === 'string' ? args.data_hora_inicio :
+    typeof args.nova_data_hora_inicio === 'string' ? args.nova_data_hora_inicio : undefined;
+  const title = typeof args.titulo === 'string' ? args.titulo :
+    typeof args.servico === 'string' ? args.servico : 'o serviço solicitado';
+  const summary = name === 'criar_agendamento'
+    ? `Planejou reservar "${title}" para ${startIso || 'o horário solicitado'} depois da aprovação do revisor pré-envio. A disponibilidade será conferida de novo imediatamente antes da reserva.`
+    : name === 'remarcar_agendamento'
+      ? `Planejou remarcar o agendamento para ${startIso || 'o horário solicitado'} depois da aprovação do revisor pré-envio. A disponibilidade será conferida de novo imediatamente antes da alteração.`
+      : name === 'cancelar_agendamento'
+        ? 'Planejou cancelar o agendamento ativo somente depois da aprovação do revisor pré-envio.'
+        : `Planejou registrar a pré-reserva de "${title}" depois da aprovação do revisor pré-envio.`;
+
+  return {
+    action: { name, args, summary },
+    response: { acao_planejada: name, pendente_revisao_pre_envio: true },
+    summary,
+    confirmedTimesHHmm: startIso ? [extractHHmm(startIso)] : undefined,
+  };
+}
+
 /**
- * Roda o agente de agendamento com ferramentas reais (function-calling) sobre
- * o Google Calendar. Não gera a resposta final ao cliente diretamente — só
- * executa as ações reais (consultar/criar/remarcar/cancelar) e devolve um
- * resumo em texto do que aconteceu de verdade, pra generateSpecialistReply
- * humanizar a resposta em cima de fatos, nunca de suposição do modelo.
+ * Roda o agente de agendamento para consultar fontes de verdade e PLANEJAR
+ * ações mutáveis. Reservar, remarcar, cancelar ou criar pré-reserva só pode
+ * acontecer depois que o revisor pré-envio aprovar a mensagem correspondente.
  */
 async function runAgendamentoTools(
   tenantId: string,
@@ -1155,7 +1205,7 @@ async function runAgendamentoTools(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   contactName?: string,
   messageId?: string
-): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[]; businessHoursStatus?: string; currentAppointment?: TrackedAppointment }> {
+): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[]; businessHoursStatus?: string; currentAppointment?: TrackedAppointment; deferredCalendarActions: DeferredCalendarAction[] }> {
   const { naive, weekday, weekdayNum } = getNowLocalNaive(BUSINESS_TIMEZONE);
   // Best-effort: uma falha aqui é só um enriquecimento de prompt (aviso de
   // horário de funcionamento) — nunca pode derrubar o fluxo real de agenda.
@@ -1175,7 +1225,7 @@ async function runAgendamentoTools(
 
   const connected = await isGoogleCalendarConnected(tenantId);
   if (!connected) {
-    return { actionsSummary: [], hadError: false, confirmedTimes: confirmedTimesFromExisting, businessHoursStatus, currentAppointment: existing };
+    return { actionsSummary: [], hadError: false, confirmedTimes: confirmedTimesFromExisting, businessHoursStatus, currentAppointment: existing, deferredCalendarActions: [] };
   }
 
   const historyText = buildHistoryText(history);
@@ -1200,6 +1250,7 @@ async function runAgendamentoTools(
   // confirmed, que é o gatilho pra ela poder dizer "confirmado" pro cliente
   // — nunca decide "verificado" sozinha.
   const actionsSummary: string[] = [];
+  const deferredCalendarActions: DeferredCalendarAction[] = [];
   if (existing?.paymentStatus === 'pending_verification') {
     actionsSummary.push('Comprovante de pagamento recebido, ainda aguardando verificação de um operador — NÃO confirme o turno como pago, diga que vai verificar com cuidado.');
   } else if (existing?.paymentStatus === 'rejected') {
@@ -1270,18 +1321,105 @@ Regras:
 
     const responseParts: Part[] = [];
     for (const call of calls) {
-      const { response: toolResponse, summary, confirmedTimesHHmm } = await executeCalendarTool(tenantId, call.name || '', call.args || {}, phone, cfg, kb, contactName, messageId);
+      const name = call.name || '';
+      const args = (call.args || {}) as Record<string, unknown>;
+      if (isDeferredCalendarActionName(name)) {
+        const planned = planCalendarAction(name, args);
+        deferredCalendarActions.push(planned.action);
+        actionsSummary.push(planned.summary);
+        if (planned.confirmedTimesHHmm) confirmedTimes.push(...planned.confirmedTimesHHmm);
+        responseParts.push({ functionResponse: { name, response: planned.response } });
+        continue;
+      }
+      const { response: toolResponse, summary, confirmedTimesHHmm } = await executeCalendarTool(tenantId, name, args, phone, cfg, kb, contactName, messageId);
       actionsSummary.push(summary);
       // 'escalonar' (Epic 4.5.9, cancelamento com 24h+ de antecedência) reaproveita
       // o mesmo caminho de needsHumanConfirmation que 'erro' já usa.
       if ('erro' in toolResponse || 'escalonar' in toolResponse) hadError = true;
       if (confirmedTimesHHmm) confirmedTimes.push(...confirmedTimesHHmm);
-      responseParts.push({ functionResponse: { name: call.name, response: toolResponse } });
+      responseParts.push({ functionResponse: { name, response: toolResponse } });
     }
     contents.push({ role: 'user', parts: responseParts });
   }
 
-  return { actionsSummary, hadError, confirmedTimes, businessHoursStatus, currentAppointment: existing };
+  return { actionsSummary, hadError, confirmedTimes, businessHoursStatus, currentAppointment: existing, deferredCalendarActions };
+}
+
+/**
+ * Executa as ações de agenda que já passaram no revisor pré-envio. Limitar a
+ * uma mutação por turno impede estados parciais (por exemplo, reservar e
+ * depois falhar ao remarcar) quando o modelo devolver chamadas incompatíveis.
+ */
+export interface ApprovedCalendarExecution {
+  hadError: boolean;
+  summaries: string[];
+  action?: DeferredCalendarAction;
+  preReservationId?: string;
+}
+
+export async function executeApprovedCalendarActions(
+  tenantId: string,
+  phone: string,
+  cfg: CalendarConfig | undefined,
+  actions: DeferredCalendarAction[] | undefined,
+  contactName?: string,
+  messageId?: string,
+): Promise<ApprovedCalendarExecution> {
+  if (!actions?.length) return { hadError: false, summaries: [] };
+  if (!cfg?.clientId || !cfg?.clientSecret) {
+    return { hadError: true, summaries: ['Ação de agenda aprovada, mas a conexão do calendário não está disponível para execução segura.'] };
+  }
+  if (actions.length > 1) {
+    return { hadError: true, summaries: ['O modelo planejou mais de uma alteração de agenda no mesmo turno; nenhuma foi executada para evitar estado parcial.'] };
+  }
+
+  const action = actions[0];
+  const kb = await getKnowledgeBase(tenantId);
+  const result = await executeCalendarTool(tenantId, action.name, action.args, phone, cfg, kb, contactName, messageId);
+  const hadError = 'erro' in result.response || 'escalonar' in result.response;
+  const preReservationId = typeof result.response.pre_reserva_id === 'string'
+    ? result.response.pre_reserva_id
+    : undefined;
+  return { hadError, summaries: [result.summary], action: hadError ? undefined : action, preReservationId };
+}
+
+/**
+ * Compensa, por melhor esforço, apenas estados novos que ainda são reversíveis
+ * quando o envio da resposta falha depois da execução aprovada. Remarcações e
+ * cancelamentos não são desfeitos automaticamente: podem coexistir com uma
+ * entrega parcial e exigem tratamento humano para não criar um segundo efeito
+ * incorreto. A pré-reserva é preservada como registro cancelado para auditoria.
+ */
+export async function compensateApprovedCalendarExecution(
+  tenantId: string,
+  phone: string,
+  execution: ApprovedCalendarExecution,
+): Promise<string> {
+  if (!execution.action) return 'Não havia ação de agenda concluída para compensar.';
+
+  if (execution.action.name === 'criar_agendamento') {
+    const startIso = typeof execution.action.args.data_hora_inicio === 'string' ? execution.action.args.data_hora_inicio : undefined;
+    const endIso = typeof execution.action.args.data_hora_fim === 'string' ? execution.action.args.data_hora_fim : undefined;
+    const appointment = await getAppointmentForPhone(tenantId, phone);
+    const isThisTurnHold = appointment
+      && !appointment.eventId
+      && appointment.source === 'ai'
+      && appointment.paymentStatus === 'awaiting_payment'
+      && appointment.startIso === startIso
+      && appointment.endIso === endIso;
+    if (!isThisTurnHold) {
+      return 'A reserva criada não pôde ser identificada com segurança para reversão automática; caso escalado para revisão humana.';
+    }
+    await clearAppointmentForPhone(tenantId, phone);
+    return 'Reserva temporária criada neste turno foi liberada após falha de envio.';
+  }
+
+  if (execution.action.name === 'criar_pre_reserva' && execution.preReservationId) {
+    await updatePreReservationStatus(tenantId, execution.preReservationId, 'cancelled');
+    return 'Pré-reserva criada neste turno foi marcada como cancelada após falha de envio.';
+  }
+
+  return `Ação ${execution.action.name} não é reversível automaticamente após possível entrega parcial; caso escalado para revisão humana.`;
 }
 
 const FOTO_TOOLS: FunctionDeclaration[] = [
@@ -1666,6 +1804,7 @@ export async function generateAutoReplyForText(
     let stopAutoReply = false;
     let confirmedTimes: string[] = [];
     let quickReplyOptions: AutoReplyResult['quickReplyOptions'];
+    let deferredCalendarActions: DeferredCalendarAction[] = [];
     // Epic 4.5.7 — precisa ser "as ferramentas rodaram de verdade nesta
     // mensagem", não "confirmaram algum horário livre". Achado numa
     // auditoria pós-lançamento: gatear só por confirmedTimes.length deixava
@@ -1701,6 +1840,7 @@ export async function generateAutoReplyForText(
       }
       forcedHumanConfirmation = result.hadError;
       confirmedTimes = result.confirmedTimes;
+      deferredCalendarActions = result.deferredCalendarActions;
       // Prevenção, não só correção (achado de benchmark externo, 25/08/2026):
       // até aqui, a única defesa contra o especialista citar um horário
       // inventado era o gate REATIVO abaixo (gera a resposta livre, depois
@@ -1914,7 +2054,7 @@ export async function generateAutoReplyForText(
         || currentAppointment.paymentStatus === 'pending_verification'
         || currentAppointment.paymentStatus === 'rejected'
       );
-      if (!currentAppointment && containsPrematureBookingConfirmation(bubbles.join(' '))) {
+      if (!currentAppointment && !deferredCalendarActions.length && containsPrematureBookingConfirmation(bubbles.join(' '))) {
         console.warn(`⚠️  [Gate de agendamento inexistente] tenant=${tenantId} modelo confirmou/reservou o turno em texto mas nenhum agendamento real existe pra este contato — corrigindo resposta.`);
         bubbles = ['Dejame confirmar bien la disponibilidad antes de asegurarte el turno — en un instante te aviso si quedó todo listo.'];
         quickReplyOptions = undefined; // bubbles mudou — os botões do fallback anterior (se houver) não fazem mais sentido pra este texto novo
@@ -1996,7 +2136,7 @@ export async function generateAutoReplyForText(
       ]);
     }
 
-    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions };
+    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions, deferredCalendarActions };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;

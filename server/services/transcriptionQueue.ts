@@ -6,7 +6,7 @@ import { emitAiReplyStatus } from './conversationEvents';
 import { saveMediaImage } from './mediaImageStore';
 import { sendBubbles, type OutboundChannel } from './sendBubbles';
 import { isGeoRestrictedError } from './metaSend';
-import { generateAutoReplyForText } from './autoReply';
+import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
@@ -209,6 +209,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             knowledgeContext: kbContext,
             isBookingFlow: result.agent === 'agendamento',
             needsHumanConfirmation: result.needsHumanConfirmation,
+            plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
           }, { ai: deps.getAi(), groqApiKey: deps.groqApiKey });
           if (!safety.approved) {
             const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
@@ -223,15 +224,42 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
+          const calendarExecution = await executeApprovedCalendarActions(
+            tenantId,
+            message.from,
+            undefined,
+            result.deferredCalendarActions,
+            message.contactName,
+            message.messageId,
+          );
+          if (calendarExecution.hadError) {
+            const reason = calendarExecution.summaries.join(' ');
+            await logEscalation(tenantId, message.from, message.contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, outcome.result.transcription);
+            emitAiReplyStatus(tenantId, message.from, 'failed');
+            return;
+          }
           if (result.agent === 'reclamacao') {
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', outcome.result.transcription);
           } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
           }
-          await sendBubbles(channel, message.from, result.bubbles, async (bubbleText) => {
-            await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
-            console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
-          }, message.messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
+          try {
+            await sendBubbles(channel, message.from, result.bubbles, async (bubbleText) => {
+              await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
+              console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
+            }, message.messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
+          } catch (sendError: any) {
+            let compensation = 'Não foi possível iniciar a compensação automática.';
+            try {
+              compensation = await compensateApprovedCalendarExecution(tenantId, message.from, calendarExecution);
+            } catch (compensationError: any) {
+              compensation = `A compensação automática falhou: ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`;
+            }
+            await logEscalation(tenantId, message.from, message.contactName, `Falha ao enviar resposta após ação de agenda aprovada: ${sendError instanceof Error ? sendError.message : String(sendError)}. ${compensation}`, outcome.result.transcription);
+            console.warn(`⚠️ [Agenda pós-envio] tenant=${tenantId} ${compensation}`);
+            emitAiReplyStatus(tenantId, message.from, 'failed');
+            return;
+          }
           emitAiReplyStatus(tenantId, message.from, 'sent');
         } catch (err: any) {
           emitAiReplyStatus(tenantId, message.from, 'failed');

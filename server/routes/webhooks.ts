@@ -5,7 +5,7 @@ import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
-import { generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
+import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
 import { markPendingFollowUp, clearPendingFollowUp } from '../services/pendingFollowUpStore';
 import { sendBubbles } from '../services/sendBubbles';
@@ -241,6 +241,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           knowledgeContext: kbContext,
           isBookingFlow: result.agent === 'agendamento',
           needsHumanConfirmation: result.needsHumanConfirmation,
+          plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
         }, { ai: getAi!(), groqApiKey });
         if (!safety.approved) {
           const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
@@ -259,14 +260,44 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
+        const calendarExecution = await executeApprovedCalendarActions(
+          tenantId,
+          phone,
+          calendarConfig,
+          result.deferredCalendarActions,
+          contactName,
+          messageId,
+        );
+        if (calendarExecution.hadError) {
+          const reason = calendarExecution.summaries.join(' ');
+          await logEscalation(tenantId, phone, contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, text);
+          console.warn(`⚠️ [Agenda pós-revisão] tenant=${tenantId} nenhuma resposta foi enviada porque a ação aprovada falhou: ${reason}`);
+          emitAiReplyStatus(tenantId, phone, 'delivery_failed');
+          emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+          return;
+        }
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
           await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
         }
-        await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
-          await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
-          console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
-        }, messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
+        try {
+          await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
+            await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
+            console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
+          }, messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
+        } catch (sendError: any) {
+          let compensation = 'Não foi possível iniciar a compensação automática.';
+          try {
+            compensation = await compensateApprovedCalendarExecution(tenantId, phone, calendarExecution);
+          } catch (compensationError: any) {
+            compensation = `A compensação automática falhou: ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`;
+          }
+          await logEscalation(tenantId, phone, contactName, `Falha ao enviar resposta após ação de agenda aprovada: ${sendError instanceof Error ? sendError.message : String(sendError)}. ${compensation}`, text);
+          console.warn(`⚠️ [Agenda pós-envio] tenant=${tenantId} ${compensation}`);
+          emitAiReplyStatus(tenantId, phone, 'delivery_failed');
+          emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+          return;
+        }
         if (pendingGuidance) {
           await markOperatorGuidanceConsumed(tenantId, pendingGuidance.id);
           console.log(`🤝 [Retomada guiada] tenant=${tenantId} usou a orientação do operador pra responder ${phone} (fora da janela original, cliente reabriu agora).`);

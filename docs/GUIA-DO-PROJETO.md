@@ -34,9 +34,15 @@ server/services/autoReply.ts
         └─ especialista Gemini (systemInstruction cacheado por tenant = Camada 1+3;
                                   contents dinâmico = Camada 4 + histórico + mensagem atual)
                 │
-                ├─ Google Calendar real (function calling, por tenant, tokens em DB)
+                ├─ Google Calendar real (consultas durante geração; ações mutáveis planejadas)
                 ├─ knowledgeBaseStore (jsonb por tenant)
                 └─ conversationStore (Postgres, tenant_id obrigatório)
+        │
+        ▼
+replySafetyGate.ts ──► aprova ou bloqueia o rascunho + plano de agenda
+        │ aprovado
+        ▼
+executor de agenda ──► revalida disponibilidade, aplica uma única ação e só então sendBubbles
 
 Frontend: React+Vite (src/App.tsx) ──► apiFetch real pra maioria das telas
                                     └─ SSE (/api/conversations/stream) pra atualização ao vivo
@@ -71,7 +77,7 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 | Catálogo público por tenant | ✅ Feito (migration aplicada, dado corrigido) | `/catalogo/:slug` lê produtos ativos e preços vigentes da `knowledge_base`, expõe somente campos comerciais e mantém regras internas fora do payload. Migration `0042_public_catalog.sql` aplicada em produção (23/08). **Bug real corrigido (23/08):** o opt-in/contato da Monique tinha sido gravado via SQL direto no tenant errado (`11111111-...`, renomeado pra "Clic Piscinas (Meta)" em 18/08) em vez do tenant real (`8a786c2a-...`, slug `monique-teste`) — corrigido, e uma aba **Catálogo** nova no painel (`PublicCatalogSettings.tsx` + `GET/PUT /api/public-catalog-settings`, escopado por `tenantOf(req)`) elimina essa classe de erro daqui pra frente. Endpoint usa rate limit próprio. |
 | Pagamentos | ❌ Não existe (gateway) | Nenhum provedor real (Stripe/PIX/etc). Hoje é um campo `payment_status` que um operador humano marca manualmente (card de Escalonamentos, kind `payment_proof`), com a IA lendo o comprovante só como dica, nunca confirmando sozinha. Desde 19/08/2026 essa confirmação já vira um registro real no Financeiro (`financial_transactions`), mas continua sendo *registro*, não *cobrança* — nada aqui move dinheiro de verdade. |
 | Observabilidade / error tracking | ❌ Não existe (geral); ✅ dois casos específicos cobertos | Só `console.log`/`console.warn` (145+ ocorrências em `server/`), zero Sentry/Pino/serviço externo — decisão deliberada de não depender de serviço externo. Dois casos já têm alerta ativo (push + WhatsApp template pro `admin_alert_phone`): erro de sistema genérico (`systemErrorAlertService.ts`, issue #111) e, desde 24/08/2026, sessão Baileys/Evolution caindo silenciosamente (`evolutionConnectionAlertJob.ts` — ver "Mudanças recentes"). Fora esses dois, incidente ainda só aparece se alguém for procurar nos logs do Render. |
-| Testes & CI | ✅ Feito | 165 arquivos de teste, 858+ testes, `.github/workflows/ci.yml` roda lint+test+build em toda PR — todos os três passam limpos no `main` em 24/08/2026 |
+| Testes & CI | ✅ Feito | 190 arquivos de teste e 995 testes na validação local da TASK-0102 em 26/08/2026; `.github/workflows/ci.yml` roda lint+test+build em toda PR |
 | Envio real de WhatsApp | ✅ Feito | Meta Cloud API (`metaSend.ts`) e Evolution API (`evolutionSend.ts`) ambos batem em endpoints reais |
 
 ## Gaps conhecidos que valem engenharia (priorizados)
@@ -85,6 +91,12 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 7. ~~**Central de Qualidade aguardando migration 0040**~~ — migration aplicada no Supabase de produção e tabelas confirmadas via REST; continua pendente apenas a validação funcional ponta a ponta após o deploy do PR.
 
 ## Mudanças recentes relevantes (não é auditoria completa, só registro)
+
+**26/08/2026 (TASK-0102 — revisor pré-envio antes de efeitos de agenda):**
+- Uma auditoria autorizada do fluxo de agendamento encontrou uma condição crítica: o agente criava uma reserva temporária e somente depois submetia a mensagem de confirmação ao revisor pré-envio. Se o revisor bloqueasse o texto, o hold poderia permanecer sem aviso para a cliente.
+- O fluxo agora separa **planejamento** de **execução**. `criar_agendamento`, `remarcar_agendamento`, `cancelar_agendamento` e `criar_pre_reserva` ficam pendentes durante a geração; o revisor recebe o texto e o resumo do plano, explicitamente marcado como ainda não executado. Com bloqueio, o fluxo encerra sem efeito mutável. Com aprovação, o executor aplica no máximo uma ação e confere a disponibilidade novamente antes do envio.
+- Se a execução aprovada falhar, o rascunho afirmativo não é enviado e o caso é escalado. Se o envio falhar depois de criar um hold identificável deste próprio turno, ele é liberado por melhor esforço; pré-reserva recém-criada é marcada como cancelada. Remarcações e cancelamentos não são revertidos automaticamente após possível entrega parcial e seguem para revisão humana.
+- Cobertura adicionada para: geração sem mutação, execução pós-aprovação, contexto levado ao revisor, compensação de hold e regras anteriores de duração, duplicidade e cancelamento. Validações locais: lint, 190 arquivos/995 testes e build aprovados. Não houve nova mutação de agenda em produção durante essa validação.
 
 **26/08/2026 (TASK-0100 — identidade canônica de celular brasileiro no Evolution):**
 - Um teste prático autorizado no tenant Monique confirmou o envio Evolution até o aparelho e a resposta até o banco. O painel parecia não receber a resposta porque a Evolution devolveu o mesmo celular brasileiro em formato legado, sem o nono dígito móvel, criando uma segunda conversa para o mesmo contato.

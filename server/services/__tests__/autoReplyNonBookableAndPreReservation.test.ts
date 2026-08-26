@@ -19,6 +19,7 @@ const createPreReservation = vi.fn(async (_tenantId: string, input: any) => ({
   updatedAt: '2026-08-07T00:00:00.000Z',
   ...input,
 }));
+const updatePreReservationStatus = vi.fn(async () => undefined);
 
 let mockKb: { products: Array<{ name: string; price: string; bookable?: boolean; durationMinutes?: number }> } | null = null;
 
@@ -30,10 +31,12 @@ vi.mock('../googleCalendar', () => ({
   cancelCalendarEvent: vi.fn(async () => undefined),
 }));
 const createAppointmentHold = vi.fn(async () => undefined);
+const getAppointmentForPhone = vi.fn(async () => null);
+const clearAppointmentForPhone = vi.fn(async () => undefined);
 vi.mock('../appointmentStore', () => ({
-  getAppointmentForPhone: vi.fn(async () => null),
+  getAppointmentForPhone,
   setAppointmentForPhone,
-  clearAppointmentForPhone: vi.fn(async () => undefined),
+  clearAppointmentForPhone,
   createAppointmentHold,
   findOverlappingHold: vi.fn(async () => undefined),
 }));
@@ -48,9 +51,9 @@ vi.mock('../knowledgeBaseStore', async () => {
     getKnowledgeBase: vi.fn(async () => mockKb),
   };
 });
-vi.mock('../preReservationStore', () => ({ createPreReservation }));
+vi.mock('../preReservationStore', () => ({ createPreReservation, updatePreReservationStatus }));
 
-const { generateAutoReplyForText } = await import('../autoReply');
+const { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText } = await import('../autoReply');
 
 const CALENDAR_CONFIG = { clientId: 'id', clientSecret: 'secret', redirectUri: 'https://x/redirect' };
 
@@ -95,7 +98,7 @@ describe('criar_agendamento recusa serviço não-agendável (bookable:false)', (
     expect(setAppointmentForPhone).not.toHaveBeenCalled();
   });
 
-  it('cria normalmente (reserva, issue #289) um serviço sem bookable:false', async () => {
+  it('planeja a reserva e só a cria depois da aprovação pré-envio', async () => {
     mockKb = { products: [{ name: 'Microlips', price: 'Gs 500.000', durationMinutes: 120 }] };
     createCalendarEvent.mockClear();
     createAppointmentHold.mockClear();
@@ -105,18 +108,57 @@ describe('criar_agendamento recusa serviço não-agendável (bookable:false)', (
       args: { titulo: 'Microlips', data_hora_inicio: '2026-08-10T10:00:00', data_hora_fim: '2026-08-10T12:00:00' },
     });
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'quero marcar microlips amanhã 10h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
 
     expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(createAppointmentHold).not.toHaveBeenCalled();
+    expect(result?.deferredCalendarActions).toHaveLength(1);
+
+    const execution = await executeApprovedCalendarActions(
+      'tenant-a',
+      '595981234567',
+      CALENDAR_CONFIG,
+      result?.deferredCalendarActions,
+      'Cliente',
+    );
+
+    expect(execution.hadError).toBe(false);
     expect(createAppointmentHold).toHaveBeenCalledTimes(1);
+  });
+
+  it('libera somente o hold recém-criado quando a entrega posterior falha', async () => {
+    clearAppointmentForPhone.mockClear();
+    getAppointmentForPhone.mockResolvedValue({
+      eventId: undefined,
+      summary: 'Microlips',
+      startIso: '2026-08-10T10:00:00',
+      endIso: '2026-08-10T12:00:00',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      paymentStatus: 'awaiting_payment',
+      source: 'ai',
+    });
+
+    const compensation = await compensateApprovedCalendarExecution('tenant-a', '595981234567', {
+      hadError: false,
+      summaries: ['Reserva temporária criada.'],
+      action: {
+        name: 'criar_agendamento',
+        args: { data_hora_inicio: '2026-08-10T10:00:00', data_hora_fim: '2026-08-10T12:00:00' },
+        summary: 'Plano de teste.',
+      },
+    });
+
+    expect(clearAppointmentForPhone).toHaveBeenCalledWith('tenant-a', '595981234567');
+    expect(compensation).toContain('foi liberada');
+    getAppointmentForPhone.mockResolvedValue(null);
   });
 });
 
 describe('criar_pre_reserva registra um estado real (Etapa 1 + Etapa 2)', () => {
-  it('chama createPreReservation com telefone/serviço/data combinada e o messageId como idempotência', async () => {
+  it('planeja a pré-reserva e só a persiste depois da aprovação pré-envio', async () => {
     mockKb = { products: [{ name: 'Microlips', price: 'Gs 500.000' }] };
     createPreReservation.mockClear();
 
@@ -125,11 +167,24 @@ describe('criar_pre_reserva registra um estado real (Etapa 1 + Etapa 2)', () => 
       args: { servico: 'Microlips', data_combinada: '2026-08-15' },
     });
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'te transfiro a seña na sexta', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG, undefined, undefined, 'wamid.ABC123'
     );
 
+    expect(createPreReservation).not.toHaveBeenCalled();
+    expect(result?.deferredCalendarActions).toHaveLength(1);
+
+    const execution = await executeApprovedCalendarActions(
+      'tenant-a',
+      '595981234567',
+      CALENDAR_CONFIG,
+      result?.deferredCalendarActions,
+      'Cliente',
+      'wamid.ABC123',
+    );
+
+    expect(execution.hadError).toBe(false);
     expect(createPreReservation).toHaveBeenCalledTimes(1);
     expect(createPreReservation).toHaveBeenCalledWith('tenant-a', {
       phone: '595981234567',
@@ -138,6 +193,24 @@ describe('criar_pre_reserva registra um estado real (Etapa 1 + Etapa 2)', () => 
       committedDate: '2026-08-15',
       waMessageId: 'wamid.ABC123',
     });
+  });
+
+  it('marca a pré-reserva recém-criada como cancelada se a entrega posterior falhar', async () => {
+    updatePreReservationStatus.mockClear();
+
+    const compensation = await compensateApprovedCalendarExecution('tenant-a', '595981234567', {
+      hadError: false,
+      summaries: ['Pré-reserva criada.'],
+      action: {
+        name: 'criar_pre_reserva',
+        args: { servico: 'Microlips', data_combinada: '2026-08-15' },
+        summary: 'Plano de teste.',
+      },
+      preReservationId: 'pre-1',
+    });
+
+    expect(updatePreReservationStatus).toHaveBeenCalledWith('tenant-a', 'pre-1', 'cancelled');
+    expect(compensation).toContain('marcada como cancelada');
   });
 
   it('não registra (e não promete) pré-reserva quando falta o messageId', async () => {

@@ -46,7 +46,7 @@ vi.mock('../knowledgeBaseStore', async () => {
   };
 });
 
-const { generateAutoReplyForText } = await import('../autoReply');
+const { executeApprovedCalendarActions, generateAutoReplyForText } = await import('../autoReply');
 
 const CALENDAR_CONFIG = { clientId: 'id', clientSecret: 'secret', redirectUri: 'https://x/redirect' };
 
@@ -84,10 +84,11 @@ describe('criar_agendamento/remarcar_agendamento ignoram o data_hora_fim errado 
       args: { titulo: 'Combo Triple', data_hora_inicio: '2026-08-10T14:00:00', data_hora_fim: '2026-08-10T14:30:00' },
     });
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'quero marcar o combo triple às 14h', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
+    await executeApprovedCalendarActions('tenant-a', '595981234567', CALENDAR_CONFIG, result?.deferredCalendarActions, 'Cliente');
 
     // Issue #289: não cria mais o evento real na hora — a RESERVA tem que
     // cobrir as 3h inteiras (14:00–17:00), não os 30min que o modelo mandou.
@@ -109,10 +110,11 @@ describe('criar_agendamento/remarcar_agendamento ignoram o data_hora_fim errado 
       args: { nova_data_hora_inicio: '2026-08-11T09:00:00', nova_data_hora_fim: '2026-08-11T09:45:00' },
     });
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'posso remarcar pra amanhã 9h?', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
+    await executeApprovedCalendarActions('tenant-a', '595981234567', CALENDAR_CONFIG, result?.deferredCalendarActions, 'Cliente');
 
     expect(rescheduleCalendarEvent).toHaveBeenCalledWith('tenant-a', CALENDAR_CONFIG, 'evt-existente', '2026-08-11T09:00:00', '2026-08-11T12:00:00', expect.any(String));
     expect(setAppointmentForPhone).toHaveBeenCalledWith(
@@ -132,10 +134,11 @@ describe('criar_agendamento/remarcar_agendamento ignoram o data_hora_fim errado 
       args: { titulo: 'Serviço Novo Sem Cadastro', data_hora_inicio: '2026-08-10T14:00:00', data_hora_fim: '2026-08-10T14:05:00' },
     });
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'quero marcar', 'Cliente', undefined, undefined,
       '595981234567', CALENDAR_CONFIG
     );
+    await executeApprovedCalendarActions('tenant-a', '595981234567', CALENDAR_CONFIG, result?.deferredCalendarActions, 'Cliente');
 
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(createAppointmentHold).toHaveBeenCalledWith(
