@@ -51,6 +51,21 @@ describe('revisor pré-envio de respostas automáticas', () => {
     expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
       contents: expect.stringContaining('NUNCA será enviada automaticamente'),
     }));
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('descartar informação correta não é uma correção'),
+    }));
+  });
+
+  it('rejeita a sugestão quando o modelo troca o idioma da cliente (achado real 26/08/2026)', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ reply: 'Qual é o teu nome, pra eu poder marcar o combo?' }) });
+    const suggestion = await generateCorrectedReplySuggestion({
+      customerMessage: 'Me gustaría reservar un horario para el combo de cejas y labios',
+      blockedDraft: '¡Hola! El Combo Micro Cejas + Labios está Gs 850.000. ¿Cuál horario te queda mejor?',
+      reviewerReason: 'No se solicita ni confirma el nombre del cliente ni el servicio exacto.',
+      knowledgeContext: 'Combo Micro Cejas + Labios: Gs 850.000, incluye evaluación presencial.',
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(suggestion).toBeNull();
   });
 
   it('não gera sugestão para pagamento ou dado sensível', async () => {
