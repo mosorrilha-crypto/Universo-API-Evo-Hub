@@ -482,6 +482,20 @@ export const App: React.FC = () => {
   // pelo mesmo motivo do fix de imagem sumindo — evita o editor capturar
   // (mesmo que por um instante) a base de conhecimento do tenant errado.
   useEffect(() => {
+    // Bug real reportado (25-26/08/2026, dois prints do celular): trocar de
+    // empresa no seletor mostrava o catálogo de OUTRA empresa (ex: Monique
+    // selecionada, mas produtos da Clic Piscinas aparecendo). Banco de dados
+    // sempre esteve correto nos dois casos (confirmado por query direta no
+    // Postgres) — não é vazamento de dado nem bug de isolamento por
+    // tenant_id, é uma corrida de requisições puramente no navegador: esse
+    // efeito nunca verificava se a resposta que chegou ainda era da empresa
+    // ativa NA HORA que ela chega. Trocar de empresa rapidamente (ou uma
+    // resposta antiga demorar mais que a nova) deixava a resposta da
+    // empresa ERRADA "vencer" e sobrescrever o estado, mesmo com o seletor
+    // já mostrando a empresa certa. `cancelled` (mesmo padrão já usado em
+    // PublicCatalogSettings.tsx) faz a resposta tardia ser ignorada assim
+    // que outra troca de tenant já aconteceu.
+    let cancelled = false;
     setKbLoaded(false);
     // Carrega o cache do TENANT NOVO (ou o placeholder padrão) na hora —
     // sem isso a tela continuava mostrando, por um instante, a base de
@@ -501,6 +515,7 @@ export const App: React.FC = () => {
     apiFetch('/api/knowledge-base')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
+        if (cancelled) return;
         if (data?.knowledgeBase) {
           setKnowledgeBase((prev) => ({
             ...prev,
@@ -513,7 +528,12 @@ export const App: React.FC = () => {
         }
       })
       .catch(() => {})
-      .finally(() => setKbLoaded(true));
+      .finally(() => {
+        if (!cancelled) setKbLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeTenant.id]);
 
   // Busca o horário de funcionamento real salvo no backend (usado pelo
