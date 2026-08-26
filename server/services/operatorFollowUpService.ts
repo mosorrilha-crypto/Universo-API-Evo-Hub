@@ -25,7 +25,7 @@ import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 
 const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-/** Template aprovado no Meta Business Manager (categoria Utilitário) — corpo sugerido: "Olá {{1}}! Aqui é a equipe do {{2}}, ainda estamos aqui pra te ajudar 😊 Responde essa mensagem quando puder!" — {{1}} nome do lead, {{2}} nome do tenant, nessa ordem. */
+/** Template aprovado no Meta Business Manager (categoria Utilitário) — corpo sugerido (idioma es, mesmo do tenant real): "¡Hola {{1}}! Somos el equipo de {{2}}, seguimos aquí para ayudarte 😊 ¡Respondé este mensaje cuando puedas!" — {{1}} nome do lead, {{2}} nome do tenant, nessa ordem. */
 const REENGAGEMENT_TEMPLATE_NAME = 'retomada_atendimento';
 const REENGAGEMENT_TEMPLATE_LANGUAGE = 'es';
 
