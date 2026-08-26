@@ -69,6 +69,15 @@ let tenantOverride: string | null = normalizeTenantOverride(readStoredTenantOver
 
 export const setTenantOverride = (tenantId: string | null) => {
   tenantOverride = normalizeTenantOverride(tenantId);
+  try {
+    if (tenantOverride) {
+      localStorage.setItem('saas_active_tenant_override', tenantOverride);
+    } else {
+      localStorage.removeItem('saas_active_tenant_override');
+    }
+  } catch {
+    // localStorage indisponível — o override continua válido apenas nesta sessão.
+  }
 };
 
 export const getTenantOverride = () => tenantOverride;
