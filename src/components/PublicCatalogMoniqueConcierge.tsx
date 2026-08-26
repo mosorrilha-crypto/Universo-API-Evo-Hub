@@ -41,7 +41,20 @@ interface CatalogProduct {
   price: string;
   durationMinutes?: number;
   variants?: CatalogVariant[];
+  imageUrl?: string;
 }
+
+/**
+ * Artes promocionais reais (estilo anúncio, preto e dourado) fornecidas pela cliente —
+ * casadas por nome exato com o produto real da Base de Conhecimento (confirmado via
+ * Supabase, 26/08/2026). Só usadas quando o produto não já tem `imageUrl` próprio vindo
+ * do backend (foto de exemplo cadastrada no painel tem prioridade).
+ */
+const PROMO_IMAGE_BY_PRODUCT_NAME: Record<string, string> = {
+  'Microlips Labios': '/monique-novo/promo-labios.jpg',
+  'Combo Full Face con Micro de Cejas + Labios y Pestañas': '/monique-novo/promo-combo-full-face.jpg',
+  'Combo Micro Cejas + Labios': '/monique-novo/promo-combo-cejas-labios.jpg',
+};
 
 interface PublicCatalogResponse {
   tenant: { name: string; slug: string };
@@ -274,6 +287,85 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .footer a:hover { color: #fff; }
         @media (min-width: 640px) { .concierge-scope .option-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
         @media (max-width: 767px) { .concierge-scope .section-heading { align-items: start; flex-direction: column; } .concierge-scope .results-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .concierge-scope .result-card.featured { grid-column: span 2; grid-row: auto; min-height: 22rem; } .concierge-scope .catalog-grid { grid-template-columns: 1fr; } .concierge-scope .hero { padding-top: 2.5rem; } .concierge-scope .hero-note { left: .65rem; } }
+
+        /* Black & Gold Atelier — identidade visual correta (captura original, commit c1693b81): preto profundo e dourado, não azul/branco. Sobrescreve as regras acima, na mesma ordem do CSS de origem. */
+        .concierge-scope .site-header { background: rgba(10,9,8,.96); border-bottom-color: rgba(214,166,75,.2); color: #f7efe2; }
+        .concierge-scope .site-header nav a, .concierge-scope .mobile-menu a { color: #d7c7ae; }
+        .concierge-scope .site-header nav a:hover, .concierge-scope .mobile-menu a:hover { color: #e8b95e; }
+        .concierge-scope .brand, .concierge-scope .brand strong { color: #f7efe2; }
+        .concierge-scope .brand small { color: #bda982; }
+        .concierge-scope .brand-mark { border-color: #d8a64b; color: #e8b95e; }
+        .concierge-scope .header-cta, .concierge-scope .primary-cta, .concierge-scope .next-cta { background: linear-gradient(135deg,#e5b454,#b97922); color: #130f0b; box-shadow: 0 .45rem 1rem rgba(216,166,75,.2); }
+        .concierge-scope .header-cta:hover, .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: linear-gradient(135deg,#f1c86c,#c88a2d); }
+        .concierge-scope .mobile-menu { background: #0a0908; border-top-color: rgba(214,166,75,.2); }
+        .concierge-scope .hero { background: #0a0908; color: #f7efe2; }
+        .concierge-scope .hero-copy h1 { color: #f7efe2; }
+        .concierge-scope .hero-copy h1 span, .concierge-scope .section-intro h2 span, .concierge-scope .section-heading h2 span, .concierge-scope .contact-section h2 span { color: #e7b35b; }
+        .concierge-scope .hero-copy > p { color: #cdbfae; }
+        .concierge-scope .kicker { color: #e7b35b; }
+        .concierge-scope .trust-row { color: #bda982; }
+        .concierge-scope .trust-row svg { color: #e7b35b; }
+        .concierge-scope .hero-image-wrap { box-shadow: 1rem 1rem 0 #3b2814; border: 1px solid rgba(231,179,91,.4); }
+        .concierge-scope .hero-note { background: #f7efe2; border-color: #c69947; color: #392816; }
+        .concierge-scope .hero-note b { color: #b77a24; }
+        .concierge-scope .triage-section { background: #f3eadc; }
+        .concierge-scope .section-number { color: #a46d1d; }
+        .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { color: #665846; }
+        .concierge-scope .step-rail { color: #a38e70; }
+        .concierge-scope .step-rail span { border-color: #d6c4a7; }
+        .concierge-scope .step-rail .active { border-color: #b77a24; color: #8f5e19; }
+        .concierge-scope .triage-card { background: #16120e; border-color: #5e421f; box-shadow: 0 .8rem 2.3rem rgba(47,29,9,.2); color: #f7efe2; }
+        .concierge-scope .triage-top { border-bottom-color: rgba(224,174,82,.25); color: #dbc69e; }
+        .concierge-scope .progress { background: #3d2b18; }
+        .concierge-scope .progress i { background: linear-gradient(90deg,#b77a24,#f1c56b); }
+        .concierge-scope .triage-body h3 { color: #f7efe2; }
+        .concierge-scope .helper { color: #cdbfae; }
+        .concierge-scope .option { border-color: #4e3a24; background: #211a13; color: #f7efe2; }
+        .concierge-scope .option:hover { border-color: #c99a48; box-shadow: 0 .5rem 1rem rgba(216,166,75,.12); }
+        .concierge-scope .option.selected { border-color: #e0ae52; box-shadow: 0 0 0 3px rgba(224,174,82,.16); }
+        .concierge-scope .option-icon { background: #3b2814; color: #e8b95e; }
+        .concierge-scope .option.selected .option-icon { background: #d39a38; color: #17100a; }
+        .concierge-scope .option b { color: #fff7e9; }
+        .concierge-scope .option small { color: #cdbfae; }
+        .concierge-scope .back-cta { border-color: #6b4c27; color: #d4bd98; }
+        .concierge-scope .field span { color: #d7c29d; }
+        .concierge-scope .field input, .concierge-scope .field select, .concierge-scope .field textarea { border-color: #6b4c27; background: #211a13; color: #fff7e9; }
+        .concierge-scope .field input::placeholder, .concierge-scope .field textarea::placeholder { color: #a99578; }
+        .concierge-scope .field input:focus, .concierge-scope .field select:focus, .concierge-scope .field textarea:focus { border-color: #e0ae52; box-shadow: 0 0 0 3px rgba(224,174,82,.15); }
+        .concierge-scope .sent-note { color: #e8b95e; }
+        .concierge-scope .results-section { background: #120f0c; color: #f7efe2; }
+        .concierge-scope .results-section .section-heading > p { color: #cdbfae; }
+        .concierge-scope .text-link { color: #e7b35b; }
+        .concierge-scope .result-card { background: #271b10; border: 1px solid rgba(215,166,76,.25); }
+        .concierge-scope .result-card span { background: rgba(10,9,8,.88); color: #f7efe2; }
+        .concierge-scope .catalog-section { background: #f3eadc; }
+        .concierge-scope .catalog-section .section-heading > p { color: #665846; }
+        .concierge-scope .service-card { border-color: #d8c6aa; background: #fbf6ed; overflow: hidden; }
+        .concierge-scope .service-card:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
+        .concierge-scope .service-card-image { display: block; width: calc(100% + 2.3rem); aspect-ratio: 4 / 3; margin: -1.15rem -1.15rem 1rem; object-fit: cover; }
+        .concierge-scope .service-meta { color: #846d4d; }
+        .concierge-scope .service-card h3 { color: #24190f; }
+        .concierge-scope .service-card p { color: #75624c; }
+        .concierge-scope .service-bottom { border-top-color: #dfcfb6; }
+        .concierge-scope .service-bottom b { color: #9b6417; }
+        .concierge-scope .service-bottom a { color: #684916; }
+        .concierge-scope .policy-box { border-color: #d1b88f; background: #f9f0e2; }
+        .concierge-scope .policy-box summary { color: #4b351b; }
+        .concierge-scope .policy-box div { color: #705f49; }
+        .concierge-scope .contact-section { background: #0a0908; color: #f7efe2; border-top: 1px solid rgba(224,174,82,.25); }
+        .concierge-scope .contact-section p { color: #cdbfae; }
+        .concierge-scope .light-cta { background: linear-gradient(135deg,#f3c96c,#b97a22); color: #17100a; }
+        .concierge-scope .footer { background: #000; color: #cdbfae; border-top: 1px solid rgba(224,174,82,.2); }
+        .concierge-scope .footer a:hover { color: #e8b95e; }
+        .concierge-scope .gold-promo { background: #0a0908; padding: 3.5rem 0; color: #f7efe2; }
+        .concierge-scope .gold-promo-grid { display: grid; grid-template-columns: minmax(0,.72fr) minmax(0,1.28fr); align-items: center; gap: 3rem; }
+        .concierge-scope .gold-promo-copy h2 { margin-top: 1rem; max-width: 28rem; font-family: 'Cormorant Garamond', Georgia, serif; font-size: clamp(2.6rem, 5vw, 5rem); line-height: .9; letter-spacing: -.045em; }
+        .concierge-scope .gold-promo-copy h2 span { color: #e8b95e; font-style: italic; }
+        .concierge-scope .gold-promo-copy p { max-width: 24rem; margin-top: 1.2rem; color: #cdbfae; font-size: .95rem; line-height: 1.65; }
+        .concierge-scope .gold-promo-media { overflow: hidden; border: 1px solid rgba(224,174,82,.45); border-radius: .8rem; box-shadow: 0 1rem 3rem rgba(0,0,0,.35); }
+        .concierge-scope .gold-promo-media img { display: block; width: 100%; max-height: 32rem; object-fit: cover; object-position: center 28%; }
+        .concierge-scope .gold-rule { display: inline-block; width: 3rem; height: 1px; background: #e8b95e; vertical-align: middle; }
+        @media (max-width: 767px) { .concierge-scope .gold-promo-grid { grid-template-columns: 1fr; gap: 1.6rem; } .concierge-scope .gold-promo { padding: 2.8rem 0; } .concierge-scope .gold-promo-copy h2 { font-size: 3.5rem; } }
       `}</style>
 
       <header className="site-header">
@@ -316,6 +408,20 @@ export function PublicCatalogMoniqueConcierge() {
           <div className="hero-visual">
             <div className="hero-image-wrap"><img src="/monique-novo/full-face.jpg" alt="Resultado real de belleza natural" /></div>
             <div className="hero-note"><b>01</b><span>Elegir bien también es parte del cuidado.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="gold-promo">
+        <div className="container gold-promo-grid">
+          <div className="gold-promo-copy">
+            <span className="kicker"><span className="gold-rule" /> Oferta especial · evaluación</span>
+            <h2>Un cuidado completo para entrar en tu <span>próxima etapa.</span></h2>
+            <p>Conocé el Combo Full Face y recibí orientación personalizada antes de confirmar. La seña y el horario se coordinan por WhatsApp.</p>
+            <a href="#triagem" className="primary-cta">Agendar mi evaluación <ArrowRight size={16} /></a>
+          </div>
+          <div className="gold-promo-media">
+            <img src="/monique-novo/promo-combo-full-face.jpg" alt="Arte promocional do Combo Full Face" />
           </div>
         </div>
       </section>
@@ -437,8 +543,10 @@ export function PublicCatalogMoniqueConcierge() {
                 const consultMessage = catalog.contact.whatsappMessageProduct
                   ? catalog.contact.whatsappMessageProduct.split('{produto}').join(service.name)
                   : `Hola Monique, me interesa ${service.name}. Quiero saber si es para mí.`;
+                const cardImage = service.imageUrl || PROMO_IMAGE_BY_PRODUCT_NAME[service.name];
                 return (
                   <article className="service-card" key={service.name}>
+                    {cardImage && <img className="service-card-image" src={cardImage} alt={service.name} loading="lazy" />}
                     <div className="service-meta">
                       <span>{service.category || 'Servicios'}</span>
                       {formatDuration(service.durationMinutes) && <span><Clock3 size={12} /> {formatDuration(service.durationMinutes)}</span>}
