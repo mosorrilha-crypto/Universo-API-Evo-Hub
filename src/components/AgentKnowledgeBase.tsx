@@ -3,7 +3,7 @@
  * estruturada, leitura clara e edição previsível em desktop e celular.
  */
 import React, { useState, useEffect, useMemo } from 'react';
-import { AgentKnowledgeBase, AgentProduct, ProductVariant, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
+import { AgentKnowledgeBase, AgentProduct, ProductVariant, BeforeAfterPair, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import {
@@ -352,6 +352,79 @@ const PRESET_TEMPLATES: { name: string; icon: string; desc: string; data: Partia
     }
   }
 ];
+
+interface BeforeAfterEditorProps {
+  label: string;
+  pairs?: BeforeAfterPair[];
+  onChange: (pairs: BeforeAfterPair[]) => void;
+}
+
+const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onChange }) => {
+  const comparisons = pairs || [];
+  const addPair = () => onChange([...comparisons, {
+    id: `before-after-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    beforeImageBase64: '',
+    afterImageBase64: '',
+  }]);
+  const removePair = (id: string) => onChange(comparisons.filter((pair) => pair.id !== id));
+  const updatePair = (id: string, patch: Partial<BeforeAfterPair>) => onChange(comparisons.map((pair) => pair.id === id ? { ...pair, ...patch } : pair));
+  const uploadImage = (id: string, side: 'before' | 'after', event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Selecione uma imagem para a comparação.');
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      alert('Cada imagem da comparação pode ter no máximo 4 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => updatePair(id, side === 'before'
+      ? { beforeImageBase64: String(reader.result), beforeImageMimeType: file.type }
+      : { afterImageBase64: String(reader.result), afterImageMimeType: file.type });
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-violet-400/20 bg-violet-500/5 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] font-semibold text-violet-200">Antes e depois · {label}</span>
+        <button type="button" onClick={addPair} className="inline-flex items-center gap-1 text-[9px] font-semibold text-violet-300 hover:text-violet-100">
+          <Plus className="h-3 w-3" /> Adicionar comparação
+        </button>
+      </div>
+      {comparisons.map((pair, index) => (
+        <div key={pair.id} className="space-y-1.5 rounded-md border border-slate-700 bg-slate-950/70 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[9px] text-slate-400">Comparação {index + 1}</span>
+            <button type="button" onClick={() => removePair(pair.id)} className="p-0.5 text-slate-500 hover:text-red-400" title="Remover comparação"><Trash2 className="h-3 w-3" /></button>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {(['before', 'after'] as const).map((side) => {
+              const image = side === 'before' ? pair.beforeImageBase64 : pair.afterImageBase64;
+              return (
+                <label key={side} className="group relative flex min-h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-md border border-dashed border-slate-700 bg-slate-900 text-[9px] font-medium text-slate-400 hover:border-violet-400/60 hover:text-violet-200">
+                  {image ? <img src={image} alt={side === 'before' ? 'Antes' : 'Depois'} className="absolute inset-0 h-full w-full object-cover" /> : <><ImageIcon className="mb-1 h-3.5 w-3.5" />{side === 'before' ? 'Foto do antes' : 'Foto do depois'}</>}
+                  {image && <span className="relative z-10 rounded bg-slate-950/80 px-1.5 py-0.5">Trocar {side === 'before' ? 'antes' : 'depois'}</span>}
+                  <input type="file" accept="image/*" className="hidden" onChange={(event) => uploadImage(pair.id, side, event)} />
+                </label>
+              );
+            })}
+          </div>
+          <input
+            type="text"
+            value={pair.caption || ''}
+            onChange={(event) => updatePair(pair.id, { caption: event.target.value })}
+            placeholder="Contexto do resultado (sem dados pessoais)"
+            className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[9px] text-slate-200 placeholder-slate-600"
+          />
+        </div>
+      ))}
+    </div>
+  );
+};
 
 export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   knowledgeBase,
@@ -890,6 +963,43 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const handleVariantImageChange = (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result);
+      setFormData((prev) => ({
+        ...prev,
+        products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
+          ...product,
+          variants: product.variants.map((variant, variantIndex) => variantIndex === index
+            ? { ...variant, exampleImageBase64: base64, exampleImageMimeType: file.type }
+            : variant),
+        }),
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleProductBeforeAfterChange = (productId: string, pairs: BeforeAfterPair[]) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((product) => product.id === productId ? { ...product, beforeAfter: pairs } : product),
+    }));
+  };
+
+  const handleVariantBeforeAfterChange = (productId: string, index: number, pairs: BeforeAfterPair[]) => {
+    setFormData((prev) => ({
+      ...prev,
+      products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
+        ...product,
+        variants: product.variants.map((variant, variantIndex) => variantIndex === index ? { ...variant, beforeAfter: pairs } : variant),
+      }),
+    }));
+  };
+
   const MAX_VIDEO_INPUT_SIZE_MB = 35; // teto do arquivo ORIGINAL antes de converter (ex: .MOV do iPhone) — mesmo valor de MAX_VIDEO_INPUT_BYTES no servidor; o servidor converte pro limite final de 16MB da Meta se precisar
   const [uploadingVideoForId, setUploadingVideoForId] = useState<string | null>(null);
   const [previewingVideoId, setPreviewingVideoId] = useState<string | null>(null);
@@ -947,6 +1057,50 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       }));
     } catch (err: any) {
       console.error('Falha ao enviar vídeo:', err);
+      alert(`Não foi possível enviar o vídeo: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingVideoForId(null);
+    }
+  };
+
+  const handleVariantVideoUpload = async (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('video/')) {
+      alert(`Arquivo não é um vídeo (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_VIDEO_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Vídeo maior que ${MAX_VIDEO_INPUT_SIZE_MB}MB. Comprima ou corte antes de enviar.`);
+      return;
+    }
+    const uploadKey = `variant:${productId}:${index}`;
+    const oldVideoId = formData.products.find((product) => product.id === productId)?.variants?.[index]?.exampleVideoId;
+    setUploadingVideoForId(uploadKey);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64, oldVideoId }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { videoId, mimeType, fileName, sizeBytes } = await res.json();
+      setFormData((prev) => ({
+        ...prev,
+        products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
+          ...product,
+          variants: product.variants.map((variant, variantIndex) => variantIndex === index
+            ? { ...variant, exampleVideoId: videoId, exampleVideoMimeType: mimeType, exampleVideoFileName: fileName, exampleVideoSizeBytes: sizeBytes }
+            : variant),
+        }),
+      }));
+    } catch (err: any) {
+      console.error('Falha ao enviar vídeo da variação:', err);
       alert(`Não foi possível enviar o vídeo: ${err.message || 'tente novamente'}.`);
     } finally {
       setUploadingVideoForId(null);
@@ -2309,6 +2463,27 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           title="Descrição exclusiva desta variação. Ela aparece no catálogo público e orienta o agente sem misturar todos os efeitos na descrição da família."
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-400/60"
                         />
+                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 p-2">
+                          {variant.exampleImageBase64 && <img src={variant.exampleImageBase64} alt={`Foto de ${variant.code || 'variação'}`} className="h-9 w-9 rounded-md border border-slate-700 object-cover" />}
+                          <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-sky-300 hover:text-sky-200">
+                            <ImageIcon className="h-3 w-3" /> {variant.exampleImageBase64 ? 'Trocar foto' : 'Foto desta variação'}
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleVariantImageChange(prod.id, vIndex, e)} />
+                          </label>
+                          <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-emerald-300 hover:text-emerald-200">
+                            <Video className="h-3 w-3" /> {uploadingVideoForId === `variant:${prod.id}:${vIndex}` ? 'Enviando vídeo…' : variant.exampleVideoId ? 'Trocar vídeo' : 'Vídeo desta variação'}
+                            <input type="file" accept="video/*" className="hidden" disabled={uploadingVideoForId === `variant:${prod.id}:${vIndex}`} onChange={(e) => handleVariantVideoUpload(prod.id, vIndex, e)} />
+                          </label>
+                          {variant.exampleVideoId && <button type="button" onClick={() => handlePreviewProductVideo(variant.exampleVideoId!)} className="inline-flex items-center gap-1 text-[9px] font-semibold text-slate-300 hover:text-white"><Play className="h-3 w-3" /> Ver vídeo</button>}
+                        </div>
+                        <BeforeAfterEditor label={variant.code || 'esta variação'} pairs={variant.beforeAfter} onChange={(pairs) => handleVariantBeforeAfterChange(prod.id, vIndex, pairs)} />
+                        <AutoResizeTextarea
+                          minRows={2}
+                          placeholder="Mensagem de WhatsApp desta variação. Use {produto} para inserir o nome do efeito."
+                          value={variant.whatsappMessage || ''}
+                          onChange={(e) => handleVariantFieldChange(prod.id, vIndex, 'whatsappMessage', e.target.value)}
+                          title="Esta mensagem aparece no WhatsApp quando a cliente consulta esta variação específica."
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-400/60"
+                        />
                         <div className="flex items-center gap-1.5">
                           <span className="text-[9px] font-semibold text-amber-300 whitespace-nowrap">Desconto temporário</span>
                           <input
@@ -2398,6 +2573,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                       </span>
                     )}
                   </div>
+                  <BeforeAfterEditor label={prod.name} pairs={prod.beforeAfter} onChange={(pairs) => handleProductBeforeAfterChange(prod.id, pairs)} />
                   </>); })()}
                   </div>
                 )}

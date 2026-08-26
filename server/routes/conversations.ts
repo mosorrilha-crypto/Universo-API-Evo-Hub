@@ -772,22 +772,20 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     const kb = await getKnowledgeBase(tenantId);
-    // findProductMatch acha o produto pai mesmo quando productName bate numa
-    // variante específica (ex: "Lash Lift" dentro da família "Pestañas") —
-    // foto/vídeo de exemplo são sempre da família inteira, nunca por variante.
-    const product = findProductMatch(kb, productName)?.product;
-    if (!product?.exampleImageBase64) {
+    const match = findProductMatch(kb, productName);
+    const media = match?.variant?.exampleImageBase64 ? match.variant : match?.product;
+    if (!media?.exampleImageBase64) {
       return res.status(404).json({ error: 'Esse serviço não tem foto de exemplo cadastrada na Base de Conhecimento.' });
     }
 
     try {
-      const mimeType = product.exampleImageMimeType || 'image/jpeg';
+      const mimeType = media.exampleImageMimeType || 'image/jpeg';
       const channel = await resolveCredentialsForTenant(
         tenantId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
-      const cleanImageBase64 = product.exampleImageBase64.replace(/^data:[^;]+;base64,/, '');
+      const cleanImageBase64 = media.exampleImageBase64.replace(/^data:[^;]+;base64,/, '');
       if (channel.provider === 'evolution') {
         await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, cleanImageBase64, mimeType, `${productName}.jpg`, productName);
       } else {
@@ -815,7 +813,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         undefined,
         messageId
       );
-      await saveMediaImage(supabaseUrl, supabaseKey, messageId, product.exampleImageBase64, mimeType);
+      await saveMediaImage(supabaseUrl, supabaseKey, messageId, media.exampleImageBase64, mimeType);
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
@@ -837,18 +835,19 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     const kb = await getKnowledgeBase(tenantId);
-    const product = findProductMatch(kb, productName)?.product;
-    if (!product?.exampleVideoId) {
+    const match = findProductMatch(kb, productName);
+    const media = match?.variant?.exampleVideoId ? match.variant : match?.product;
+    if (!media?.exampleVideoId) {
       return res.status(404).json({ error: 'Esse serviço não tem vídeo de exemplo cadastrado na Base de Conhecimento.' });
     }
-    const video = await getKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, product.exampleVideoId);
+    const video = await getKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, media.exampleVideoId);
     if (!video) {
       return res.status(404).json({ error: 'O vídeo cadastrado não foi encontrado no Storage — tente subir de novo na Base de Conhecimento.' });
     }
 
     try {
-      const mimeType = product.exampleVideoMimeType || video.contentType;
-      const filename = product.exampleVideoFileName || `${productName}.mp4`;
+      const mimeType = media.exampleVideoMimeType || video.contentType;
+      const filename = media.exampleVideoFileName || `${productName}.mp4`;
       const channel = await resolveCredentialsForTenant(
         tenantId,
         { metaAccessToken, metaPhoneNumberId },

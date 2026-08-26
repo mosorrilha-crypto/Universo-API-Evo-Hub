@@ -8,11 +8,24 @@ import {
   resolveVariantPriceAmount,
   type AgentProduct,
   type ProductVariant,
+  type BeforeAfterPair,
 } from './knowledgeBaseStore';
+
+export interface PublicBeforeAfterPair {
+  id: string;
+  beforeImageUrl: string;
+  afterImageUrl: string;
+  caption?: string;
+}
 
 export interface PublicCatalogVariant {
   code: string;
   description?: string;
+  /** Miniatura pública e comprimida da foto exclusiva da variação. */
+  imageUrl?: string;
+  /** Template de WhatsApp específico do efeito/modelo; não expõe dados internos do agente. */
+  whatsappMessage?: string;
+  beforeAfter?: PublicBeforeAfterPair[];
   dimensions?: string;
   litros?: number;
   price: string;
@@ -31,6 +44,7 @@ export interface PublicCatalogProduct {
   variants?: PublicCatalogVariant[];
   /** Miniatura comprimida (data URI JPEG) — nunca a foto original (`exampleImageBase64`), que pode chegar a alguns MB e é privada/interna. */
   imageUrl?: string;
+  beforeAfter?: PublicBeforeAfterPair[];
 }
 
 export interface PublicCatalog {
@@ -77,12 +91,36 @@ function normalizeSlug(slug: string): string | null {
   return /^[a-z0-9][a-z0-9-]{0,79}$/.test(normalized) ? normalized : null;
 }
 
-function publicVariant(variant: ProductVariant): PublicCatalogVariant {
+async function publicBeforeAfterPair(pair: BeforeAfterPair): Promise<PublicBeforeAfterPair | null> {
+  const [beforeImageUrl, afterImageUrl] = await Promise.all([
+    buildCatalogThumbnail(pair.beforeImageBase64),
+    buildCatalogThumbnail(pair.afterImageBase64),
+  ]);
+  if (!beforeImageUrl || !afterImageUrl) return null;
+  return {
+    id: pair.id,
+    beforeImageUrl,
+    afterImageUrl,
+    caption: pair.caption?.trim() || undefined,
+  };
+}
+
+async function publicBeforeAfterPairs(pairs?: BeforeAfterPair[]): Promise<PublicBeforeAfterPair[] | undefined> {
+  if (!pairs?.length) return undefined;
+  const converted = await Promise.all(pairs.map(publicBeforeAfterPair));
+  const valid = converted.filter((pair): pair is PublicBeforeAfterPair => pair !== null);
+  return valid.length ? valid : undefined;
+}
+
+async function publicVariant(variant: ProductVariant): Promise<PublicCatalogVariant> {
   const currentPrice = resolveVariantPrice(variant);
   const amount = resolveVariantPriceAmount(variant);
   return {
     code: variant.code,
     description: variant.description?.trim() || undefined,
+    imageUrl: await buildCatalogThumbnail(variant.exampleImageBase64),
+    whatsappMessage: variant.whatsappMessage?.trim() || undefined,
+    beforeAfter: await publicBeforeAfterPairs(variant.beforeAfter),
     dimensions: variant.dimensions,
     litros: variant.litros,
     price: currentPrice,
@@ -102,8 +140,9 @@ export async function toPublicCatalogProduct(product: AgentProduct, tenantCurren
     priceAmount: amount > 0 ? amount : undefined,
     currency: product.currency || tenantCurrency,
     durationMinutes: product.durationMinutes,
-    variants: product.variants?.map(publicVariant),
+    variants: product.variants ? await Promise.all(product.variants.map(publicVariant)) : undefined,
     imageUrl: await buildCatalogThumbnail(product.exampleImageBase64),
+    beforeAfter: await publicBeforeAfterPairs(product.beforeAfter),
   };
 }
 

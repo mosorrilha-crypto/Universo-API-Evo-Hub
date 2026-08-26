@@ -52,7 +52,9 @@ describe('publicCatalogStore', () => {
     expect(catalog).not.toHaveProperty('pricingAndPolicies');
   });
 
-  it('preserva variantes comerciais sem transportar aliases ou mídia privada', async () => {
+  it('preserva foto pública comprimida e mensagem comercial por variante sem transportar o vídeo privado', async () => {
+    const tinyPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
     const product = await toPublicCatalogProduct(
       {
         name: 'Pestañas',
@@ -60,14 +62,56 @@ describe('publicCatalogStore', () => {
         price: 'Consultar',
         category: 'Pestañas',
         description: 'Família de serviços.',
-        variants: [{ code: 'Efecto 30+', description: 'Máximo volume e retenção de até 30 dias.', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120, bookable: false }],
+        beforeAfter: [{
+          id: 'pestanas-resultado-1',
+          beforeImageBase64: `data:image/png;base64,${tinyPngBase64}`,
+          afterImageBase64: `data:image/png;base64,${tinyPngBase64}`,
+          caption: 'Resultado adaptado a la mirada.',
+        }],
+        variants: [{
+          code: 'Efecto 30+',
+          description: 'Máximo volume e retenção de até 30 dias.',
+          whatsappMessage: 'Hola, quiero información sobre {produto}.',
+          exampleImageBase64: `data:image/png;base64,${tinyPngBase64}`,
+          exampleImageMimeType: 'image/png',
+          exampleVideoId: 'private-variant-video-id',
+          beforeAfter: [{
+            id: 'efecto-30-resultado-1',
+            beforeImageBase64: `data:image/png;base64,${tinyPngBase64}`,
+            afterImageBase64: `data:image/png;base64,${tinyPngBase64}`,
+            caption: 'Volumen con acabado intenso.',
+          }],
+          price: 'Gs 350.000',
+          priceAmount: 350000,
+          durationMinutes: 120,
+          bookable: false,
+        }],
       },
       'PYG',
     );
 
-    expect(product.variants).toEqual([
-      { code: 'Efecto 30+', description: 'Máximo volume e retenção de até 30 dias.', price: 'Gs 350.000', priceAmount: 350000, durationMinutes: 120 },
-    ]);
+    expect(product.variants?.[0]).toMatchObject({
+      code: 'Efecto 30+',
+      description: 'Máximo volume e retenção de até 30 dias.',
+      whatsappMessage: 'Hola, quiero información sobre {produto}.',
+      price: 'Gs 350.000',
+      priceAmount: 350000,
+      durationMinutes: 120,
+      imageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+    });
+    expect(product.beforeAfter?.[0]).toMatchObject({
+      id: 'pestanas-resultado-1',
+      caption: 'Resultado adaptado a la mirada.',
+      beforeImageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+      afterImageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+    });
+    expect(product.variants?.[0].beforeAfter?.[0]).toMatchObject({
+      id: 'efecto-30-resultado-1',
+      caption: 'Volumen con acabado intenso.',
+      beforeImageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+      afterImageUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+    });
+    expect(product.variants?.[0]).not.toHaveProperty('exampleVideoId');
     expect(product).not.toHaveProperty('aliases');
   });
 

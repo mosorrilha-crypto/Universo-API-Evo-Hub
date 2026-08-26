@@ -150,12 +150,35 @@ export interface LeadAttribution {
   capiEvents?: MetaCAPIEvent[];
 }
 
+/** Par comparativo real, sempre com foto anterior e posterior do mesmo procedimento. */
+export interface BeforeAfterPair {
+  id: string;
+  beforeImageBase64: string;
+  beforeImageMimeType?: string;
+  afterImageBase64: string;
+  afterImageMimeType?: string;
+  /** Contexto opcional e não identificável do resultado, como técnica ou efeito. */
+  caption?: string;
+}
+
 /** Uma variante de tamanho/modelo dentro de um produto unificado — ver AgentProduct.variants. */
 export interface ProductVariant {
   /** Nome/código da variante — o que o agente cita pro cliente e usa pra bater com o nome do serviço pedido (ex: "AC F400" num catálogo de piscinas, ou "Lash Lift" numa família de serviços). */
   code: string;
   /** Explica o benefício, efeito ou diferença desta variação específica, sem repetir a descrição geral da família. */
   description?: string;
+  /** Foto exclusiva da variação, usada no catálogo e no envio manual quando o cliente pede exatamente este efeito/modelo. */
+  exampleImageBase64?: string;
+  exampleImageMimeType?: string;
+  /** Vídeo exclusivo da variação; o binário permanece no Storage e a KB guarda somente a referência. */
+  exampleVideoId?: string;
+  exampleVideoMimeType?: string;
+  exampleVideoFileName?: string;
+  exampleVideoSizeBytes?: number;
+  /** Texto pré-preenchido no WhatsApp quando o catálogo público recebe uma consulta por esta variação. `{produto}` é substituído pelo nome exibido. */
+  whatsappMessage?: string;
+  /** Resultados comparativos cadastrados exclusivamente para esta variação. */
+  beforeAfter?: BeforeAfterPair[];
   dimensions?: string;
   litros?: number;
   price: string;
@@ -195,6 +218,8 @@ export interface AgentProduct {
   exampleVideoMimeType?: string;
   exampleVideoFileName?: string;
   exampleVideoSizeBytes?: number;
+  /** Resultados comparativos da família, exibidos quando não houver um par específico da variação. */
+  beforeAfter?: BeforeAfterPair[];
   promoPrice?: string;
   promoUntil?: string;
   /** Valor numérico do preço regular (Etapa 2 do roadmap) — opcional, fonte de verdade pra cálculo quando preenchido. */
