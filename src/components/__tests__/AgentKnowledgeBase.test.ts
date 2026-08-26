@@ -9,7 +9,7 @@
  * buraco assim que os dados entram no editor.
  */
 import { describe, expect, it } from 'vitest';
-import { ensureUniqueIds } from '../AgentKnowledgeBase';
+import { ensureUniqueIds, emptyKnowledgeBase, moniqueStudioKnowledgeBase } from '../AgentKnowledgeBase';
 
 interface TestProduct {
   id?: string;
@@ -69,5 +69,27 @@ describe('ensureUniqueIds', () => {
   it('lista vazia/undefined não quebra', () => {
     expect(ensureUniqueIds(undefined, 'prod')).toEqual([]);
     expect(ensureUniqueIds([], 'prod')).toEqual([]);
+  });
+});
+
+// Bug real (25/08/2026): App.tsx usava moniqueStudioKnowledgeBase (catálogo
+// REAL da Monique — produtos, preços, dado bancário dela) como fallback
+// sempre que um tenant ainda não tinha dado real carregado (tenant novo,
+// cache vazio, logout). Um saas_admin criou um tenant novo de verdade e o
+// painel mostrou o catálogo dela como se fosse daquele tenant, sem
+// indicação nenhuma de que era só um exemplo — risco real de sobrescrever
+// por engano. emptyKnowledgeBase é o fallback correto agora.
+describe('emptyKnowledgeBase (fallback correto pra tenant sem dado real)', () => {
+  it('não contém nenhum produto/regra/FAQ/documento — nada que pareça dado real de outro tenant', () => {
+    expect(emptyKnowledgeBase.products).toEqual([]);
+    expect(emptyKnowledgeBase.businessRules).toEqual([]);
+    expect(emptyKnowledgeBase.faqs).toEqual([]);
+    expect(emptyKnowledgeBase.documents).toEqual([]);
+    expect(emptyKnowledgeBase.companyName).toBe('');
+    expect(emptyKnowledgeBase.pricingAndPolicies).toBe('');
+  });
+
+  it('moniqueStudioKnowledgeBase continua existindo (usado só como preset explícito, nunca mais como fallback silencioso)', () => {
+    expect(moniqueStudioKnowledgeBase.products.length).toBeGreaterThan(0);
   });
 });

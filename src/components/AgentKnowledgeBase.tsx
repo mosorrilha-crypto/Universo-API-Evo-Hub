@@ -121,13 +121,40 @@ export function ensureUniqueIds<T extends { id?: string }>(items: T[] | undefine
   });
 }
 
+// Bug real reportado (25/08/2026): um saas_admin criou um tenant novo de
+// verdade e o painel mostrou o catálogo REAL da Monique (produtos, preços,
+// até o nome de quem recebe a transferência bancária dela) como se fosse o
+// conteúdo daquele tenant novo — sem nenhuma indicação de que era só um
+// "exemplo". Causa: App.tsx usava `moniqueStudioKnowledgeBase` (a cópia
+// abaixo) como fallback sempre que ainda não tinha dado real carregado
+// (tenant novo sem linha em `knowledge_base`, cache local vazio, logout).
+// Isso arrisca duas coisas: um operador salvar sem perceber e sobrescrever
+// o catálogo do tenant novo com o da Monique por engano, e dado sensível
+// (conta bancária real) só existir "escondido" num fallback silencioso.
+// `emptyKnowledgeBase` é o fallback correto pra esses casos — o catálogo
+// de exemplo da Monique continua disponível, mas só como escolha explícita
+// em PRESET_TEMPLATES abaixo (o admin escolhe carregar, nunca é automático).
+export const emptyKnowledgeBase: AgentKnowledgeBase = {
+  companyName: '',
+  agentGoal: '',
+  toneOfVoice: '',
+  businessModel: '',
+  pricingAndPolicies: '',
+  products: [],
+  businessRules: [],
+  faqs: [],
+  documents: [],
+};
+
 // Espelha o "PROMPT FINAL — MONIQUE SORRILHA BEAUTY STUDIO" (versão final
 // fechada em 07/08/2026, ver scripts/seed-monique-knowledge-base.ts pra a
 // cópia que roda de verdade no backend/Gemini). Essa cópia aqui alimenta só
 // o editor local da aba "Base de Conhecimento" — mantida em paridade com o
 // backend pra nunca voltar a divergir (achado numa auditoria: essa cópia
 // tinha só 10 dos 21 serviços e ainda mostrava a promoção de julho/2026 já
-// vencida, "[PROMO Gs 450.000]", hardcoded no preço).
+// vencida, "[PROMO Gs 450.000]", hardcoded no preço). Usada só como PRESET
+// explícito (ver PRESET_TEMPLATES abaixo) — nunca mais como fallback
+// silencioso (ver App.tsx).
 export const moniqueStudioKnowledgeBase: AgentKnowledgeBase = {
   companyName: 'Monique Sorrilha Beauty Studio',
   agentGoal: 'Atender clientes pelo WhatsApp e Instagram, entender o que elas desejam, recomendar serviços somente com base no catálogo oficial, consultar a agenda conectada e conduzir o atendimento até a reserva, sem confirmar horários antes da conclusão de todas as etapas obrigatórias. Quando perguntarem quem atende, responder: "Sou a Ana, assistente da Monique por aqui." Nunca dizer ou sugerir que é a própria Monique.',
