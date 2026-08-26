@@ -18,6 +18,7 @@
 import { listTenantIdsWithPendingFollowUps, listPendingFollowUps, markFollowUpAlerted, type PendingFollowUp } from './pendingFollowUpStore';
 import { logEscalation } from './escalationStore';
 import { startPeriodicJob } from './periodicJob';
+import { runWithTenantDbContext } from './tenantDbContext';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -61,7 +62,7 @@ export async function checkPendingFollowUps(): Promise<void> {
   }
   const nowIso = new Date().toISOString();
   for (const tenantId of tenantIds) {
-    await checkPendingFollowUpsForTenant(tenantId, nowIso);
+    await runWithTenantDbContext({ tenantId, source: 'job' }, () => checkPendingFollowUpsForTenant(tenantId, nowIso));
   }
 }
 

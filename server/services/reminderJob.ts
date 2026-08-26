@@ -11,6 +11,7 @@
  */
 import { listUpcomingEvents, localNaiveToUtcIso, listConnectedCalendarTenants, type CalendarConfig } from './googleCalendar';
 import { listAllAppointments } from './appointmentStore';
+import { runWithTenantDbContext } from './tenantDbContext';
 import { wasReminderSent, markReminderSent, type ReminderType } from './reminderStore';
 import { sendWhatsAppTemplateMessage } from './metaSend';
 import { sendEvolutionTextMessage } from './evolutionSend';
@@ -107,12 +108,14 @@ export async function checkAndSendReminders(deps: ReminderJobDeps): Promise<void
   }
 
   for (const tenantId of tenantIds) {
-    const channel = await resolveCredentialsForTenant(
-      tenantId,
-      { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
-      { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
-    );
-    await checkAndSendRemindersForTenant(tenantId, cfg, channel);
+    await runWithTenantDbContext({ tenantId, source: 'job' }, async () => {
+      const channel = await resolveCredentialsForTenant(
+        tenantId,
+        { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
+        { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
+      );
+      await checkAndSendRemindersForTenant(tenantId, cfg, channel);
+    });
   }
 }
 
