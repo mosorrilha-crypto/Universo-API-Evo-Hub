@@ -6,6 +6,16 @@
  */
 import { getDb } from './db';
 
+/** Comparação visual real de um procedimento, mantida inline como as fotos de exemplo da Base de Conhecimento. */
+export interface BeforeAfterPair {
+  id: string;
+  beforeImageBase64: string;
+  beforeImageMimeType?: string;
+  afterImageBase64: string;
+  afterImageMimeType?: string;
+  caption?: string;
+}
+
 /**
  * Uma variante de tamanho/modelo dentro de um produto unificado (ex: catálogo
  * de piscinas — um produto "Acapulco" cobrindo AC F400/F500/F600, cada um com
@@ -29,6 +39,8 @@ export interface ProductVariant {
   exampleVideoSizeBytes?: number;
   /** Mensagem comercial pré-preenchida do WhatsApp para uma consulta por esta variação. */
   whatsappMessage?: string;
+  /** Resultados comparativos exclusivos desta variação. */
+  beforeAfter?: BeforeAfterPair[];
   /** Medidas em texto livre (ex: "4,10x2,30m"), opcional. */
   dimensions?: string;
   /** Capacidade em litros, opcional. */
@@ -89,6 +101,8 @@ export interface AgentProduct {
   exampleVideoMimeType?: string;
   exampleVideoFileName?: string;
   exampleVideoSizeBytes?: number;
+  /** Resultados comparativos da família de serviços. */
+  beforeAfter?: BeforeAfterPair[];
   /** Preço promocional com vencimento — volta sozinho pro preço regular após promoUntil, sem precisar editar manualmente. */
   promoPrice?: string;
   promoUntil?: string; // YYYY-MM-DD
