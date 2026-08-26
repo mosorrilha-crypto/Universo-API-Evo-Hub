@@ -114,6 +114,15 @@ describe('resolveProductPriceAmount', () => {
     const product: AgentProduct = { name: 'Microlips', price: 'Gs 500.000', priceAmount: 500000, promoPriceAmount: 450000, promoUntil: '2020-01-01' };
     expect(resolveProductPriceAmount(product)).toBe(500000);
   });
+
+  it('produto com variantes e sem priceAmount próprio: nunca parseia o texto de faixa do cabeçalho (achado real 26/08/2026, ex: "Gs 140.000 a Gs 350.000" virando 140000350000)', () => {
+    const product: AgentProduct = {
+      name: 'Pestañas',
+      price: 'Gs 140.000 a Gs 350.000 (varia por efeito)',
+      variants: [{ code: 'Lash Lift', price: 'Gs 140.000', priceAmount: 140000 }],
+    };
+    expect(resolveProductPriceAmount(product)).toBe(0);
+  });
 });
 
 describe('isNonBookableProduct', () => {

@@ -792,13 +792,21 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // preço só pelo painel (um combo chegou a mostrar um preço ao cliente
   // MAIOR que a soma dos itens separados). Recalcula `priceAmount` junto
   // sempre que `price` muda, igual já era feito pra `promoPrice` acima.
+  //
+  // Achado real #2 (26/08/2026): produto com variantes tem `price` como
+  // cabeçalho/faixa ("Gs 140.000 a Gs 350.000"), nunca um valor único — o
+  // preço de verdade está em cada variante (mesma regra já refletida no
+  // card, que só mostra "Valor financeiro automático" pra quem NÃO tem
+  // variantes). Recalcular a partir desse texto concatenava os dois
+  // extremos da faixa num número absurdo (140000350000). Não recalcula
+  // quando há variantes.
   const handleProductFieldChange = (id: string, field: 'name' | 'price' | 'description' | 'category', value: string) => {
     setFormData((prev) => ({
       ...prev,
       products: prev.products.map((p) => {
         if (p.id !== id) return p;
         const updated = { ...p, [field]: value };
-        if (field === 'price') updated.priceAmount = parsePriceToNumber(value);
+        if (field === 'price') updated.priceAmount = p.variants?.length ? undefined : parsePriceToNumber(value);
         return updated;
       }),
     }));

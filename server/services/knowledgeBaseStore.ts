@@ -166,6 +166,11 @@ export function resolveProductPriceAmount(product: AgentProduct, timezone = 'Ame
     if (today <= product.promoUntil) return product.promoPriceAmount;
   }
   if (product.priceAmount != null) return product.priceAmount;
+  // Produto com variantes: o `price` do produto-pai é só um cabeçalho/faixa
+  // ("Gs 140.000 a Gs 350.000"), nunca um valor cobrável — o preço de
+  // verdade está sempre na variante. Parsear esse texto como número
+  // concatenaria os dois extremos da faixa (achado real, 26/08/2026).
+  if (product.variants?.length) return 0;
   return parsePriceToNumber(resolveProductPrice(product, timezone));
 }
 
