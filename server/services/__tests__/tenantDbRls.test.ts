@@ -56,6 +56,18 @@ describe('camada de dados com RLS efetivo', () => {
     );
   });
 
+  it('permite que um job de fundo (sem requisição HTTP) processe um tenant via runWithTenantDbContext com source "job"', async () => {
+    // TASK-0083: jobs periódicos (setInterval/startPeriodicJob) não têm contexto
+    // de tenant do AsyncLocalStorage por padrão — sem esse wrap, getDb() dentro
+    // do processamento por-tenant do job rejeitava tudo (regressão real após o
+    // rollout de RLS, achada nos logs de produção via mcp__Render__list_logs).
+    expect(() => getDb()).toThrow(/sem contexto de tenant/i);
+    await runWithTenantDbContext({ tenantId: TENANT_A, source: 'job' }, async () => {
+      await Promise.resolve();
+      expect(getDb()).not.toBe(platformClient);
+    });
+  });
+
   it('assina claims curtos que restringem o PostgREST ao tenant e ao papel authenticated', () => {
     const token = createTenantRuntimeAccessToken(config, {
       tenantId: TENANT_A,

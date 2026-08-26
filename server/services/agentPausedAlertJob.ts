@@ -18,7 +18,8 @@
  * por deps, nunca tentava Evolution API pro tenant que atende de verdade
  * por lá.
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
+import { runWithTenantDbContext } from './tenantDbContext';
 import { sendAdminAlert } from './adminAlertChannel';
 import { sendPushToTenant } from './webPush';
 import { startPeriodicJob } from './periodicJob';
@@ -45,7 +46,7 @@ interface AgentStatusRow {
 }
 
 async function listStalePausedTenants(thresholdMs: number): Promise<AgentStatusRow[]> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { data, error } = await db
     .from('agent_status')
     .select('tenant_id, updated_at, paused_alert_sent_at')
@@ -189,7 +190,7 @@ export async function checkPausedAgentsAndAlert(deps: AgentPausedAlertJobDeps = 
 
   for (const row of stale) {
     try {
-      await alertForTenant(row, deps);
+      await runWithTenantDbContext({ tenantId: row.tenant_id, source: 'job' }, () => alertForTenant(row, deps));
     } catch (err) {
       console.warn(`⚠️  [Alerta agente pausado] tenant=${row.tenant_id} falha ao processar:`, (err as Error).message);
     }

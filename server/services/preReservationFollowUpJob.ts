@@ -16,6 +16,7 @@
 import { listTenantIdsWithPendingPreReservations, listPendingPreReservations, markFollowUpAlerted, type PreReservation } from './preReservationStore';
 import { logEscalation } from './escalationStore';
 import { startPeriodicJob } from './periodicJob';
+import { runWithTenantDbContext } from './tenantDbContext';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
@@ -76,7 +77,7 @@ export async function checkPreReservationFollowUps(): Promise<void> {
   }
   const todayKey = todayDateKeyInTz();
   for (const tenantId of tenantIds) {
-    await checkPreReservationFollowUpsForTenant(tenantId, todayKey);
+    await runWithTenantDbContext({ tenantId, source: 'job' }, () => checkPreReservationFollowUpsForTenant(tenantId, todayKey));
   }
 }
 

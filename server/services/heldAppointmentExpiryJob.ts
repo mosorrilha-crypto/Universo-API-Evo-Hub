@@ -19,6 +19,7 @@
  */
 import { listTenantIdsWithExpiredHolds, listExpiredHolds, clearAppointmentForPhone } from './appointmentStore';
 import { startPeriodicJob } from './periodicJob';
+import { runWithTenantDbContext } from './tenantDbContext';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -54,7 +55,7 @@ export async function expireStaleHolds(): Promise<void> {
     return;
   }
   for (const tenantId of tenantIds) {
-    await expireHoldsForTenant(tenantId);
+    await runWithTenantDbContext({ tenantId, source: 'job' }, () => expireHoldsForTenant(tenantId));
   }
 }
 
