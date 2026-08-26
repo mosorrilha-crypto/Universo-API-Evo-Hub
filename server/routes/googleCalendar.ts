@@ -26,6 +26,7 @@ import {
   type PaymentMethod,
   type PaymentStatus,
 } from '../services/financialStore';
+import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -160,7 +161,10 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     // Status financeiro por evento (pedido real, 20/08/2026: "poder alterar e
     // lançar pagamentos direto da agenda") — uma única consulta por
     // `source_ref` em vez de N chamadas, uma por card renderizado.
-    const transactions = await listFinancialTransactionsBySourceRefs(tenantId, events.map((e) => sourceRefForEvent(e.id)));
+    const financialModuleEnabled = await isFinancialModuleEnabledForCurrentTenant();
+    const transactions = financialModuleEnabled
+      ? await listFinancialTransactionsBySourceRefs(tenantId, events.map((e) => sourceRefForEvent(e.id)))
+      : [];
     const paymentByEventId = new Map(transactions.map((t) => [t.sourceRef!.slice('apt:'.length), t]));
 
     res.json({
@@ -169,7 +173,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
         return {
           ...e,
           completed: completedIds.has(e.id),
-          payment: payment ? { amount: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status } : null,
+          payment: financialModuleEnabled && payment ? { amount: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status } : null,
         };
       }),
     });
@@ -184,6 +188,9 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // um pagamento já lançado fica pra uma etapa seguinte.
   router.post('/api/google-calendar/events/:eventId/payment', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
+    if (!(await isFinancialModuleEnabledForCurrentTenant())) {
+      return res.status(403).json({ error: 'O módulo Financeiro não está habilitado para esta empresa.', code: 'financial_module_disabled' });
+    }
     const { amount, paymentMethod, status } = req.body || {};
     if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0) {
       return res.status(400).json({ error: 'Campo "amount" precisa ser um número válido.' });
@@ -230,6 +237,9 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // 404 (o operador usa "Registrar pagamento" pra criar a primeira vez).
   router.patch('/api/google-calendar/events/:eventId/payment', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
+    if (!(await isFinancialModuleEnabledForCurrentTenant())) {
+      return res.status(403).json({ error: 'O módulo Financeiro não está habilitado para esta empresa.', code: 'financial_module_disabled' });
+    }
     const { amount, paymentMethod, status } = req.body || {};
     if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)) {
       return res.status(400).json({ error: 'Campo "amount" precisa ser um número válido.' });

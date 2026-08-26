@@ -41,6 +41,7 @@ interface HeaderProps {
   tenants: Tenant[];
   activeTenant: Tenant;
   onSelectTenant: (tenant: Tenant) => void;
+  financialModuleEnabled: boolean;
 }
 
 type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
@@ -59,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   tenants,
   activeTenant,
   onSelectTenant,
+  financialModuleEnabled,
 }) => {
   const { language, setLanguage, theme, setTheme } = useAppPreferences();
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -80,16 +82,17 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: financialModuleEnabled ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: financialModuleEnabled ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   const primaryNavigation: NavigationItem[] = [
     { id: 'home', label: copy.today, icon: <Home className="w-4 h-4" /> },
     { id: 'whatsapp', label: copy.conversations, icon: <MessageSquare className="w-4 h-4" /> },
     { id: 'crm', label: copy.sales, icon: <Kanban className="w-4 h-4" /> },
-    ...(canSeeFinancial ? [{ id: 'agenda' as ActiveTab, label: copy.schedule, icon: <CalendarDays className="w-4 h-4" /> }, { id: 'financial' as ActiveTab, label: copy.financial, icon: <WalletCards className="w-4 h-4" /> }] : []),
+    ...(canSeeFinancial ? [{ id: 'agenda' as ActiveTab, label: copy.schedule, icon: <CalendarDays className="w-4 h-4" /> }] : []),
+    ...(canSeeFinancial && financialModuleEnabled ? [{ id: 'financial' as ActiveTab, label: copy.financial, icon: <WalletCards className="w-4 h-4" /> }] : []),
     ...(canSeeAdminTools ? [{ id: 'attribution' as ActiveTab, label: copy.growth, icon: <Target className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
   const configurationNavigation: NavigationItem[] = canSeeAdminTools ? [

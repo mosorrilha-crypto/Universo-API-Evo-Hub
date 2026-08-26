@@ -52,6 +52,8 @@ interface AgendaFinanceiroCenterProps {
   onAddTransaction: (transaction: FinancialTransaction) => Promise<boolean>;
   onUpdateTransactionStatus: (id: string, status: PaymentStatus) => Promise<void> | void;
   onDeleteTransaction: (id: string) => Promise<void> | void;
+  /** A Agenda segue disponível sem Financeiro; cobrança só aparece se o contrato liberar o módulo. */
+  financialModuleEnabled?: boolean;
   onToast: (message: string) => void;
   /** Despesas recorrentes (TASK-0097) — só usado no scope="financial"; opcional pra não quebrar o uso em scope="agenda". */
   recurringExpenses?: RecurringExpense[];
@@ -90,6 +92,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   onAddTransaction,
   onUpdateTransactionStatus,
   onDeleteTransaction,
+  financialModuleEnabled = true,
   onToast,
   recurringExpenses = [],
   onAddRecurringExpense,
@@ -222,12 +225,12 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
             startIso: start.toISOString().slice(0, 19),
             endIso: end.toISOString().slice(0, 19),
             notes: clientName ? `Cliente informado na central: ${clientName}` : undefined,
-            amount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+            ...(financialModuleEnabled && Number.isFinite(amount) && amount >= 0 ? { amount } : {}),
           }),
         });
         const data = await response.json().catch(() => null);
         if (!response.ok) throw new Error(getApiError(data, 'Não foi possível criar o agendamento.'));
-        onToast('Agendamento criado e cobrança pendente vinculada automaticamente.');
+        onToast(financialModuleEnabled ? 'Agendamento criado e cobrança pendente vinculada automaticamente.' : 'Agendamento criado na agenda.');
       }
       setAppointmentDialog(null);
       await refreshEvents();
@@ -387,7 +390,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
             {calendarEvent.completed && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {calendarEvent.payment ? <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusStyle[calendarEvent.payment.status]}`}>{calendarEvent.payment.status === 'pago' ? (isSpanish ? 'Cobrado' : 'Recebido') : calendarEvent.payment.status === 'atrasado' ? (isSpanish ? 'Atrasado' : 'Em atraso') : (isSpanish ? 'Por cobrar' : 'A receber')} · {formatMoney(calendarEvent.payment.amount)}</button> : <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className="rounded-full border border-dashed border-amber-500/35 px-2 py-1 text-[10px] font-bold text-amber-200 hover:bg-amber-500/10">{isSpanish ? 'Vincular cobro' : 'Vincular cobrança'}</button>}
+            {financialModuleEnabled && (calendarEvent.payment ? <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusStyle[calendarEvent.payment.status]}`}>{calendarEvent.payment.status === 'pago' ? (isSpanish ? 'Cobrado' : 'Recebido') : calendarEvent.payment.status === 'atrasado' ? (isSpanish ? 'Atrasado' : 'Em atraso') : (isSpanish ? 'Por cobrar' : 'A receber')} · {formatMoney(calendarEvent.payment.amount)}</button> : <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className="rounded-full border border-dashed border-amber-500/35 px-2 py-1 text-[10px] font-bold text-amber-200 hover:bg-amber-500/10">{isSpanish ? 'Vincular cobro' : 'Vincular cobrança'}</button>)}
             {!compact && <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
               <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar agendamiento' : 'Editar agendamento'}><MoreHorizontal className="h-4 w-4" /></button>
               <button type="button" onClick={() => quickComplete(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-300" title={isSpanish ? 'Finalizar atención' : 'Concluir atendimento'}><CheckCircle2 className="h-4 w-4" /></button>
@@ -406,7 +409,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
           <div className="max-w-2xl">
             <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.17em] text-emerald-300"><span className="h-px w-7 bg-emerald-400" />{view === 'agenda' ? (isSpanish ? 'Operación comercial' : 'Operação comercial') : (isSpanish ? 'Control de caja' : 'Controle de caixa')}</div>
             <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">{view === 'agenda' ? 'Agenda' : (isSpanish ? 'Finanzas' : 'Financeiro')}</h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">{view === 'agenda' ? (isSpanish ? 'Organizá horarios, acompañá los próximos atendimientos y registrá cobros vinculados a cada cita.' : 'Organize horários, acompanhe os próximos atendimentos e registre cobranças vinculadas a cada agendamento.') : (isSpanish ? 'Acompañá ingresos, gastos y cobros pendientes sin mezclar esta rutina con la agenda.' : 'Acompanhe receitas, despesas e cobranças em aberto sem misturar essa rotina com a agenda.')}</p>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">{view === 'agenda' ? (financialModuleEnabled ? (isSpanish ? 'Organizá horarios, acompañá los próximos atendimientos y registrá cobros vinculados a cada cita.' : 'Organize horários, acompanhe os próximos atendimentos e registre cobranças vinculadas a cada agendamento.') : (isSpanish ? 'Organizá horarios y acompañá los próximos atendimientos en una rutina independiente.' : 'Organize horários e acompanhe os próximos atendimentos em uma rotina independente.')) : (isSpanish ? 'Acompañá ingresos, gastos y cobros pendientes sin mezclar esta rutina con la agenda.' : 'Acompanhe receitas, despesas e cobranças em aberto sem misturar essa rotina com a agenda.')}</p>
           </div>
           <div className="agenda-financeiro-workspace__actions flex flex-wrap gap-2">
             {view === 'financial' && <><button type="button" onClick={() => setTransactionDialog('expense')} className="rounded-xl border border-slate-700 bg-slate-900/70 px-3.5 py-2.5 text-xs font-bold text-slate-200 transition-colors hover:border-rose-400/50 hover:bg-rose-500/10"><ArrowDownRight className="mr-1.5 inline h-4 w-4 text-rose-300" />{isSpanish ? 'Nuevo gasto' : 'Nova despesa'}</button><button type="button" onClick={() => setTransactionDialog('income')} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3.5 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-500/15"><ArrowUpRight className="mr-1.5 inline h-4 w-4" />{isSpanish ? 'Ingreso adicional' : 'Receita avulsa'}</button></>}

@@ -37,7 +37,7 @@ const saasAdmin: UserProfile = {
   department: 'Operações',
 };
 
-function renderHeader() {
+function renderHeader(financialModuleEnabled = true) {
   return render(
     <AppPreferencesProvider>
       <Header
@@ -50,6 +50,7 @@ function renderHeader() {
         tenants={[activeTenant]}
         activeTenant={activeTenant}
         onSelectTenant={vi.fn()}
+        financialModuleEnabled={financialModuleEnabled}
       />
     </AppPreferencesProvider>,
   );
@@ -62,6 +63,13 @@ afterEach(() => cleanup());
 // logo e botão de menu parcialmente cobertos, toque no menu não registrava.
 // Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>.
 describe('grupos de navegação no desktop', () => {
+  it('oculta Financeiro sem ocultar Agenda quando o módulo não foi liberado', () => {
+    renderHeader(false);
+
+    expect(screen.getByRole('button', { name: 'Agenda' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Financeiro' })).toBeNull();
+  });
+
   it('agrupa a configuração do agente e o catálogo no menu Configurar', async () => {
     const user = userEvent.setup();
     renderHeader();

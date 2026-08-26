@@ -18,6 +18,7 @@ let server: Server;
 let baseUrl: string;
 let supabase: ReturnType<typeof createFakeSupabase>;
 let authenticatedRole: 'operator' | 'manager' | 'admin' | 'saas_admin' = 'admin';
+let financialModuleEnabled = true;
 
 function fakeAuthenticateToken(req: any, _res: any, next: any) {
   req.user = { id: 'op-1', tenantId: TENANT_A, role: authenticatedRole };
@@ -27,7 +28,10 @@ function fakeAuthenticateToken(req: any, _res: any, next: any) {
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
-  app.use(createFinancialRouter({ authenticateToken: fakeAuthenticateToken as any }));
+  app.use(createFinancialRouter({
+    authenticateToken: fakeAuthenticateToken as any,
+    isFinancialModuleEnabled: async () => financialModuleEnabled,
+  }));
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
     res.status(500).json({ error: err?.message || 'Erro interno do servidor.' });
@@ -48,6 +52,7 @@ const NOW = new Date().toISOString();
 
 beforeEach(() => {
   authenticatedRole = 'admin';
+  financialModuleEnabled = true;
   supabase = createFakeSupabase({
     financial_transactions: [
       {
@@ -185,6 +190,13 @@ describe('GET /api/financial/transactions', () => {
       status: 'pendente',
     });
   });
+
+  it('recusa leitura quando o Admin SaaS desabilitou o módulo para o tenant', async () => {
+    financialModuleEnabled = false;
+    const res = await fetch(`${baseUrl}/api/financial/transactions`);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ code: 'financial_module_disabled' });
+  });
 });
 
 describe('POST /api/financial/transactions', () => {
@@ -312,7 +324,7 @@ describe('isolamento entre tenants', () => {
     }
     const app2 = express();
     app2.use(express.json());
-    app2.use(createFinancialRouter({ authenticateToken: otherTenantAuth as any }));
+    app2.use(createFinancialRouter({ authenticateToken: otherTenantAuth as any, isFinancialModuleEnabled: async () => true }));
     const server2 = await new Promise<Server>((resolve) => {
       const s = app2.listen(0, () => resolve(s));
     });

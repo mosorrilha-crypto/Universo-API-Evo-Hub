@@ -160,9 +160,12 @@ export const App: React.FC = () => {
   // botões das abas — repetido aqui pra também travar o CONTEÚDO: esconder
   // só o botão não bastaria se activeTab ficasse apontando pra uma aba
   // proibida (ex: troca de usuário no meio da sessão, sem reload da página).
-  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager');
+  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager');
+  const canSeeFinancialByRole = hasRoleAtLeast(currentUser?.role, 'manager');
   const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
   const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
+  const [financialModuleEnabled, setFinancialModuleEnabled] = useState(false);
+  const canSeeFinancial = canSeeFinancialByRole && financialModuleEnabled;
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
@@ -173,11 +176,41 @@ export const App: React.FC = () => {
     if (!currentUser) return;
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
-      (['agenda', 'financial'].includes(activeTab) && !canSeeFinancial) ||
+      (activeTab === 'agenda' && !canSeeAgenda) ||
+      (activeTab === 'financial' && !canSeeFinancial) ||
       (['attribution', 'knowledge', 'catalog', 'quality'].includes(activeTab) && !canSeeAdminTools);
     if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.role]);
+  }, [activeTab, canSeeAgenda, canSeeFinancial, currentUser?.role]);
+
+  // Financeiro é opcional por empresa. A decisão vem do contrato self-scoped
+  // do tenant e falha fechada para não expor navegação ou dados sem liberação.
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentUser) {
+      setFinancialModuleEnabled(false);
+      return () => { cancelled = true; };
+    }
+    const refreshEntitlements = () => {
+      apiFetch('/api/me/entitlements')
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (cancelled) return;
+          setFinancialModuleEnabled(Boolean((data?.entitlements || []).find((item: { key?: string; enabled?: boolean }) => item.key === 'sales.financial' && item.enabled)));
+        })
+        .catch(() => { if (!cancelled) setFinancialModuleEnabled(false); });
+    };
+    const onEntitlementsChanged = (event: Event) => {
+      const tenantId = (event as CustomEvent<{ tenantId?: string }>).detail?.tenantId;
+      if (!tenantId || tenantId === activeTenant.id) refreshEntitlements();
+    };
+    refreshEntitlements();
+    window.addEventListener('universo:entitlements-changed', onEntitlementsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('universo:entitlements-changed', onEntitlementsChanged);
+    };
+  }, [activeTenant.id, currentUser?.id]);
 
   // Bug real relatado em produção: o badge de "empresa ativa" no cabeçalho
   // (e tudo que depende de `activeTenant`, como o polling de CRM leads —
@@ -610,8 +643,13 @@ export const App: React.FC = () => {
   }, [activeTenant.id]);
 
   // Financeiro real (mesmo padrão de fetchCrmLeads acima) — merge por id,
-  // marca isReal pra distinguir de dado de demonstração local.
+  // marca isReal pra distinguir de dado de demonstração local. Quando o
+  // módulo estiver desligado, não chama a API protegida e limpa a visão local.
   useEffect(() => {
+    if (!canSeeFinancial) {
+      setTransactions([]);
+      return;
+    }
     let cancelled = false;
     const fetchFinancialTransactions = () => {
       apiFetch('/api/financial/transactions')
@@ -635,7 +673,7 @@ export const App: React.FC = () => {
     const interval = setInterval(fetchFinancialTransactions, 8000);
     return () => { cancelled = true; clearInterval(interval); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTenant.id]);
+  }, [activeTenant.id, canSeeFinancial]);
 
   // Despesas recorrentes (TASK-0097) — baixo volume/baixa frequência de
   // mudança, não precisa do polling de 8s dos leads/transações; refetchRecurringExpenses
@@ -1051,6 +1089,10 @@ export const App: React.FC = () => {
 
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
+    if (!canSeeFinancial) {
+      showToast('O módulo Financeiro não está habilitado para esta empresa.');
+      return;
+    }
     setFinancialPreselectedLead(lead);
     handleSetActiveTab('financial');
   };
@@ -1076,6 +1118,7 @@ export const App: React.FC = () => {
         tenants={tenants}
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
+        financialModuleEnabled={canSeeFinancial}
       />
 
       {activeTab !== 'whatsapp' && (
@@ -1104,6 +1147,7 @@ export const App: React.FC = () => {
             escalations={escalations}
             knowledgeBase={knowledgeBase}
             businessHours={businessHours}
+            canSeeAgenda={canSeeAgenda}
             canSeeFinancial={canSeeFinancial}
             canSeeAdminTools={canSeeAdminTools}
             onNavigate={handleSetActiveTab}
@@ -1183,7 +1227,7 @@ export const App: React.FC = () => {
           />
           </OperationsModuleFrame>
         )}
-        {activeTab === 'agenda' && canSeeFinancial && (
+        {activeTab === 'agenda' && canSeeAgenda && (
           <OperationsModuleFrame
             title="Agenda"
             eyebrow="Vendas e atendimento"
@@ -1200,6 +1244,7 @@ export const App: React.FC = () => {
             currentUser={currentUser || GUEST_USER}
             currency={activeTenant.currency}
             locale={activeTenant.locale}
+            financialModuleEnabled={canSeeFinancial}
             onToast={showToast}
           />
           </OperationsModuleFrame>

@@ -37,6 +37,7 @@ beforeAll(async () => {
       metaAccessToken: 'tok',
       jwtSecret: 'test-secret',
       metaPhoneNumberId: 'pn',
+      isFinancialModuleEnabled: async () => true,
     })
   );
   await new Promise<void>((resolve) => {

@@ -50,6 +50,7 @@ export function TenantEntitlementsModal({ tenant, onClose }: TenantEntitlementsM
   const [revokeReason, setRevokeReason] = useState<Record<string, string>>({});
 
   const selectedFeature = useMemo(() => catalogFeatures.find((feature) => feature.id === featureId) || null, [catalogFeatures, featureId]);
+  const notifyEntitlementsChanged = () => window.dispatchEvent(new CustomEvent('universo:entitlements-changed', { detail: { tenantId: tenant.id } }));
 
   const load = async () => {
     setLoading(true);
@@ -89,6 +90,7 @@ export function TenantEntitlementsModal({ tenant, onClose }: TenantEntitlementsM
       if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
       setPlanReason('');
       await load();
+      notifyEntitlementsChanged();
     } catch (saveError: any) {
       setError(saveError.message || 'Falha ao atualizar o plano.');
     } finally {
@@ -116,6 +118,7 @@ export function TenantEntitlementsModal({ tenant, onClose }: TenantEntitlementsM
       setOverrideExpiresAt('');
       setOverrideReason('');
       await load();
+      notifyEntitlementsChanged();
     } catch (saveError: any) {
       setError(saveError.message || 'Falha ao criar a exceção.');
     } finally {
@@ -136,6 +139,7 @@ export function TenantEntitlementsModal({ tenant, onClose }: TenantEntitlementsM
       if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
       setRevokeReason((current) => ({ ...current, [entitlement.featureId]: '' }));
       await load();
+      notifyEntitlementsChanged();
     } catch (revokeError: any) {
       setError(revokeError.message || 'Falha ao revogar a exceção.');
     } finally {
