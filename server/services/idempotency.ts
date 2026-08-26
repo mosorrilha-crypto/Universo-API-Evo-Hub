@@ -8,11 +8,11 @@
  * memória por processo não pegava esse caso, causando respostas duplicadas
  * da IA pra leads reais).
  */
-import { getDb } from './db';
+import { getPlatformDb } from './db';
 
 /** Retorna true se essa mensagem ainda não tinha sido processada (e marca como vista agora). */
 export async function markProcessedIfNew(messageId: string): Promise<boolean> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { error } = await db.from('processed_webhook_messages').insert({ message_id: messageId });
   if (!error) return true;
   if (error.code === '23505') {
@@ -36,7 +36,7 @@ export async function markProcessedIfNew(messageId: string): Promise<boolean> {
  * automática, sem nenhum aviso pro operador.
  */
 export async function unmarkProcessed(messageId: string): Promise<void> {
-  const db = getDb();
+  const db = getPlatformDb();
   const { error } = await db.from('processed_webhook_messages').delete().eq('message_id', messageId);
   if (error) {
     console.warn(`⚠️  [Idempotência] Falha ao desmarcar mensagem ${messageId} (reentrega pode não conseguir tentar de novo):`, error.message);

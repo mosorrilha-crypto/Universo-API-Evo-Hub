@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 import { normalizeSlug } from './publicCatalogStore';
 
 /**
@@ -48,7 +48,7 @@ export interface CatalogWhatsappTarget {
 export async function resolveCatalogWhatsappTarget(slug: string): Promise<CatalogWhatsappTarget | null> {
   const normalizedSlug = normalizeSlug(slug);
   if (!normalizedSlug) return null;
-  const { data, error } = await getDb()
+  const { data, error } = await getPlatformDb()
     .from('tenants')
     .select('id, public_catalog_enabled, public_whatsapp_phone')
     .eq('slug', normalizedSlug)
@@ -74,7 +74,7 @@ export interface CatalogWhatsappClick {
  * normalmente acerta de primeira).
  */
 export async function recordCatalogWhatsappClick(tenantId: string, baseMessage: string, product?: string): Promise<CatalogWhatsappClick> {
-  const db = getDb();
+  const db = getPlatformDb();
   let code = generateCuteCode();
   for (let attempt = 0; attempt < 5; attempt++) {
     const { data } = await db.from('public_catalog_whatsapp_clicks').select('id').eq('tenant_id', tenantId).eq('code', code);

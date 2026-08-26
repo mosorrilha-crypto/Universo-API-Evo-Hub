@@ -12,6 +12,7 @@ interface PublicCatalogVariant {
   description?: string;
   imageUrl?: string;
   whatsappMessage?: string;
+  beforeAfter?: PublicBeforeAfterPair[];
   dimensions?: string;
   litros?: number;
   price: string;
@@ -30,7 +31,17 @@ interface PublicCatalogProduct {
   variants?: PublicCatalogVariant[];
   /** Miniatura comprimida (data URI JPEG) — gerada no backend a partir da foto de exemplo do produto, quando existir. */
   imageUrl?: string;
+  beforeAfter?: PublicBeforeAfterPair[];
 }
+
+interface PublicBeforeAfterPair {
+  id: string;
+  beforeImageUrl: string;
+  afterImageUrl: string;
+  caption?: string;
+}
+
+type CatalogTemplate = 'default' | 'beauty_concierge' | 'gold_catalog';
 
 interface PublicCatalog {
   tenant: {
@@ -38,6 +49,7 @@ interface PublicCatalog {
     slug: string;
     currency: string;
     locale: string;
+    template?: CatalogTemplate;
   };
   contact: {
     whatsappNumber?: string;
@@ -93,6 +105,9 @@ const COPY = {
     whatsappProduct: 'Consultar por WhatsApp',
     whatsappGeneral: 'Hola, quiero información sobre los servicios.',
     whatsappWithProduct: (product: string) => `Hola, quiero información sobre ${product}.`,
+    beforeAfter: 'Antes y después',
+    before: 'Antes',
+    after: 'Después',
     faqEyebrow: 'Antes de escribir',
     faqTitle: 'Las preguntas que todas hacen',
     footerMap: 'Cómo llegar',
@@ -134,6 +149,9 @@ const COPY = {
     whatsappProduct: 'Consultar pelo WhatsApp',
     whatsappGeneral: 'Olá, quero informações sobre os serviços.',
     whatsappWithProduct: (product: string) => `Olá, quero informações sobre ${product}.`,
+    beforeAfter: 'Antes e depois',
+    before: 'Antes',
+    after: 'Depois',
     faqEyebrow: 'Antes de escrever',
     faqTitle: 'As perguntas que todas fazem',
     footerMap: 'Como chegar',
@@ -266,6 +284,43 @@ function formatDuration(minutes?: number): string | null {
 function formatProductPrice(product: PublicCatalogProduct, language: CatalogLanguage): string {
   if (!product.price) return language === 'pt' ? 'Consultar' : 'Consultar';
   return localizeCatalogText(product.price, language);
+}
+
+function BeforeAfterGallery({ pairs, language, title }: { pairs: PublicBeforeAfterPair[]; language: CatalogLanguage; title: string }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [reveal, setReveal] = useState(50);
+  const copy = COPY[language];
+  const pair = pairs[Math.min(activeIndex, pairs.length - 1)];
+
+  if (!pair) return null;
+
+  return (
+    <section className="before-after-gallery" aria-label={`${copy.beforeAfter}: ${title}`}>
+      <div className="before-after-heading"><span>{copy.beforeAfter}</span><em>{title}</em></div>
+      <div className="before-after-stage">
+        <img src={pair.beforeImageUrl} alt={`${copy.before}: ${title}`} loading="lazy" />
+        <img className="before-after-overlay" src={pair.afterImageUrl} alt={`${copy.after}: ${title}`} loading="lazy" style={{ clipPath: `inset(0 ${100 - reveal}% 0 0)` }} />
+        <span className="before-after-line" style={{ left: `${reveal}%` }} aria-hidden="true" />
+        <span className="before-after-label before-label">{copy.before}</span>
+        <span className="before-after-label after-label">{copy.after}</span>
+        <input
+          className="before-after-range"
+          type="range"
+          min="0"
+          max="100"
+          value={reveal}
+          onChange={(event) => setReveal(Number(event.target.value))}
+          aria-label={`${copy.beforeAfter}: ${title}`}
+        />
+      </div>
+      {pair.caption && <p className="before-after-caption">{localizeCatalogText(pair.caption, language)}</p>}
+      {pairs.length > 1 && (
+        <div className="before-after-pagination" aria-label={`${copy.beforeAfter}: ${title}`}>
+          {pairs.map((item, index) => <button key={item.id} type="button" onClick={() => { setActiveIndex(index); setReveal(50); }} aria-label={`${copy.beforeAfter} ${index + 1}`} aria-current={index === activeIndex}>{index + 1}</button>)}
+        </div>
+      )}
+    </section>
+  );
 }
 
 declare global {
@@ -442,6 +497,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                             <h4>{localizedName}</h4>
                             <div className="price-row"><strong>{formatProductPrice(product, language)}</strong><span>{copy.from}</span></div>
                             {product.description && <p>{localizeCatalogText(product.description, language)}</p>}
+                            {product.beforeAfter?.length ? <BeforeAfterGallery pairs={product.beforeAfter} language={language} title={localizedName} /> : null}
                             {product.variants && product.variants.length > 0 && (
                               <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
                                 {product.variants.map((variant) => {
@@ -453,6 +509,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                                       {variant.imageUrl && <img className="variant-image" src={variant.imageUrl} alt={localizedVariantName} loading="lazy" />}
                                       <span className="variant-name">{localizeCatalogText(variant.code, language)}</span>
                                       {variant.description && <p className="variant-description">{localizeCatalogText(variant.description, language)}</p>}
+                                      {variant.beforeAfter?.length ? <BeforeAfterGallery pairs={variant.beforeAfter} language={language} title={localizedVariantName} /> : null}
                                       {variantWhatsapp && <a className="variant-whatsapp" href={variantWhatsapp} target="_blank" rel="noreferrer">{copy.whatsappProduct} <span aria-hidden="true">↗</span></a>}
                                     </div>
                                     <strong>{localizeCatalogText(variant.price, language)}</strong>
@@ -591,9 +648,11 @@ function Step({ number, title, text }: { number: string; title: string; text: st
   return <div className="step"><span className="step-number">{number}</span><h3>{title}</h3><p>{text}</p></div>;
 }
 
-function PageShell({ children, template = 'default' }: { children: ReactNode; template?: 'default' | 'beauty_concierge' | 'gold_catalog' }) {
+function PageShell({ children, template = 'default' }: { children: ReactNode; template?: CatalogTemplate }) {
+  // Um valor novo do backend não pode deixar a árvore pública vazia.
+  const safeTemplate: CatalogTemplate = template === 'gold_catalog' || template === 'beauty_concierge' ? template : 'default';
   return (
-    <div className={`catalog-page catalog-template-${template}`}>
+    <div className={`catalog-page catalog-template-${safeTemplate}`}>
       <style>{`
         /* Atelier Bilíngue: contraste sereno, tipografia editorial e estados de espera acolhedores. */
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&display=swap');
@@ -657,6 +716,21 @@ function PageShell({ children, template = 'default' }: { children: ReactNode; te
         .variant-image { float: left; width: 42px; height: 42px; margin: 1px 9px 4px 0; border: 1px solid rgba(78, 62, 49, .16); object-fit: cover; }
         .product-card .variant-description { margin: 4px 0 0; color: #7a6d63; font-size: 11px; line-height: 1.5; }
         .variant-whatsapp { display: inline-flex; margin-top: 8px; color: #8d5c43; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-decoration: underline; text-underline-offset: 3px; text-transform: uppercase; }
+        .before-after-gallery { margin: 18px 0 4px; border-top: 1px solid rgba(78, 62, 49, .14); padding-top: 13px; }
+        .before-after-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: #8d5c43; font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+        .before-after-heading em { overflow: hidden; color: #a18d7d; font-size: 8px; font-style: normal; font-weight: 500; letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
+        .before-after-stage { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #e8ded2; }
+        .before-after-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        .before-after-overlay { pointer-events: none; }
+        .before-after-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #fffdf9; box-shadow: 0 0 0 1px rgba(33, 29, 26, .16); transform: translateX(-1px); pointer-events: none; }
+        .before-after-line::after { position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; border: 1px solid rgba(33, 29, 26, .2); border-radius: 50%; background: #fffdf9; box-shadow: 0 3px 8px rgba(33, 29, 26, .12); content: '↔'; color: #8d5c43; font-size: 12px; line-height: 22px; text-align: center; transform: translate(-50%, -50%); }
+        .before-after-label { position: absolute; top: 9px; z-index: 1; padding: 4px 6px; background: rgba(33, 29, 26, .64); color: #fffdf9; font-size: 8px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; pointer-events: none; }
+        .before-label { left: 9px; } .after-label { right: 9px; }
+        .before-after-range { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+        .before-after-caption { margin: 8px 0 0 !important; color: #8a796c !important; font-size: 10px !important; line-height: 1.5 !important; }
+        .before-after-pagination { display: flex; gap: 5px; margin-top: 9px; }
+        .before-after-pagination button { width: 21px; height: 21px; border: 1px solid rgba(141, 92, 67, .3); background: transparent; color: #8d5c43; cursor: pointer; font-size: 9px; }
+        .before-after-pagination button[aria-current="true"] { background: #8d5c43; color: #fffdf9; }
         .variant-row strong { color: #8d5c43; font-weight: 600; }
         .whatsapp-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; background: #c9987a; color: #fffdf9; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-decoration: none; text-transform: uppercase; transition: transform 160ms cubic-bezier(.23, 1, .32, 1), background 160ms cubic-bezier(.23, 1, .32, 1); }
         .whatsapp-button:hover { background: #b88063; }

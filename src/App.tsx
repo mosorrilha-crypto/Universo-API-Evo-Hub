@@ -975,6 +975,8 @@ export const App: React.FC = () => {
             leads={leads}
             transactions={transactions}
             escalations={escalations}
+            knowledgeBase={knowledgeBase}
+            businessHours={businessHours}
             canSeeFinancial={canSeeFinancial}
             canSeeAdminTools={canSeeAdminTools}
             onNavigate={handleSetActiveTab}

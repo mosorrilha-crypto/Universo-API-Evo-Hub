@@ -84,7 +84,7 @@ async function startServer() {
   // Os 8 serviços (Bloco 2.A) leem/escrevem em tabelas Postgres reais
   // através deste único cliente Supabase compartilhado — nada mais fica em
   // memória ou em JSON solto no Storage.
-  initDb(supabase);
+  initDb(supabase, config);
   if (!supabase) {
     console.warn('⚠️  SUPABASE_URL/SUPABASE_KEY ausentes — conversas, agenda, base de conhecimento e login real não vão funcionar até configurar.');
   }
