@@ -10,9 +10,8 @@ export function createEntitlementsRouter({ authenticateToken }: { authenticateTo
   // tenantId em body/query/param, pois isso transformaria uma tela de plano em
   // uma superfície de leitura cross-tenant.
   router.get('/api/me/entitlements', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) return res.status(403).json({ error: 'Sessão sem tenant válido.' });
-    const entitlements = await getTenantEntitlements(tenantId);
+    if (!req.user?.tenantId) return res.status(403).json({ error: 'Sessão sem tenant válido.' });
+    const entitlements = await getTenantEntitlements();
     res.json(entitlements);
   }));
 

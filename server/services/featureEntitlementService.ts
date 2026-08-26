@@ -1,4 +1,5 @@
-import { getPlatformDb } from './db';
+import { getDb, getPlatformDb } from './db';
+import { getTenantDbContext } from './tenantDbContext';
 
 export type EntitlementSource = 'plan' | 'override' | 'compatibility';
 
@@ -145,8 +146,7 @@ export async function listEntitlementCatalog() {
   return { features: (features || []) as FeatureDefinition[], plans: plans || [] };
 }
 
-export async function getTenantEntitlements(tenantId: string): Promise<TenantEntitlements> {
-  const db = getPlatformDb();
+async function resolveTenantEntitlements(db: ReturnType<typeof getDb>, tenantId: string): Promise<TenantEntitlements> {
   const [{ data: features, error: featuresError }, { data: subscriptions, error: subscriptionsError }, { data: overrides, error: overridesError }, { data: usage, error: usageError }] = await Promise.all([
     db.from('features').select('id, key, name, domain, kind, status').order('domain').order('key'),
     db.from('tenant_subscriptions').select('id, plan_id, status, started_at, ended_at').eq('tenant_id', tenantId).in('status', ['trial', 'active']).is('ended_at', null).order('started_at', { ascending: false }).limit(1),
@@ -182,6 +182,18 @@ export async function getTenantEntitlements(tenantId: string): Promise<TenantEnt
       usage: (usage || []) as FeatureUsage[],
     }),
   };
+}
+
+/** Leitura do próprio tenant: sempre usa o cliente emitido sob o JWT/RLS atual. */
+export async function getTenantEntitlements(): Promise<TenantEntitlements> {
+  const context = getTenantDbContext();
+  if (!context?.tenantId) throw new Error('Leitura de entitlements sem contexto de tenant recusada.');
+  return resolveTenantEntitlements(getDb(), context.tenantId);
+}
+
+/** Leitura cross-tenant reservada para rotas saas_admin já autorizadas. */
+export async function getTenantEntitlementsForPlatform(tenantId: string): Promise<TenantEntitlements> {
+  return resolveTenantEntitlements(getPlatformDb(), tenantId);
 }
 
 export async function ensureTenantCompatibilitySubscription(tenantId: string, actorId = 'system:tenant-create') {

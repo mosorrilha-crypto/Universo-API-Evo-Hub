@@ -12,7 +12,7 @@ import {
   changeTenantSubscription,
   createTenantFeatureOverride,
   ensureTenantCompatibilitySubscription,
-  getTenantEntitlements,
+  getTenantEntitlementsForPlatform,
   listEntitlementCatalog,
   revokeTenantFeatureOverride,
 } from '../services/featureEntitlementService';
@@ -206,7 +206,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   }));
 
   router.get('/api/admin/tenants/:id/entitlements', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
-    res.json(await getTenantEntitlements(String(req.params.id)));
+    res.json(await getTenantEntitlementsForPlatform(String(req.params.id)));
   }));
 
   router.put('/api/admin/tenants/:id/subscription', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
