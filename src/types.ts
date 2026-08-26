@@ -91,6 +91,20 @@ export interface FinancialTransaction {
   entryType?: 'income' | 'expense';
 }
 
+/** Despesa fixa (aluguel, assinatura...) cadastrada uma vez — o job diário gera a FinancialTransaction correspondente sozinho todo mês no dia de vencimento (dayOfMonth). Ver server/services/recurringExpenseJob.ts. */
+export interface RecurringExpense {
+  id: string;
+  tenantId?: string;
+  description: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  /** Dia do mês de vencimento, 1 a 28 (evita cair em meses mais curtos). */
+  dayOfMonth: number;
+  active: boolean;
+  /** "YYYY-MM" do último mês em que o job já gerou o lançamento — só informativo no painel. */
+  lastGeneratedMonth?: string | null;
+}
+
 export type LeadSourceChannel = 'meta_ads' | 'instagram_ads' | 'google_ads' | 'instagram_organic' | 'google_organic' | 'whatsapp_direct';
 
 export interface UTMParams {

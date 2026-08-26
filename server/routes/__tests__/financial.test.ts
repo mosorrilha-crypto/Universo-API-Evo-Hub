@@ -67,8 +67,108 @@ beforeEach(() => {
         payment_link_url: 'https://pay.example.com/fat_tx-1',
       },
     ],
+    recurring_expenses: [
+      {
+        id: 'rec-1',
+        tenant_id: TENANT_A,
+        description: 'Aluguel do salão',
+        amount: 1500000,
+        payment_method: 'Transferência Bancária',
+        day_of_month: 5,
+        active: true,
+        last_generated_month: null,
+      },
+    ],
   });
   initDb(supabase);
+});
+
+describe('GET /api/financial/recurring-expenses', () => {
+  it('lista as despesas recorrentes do tenant', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.recurringExpenses).toHaveLength(1);
+    expect(data.recurringExpenses[0]).toMatchObject({ id: 'rec-1', description: 'Aluguel do salão', dayOfMonth: 5, active: true });
+  });
+});
+
+describe('POST /api/financial/recurring-expenses', () => {
+  it('cadastra uma despesa recorrente de verdade', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'Assinatura CRM', amount: 200000, paymentMethod: 'PIX', dayOfMonth: 10 }),
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.recurringExpense).toMatchObject({ description: 'Assinatura CRM', amount: 200000, dayOfMonth: 10, active: true });
+
+    const listRes = await fetch(`${baseUrl}/api/financial/recurring-expenses`);
+    const listData = await listRes.json();
+    expect(listData.recurringExpenses).toHaveLength(2);
+  });
+
+  it('400 quando dayOfMonth está fora de 1..28', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'X', amount: 100, paymentMethod: 'PIX', dayOfMonth: 30 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 quando amount não é maior que zero', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'X', amount: 0, paymentMethod: 'PIX', dayOfMonth: 5 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('recusa cadastro por operador', async () => {
+    authenticatedRole = 'operator';
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'X', amount: 100, paymentMethod: 'PIX', dayOfMonth: 5 }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('PATCH /api/financial/recurring-expenses/:id', () => {
+  it('pausa uma despesa recorrente', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses/rec-1`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: false }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.recurringExpense.active).toBe(false);
+  });
+
+  it('404 quando a despesa recorrente não existe', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses/inexistente`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: false }),
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('DELETE /api/financial/recurring-expenses/:id', () => {
+  it('remove a despesa recorrente de verdade', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses/rec-1`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+
+    const listRes = await fetch(`${baseUrl}/api/financial/recurring-expenses`);
+    const listData = await listRes.json();
+    expect(listData.recurringExpenses).toHaveLength(0);
+  });
 });
 
 describe('GET /api/financial/transactions', () => {
@@ -222,6 +322,26 @@ describe('isolamento entre tenants', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/financial/transactions`);
     const data = await res.json();
     expect(data.transactions).toHaveLength(0);
+    server2.close();
+  });
+
+  it('tenant B nunca vê despesas recorrentes do tenant A', async () => {
+    function otherTenantAuth(req: any, _res: any, next: any) {
+      req.user = { id: 'op-2', tenantId: TENANT_B, role: 'admin' };
+      next();
+    }
+    const app2 = express();
+    app2.use(express.json());
+    app2.use(createFinancialRouter({ authenticateToken: otherTenantAuth as any }));
+    const server2 = await new Promise<Server>((resolve) => {
+      const s = app2.listen(0, () => resolve(s));
+    });
+    const address = server2.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/financial/recurring-expenses`);
+    const data = await res.json();
+    expect(data.recurringExpenses).toHaveLength(0);
     server2.close();
   });
 });
