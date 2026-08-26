@@ -11,8 +11,10 @@ import {
   Target,
   UsersRound,
 } from 'lucide-react';
-import { ActiveTab, EscalationInfo, FinancialTransaction, LeadInfo, Tenant, UserProfile } from '../types';
+import { ActiveTab, AgentKnowledgeBase, BusinessHours, EscalationInfo, FinancialTransaction, LeadInfo, Tenant, UserProfile } from '../types';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { evaluateTenantActivation } from '../lib/tenantActivation';
+import { TenantActivationChecklist } from './TenantActivationChecklist';
 
 interface OperationsCenterProps {
   activeTenant: Tenant;
@@ -20,6 +22,8 @@ interface OperationsCenterProps {
   leads: LeadInfo[];
   transactions: FinancialTransaction[];
   escalations: EscalationInfo[];
+  knowledgeBase: AgentKnowledgeBase;
+  businessHours: BusinessHours;
   canSeeFinancial: boolean;
   canSeeAdminTools: boolean;
   onNavigate: (tab: ActiveTab) => void;
@@ -45,6 +49,8 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   leads,
   transactions,
   escalations,
+  knowledgeBase,
+  businessHours,
   canSeeFinancial,
   canSeeAdminTools,
   onNavigate,
@@ -68,6 +74,11 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
       paidRevenue,
     };
   }, [escalations, leads, transactions]);
+
+  const activation = useMemo(
+    () => evaluateTenantActivation(activeTenant, knowledgeBase, businessHours),
+    [activeTenant.whatsappStatus, businessHours, knowledgeBase],
+  );
 
   const priorityCount = summary.unresolved.length + summary.uncompletedTasks.length + summary.pendingTransactions.length;
   const priorityItems = [
@@ -133,6 +144,12 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
           </div>
         </div>
       </div>
+
+      <TenantActivationChecklist
+        status={activation}
+        canConfigure={canSeeAdminTools}
+        onNavigate={onNavigate}
+      />
 
       <section className="operations-quick-access rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="quick-access-heading">
         <div className="flex items-center justify-between gap-3">
