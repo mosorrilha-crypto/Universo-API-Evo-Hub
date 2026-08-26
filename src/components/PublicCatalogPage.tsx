@@ -765,37 +765,6 @@ function PageShell({ children, template = 'default' }: { children: ReactNode; te
         @keyframes loadingPulse { 50% { transform: scale(.72); opacity: .55; } }
         @keyframes skeletonShimmer { to { background-position: -120% 0; } }
         @media (prefers-reduced-motion: reduce) { .loading-orb, .skeleton { animation: none; } }
-        /* Templates tenant-scoped: overrides inline para vencer os estilos base do catálogo. */
-        .catalog-template-beauty_concierge { background: #eef6ff; color: #102a43; }
-        .catalog-template-beauty_concierge .catalog-header { background: rgba(238,246,255,.92); border-color: rgba(31,111,186,.22); }
-        .catalog-template-beauty_concierge .brand, .catalog-template-beauty_concierge .header-cta { color: #102a43; }
-        .catalog-template-beauty_concierge .brand-mark { border-color: #1f6fba; color: #1f6fba; }
-        .catalog-template-beauty_concierge .catalog-hero { background: radial-gradient(circle at 72% 14%, rgba(255,127,105,.25), transparent 34%), linear-gradient(135deg,#eef6ff 0%,#d7eaff 100%); }
-        .catalog-template-beauty_concierge .catalog-hero h1, .catalog-template-beauty_concierge .steps-section h2, .catalog-template-beauty_concierge .services-section h2, .catalog-template-beauty_concierge .faq-section h2 { color: #102a43; }
-        .catalog-template-beauty_concierge .catalog-hero h1 em, .catalog-template-beauty_concierge .catalog-hero h1 i, .catalog-template-beauty_concierge .services-section h2 em { color: #1f6fba; }
-        .catalog-template-beauty_concierge .eyebrow, .catalog-template-beauty_concierge .step-number, .catalog-template-beauty_concierge .product-dot { color: #1f6fba; }
-        .catalog-template-beauty_concierge .trust-band, .catalog-template-beauty_concierge .whatsapp-button, .catalog-template-beauty_concierge .sticky-whatsapp { background: #1f6fba; }
-        .catalog-template-beauty_concierge .services-section { background: #f8fbff; }
-        .catalog-template-beauty_concierge .faq-section { background: #ffe9e3; }
-        .catalog-template-gold_catalog { background: #090807; color: #f7efe2; }
-        .catalog-template-gold_catalog .catalog-header { background: rgba(9,8,7,.94); border-color: rgba(232,185,94,.28); }
-        .catalog-template-gold_catalog .brand, .catalog-template-gold_catalog .header-cta { color: #f7efe2; }
-        .catalog-template-gold_catalog .brand-mark { border-color: #c99539; color: #e8b95e; }
-        .catalog-template-gold_catalog .language-switch { border-color: rgba(232,185,94,.4); background: rgba(24,18,12,.85); }
-        .catalog-template-gold_catalog .language-switch button { color: #cdbfae; }
-        .catalog-template-gold_catalog .language-switch button.is-active { background: #c99539; color: #150f08; }
-        .catalog-template-gold_catalog .catalog-hero { background: radial-gradient(circle at 74% 12%, rgba(178,112,28,.32), transparent 36%), #090807; }
-        .catalog-template-gold_catalog .catalog-hero h1, .catalog-template-gold_catalog .steps-section h2, .catalog-template-gold_catalog .services-section h2, .catalog-template-gold_catalog .faq-section h2 { color: #f7efe2; }
-        .catalog-template-gold_catalog .catalog-hero h1 em, .catalog-template-gold_catalog .catalog-hero h1 i, .catalog-template-gold_catalog .steps-section h2 em, .catalog-template-gold_catalog .services-section h2 em, .catalog-template-gold_catalog .faq-section h2 em { color: #e8b95e; }
-        .catalog-template-gold_catalog .eyebrow, .catalog-template-gold_catalog .step-number, .catalog-template-gold_catalog .product-dot { color: #e8b95e; }
-        .catalog-template-gold_catalog .hero-sub, .catalog-template-gold_catalog .step p, .catalog-template-gold_catalog .faq-item p { color: #cdbfae; }
-        .catalog-template-gold_catalog .hero-link, .catalog-template-gold_catalog .price-row strong { color: #e8b95e; border-color: #c99539; }
-        .catalog-template-gold_catalog .trust-band, .catalog-template-gold_catalog .whatsapp-button, .catalog-template-gold_catalog .sticky-whatsapp { background: #e8b95e; color: #150f08; }
-        .catalog-template-gold_catalog .steps-section, .catalog-template-gold_catalog .faq-section { background: #15100c; }
-        .catalog-template-gold_catalog .services-section { background: #f3eadc; color: #21170f; }
-        .catalog-template-gold_catalog .services-section h2, .catalog-template-gold_catalog .services-section .group-title, .catalog-template-gold_catalog .services-section .product-card h4 { color: #21170f; }
-        .catalog-template-gold_catalog .product-card { background: #fffaf1; border-color: rgba(133,91,31,.28); }
-        .catalog-template-gold_catalog .catalog-footer { background: #090807; color: #cdbfae; }
         @media (max-width: 800px) {
           .catalog-wrap { width: min(100% - 28px, 620px); }
           .catalog-header-inner { min-height: 68px; }
