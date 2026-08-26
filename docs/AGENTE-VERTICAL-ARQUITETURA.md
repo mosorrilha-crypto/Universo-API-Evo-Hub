@@ -75,10 +75,12 @@ Classificação completa das 30 seções do script definitivo (mensagem do dono 
 
 ## 3. Schema da Base do Tenant — de blob único pra documentos tipados
 
-Hoje `knowledge_base.data` é um jsonb único (companyName, agentGoal, toneOfVoice,
-businessModel, pricingAndPolicies, products[], businessRules[], faqs[]). Passa a ser
-organizado por **tipo de documento**, cada um com seu próprio ciclo de vida (versão, status,
-validade) em vez de tudo editado junto:
+O runtime atual ainda lê `knowledge_base.data`, um jsonb único (companyName, agentGoal,
+toneOfVoice, businessModel, pricingAndPolicies, products[], businessRules[], faqs[]). Desde
+26/08/2026, a migration `0057_knowledge_base_typed_documents.sql` mantém em paralelo os
+documentos tipados publicados para transição segura; o corte da fonte de leitura ainda não foi
+feito. A forma alvo organiza a base por **tipo de documento**, cada um com seu próprio ciclo de
+vida (versão e status) em vez de tudo editado junto:
 
 | document_type | Conteúdo | Novo em relação a hoje |
 |---|---|---|
@@ -93,7 +95,9 @@ validade) em vez de tudo editado junto:
 
 Cada documento carrega `tenant_id`, `version`, `status` (`draft`/`published`), `updated_at`,
 `updated_by` — resolve o "editar sem risco" (rascunho vs. publicado) e a auditoria que
-faltavam.
+faltavam. Nesta primeira etapa, há oito documentos `published` v1 por tenant legado e eventos
+de publicação; rotas de edição/publicação serão introduzidas sem alterar o agente até o corte
+revisado.
 
 **Regra de publicação (fechada em 06/08/2026):** só `admin` ou `saas_admin` publica
 (`draft` → `published`) — role já existe no RBAC (Bloco 2.D), não é conceito novo. O agente

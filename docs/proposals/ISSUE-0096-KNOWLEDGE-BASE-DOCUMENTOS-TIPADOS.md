@@ -1,6 +1,6 @@
 # Proposta — Issue #96: Base de Conhecimento em documentos tipados
 
-**Status:** proposta para revisão humana antes de qualquer migration em produção.  
+**Status:** PR1 aplicado e validado; PR2–PR4 ainda requerem revisão humana.
 **Rastreabilidade:** TASK-0101 · Issue #96.  
 **Escopo:** substituir a edição direta do blob `knowledge_base.data` por documentos tipados, versionados e publicáveis, sem alterar o conteúdo que alimenta o agente durante a transição.
 
@@ -14,13 +14,13 @@ Propõe-se uma **tabela genérica versionada**, `knowledge_base_documents`, em v
 | `tenant_id` | Obrigatório, FK para `tenants`, sempre resolvido do JWT nas rotas. |
 | `document_type` | Um dos oito tipos fechados: `business_profile`, `brand_voice`, `service_catalog`, `pricing_policies`, `opening_hours`, `faq`, `human_handoff_rules`, `media_assets`. |
 | `version` | Inteiro sequencial por tenant e tipo. Nunca é reescrito após publicação. |
-| `status` | `draft` ou `published`. Só uma versão publicada por tenant e tipo. |
+| `status` | `draft` ou `published`. Índice único parcial garante exatamente uma versão publicada por tenant e tipo, inclusive em publicação concorrente. |
 | `data` | JSON do contrato específico do tipo, validado no serviço antes de persistir. |
 | `created_at` / `created_by` | Criação do rascunho. |
 | `updated_at` / `updated_by` | Última edição do rascunho. |
 | `published_at` / `published_by` | Ato de publicação. |
 
-O histórico de versões preserva o conteúdo completo usado em cada publicação. Um registro complementar `knowledge_base_document_events` guarda eventos mínimos de auditoria (`draft_created`, `draft_updated`, `published`), ator, tipo, versão e timestamp. Assim, a auditoria responde **quem publicou o quê e quando**, enquanto a versão preserva o valor efetivo.
+O histórico de versões preserva o conteúdo completo usado em cada publicação. Um registro complementar `knowledge_base_document_events` guarda eventos mínimos de auditoria (`draft_created`, `draft_updated`, `published`), ator, tipo, versão e timestamp. Assim, a auditoria responde **quem publicou o quê e quando**, enquanto a versão preserva o valor efetivo. Além da unicidade por versão, haverá índices únicos parciais para **um único rascunho** e **uma única publicação** por tenant e tipo.
 
 ## Contrato inicial dos oito documentos
 
@@ -40,6 +40,12 @@ O histórico de versões preserva o conteúdo completo usado em cada publicaçã
 A migration será **idempotente**. Ela cria as tabelas, índices parciais e RLS com `IF NOT EXISTS`/`DROP POLICY IF EXISTS`; depois lê cada linha existente de `knowledge_base` e insere exatamente oito documentos `published`, versão `1`, somente quando ainda não houver uma versão publicada daquele tenant e tipo. O mapeamento copia os valores existentes sem preenchimento fictício e sem parsear texto livre.
 
 O blob legado não será removido nesta etapa. Ele permanece como rollback e fonte de comparação até a validação pós-publicação de cada tenant, incluindo Monique e Clic Piscinas. A migration será aplicada apenas via `apply_migration` do Supabase MCP e conferida com `list_migrations`.
+
+### Registro de execução do PR1 — 2026-08-26
+
+A migration foi aplicada ao projeto de produção `pkocepjfedtsxmufymvd` e consta no histórico como `knowledge_base_typed_documents` (`20260826223609`). Foram confirmados **24 documentos publicados v1** e **24 eventos de publicação** para as 3 linhas legadas, sem remoção do blob. A verificação de invariantes retornou zero duplicidades de publicação e os três índices esperados (versão, rascunho e publicação).
+
+A comparação direta no banco confirmou equivalência campo a campo dos dados de **Monique Sorrilha Beauty Studio** e **Clic Piscinas** para perfil, tom, catálogo completo, políticas/regras, FAQ e mídia. O adaptador TypeScript também valida a compatibilidade de prompt, preço por variação, duração e referências de vídeo. Esta evidência satisfaz o pré-requisito de equivalência do PR1; ela **não autoriza por si só o corte do runtime**, que continua condicionado ao PR4 e à revisão humana.
 
 ## Compatibilidade e corte em etapas
 
@@ -65,7 +71,7 @@ O ganho de qualidade será mensurável por testes de contrato: respostas devem c
 1. A composição dos oito documentos publicados precisa reproduzir integralmente os campos hoje consumidos pelo agente.
 2. Um rascunho de tenant A não pode ser lido, publicado ou listado por tenant B.
 3. Publicar uma nova versão muda o contexto no turno seguinte, sem alterar o turno já em execução.
-4. Os fluxos de preço, duração, agenda, catálogo, vídeo, mídia e transcrição precisam passar pelos testes existentes e pelos novos testes de equivalência.
+4. Antes do PR 4, `composePublishedKnowledgeBase` precisa ser executado contra os dados reais — ou cópias verificadas — da Monique e da Clic Piscinas, reproduzindo campo a campo o contexto de `formatKnowledgeBaseForPrompt`, preço, duração e agendabilidade hoje obtidos do blob legado.
 5. A migration só será aplicada após revisão humana desta proposta e autorização explícita para alterar o schema e os dados publicados em produção.
 
 > **Ponto de revisão:** a primeira migration afeta a Base de Conhecimento da Monique em produção. A próxima etapa deve confirmar o schema e o plano de corte acima antes de executar DDL ou backfill no Supabase.

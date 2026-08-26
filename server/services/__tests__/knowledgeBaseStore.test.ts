@@ -4,8 +4,10 @@
  * chegavam no prompt do Gemini, quebrando perguntas de FAQ reais tipo
  * "a que horas abrem?"/"onde fica?".
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  composeKnowledgeBaseDocuments,
+  getPublishedKnowledgeBaseDocuments,
   formatKnowledgeBaseForPrompt,
   resolveProductPriceAmount,
   resolveProductAmountByName,
@@ -15,7 +17,10 @@ import {
   collectReferencedVideoIds,
   type AgentKnowledgeBase,
   type AgentProduct,
+  type KnowledgeBaseDocument,
 } from '../knowledgeBaseStore';
+import { initDb } from '../db';
+import { createFakeSupabase } from './fakeSupabase';
 
 describe('formatKnowledgeBaseForPrompt', () => {
   it('inclui businessModel (endereço/horário/posicionamento) no texto do prompt', () => {
@@ -275,5 +280,91 @@ describe('findProductMatch (produto de topo ou variante dentro de uma família)'
 
   it('resolveProductAmountByName undefined quando o nome não bate com nada (nunca inventa valor)', () => {
     expect(resolveProductAmountByName(familyKb, 'Serviço Inexistente')).toBeUndefined();
+  });
+});
+
+/**
+ * ISSUE-0096 / PR1 — equivalência da forma publicada com o blob legado. As
+ * fixtures representam as famílias que mais exigem preservação no corte:
+ * Monique (duração/agendabilidade/mídia) e Clic Piscinas (variantes/preços).
+ * Nenhuma contém imagens/base64 reais, pois a regra sob teste é estrutural.
+ */
+describe('composeKnowledgeBaseDocuments — equivalência da KB tipada', () => {
+  const moniqueAndClicLegacy: AgentKnowledgeBase = {
+    companyName: 'Monique Beauty & Clic Piscinas',
+    agentGoal: 'Responder somente com informações cadastradas.',
+    businessModel: 'Atendimento com horário marcado e catálogo por modelo.',
+    locationMapsUrl: 'https://maps.example.test/monique-clic',
+    toneOfVoice: 'Acolhedor, direto e profissional.',
+    pricingAndPolicies: 'Preços podem variar por modelo e campanha vigente.',
+    businessRules: ['Nunca inventar preço.', 'Retoque exige avaliação humana.'],
+    products: [
+      {
+        name: 'Pestañas',
+        price: 'Consultar por efeito',
+        variants: [{ code: 'Lash Lift', price: 'Gs 140.000', priceAmount: 140000, durationMinutes: 90, exampleVideoId: 'video-lash-lift' }],
+      },
+      {
+        name: 'Piscina Fibratec Acapulco',
+        price: 'Consultar por tamanho',
+        variants: [{ code: 'AC F400', dimensions: '4,10x2,30m', litros: 7800, price: 'Gs 12.000.000', priceAmount: 12000000 }],
+      },
+    ],
+    faqs: [{ question: 'Como agendar?', answer: 'Envie a opção desejada para confirmar disponibilidade.' }],
+    documents: [{ id: 'catalogo-pdf', fileName: 'catalogo.pdf', fileSize: '10 KB', uploadDate: '2026-08-26', status: 'Processado', extractedText: 'Modelos disponíveis.' }],
+    firstContactBlocks: [{ id: 'boas-vindas', type: 'video', videoId: 'welcome-video', videoCaption: 'Conheça as opções.' }],
+  };
+
+  const publishedDocuments: KnowledgeBaseDocument[] = [
+    { id: '1', tenantId: 'tenant-a', documentType: 'business_profile', version: 1, status: 'published', data: { companyName: moniqueAndClicLegacy.companyName, agentGoal: moniqueAndClicLegacy.agentGoal, businessModel: moniqueAndClicLegacy.businessModel, locationMapsUrl: moniqueAndClicLegacy.locationMapsUrl } },
+    { id: '2', tenantId: 'tenant-a', documentType: 'brand_voice', version: 1, status: 'published', data: { toneOfVoice: moniqueAndClicLegacy.toneOfVoice } },
+    { id: '3', tenantId: 'tenant-a', documentType: 'service_catalog', version: 1, status: 'published', data: { products: moniqueAndClicLegacy.products } },
+    { id: '4', tenantId: 'tenant-a', documentType: 'pricing_policies', version: 1, status: 'published', data: { pricingAndPolicies: moniqueAndClicLegacy.pricingAndPolicies, businessRules: moniqueAndClicLegacy.businessRules } },
+    { id: '5', tenantId: 'tenant-a', documentType: 'opening_hours', version: 1, status: 'published', data: {} },
+    { id: '6', tenantId: 'tenant-a', documentType: 'faq', version: 1, status: 'published', data: { faqs: moniqueAndClicLegacy.faqs } },
+    { id: '7', tenantId: 'tenant-a', documentType: 'human_handoff_rules', version: 1, status: 'published', data: {} },
+    { id: '8', tenantId: 'tenant-a', documentType: 'media_assets', version: 1, status: 'published', data: { documents: moniqueAndClicLegacy.documents, firstContactBlocks: moniqueAndClicLegacy.firstContactBlocks } },
+  ];
+
+  it('recompõe todos os campos mapeados sem perder variantes, preços, duração ou mídia', () => {
+    const composed = composeKnowledgeBaseDocuments(publishedDocuments);
+
+    expect(composed).toEqual(moniqueAndClicLegacy);
+    expect(formatKnowledgeBaseForPrompt(composed)).toBe(formatKnowledgeBaseForPrompt(moniqueAndClicLegacy));
+    expect(resolveProductAmountByName(composed, 'Lash Lift')).toBe(140000);
+    expect(resolveProductAmountByName(composed, 'AC F400')).toBe(12000000);
+    expect(findProductDurationMinutes(composed, 'Lash Lift')).toBe(90);
+    expect(collectReferencedVideoIds(composed)).toEqual(new Set(['video-lash-lift', 'welcome-video']));
+  });
+
+  it('ignora rascunho e campos fora do contrato do tipo documental', () => {
+    const composed = composeKnowledgeBaseDocuments([
+      ...publishedDocuments,
+      { id: 'draft', tenantId: 'tenant-a', documentType: 'brand_voice', version: 2, status: 'draft', data: { toneOfVoice: 'Nunca deve vazar ao runtime.' } },
+      { id: 'extra', tenantId: 'tenant-a', documentType: 'faq', version: 1, status: 'published', data: { faqs: moniqueAndClicLegacy.faqs, products: [] } },
+    ]);
+
+    expect(composed.toneOfVoice).toBe(moniqueAndClicLegacy.toneOfVoice);
+    expect(composed.products).toEqual(moniqueAndClicLegacy.products);
+  });
+});
+
+describe('getPublishedKnowledgeBaseDocuments', () => {
+  beforeEach(() => {
+    initDb(createFakeSupabase({
+      knowledge_base_documents: [
+        { id: 'published-a', tenant_id: 'tenant-a', document_type: 'faq', version: 1, status: 'published', data: { faqs: [] } },
+        { id: 'draft-a', tenant_id: 'tenant-a', document_type: 'faq', version: 2, status: 'draft', data: { faqs: [{ question: 'interno', answer: 'não publicar' }] } },
+        { id: 'published-b', tenant_id: 'tenant-b', document_type: 'faq', version: 1, status: 'published', data: { faqs: [] } },
+      ],
+    }) as any);
+  });
+
+  afterEach(() => initDb(null));
+
+  it('lê apenas a publicação do tenant solicitado', async () => {
+    await expect(getPublishedKnowledgeBaseDocuments('tenant-a')).resolves.toEqual([
+      expect.objectContaining({ id: 'published-a', tenantId: 'tenant-a', documentType: 'faq', version: 1, status: 'published' }),
+    ]);
   });
 });

@@ -3,6 +3,11 @@
  * catálogo de preços, FAQ) — usada como contexto real nos prompts do Gemini
  * pra resposta automática. Migrado pra tabela Postgres `knowledge_base`
  * (Bloco 2.A), 1 registro (jsonb) por tenant_id.
+ *
+ * ISSUE-0096 — durante a transição, `getKnowledgeBase` continua lendo o
+ * blob legado. As funções de documentos tipados abaixo existem para provar a
+ * equivalência antes do corte explícito do runtime; nunca devem ser usadas
+ * como fallback silencioso.
  */
 import { getDb } from './db';
 
@@ -370,6 +375,116 @@ export interface AgentKnowledgeBase {
   locationMapsUrl?: string;
   /** Sequência fixa de "1º contato" (texto/imagem/vídeo/arquivo, na ordem do array) — ver FirstContactBlock acima. Ausente/vazio = comportamento de sempre. */
   firstContactBlocks?: FirstContactBlock[];
+}
+
+/** Tipos de documento permitidos pela migration 0057 e pelo contrato da API. */
+export const KNOWLEDGE_BASE_DOCUMENT_TYPES = [
+  'business_profile',
+  'brand_voice',
+  'service_catalog',
+  'pricing_policies',
+  'opening_hours',
+  'faq',
+  'human_handoff_rules',
+  'media_assets',
+] as const;
+
+export type KnowledgeBaseDocumentType = (typeof KNOWLEDGE_BASE_DOCUMENT_TYPES)[number];
+export type KnowledgeBaseDocumentStatus = 'draft' | 'published';
+
+/**
+ * Registro normalizado da tabela `knowledge_base_documents`.
+ *
+ * O payload permanece `Record<string, unknown>` no limite com o banco. A
+ * composição seleciona estritamente os campos permitidos para cada tipo, em
+ * vez de confiar no conteúdo arbitrário de um JSONB.
+ */
+export interface KnowledgeBaseDocument {
+  id: string;
+  tenantId: string;
+  documentType: KnowledgeBaseDocumentType;
+  version: number;
+  status: KnowledgeBaseDocumentStatus;
+  data: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+  publishedAt?: string | null;
+}
+
+type KnowledgeBaseDocumentRow = {
+  id: string;
+  tenant_id: string;
+  document_type: KnowledgeBaseDocumentType;
+  version: number;
+  status: KnowledgeBaseDocumentStatus;
+  data: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  published_at?: string | null;
+};
+
+const KNOWLEDGE_BASE_DOCUMENT_FIELDS: Record<KnowledgeBaseDocumentType, readonly (keyof AgentKnowledgeBase)[]> = {
+  business_profile: ['companyName', 'agentGoal', 'businessModel', 'locationMapsUrl'],
+  brand_voice: ['toneOfVoice'],
+  service_catalog: ['products'],
+  pricing_policies: ['pricingAndPolicies', 'businessRules'],
+  opening_hours: [],
+  faq: ['faqs'],
+  human_handoff_rules: [],
+  media_assets: ['documents', 'firstContactBlocks'],
+};
+
+function normalizeKnowledgeBaseDocument(row: KnowledgeBaseDocumentRow): KnowledgeBaseDocument {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    documentType: row.document_type,
+    version: row.version,
+    status: row.status,
+    data: row.data || {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    publishedAt: row.published_at,
+  };
+}
+
+/**
+ * Reconstrói a forma legada da KB a partir de documentos publicados. Só os
+ * campos pertencentes ao tipo de documento são aceitos, preservando produtos,
+ * variantes, mídias e regras exatamente como foram persistidos. A função é
+ * pura para viabilizar testes de equivalência sem depender do banco.
+ */
+export function composeKnowledgeBaseDocuments(documents: readonly KnowledgeBaseDocument[]): AgentKnowledgeBase {
+  const composed: AgentKnowledgeBase = {};
+  const target = composed as Record<string, unknown>;
+
+  for (const document of documents) {
+    if (document.status !== 'published') continue;
+    for (const field of KNOWLEDGE_BASE_DOCUMENT_FIELDS[document.documentType]) {
+      const value = document.data[field];
+      if (value !== undefined) target[field] = value;
+    }
+  }
+
+  return composed;
+}
+
+/** Lista somente as versões publicadas do tenant autenticado no banco. */
+export async function getPublishedKnowledgeBaseDocuments(tenantId: string): Promise<KnowledgeBaseDocument[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('knowledge_base_documents')
+    .select('id, tenant_id, document_type, version, status, data, created_at, updated_at, published_at')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'published')
+    .order('document_type', { ascending: true });
+  if (error) throw error;
+  return ((data || []) as KnowledgeBaseDocumentRow[]).map(normalizeKnowledgeBaseDocument);
+}
+
+/** Composição de conveniência usada apenas por testes e futuros endpoints da etapa de publicação. */
+export async function composePublishedKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase> {
+  return composeKnowledgeBaseDocuments(await getPublishedKnowledgeBaseDocuments(tenantId));
 }
 
 export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
