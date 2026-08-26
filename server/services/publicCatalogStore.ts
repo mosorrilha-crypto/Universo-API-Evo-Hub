@@ -1,7 +1,6 @@
-import { getDb } from './db';
+import { getPlatformDb } from './db';
 import { buildCatalogThumbnail } from './catalogImageThumbnail';
 import {
-  getKnowledgeBase,
   resolveProductPrice,
   resolveProductPriceAmount,
   resolveVariantPrice,
@@ -9,6 +8,7 @@ import {
   type AgentProduct,
   type ProductVariant,
   type BeforeAfterPair,
+  type AgentKnowledgeBase,
 } from './knowledgeBaseStore';
 
 export interface PublicBeforeAfterPair {
@@ -173,7 +173,7 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
   const normalizedSlug = normalizeSlug(slug);
   if (!normalizedSlug) return null;
 
-  const { data: tenant, error } = await getDb()
+  const { data: tenant, error } = await getPlatformDb()
     .from('tenants')
     .select('id, name, slug, currency, locale, public_catalog_enabled, public_catalog_template, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
     .eq('slug', normalizedSlug)
@@ -181,7 +181,13 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
   if (error) throw error;
   if (!tenant?.slug || tenant.public_catalog_enabled !== true) return null;
 
-  const knowledgeBase = await getKnowledgeBase(tenant.id);
+  const { data: knowledgeBaseRow, error: knowledgeBaseError } = await getPlatformDb()
+    .from('knowledge_base')
+    .select('data')
+    .eq('tenant_id', tenant.id)
+    .maybeSingle();
+  if (knowledgeBaseError) throw knowledgeBaseError;
+  const knowledgeBase = knowledgeBaseRow?.data as AgentKnowledgeBase | undefined;
   if (!knowledgeBase) return null;
 
   const catalog = await toPublicCatalog(tenant, knowledgeBase.products || []);
@@ -197,7 +203,7 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
 
   // Só o dataset_id (Pixel ID) vai pro cliente — nunca o capi_access_token,
   // que é um segredo server-side (usado só por metaCapiService.ts).
-  const { data: metaCredentials } = await getDb().from('tenant_meta_credentials').select('capi_dataset_id').eq('tenant_id', tenant.id).maybeSingle();
+  const { data: metaCredentials } = await getPlatformDb().from('tenant_meta_credentials').select('capi_dataset_id').eq('tenant_id', tenant.id).maybeSingle();
   catalog.pixelId = metaCredentials?.capi_dataset_id || undefined;
 
   return catalog;

@@ -5,7 +5,14 @@ export interface ServerConfig {
   isProduction: boolean;
   jwtSecret: string;
   supabaseUrl?: string;
+  /** Chave secreta de plataforma, restrita a manutenção e operações cross-tenant explícitas. */
   supabaseKey?: string;
+  /** Chave pública usada pelo cliente runtime que passa pelas policies RLS. */
+  supabasePublishableKey?: string;
+  /** Segredo de assinatura para emitir JWTs curtos com claims de tenant ao PostgREST. */
+  supabaseJwtSecret?: string;
+  /** Verdadeiro somente quando o runtime pode acessar dados sem BYPASSRLS. */
+  rlsEnforced: boolean;
   metaWebhookVerifyToken: string;
   /** Segredo do App Meta usado para validar HMAC dos POSTs de webhook. Obrigatório em produção. */
   metaAppSecret?: string;
@@ -72,12 +79,30 @@ export function loadConfig(): ServerConfig {
     console.warn('⚠️  VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY não configuradas — push notification do PWA fica desativado até gerar um par de chaves (npx web-push generate-vapid-keys) e configurar as duas.');
   }
 
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+  const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+  const supabaseJwtSecret = process.env.SUPABASE_JWT_SECRET;
+  const rlsEnforced = Boolean(supabaseUrl && supabaseKey && supabasePublishableKey && supabaseJwtSecret);
+
+  // A chave secreta de plataforma ignora RLS. Em produção, iniciar sem o
+  // cliente runtime assinado reintroduziria exatamente o bypass que esta
+  // correção elimina, então falhamos cedo em vez de degradar silenciosamente.
+  if (supabaseUrl && supabaseKey && !rlsEnforced) {
+    const message = 'SUPABASE_PUBLISHABLE_KEY e SUPABASE_JWT_SECRET são obrigatórias junto de SUPABASE_URL/SUPABASE_KEY para que o runtime respeite RLS.';
+    if (isProduction) throw new Error(message);
+    console.warn(`⚠️  ${message} Desenvolvimento seguirá com acesso de plataforma; RLS efetivo permanece desativado neste ambiente.`);
+  }
+
   return {
     port,
     isProduction,
     jwtSecret,
-    supabaseUrl: process.env.SUPABASE_URL,
-    supabaseKey: process.env.SUPABASE_KEY,
+    supabaseUrl,
+    supabaseKey,
+    supabasePublishableKey,
+    supabaseJwtSecret,
+    rlsEnforced,
     metaWebhookVerifyToken,
     metaAppSecret,
     geminiApiKey: process.env.GEMINI_API_KEY,

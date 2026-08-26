@@ -7,6 +7,7 @@
  */
 import type { NextFunction, Response } from 'express';
 import type { AuthenticatedRequest } from './auth';
+import { replaceTenantInCurrentDbContext } from '../services/tenantDbContext';
 
 export type Role = 'operator' | 'manager' | 'admin' | 'saas_admin';
 
@@ -68,7 +69,10 @@ export function resolveTenantId(req: AuthenticatedRequest): string {
     // devem ser ignorados, nunca enviados ao Postgres; UUIDs canônicos antigos
     // continuam válidos mesmo sem versão/variante RFC 4122; o JWT continua
     // sendo a fonte segura de fallback para a requisição autenticada.
-    if (normalized && TENANT_UUID_PATTERN.test(normalized)) return normalized;
+    if (normalized && TENANT_UUID_PATTERN.test(normalized)) {
+      replaceTenantInCurrentDbContext(normalized);
+      return normalized;
+    }
   }
   return req.user.tenantId;
 }

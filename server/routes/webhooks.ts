@@ -28,6 +28,7 @@ import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolve
 import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
 import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
+import { runWithTenantDbContext } from '../services/tenantDbContext';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
 
@@ -322,18 +323,24 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // de disparar a resposta — espera ~6s de silêncio, evitando responder cada
   // fragmento separadamente (denunciaria automação na hora).
   const handleIncomingText = (phone: string, contactName: string | undefined, text: string, messageId: string, resolvedTenant: ResolvedTenant) => {
-    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) => {
-      triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant);
-    });
+    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+      runWithTenantDbContext(
+        { tenantId: bufferedTenant.tenantId, source: 'webhook' },
+        () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+      )
+    );
   };
 
   // Recupera buffers de rajada presos por um restart de deploy no meio da
   // janela de 6s de silêncio — sem isso, a mensagem ficava perdida pra
   // sempre (achado real, 15/08/2026). Uma vez só no boot do router, o
   // próprio sweeper se reagenda periodicamente por dentro.
-  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) => {
-    triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant);
-  });
+  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+    runWithTenantDbContext(
+      { tenantId: bufferedTenant.tenantId, source: 'job' },
+      () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+    )
+  );
 
   // Extrai as mensagens em um formato comum, resolve de qual tenant é cada
   // uma (Bloco 2.B — por phone_number_id, com fallback pro tenant legado +
@@ -378,6 +385,9 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           continue;
         }
         const { tenantId } = resolvedTenant;
+        await runWithTenantDbContext(
+          { tenantId, source: 'webhook' },
+          async () => {
 
         // Eco fromMe:true (só Evolution API — Baileys espelha TODA atividade
         // do número conectado, inclusive nosso próprio envio via API). Nunca
@@ -408,7 +418,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
               console.log(`📱 [Eco de envio] tenant=${tenantId} mensagem mandada direto do celular (fora do painel) pra ${msg.from} — gravada como operador.`);
             }
           }
-          continue;
+          return;
         }
 
         if (msg.referral?.ctwaClid) {
@@ -543,6 +553,8 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // "[sticker]"/"[video]" cru de antes (achado real em produção).
           await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel });
         }
+          }
+        );
       } catch (err: any) {
         await unmarkProcessed(msg.messageId);
         console.error(`❌ [Webhook ${msg.provider}] Falha ao processar mensagem ${msg.messageId} de ${msg.from} — desmarcada pra reentrega tentar de novo:`, err.message);

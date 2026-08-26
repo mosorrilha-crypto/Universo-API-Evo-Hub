@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import type { NextFunction, Request, Response } from 'express';
+import { runWithTenantDbContext } from '../services/tenantDbContext';
 
 /**
  * `express-serve-static-core`'s `ParamsDictionary` types every param as
@@ -23,8 +24,20 @@ export function createAuthenticateToken(jwtSecret: string) {
 
     jwt.verify(token, jwtSecret, (err: any, user: any) => {
       if (err) return res.sendStatus(403);
+      if (!user?.tenantId) {
+        return res.status(403).json({ error: 'Sessão autenticada sem tenant. Acesso recusado.' });
+      }
+
       req.user = user;
-      next();
+      return runWithTenantDbContext(
+        {
+          tenantId: user.tenantId,
+          actorId: user.id,
+          role: user.role,
+          source: 'authenticated_request',
+        },
+        () => next()
+      );
     });
   };
 }

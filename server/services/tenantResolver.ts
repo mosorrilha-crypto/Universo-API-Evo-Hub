@@ -16,7 +16,7 @@
  *     true` e nenhum dado é gravado em tenant nenhum — quem chama decide
  *     descartar e logar pra investigação manual.
  */
-import { getDb } from './db';
+import { getPlatformDb } from './db';
 import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
 
 export interface ResolvedTenant {
@@ -51,7 +51,7 @@ export async function resolveTenantByPhoneNumberId(
 ): Promise<ResolvedTenant> {
   if (phoneNumberId) {
     try {
-      const db = getDb();
+      const db = getPlatformDb();
       const { data } = await db
         .from('tenant_meta_credentials')
         .select('tenant_id, access_token, phone_number_id')
@@ -90,7 +90,7 @@ export async function resolveTenantByEvolutionInstance(
 ): Promise<ResolvedTenant> {
   if (instanceName) {
     try {
-      const db = getDb();
+      const db = getPlatformDb();
       const { data } = await db
         .from('tenant_evolution_credentials')
         .select('tenant_id, instance_name, api_url, api_key')
@@ -135,7 +135,7 @@ export async function resolveTenantByEvolutionInstance(
 export async function resolveTenantByInstagramAccountId(instagramAccountId: string | undefined): Promise<ResolvedTenant> {
   if (!instagramAccountId) return { tenantId: '', unknownChannel: true };
   try {
-    const db = getDb();
+    const db = getPlatformDb();
     const { data } = await db
       .from('tenant_instagram_credentials')
       .select('tenant_id, instagram_account_id, access_token')
@@ -169,7 +169,7 @@ export async function resolveMetaCredentialsForTenant(
   shared: SharedMetaCredentials
 ): Promise<SharedMetaCredentials> {
   try {
-    const db = getDb();
+    const db = getPlatformDb();
     const { data } = await db
       .from('tenant_meta_credentials')
       .select('access_token, phone_number_id')
@@ -197,7 +197,7 @@ export async function resolveCredentialsForTenant(
   sharedEvo: SharedEvolutionCredentials
 ): Promise<ResolvedTenant> {
   try {
-    const db = getDb();
+    const db = getPlatformDb();
     
     // Tenta Evolution primeiro (Porta A)
     const { data: evo } = await db
