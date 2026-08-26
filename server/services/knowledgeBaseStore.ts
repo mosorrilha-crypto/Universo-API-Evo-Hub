@@ -390,7 +390,7 @@ export const KNOWLEDGE_BASE_DOCUMENT_TYPES = [
 ] as const;
 
 export type KnowledgeBaseDocumentType = (typeof KNOWLEDGE_BASE_DOCUMENT_TYPES)[number];
-export type KnowledgeBaseDocumentStatus = 'draft' | 'published';
+export type KnowledgeBaseDocumentStatus = 'draft' | 'published' | 'archived';
 
 /**
  * Registro normalizado da tabela `knowledge_base_documents`.
@@ -433,6 +433,118 @@ const KNOWLEDGE_BASE_DOCUMENT_FIELDS: Record<KnowledgeBaseDocumentType, readonly
   human_handoff_rules: [],
   media_assets: ['documents', 'firstContactBlocks'],
 };
+
+const KNOWLEDGE_BASE_DOCUMENT_DATA_KEYS: Record<KnowledgeBaseDocumentType, readonly string[]> = {
+  business_profile: ['companyName', 'agentGoal', 'businessModel', 'locationMapsUrl'],
+  brand_voice: ['toneOfVoice'],
+  service_catalog: ['products'],
+  pricing_policies: ['pricingAndPolicies', 'businessRules'],
+  opening_hours: [],
+  faq: ['faqs'],
+  human_handoff_rules: [],
+  media_assets: ['documents', 'firstContactBlocks'],
+};
+
+export class KnowledgeBaseDocumentValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KnowledgeBaseDocumentValidationError';
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertString(value: unknown, field: string): void {
+  if (typeof value !== 'string') throw new KnowledgeBaseDocumentValidationError(`Campo "${field}" precisa ser texto.`);
+}
+
+function assertStringArray(value: unknown, field: string): void {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new KnowledgeBaseDocumentValidationError(`Campo "${field}" precisa ser uma lista de textos.`);
+  }
+}
+
+function assertProducts(value: unknown): void {
+  if (!Array.isArray(value)) throw new KnowledgeBaseDocumentValidationError('Campo "products" precisa ser uma lista.');
+  for (const [index, product] of value.entries()) {
+    if (!isPlainRecord(product)) throw new KnowledgeBaseDocumentValidationError(`products[${index}] precisa ser um objeto.`);
+    assertString(product.name, `products[${index}].name`);
+    assertString(product.price, `products[${index}].price`);
+    if (product.variants !== undefined) {
+      if (!Array.isArray(product.variants)) throw new KnowledgeBaseDocumentValidationError(`products[${index}].variants precisa ser uma lista.`);
+      for (const [variantIndex, variant] of product.variants.entries()) {
+        if (!isPlainRecord(variant)) throw new KnowledgeBaseDocumentValidationError(`products[${index}].variants[${variantIndex}] precisa ser um objeto.`);
+        assertString(variant.code, `products[${index}].variants[${variantIndex}].code`);
+        assertString(variant.price, `products[${index}].variants[${variantIndex}].price`);
+      }
+    }
+  }
+}
+
+function assertFaqs(value: unknown): void {
+  if (!Array.isArray(value)) throw new KnowledgeBaseDocumentValidationError('Campo "faqs" precisa ser uma lista.');
+  for (const [index, faq] of value.entries()) {
+    if (!isPlainRecord(faq)) throw new KnowledgeBaseDocumentValidationError(`faqs[${index}] precisa ser um objeto.`);
+    assertString(faq.question, `faqs[${index}].question`);
+    assertString(faq.answer, `faqs[${index}].answer`);
+  }
+}
+
+/**
+ * Valida o contrato de cada documento no limite da API. Campos não previstos
+ * são rejeitados em vez de serem persistidos sem semântica; campos sem fonte
+ * estruturada continuam explicitamente vazios até uma evolução aprovada.
+ */
+export function validateKnowledgeBaseDocumentData(documentType: KnowledgeBaseDocumentType, value: unknown): Record<string, unknown> {
+  if (!isPlainRecord(value)) throw new KnowledgeBaseDocumentValidationError('Campo "data" precisa ser um objeto JSON.');
+
+  const allowedKeys = KNOWLEDGE_BASE_DOCUMENT_DATA_KEYS[documentType];
+  const unknownKeys = Object.keys(value).filter((key) => !allowedKeys.includes(key));
+  if (unknownKeys.length) {
+    throw new KnowledgeBaseDocumentValidationError(`Campo(s) não permitido(s) em ${documentType}: ${unknownKeys.join(', ')}.`);
+  }
+
+  switch (documentType) {
+    case 'business_profile':
+      for (const field of allowedKeys) if (value[field] !== undefined) assertString(value[field], field);
+      break;
+    case 'brand_voice':
+      if (value.toneOfVoice !== undefined) assertString(value.toneOfVoice, 'toneOfVoice');
+      break;
+    case 'service_catalog':
+      if (value.products !== undefined) assertProducts(value.products);
+      break;
+    case 'pricing_policies':
+      if (value.pricingAndPolicies !== undefined) assertString(value.pricingAndPolicies, 'pricingAndPolicies');
+      if (value.businessRules !== undefined) assertStringArray(value.businessRules, 'businessRules');
+      break;
+    case 'faq':
+      if (value.faqs !== undefined) assertFaqs(value.faqs);
+      break;
+    case 'media_assets':
+      if (value.documents !== undefined && !Array.isArray(value.documents)) {
+        throw new KnowledgeBaseDocumentValidationError('Campo "documents" precisa ser uma lista.');
+      }
+      if (value.firstContactBlocks !== undefined && !Array.isArray(value.firstContactBlocks)) {
+        throw new KnowledgeBaseDocumentValidationError('Campo "firstContactBlocks" precisa ser uma lista.');
+      }
+      break;
+    case 'opening_hours':
+    case 'human_handoff_rules':
+      break;
+  }
+
+  return value;
+}
+
+export function parseKnowledgeBaseDocumentType(value: string): KnowledgeBaseDocumentType {
+  if (!(KNOWLEDGE_BASE_DOCUMENT_TYPES as readonly string[]).includes(value)) {
+    throw new KnowledgeBaseDocumentValidationError(`Tipo de documento inválido: ${value}.`);
+  }
+  return value as KnowledgeBaseDocumentType;
+}
 
 function normalizeKnowledgeBaseDocument(row: KnowledgeBaseDocumentRow): KnowledgeBaseDocument {
   return {
@@ -485,6 +597,126 @@ export async function getPublishedKnowledgeBaseDocuments(tenantId: string): Prom
 /** Composição de conveniência usada apenas por testes e futuros endpoints da etapa de publicação. */
 export async function composePublishedKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase> {
   return composeKnowledgeBaseDocuments(await getPublishedKnowledgeBaseDocuments(tenantId));
+}
+
+export interface KnowledgeBaseDocumentState {
+  documentType: KnowledgeBaseDocumentType;
+  published: KnowledgeBaseDocument | null;
+  draft: KnowledgeBaseDocument | null;
+}
+
+export interface KnowledgeBaseDocumentEvent {
+  id: string;
+  tenantId: string;
+  documentId: string;
+  documentType: KnowledgeBaseDocumentType;
+  version: number;
+  eventType: 'draft_created' | 'draft_updated' | 'published';
+  actorId: string | null;
+  createdAt: string;
+}
+
+type KnowledgeBaseDocumentEventRow = {
+  id: string;
+  tenant_id: string;
+  document_id: string;
+  document_type: KnowledgeBaseDocumentType;
+  version: number;
+  event_type: KnowledgeBaseDocumentEvent['eventType'];
+  actor_id: string | null;
+  created_at: string;
+};
+
+function normalizeKnowledgeBaseDocumentEvent(row: KnowledgeBaseDocumentEventRow): KnowledgeBaseDocumentEvent {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    documentId: row.document_id,
+    documentType: row.document_type,
+    version: row.version,
+    eventType: row.event_type,
+    actorId: row.actor_id,
+    createdAt: row.created_at,
+  };
+}
+
+const DOCUMENT_SELECT_COLUMNS = 'id, tenant_id, document_type, version, status, data, created_at, updated_at, published_at';
+
+/** Visão de edição: somente a publicação vigente e o rascunho do tenant. */
+export async function listKnowledgeBaseDocumentStates(tenantId: string): Promise<KnowledgeBaseDocumentState[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('knowledge_base_documents')
+    .select(DOCUMENT_SELECT_COLUMNS)
+    .eq('tenant_id', tenantId)
+    .in('status', ['published', 'draft'])
+    .order('document_type', { ascending: true });
+  if (error) throw error;
+
+  const liveDocuments = ((data || []) as KnowledgeBaseDocumentRow[]).map(normalizeKnowledgeBaseDocument);
+  return KNOWLEDGE_BASE_DOCUMENT_TYPES.map((documentType) => ({
+    documentType,
+    published: liveDocuments.find((document) => document.documentType === documentType && document.status === 'published') || null,
+    draft: liveDocuments.find((document) => document.documentType === documentType && document.status === 'draft') || null,
+  }));
+}
+
+export async function getKnowledgeBaseDocumentState(tenantId: string, documentType: KnowledgeBaseDocumentType): Promise<KnowledgeBaseDocumentState> {
+  const states = await listKnowledgeBaseDocumentStates(tenantId);
+  return states.find((state) => state.documentType === documentType)!;
+}
+
+/** Cria ou atualiza exclusivamente o rascunho, sem tocar em publicação. */
+export async function saveKnowledgeBaseDocumentDraft(
+  tenantId: string,
+  documentType: KnowledgeBaseDocumentType,
+  data: Record<string, unknown>,
+  actorId: string,
+): Promise<KnowledgeBaseDocument> {
+  const validatedData = validateKnowledgeBaseDocumentData(documentType, data);
+  const db = getDb();
+  const { data: saved, error } = await db
+    .rpc('save_knowledge_base_document_draft', {
+      p_document_type: documentType,
+      p_data: validatedData,
+      p_actor_id: actorId,
+    })
+    .single();
+  if (error) throw error;
+  const document = normalizeKnowledgeBaseDocument(saved as KnowledgeBaseDocumentRow);
+  // RLS também limita o RPC ao tenant do JWT. Esta defesa local torna uma
+  // configuração incorreta de contexto visível em testes/desenvolvimento.
+  if (document.tenantId !== tenantId) throw new Error('RPC retornou documento de outro tenant — operação recusada.');
+  return document;
+}
+
+/** Publica pelo RPC transacional da migration 0058; o banco também confere RBAC e ator. */
+export async function publishKnowledgeBaseDocument(
+  tenantId: string,
+  documentType: KnowledgeBaseDocumentType,
+  actorId: string,
+): Promise<KnowledgeBaseDocument> {
+  const db = getDb();
+  const { data, error } = await db
+    .rpc('publish_knowledge_base_document', { p_document_type: documentType, p_actor_id: actorId })
+    .single();
+  if (error) throw error;
+  const document = normalizeKnowledgeBaseDocument(data as KnowledgeBaseDocumentRow);
+  if (document.tenantId !== tenantId) throw new Error('RPC retornou documento de outro tenant — operação recusada.');
+  return document;
+}
+
+/** Histórico auditável do tipo, sempre limitado pelo RLS do tenant atual. */
+export async function listKnowledgeBaseDocumentEvents(tenantId: string, documentType: KnowledgeBaseDocumentType): Promise<KnowledgeBaseDocumentEvent[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('knowledge_base_document_events')
+    .select('id, tenant_id, document_id, document_type, version, event_type, actor_id, created_at')
+    .eq('tenant_id', tenantId)
+    .eq('document_type', documentType)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return ((data || []) as KnowledgeBaseDocumentEventRow[]).map(normalizeKnowledgeBaseDocumentEvent);
 }
 
 export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {

@@ -52,7 +52,7 @@ A comparação direta no banco confirmou equivalência campo a campo dos dados d
 | PR | Entrega | Comportamento em produção |
 |---|---|---|
 | PR 1 | Schema, backfill idempotente, tipos, serviço de composição e testes de equivalência | O agente continua lendo o blob legado; nenhum comportamento muda. |
-| PR 2 | Rotas de leitura, edição de rascunho e publicação com RBAC, além de auditoria | Operadores passam a salvar rascunhos tipados; ainda sem troca do runtime. |
+| PR 2 | Rotas de leitura, edição de rascunho e publicação com RBAC, além de auditoria | Administradores passam a salvar rascunhos tipados; ainda sem troca do runtime. |
 | PR 3 | Editor com estado publicado/rascunho e botão de publicação para `admin`/`saas_admin` | A publicação torna a versão visível, sem alterar a conversa em curso. |
 | PR 4 | Corte do runtime para documentos publicados e remoção do adaptador de escrita legado | A cada resposta, o agente recompõe a KB a partir das versões `published` vigentes. |
 
@@ -60,7 +60,11 @@ O adaptador `composePublishedKnowledgeBase(tenantId)` devolve o contrato legado 
 
 ## RBAC, isolamento e qualidade de resposta
 
-Todas as rotas resolvem `tenantId` exclusivamente de `req.user.tenantId`. Operador e manager poderão criar e editar rascunhos do próprio tenant conforme a política atual; somente `admin` e `saas_admin` poderão publicar. A edição nunca atualiza uma versão publicada: ela cria ou atualiza o rascunho seguinte.
+Todas as rotas resolvem `tenantId` exclusivamente de `req.user.tenantId` (com a exceção controlada do header de tenant para `saas_admin`). A API da PR2 é exclusiva de `admin` e `saas_admin`, pois revela rascunhos e ainda não há editor com permissões granulares. A edição nunca atualiza uma versão publicada: ela cria ou atualiza o rascunho seguinte.
+
+Uma publicação não sobrescreve a versão anterior. O RPC transacional arquiva a publicação vigente, promove o único rascunho e registra o evento `published` na mesma transação, sob trava por tenant/tipo e mantendo o índice único parcial como segunda barreira. A criação/edição de rascunho também registra seu evento na mesma transação; não há janela em que documento e auditoria possam divergir.
+
+> **Metadado `lastSaved`:** a auditoria da PR1 confirmou que ele pertence apenas à UI legada e não é consumido pelo agente. A PR2 não o copia para `data`; na PR3, o editor deverá exibir estado derivado de `updated_at` e `published_at`.
 
 O agente chama `composePublishedKnowledgeBase` no início de **cada resposta**. Nenhuma versão é guardada no estado da conversa. Isso garante que uma nova publicação seja usada já no próximo turno, sem fazer o agente responder com conteúdo de rascunho nem ficar preso a preço, catálogo ou regra antiga.
 
