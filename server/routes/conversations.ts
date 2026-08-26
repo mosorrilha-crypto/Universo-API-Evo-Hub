@@ -1310,14 +1310,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/public-catalog-settings', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { data, error } = await getDb()
       .from('tenants')
-      .select('slug, public_catalog_enabled, public_catalog_template, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
+      .select('slug, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
       .eq('id', tenantOf(req))
       .maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     res.json({
       slug: data?.slug || null,
       enabled: data?.public_catalog_enabled === true,
-      template: data?.public_catalog_template || 'default',
       whatsappPhone: data?.public_whatsapp_phone || '',
       instagramUrl: data?.public_instagram_url || '',
       locationMapsUrl: data?.public_location_maps_url || '',
@@ -1336,12 +1335,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   router.put('/api/public-catalog-settings', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { enabled, template = 'default', whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel, whatsappMessageGeneral, whatsappMessageProduct } = req.body || {};
+    const { enabled, whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel, whatsappMessageGeneral, whatsappMessageProduct } = req.body || {};
     if (typeof enabled !== 'boolean') {
       return res.status(400).json({ error: 'Campo "enabled" precisa ser booleano.' });
-    }
-    if (!['default', 'beauty_concierge', 'gold_catalog'].includes(template)) {
-      return res.status(400).json({ error: 'Modelo de catálogo inválido.' });
     }
     const textFields = { whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel, whatsappMessageGeneral, whatsappMessageProduct };
     for (const [field, value] of Object.entries(textFields)) {
@@ -1353,7 +1349,6 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       .from('tenants')
       .update({
         public_catalog_enabled: enabled,
-        public_catalog_template: template,
         public_whatsapp_phone: whatsappPhone?.trim() || null,
         public_instagram_url: instagramUrl?.trim() || null,
         public_location_maps_url: locationMapsUrl?.trim() || null,
