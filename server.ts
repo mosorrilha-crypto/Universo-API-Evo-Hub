@@ -23,6 +23,7 @@ import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
 import { createQualityAuditRouter } from './server/routes/qualityAudit';
 import { createPublicCatalogRouter } from './server/routes/publicCatalog';
+import { createEntitlementsRouter } from './server/routes/entitlements';
 import { startTranscriptionWorker } from './server/services/transcriptionQueue';
 import { initDb } from './server/services/db';
 import { startReminderJob } from './server/services/reminderJob';
@@ -115,6 +116,7 @@ async function startServer() {
   app.use(createPublicCatalogRouter());
 
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
+  app.use(createEntitlementsRouter({ authenticateToken }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken }));
   app.use(createWebhooksRouter({

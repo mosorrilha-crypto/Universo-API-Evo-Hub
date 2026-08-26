@@ -8,6 +8,14 @@ import { setEvolutionWebhook } from '../services/evolutionSend';
 import { getGlobalPromptLayerRow, setGlobalPromptLayer } from '../services/globalPromptStore';
 import { getKnowledgeBase } from '../services/knowledgeBaseStore';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
+import {
+  changeTenantSubscription,
+  createTenantFeatureOverride,
+  ensureTenantCompatibilitySubscription,
+  getTenantEntitlementsForPlatform,
+  listEntitlementCatalog,
+  revokeTenantFeatureOverride,
+} from '../services/featureEntitlementService';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -88,7 +96,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     res.json({ tenants: tenants.map((t: any) => ({ ...t, whatsappConnected: connectedIds.has(t.id) })) });
   }));
 
-  router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+  router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, slug, currency, locale, secondaryCurrency, secondaryLocale, phoneNumberId, accessToken, wabaId, mode, segment } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
 
@@ -111,6 +119,15 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .select('*')
       .single();
     if (tenantError || !tenant) return res.status(500).json({ error: tenantError?.message || 'Falha ao criar tenant.' });
+
+    try {
+      await ensureTenantCompatibilitySubscription(tenant.id, req.user?.id || 'saas_admin:tenant-create');
+    } catch (subscriptionError) {
+      // O tenant foi criado com segurança, mas sem contrato não deve ficar
+      // silenciosamente operável. A resposta deixa o problema explícito para
+      // o saas_admin corrigir antes de ativar o atendimento.
+      return res.status(201).json({ tenant, warning: `Tenant criado, mas falha ao atribuir o plano de compatibilidade: ${subscriptionError instanceof Error ? subscriptionError.message : String(subscriptionError)}` });
+    }
 
     // Credenciais do WhatsApp são opcionais na criação — o admin pode
     // cadastrar o tenant primeiro e voltar depois assim que tiver o
@@ -178,6 +195,64 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
 
     const { error: deleteError } = await db().from('tenants').delete().eq('id', req.params.id);
     if (deleteError) return res.status(500).json({ error: deleteError.message });
+    res.json({ success: true });
+  }));
+
+  // ── Entitlements: catálogo, contrato e exceções por tenant ──────────────
+  // Estes endpoints são deliberadamente exclusivos de saas_admin. A UI de
+  // tenant recebe somente GET /api/me/entitlements, resolvido pelo próprio JWT.
+  router.get('/api/admin/entitlements/catalog', authenticateToken, requireRole('saas_admin'), asyncHandler(async (_req, res) => {
+    res.json(await listEntitlementCatalog());
+  }));
+
+  router.get('/api/admin/tenants/:id/entitlements', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req, res) => {
+    res.json(await getTenantEntitlementsForPlatform(String(req.params.id)));
+  }));
+
+  router.put('/api/admin/tenants/:id/subscription', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { planId, status, reason } = req.body || {};
+    if (!planId || !reason) return res.status(400).json({ error: 'Campos "planId" e "reason" são obrigatórios.' });
+    if (status !== undefined && !['trial', 'active', 'paused', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Status de assinatura inválido.' });
+    const subscription = await changeTenantSubscription({
+      tenantId: req.params.id,
+      planId,
+      status: status || 'active',
+      actorId: req.user?.id || 'saas_admin',
+      reason: String(reason),
+      requestId: req.header('x-request-id') || undefined,
+    });
+    res.json({ subscription });
+  }));
+
+  router.post('/api/admin/tenants/:id/feature-overrides', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { featureId, enabled, limitValue, config, expiresAt, reason } = req.body || {};
+    if (!featureId || !reason) return res.status(400).json({ error: 'Campos "featureId" e "reason" são obrigatórios.' });
+    if (enabled !== undefined && enabled !== null && typeof enabled !== 'boolean') return res.status(400).json({ error: 'Campo "enabled" precisa ser booleano quando informado.' });
+    if (config !== undefined && (!config || typeof config !== 'object' || Array.isArray(config))) return res.status(400).json({ error: 'Campo "config" precisa ser um objeto JSON.' });
+    const override = await createTenantFeatureOverride({
+      tenantId: req.params.id,
+      featureId,
+      enabled,
+      limitValue: limitValue === undefined || limitValue === null ? limitValue : Number(limitValue),
+      config,
+      expiresAt,
+      actorId: req.user?.id || 'saas_admin',
+      reason: String(reason),
+      requestId: req.header('x-request-id') || undefined,
+    });
+    res.status(201).json({ override });
+  }));
+
+  router.delete('/api/admin/tenants/:id/feature-overrides/:overrideId', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { reason } = req.body || {};
+    if (!reason) return res.status(400).json({ error: 'Informe o motivo da revogação.' });
+    await revokeTenantFeatureOverride({
+      tenantId: req.params.id,
+      overrideId: req.params.overrideId,
+      actorId: req.user?.id || 'saas_admin',
+      reason: String(reason),
+      requestId: req.header('x-request-id') || undefined,
+    });
     res.json({ success: true });
   }));
 
