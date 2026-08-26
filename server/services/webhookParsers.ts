@@ -4,6 +4,7 @@
  * formato comum (ParsedIncomingMessage) pra alimentar a fila de transcrição,
  * independente de qual provedor originou o evento.
  */
+import { normalizeConversationPhone } from './phoneNormalization';
 
 export interface ParsedIncomingMessage {
   provider: 'meta' | 'evolution' | 'instagram';
@@ -218,9 +219,10 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   // acontece, o Baileys expõe o telefone real em `key.remoteJidAlt` — usa
   // esse fallback quando presente; sem ele, cai pro valor opaco (mesmo
   // comportamento de antes, sem regressão).
-  const from: string = remoteJid.endsWith('@lid') && data.key.remoteJidAlt
+  const rawFrom: string = remoteJid.endsWith('@lid') && data.key.remoteJidAlt
     ? String(data.key.remoteJidAlt).split('@')[0]
     : remoteJid.split('@')[0];
+  const from = normalizeConversationPhone(rawFrom);
   const contactName: string | undefined = data.pushName;
   const message = data.message || {};
 

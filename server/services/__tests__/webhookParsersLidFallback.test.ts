@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { parseEvolutionWebhookPayload } from '../webhookParsers';
 
 describe('parseEvolutionWebhookPayload — fallback de @lid (key.remoteJidAlt)', () => {
-  it('usa remoteJidAlt (telefone real) quando remoteJid vem como @lid', () => {
+  it('usa remoteJidAlt normalizado quando remoteJid vem como @lid', () => {
     const [msg] = parseEvolutionWebhookPayload({
       event: 'messages.upsert',
       instance: 'cliente-abc',
@@ -23,7 +23,7 @@ describe('parseEvolutionWebhookPayload — fallback de @lid (key.remoteJidAlt)',
         message: { conversation: 'Oii, eu quero comprar uma piscina?' },
       },
     });
-    expect(msg.from).toBe('556798038466');
+    expect(msg.from).toBe('5567998038466');
   });
 
   it('cai pro valor opaco do @lid quando remoteJidAlt não vem no payload (sem regressão)', () => {

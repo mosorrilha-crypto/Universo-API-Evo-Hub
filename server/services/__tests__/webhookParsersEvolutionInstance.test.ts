@@ -42,4 +42,12 @@ describe('parseEvolutionWebhookPayload — instanceName (Epic 4.6)', () => {
     const [msg] = parseEvolutionWebhookPayload(payload);
     expect(msg.instanceName).toBeUndefined();
   });
+
+  it('normaliza o celular brasileiro legado sem nono dígito para a chave canônica da conversa', () => {
+    const [msg] = parseEvolutionWebhookPayload(
+      evolutionPayload({ data: { key: { id: 'wamid-br-legacy', remoteJid: '556798038466@s.whatsapp.net', fromMe: false }, message: { conversation: 'teste entrada' } } })
+    );
+
+    expect(msg.from).toBe('5567998038466');
+  });
 });
