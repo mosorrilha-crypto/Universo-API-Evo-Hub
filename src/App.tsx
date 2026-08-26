@@ -171,7 +171,7 @@ export const App: React.FC = () => {
     if (!currentUser) return;
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
-      (['financial', 'agenda_financeiro'].includes(activeTab) && !canSeeFinancial) ||
+      (['agenda', 'financial'].includes(activeTab) && !canSeeFinancial) ||
       (['attribution', 'knowledge', 'catalog', 'quality'].includes(activeTab) && !canSeeAdminTools);
     if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -932,7 +932,7 @@ export const App: React.FC = () => {
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
     setFinancialPreselectedLead(lead);
-    handleSetActiveTab('agenda_financeiro');
+    handleSetActiveTab('financial');
   };
 
   return (
@@ -1056,14 +1056,15 @@ export const App: React.FC = () => {
           />
           </OperationsModuleFrame>
         )}
-        {activeTab === 'agenda_financeiro' && canSeeFinancial && (
+        {activeTab === 'agenda' && canSeeFinancial && (
           <OperationsModuleFrame
-            title="Agenda & Financeiro"
-            eyebrow="Operação financeira"
-            description="Organize horários, recebimentos e confirmações em uma única visão operacional."
-            accent="blue"
+            title="Agenda"
+            eyebrow="Vendas e atendimento"
+            description="Transforme oportunidades em horários confirmados e acompanhe a próxima ação comercial."
+            accent="green"
           >
           <AgendaFinanceiroCenter
+            scope="agenda"
             transactions={transactions}
             onAddTransaction={handleAddTransaction}
             onUpdateTransactionStatus={handleUpdateTransactionStatus}
@@ -1072,7 +1073,28 @@ export const App: React.FC = () => {
             currentUser={currentUser || GUEST_USER}
             currency={activeTenant.currency}
             locale={activeTenant.locale}
-                        onToast={showToast}
+            onToast={showToast}
+          />
+          </OperationsModuleFrame>
+        )}
+        {activeTab === 'financial' && canSeeFinancial && (
+          <OperationsModuleFrame
+            title="Financeiro"
+            eyebrow="Caixa e recebimentos"
+            description="Acompanhe receitas, despesas e cobranças em aberto em uma área dedicada."
+            accent="blue"
+          >
+          <AgendaFinanceiroCenter
+            scope="financial"
+            transactions={transactions}
+            onAddTransaction={handleAddTransaction}
+            onUpdateTransactionStatus={handleUpdateTransactionStatus}
+            onDeleteTransaction={handleDeleteTransaction}
+            leads={leads}
+            currentUser={currentUser || GUEST_USER}
+            currency={activeTenant.currency}
+            locale={activeTenant.locale}
+            onToast={showToast}
           />
           </OperationsModuleFrame>
         )}

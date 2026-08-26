@@ -117,7 +117,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   const quickActions = [
     { label: t('openConversations'), description: t('openConversationsDetail'), icon: MessageSquare, tab: 'whatsapp' as ActiveTab, visible: true },
     { label: t('viewSalesPipeline'), description: t('opportunitiesInProgress', { count: summary.openLeads.length }), icon: UsersRound, tab: 'crm' as ActiveTab, visible: true },
-    { label: t('organizeSchedule'), description: t('organizeScheduleDetail'), icon: CalendarClock, tab: 'agenda_financeiro' as ActiveTab, visible: canSeeFinancial },
+    { label: t('organizeSchedule'), description: t('organizeScheduleDetail'), icon: CalendarClock, tab: 'agenda' as ActiveTab, visible: canSeeFinancial },
     { label: t('followGrowth'), description: t('followGrowthDetail'), icon: Sparkles, tab: 'attribution' as ActiveTab, visible: canSeeAdminTools },
   ].filter((action) => action.visible);
 
@@ -177,7 +177,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         <MetricCard label={t('humanPending')} value={summary.unresolved.length} detail={t('humanPendingDetail')} icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
         <MetricCard label={t('leadsInProgress')} value={summary.openLeads.length} detail={t('leadsInProgressDetail')} icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
         <MetricCard label={t('nextActions')} value={summary.uncompletedTasks.length} detail={t('nextActionsDetail')} icon={<Clock3 className="h-4 w-4" />} tone="sky" onClick={() => onNavigate('crm')} />
-        <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('agenda_financeiro')} disabled={!canSeeFinancial} />
+        <MetricCard label={t('receivedPeriod')} value={currency(summary.paidRevenue, activeTenant)} detail={t('receivedPeriodDetail')} icon={<CheckCircle2 className="h-4 w-4" />} tone="blue" onClick={() => canSeeFinancial && onNavigate('financial')} disabled={!canSeeFinancial} />
       </div>
 
       <section className="operations-smart-queue rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="smart-queue-heading">
@@ -196,7 +196,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
           </div>
 
           {canSeeFinancial && summary.pendingTransactions.length > 0 && (
-            <button type="button" onClick={() => onNavigate('agenda_financeiro')} className="mt-3 flex w-full items-start gap-2 rounded-xl bg-amber-500/8 p-2.5 text-left transition-colors hover:bg-amber-500/12 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70">
+            <button type="button" onClick={() => onNavigate('financial')} className="mt-3 flex w-full items-start gap-2 rounded-xl bg-amber-500/8 p-2.5 text-left transition-colors hover:bg-amber-500/12 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70">
               <CircleDollarSign className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
               <span><span className="block text-xs font-bold text-amber-100">{summary.pendingTransactions.length} recebimento(s) em aberto</span><span className="mt-0.5 block text-[11px] leading-relaxed text-amber-100/65">Confira a situação financeira antes do fechamento do dia.</span></span>
             </button>

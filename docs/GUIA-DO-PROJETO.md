@@ -84,6 +84,15 @@ body/query — ver `server/services/tenantContext.ts` e `server/middleware/rbac.
 
 ## Mudanças recentes relevantes (não é auditoria completa, só registro)
 
+**26/08/2026 (TASK-0084 — navegação operacional e separação de Agenda/Financeiro):**
+- A barra principal foi reorganizada por intenção de trabalho: **Hoje**, **Conversas**, **Vendas**, **Agenda**, **Financeiro** e, para administradores, **Crescimento**. Agenda fica imediatamente após Vendas para acompanhar o fluxo comercial até o horário confirmado.
+- **Agenda** e **Financeiro** deixaram de ser uma tela combinada. As duas superfícies reaproveitam os mesmos dados e ações já validados, mas cada uma mostra só sua rotina: calendário e próximos atendimentos na Agenda; receitas, despesas e cobranças em aberto no Financeiro.
+- A preferência persistida `agenda_financeiro` é migrada automaticamente para `agenda`, sem levar usuários a uma rota inexistente após atualização.
+- Configurações administrativas foram agrupadas em **Configurar** (Agente & catálogo, Catálogo público e Qualidade do agente); **Plataforma** contém somente Empresas para `saas_admin`. A tela de Pendências continua acessível por atalhos operacionais, sem competir com a navegação principal.
+- Implementação em `Header.tsx`, `AgendaFinanceiroCenter.tsx`, `App.tsx`, `OperationsCenter.tsx` e `activeTab.ts`, com atualização de testes. Validações locais: lint, suíte com 182 arquivos/948 testes e build concluídos sem erro.
+
+
+
 **26/08/2026 (TASK-0081 — ativação guiada do tenant):**
 - A Central **Hoje** passou a exibir uma jornada objetiva de ativação baseada em fontes reais, não em um flag manual: conexão WhatsApp, contexto comercial do agente, agenda/horários e catálogo com preço e duração estruturados.
 - Se alguma configuração crítica for removida, a pendência reaparece automaticamente; nenhum tenant fica marcado como pronto por um estado antigo de interface.
