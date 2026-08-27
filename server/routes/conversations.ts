@@ -45,6 +45,7 @@ import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
 import { listOperationEvents } from '../services/operationEventStore';
+import { archiveSystemIncident, listSystemIncidents, resolveSystemIncident, restoreSystemIncident, reviewSystemIncident } from '../services/systemIncidentStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
@@ -1751,6 +1752,40 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 500)) : 200;
     const events = await listOperationEvents(tenantOf(req), { phone, limit });
     res.json({ events });
+  }));
+
+  // Logs técnicos auditáveis: a página administrativa registra revisão e resolução,
+  // mas não aciona push, WhatsApp nem qualquer ação sobre conversas ou agenda.
+  router.get('/api/system-incidents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const status = ['open', 'reviewed', 'resolved', 'archived'].includes(String(req.query.status)) ? String(req.query.status) as 'open' | 'reviewed' | 'resolved' | 'archived' : undefined;
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 500)) : 200;
+    res.json({ incidents: await listSystemIncidents(tenantOf(req), { status, limit }) });
+  }));
+
+  router.post('/api/system-incidents/:id/review', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const incident = await reviewSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
+  }));
+
+  router.post('/api/system-incidents/:id/resolve', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const resolutionNote = typeof req.body?.resolutionNote === 'string' ? req.body.resolutionNote : undefined;
+    const incident = await resolveSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id }, resolutionNote);
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
+  }));
+
+  router.post('/api/system-incidents/:id/archive', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const incident = await archiveSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
+  }));
+
+  router.post('/api/system-incidents/:id/restore', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const incident = await restoreSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
   }));
 
   router.post('/api/escalations/:id/assign', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {

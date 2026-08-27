@@ -9,7 +9,8 @@ import {
   AgentKnowledgeBase,
   BusinessHours,
   SavedTranscriptItem,
-  EscalationInfo
+  EscalationInfo,
+  SystemIncidentInfo
 } from './types';
 import { Header } from './components/Header';
 import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
@@ -18,6 +19,7 @@ import AtendimentoWorkspaceFrame from './components/AtendimentoWorkspaceFrame';
 import OperationsModuleFrame from './components/OperationsModuleFrame';
 import { CrmWorkspace } from './components/CrmWorkspace';
 import { EscalationsPanel } from './components/EscalationsPanel';
+import { SystemLogsPanel } from './components/SystemLogsPanel';
 import { AgendaWorkspace } from './components/AgendaWorkspace';
 import { FinancialWorkspace } from './components/FinancialWorkspace';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
@@ -214,6 +216,7 @@ export const App: React.FC = () => {
   const canManageAgent = canSeeAdminTools && tenantCapabilities.agent;
   const canSeeCatalog = canSeeAdminTools && tenantCapabilities.catalog;
   const canSeeQuality = canSeeAdminTools && tenantCapabilities.quality;
+  const canSeeSystemLogs = canSeeAdminTools;
   const canSeeSaasMaster = isSaasSessionConfirmed && hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
@@ -232,10 +235,11 @@ export const App: React.FC = () => {
       (activeTab === 'attribution' && !canSeeGrowth) ||
       (activeTab === 'knowledge' && !canManageAgent) ||
       (activeTab === 'catalog' && !canSeeCatalog) ||
-      (activeTab === 'quality' && !canSeeQuality);
+      (activeTab === 'quality' && !canSeeQuality) ||
+      (activeTab === 'system_logs' && !canSeeSystemLogs);
     if (blocked) handleSetActiveTab('home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, currentUser?.role]);
+  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, currentUser?.role]);
 
   // A decisão vem do contrato self-scoped do tenant e falha fechada. O estado
   // carrega o tenant de origem, evitando que uma troca de empresa mostre por
@@ -475,6 +479,8 @@ export const App: React.FC = () => {
   // /api/escalations já existia, sem nenhuma UI (achado real em produção: 17
   // escalonamentos acumulados no tenant real, 0 resolvidos, ninguém via).
   const [escalations, setEscalations] = useState<EscalationInfo[]>([]);
+  const [systemIncidents, setSystemIncidents] = useState<SystemIncidentInfo[]>([]);
+  const [systemLogsLoading, setSystemLogsLoading] = useState(false);
 
   // Inter-tab Selection States
   const [financialPreselectedLead, setFinancialPreselectedLead] = useState<LeadInfo | null>(null);
@@ -486,6 +492,52 @@ export const App: React.FC = () => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3500);
   };
+
+  const refreshSystemIncidents = () => {
+    if (!canSeeSystemLogs) return;
+    const requestedTenantId = activeTenant.id;
+    setSystemLogsLoading(true);
+    apiFetch('/api/system-incidents?limit=200')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (requestedTenantId === activeTenant.id && data?.incidents) setSystemIncidents(data.incidents as SystemIncidentInfo[]);
+      })
+      .catch(() => showToast('Não foi possível carregar os Logs do Sistema.'))
+      .finally(() => setSystemLogsLoading(false));
+  };
+
+  const updateSystemIncident = async (id: string, action: 'review' | 'resolve' | 'archive' | 'restore', resolutionNote?: string) => {
+    try {
+      const response = await apiFetch(`/api/system-incidents/${encodeURIComponent(id)}/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: action === 'resolve' ? JSON.stringify({ resolutionNote }) : undefined,
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.incident) { showToast(data?.error || 'Não foi possível atualizar o incidente.'); return; }
+      setSystemIncidents((previous) => previous.map((incident) => incident.id === id ? data.incident as SystemIncidentInfo : incident));
+      showToast(action === 'review' ? 'Incidente marcado em revisão.' : action === 'resolve' ? 'Incidente resolvido e auditado.' : action === 'archive' ? 'Incidente arquivado.' : 'Incidente restaurado para revisão.');
+    } catch {
+      showToast('Não foi possível atualizar o incidente.');
+    }
+  };
+
+  // A consulta é deliberadamente passiva: apenas abastece a auditoria do admin.
+  // O cancelamento impede que a resposta de um tenant anterior apareça após a troca.
+  useEffect(() => {
+    if (!canSeeSystemLogs || activeTab !== 'system_logs') return;
+    let cancelled = false;
+    const tenantId = activeTenant.id;
+    setSystemLogsLoading(true);
+    apiFetch('/api/system-incidents?limit=200')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled && tenantId === activeTenant.id && data?.incidents) setSystemIncidents(data.incidents as SystemIncidentInfo[]);
+      })
+      .catch(() => {
+        if (!cancelled) showToast('Não foi possível carregar os Logs do Sistema.');
+      })
+      .finally(() => { if (!cancelled) setSystemLogsLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, activeTenant.id, canSeeSystemLogs]);
 
   // Bug real em produção (12/08/2026): o cache local (leads, base de
   // conhecimento, faturas) nunca era limpo no logout — então trocar de conta
@@ -1437,6 +1489,20 @@ export const App: React.FC = () => {
               handleSetActiveTab('whatsapp');
             }}
           />
+        )}
+
+        {activeTab === 'system_logs' && canSeeSystemLogs && (
+          <OperationsModuleFrame title="Logs do Sistema" eyebrow="Auditoria técnica" description="Incidentes técnicos por empresa, com recorrência e sugestões para decisão humana — sem alertas automáticos." accent="blue">
+            <SystemLogsPanel
+              incidents={systemIncidents}
+              isLoading={systemLogsLoading}
+              onRefresh={refreshSystemIncidents}
+              onReview={(id) => void updateSystemIncident(id, 'review')}
+              onResolve={(id, note) => void updateSystemIncident(id, 'resolve', note)}
+              onArchive={(id) => void updateSystemIncident(id, 'archive')}
+              onRestore={(id) => void updateSystemIncident(id, 'restore')}
+            />
+          </OperationsModuleFrame>
         )}
 
         {activeTab === 'escalations' && (

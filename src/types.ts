@@ -1,4 +1,4 @@
-export type ActiveTab = 'home' | 'whatsapp' | 'crm' | 'agenda' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'catalog' | 'escalations' | 'quality';
+export type ActiveTab = 'home' | 'whatsapp' | 'crm' | 'agenda' | 'financial' | 'saas' | 'attribution' | 'knowledge' | 'catalog' | 'escalations' | 'quality' | 'system_logs';
 
 export type UserRole = 'operator' | 'manager' | 'admin' | 'saas_admin';
 
@@ -633,6 +633,28 @@ export interface EscalationInfo {
   suggestedReplyAt?: string;
   suggestedReplyStatus?: 'generated' | 'edited' | 'copied' | 'discarded';
   suggestedReplySource?: 'groq-suggestion' | 'gemini-suggestion';
+}
+
+/** Incidente técnico auditável por tenant. Sugestões são somente orientações para revisão humana. */
+export interface SystemIncidentInfo {
+  id: string;
+  tenantId: string;
+  sourceKey: string;
+  category: 'runtime' | 'knowledge_base' | 'authentication' | 'catalog' | 'media' | 'integration' | 'availability';
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  status: 'open' | 'reviewed' | 'resolved' | 'archived';
+  title: string;
+  detail: string;
+  suggestedAction: string;
+  metadata: Record<string, unknown>;
+  occurrenceCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolutionNote?: string;
 }
 
 export interface Operator {

@@ -104,6 +104,7 @@ describe('grupos de navegação no desktop', () => {
     const menu = screen.getByRole('menu', { name: 'Configurar' });
     expect(within(menu).queryByRole('menuitem', { name: 'Catálogo público' })).toBeNull();
     expect(within(menu).queryByRole('menuitem', { name: 'Qualidade do agente' })).toBeNull();
+    expect(within(menu).getByRole('menuitem', { name: 'Logs do sistema' })).not.toBeNull();
     expect(within(menu).getByRole('menuitem', { name: 'Agente & catálogo' })).not.toBeNull();
   });
 
@@ -119,6 +120,7 @@ describe('grupos de navegação no desktop', () => {
       'Agente & catálogo',
       'Catálogo público',
       'Qualidade do agente',
+      'Logs do sistema',
     ]);
   });
 
