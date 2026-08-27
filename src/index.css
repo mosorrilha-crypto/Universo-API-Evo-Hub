@@ -689,6 +689,37 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }
+  .crm-workspace__internal-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .crm-workspace--internal-today .crm-workspace__metrics,
+  .crm-workspace--internal-today .crm-workspace__filters,
+  .crm-workspace--internal-today .crm-workspace__kanban,
+  .crm-workspace--internal-today .crm-workspace__list,
+  .crm-workspace--internal-today .crm-workspace__activities { display: none; }
+  .crm-workspace--internal-pipeline .crm-workspace__today,
+  .crm-workspace--internal-pipeline .crm-workspace__activities,
+  .crm-workspace--internal-filters .crm-workspace__today,
+  .crm-workspace--internal-filters .crm-workspace__activities,
+  .crm-workspace--internal-activities .crm-workspace__today { display: none; }
+  .crm-workspace--internal-pipeline .crm-workspace__metrics { display: none; }
+  .crm-workspace--internal-filters .crm-workspace__metrics,
+  .crm-workspace--internal-activities .crm-workspace__metrics { display: none; }
+  .crm-workspace--internal-filters .crm-workspace__kanban,
+  .crm-workspace--internal-filters .crm-workspace__list { display: none; }
+  .crm-workspace--internal-activities .crm-workspace__kanban,
+  .crm-workspace--internal-activities .crm-workspace__list { display: none; }
+  .crm-workspace--internal-activities .crm-workspace__filters,
+  .crm-workspace--internal-activities .crm-workspace__metrics,
+  .crm-workspace--internal-activities .crm-workspace__kanban,
+  .crm-workspace--internal-activities .crm-workspace__list { display: none; }
+  .crm-workspace__today article button { white-space: nowrap; }
+  .crm-workspace__internal-nav button { min-height: 2.25rem; }
+  .crm-workspace__hero { box-shadow: none; }
+  .crm-workspace__hero .crm-workspace__actions > button:nth-child(2) { display: none; }
+  .crm-workspace__hero .crm-workspace__actions { gap: .35rem; }
+  .crm-workspace__hero .crm-workspace__actions > button { min-height: 2.2rem; padding: .45rem .7rem; }
+  .crm-workspace__metrics > div { padding: .65rem .75rem; }
+  .crm-workspace__metrics > div .text-lg { font-size: 1rem; }
+  .crm-workspace__filters { padding: .65rem .75rem; box-shadow: none; }
   .crm-workspace__hero { padding: .8rem .9rem; border-radius: 1rem; }
   .crm-workspace__hero p { display: none; }
   .crm-workspace__hero .crm-workspace__actions { gap: .4rem; }
