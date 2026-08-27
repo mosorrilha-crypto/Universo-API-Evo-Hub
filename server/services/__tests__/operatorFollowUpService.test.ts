@@ -109,4 +109,32 @@ describe('sendOperatorGuidedFollowUp — retomada guiada bloqueada pelo revisor'
     expect(updated?.operatorReplyConsumedAt).toBeTruthy();
     expect(updated?.resolved).toBe(true);
   });
+
+  it('quando o Gemini falha/demora ao gerar a retomada, retorna erro tratado em vez de propagar exceção (achado real 27/08/2026, Gemini demorou >20s)', async () => {
+    const seeded = await seedEscalationWithinWindow();
+    const withGuidance = await (await import('../escalationStore')).submitOperatorReply(TENANT_A, seeded.id, 'Podemos abrir uma exceção para esta cliente');
+
+    const conversationStoreMock = await import('../conversationStore');
+    (conversationStoreMock.getConversation as any).mockResolvedValue({
+      messages: [{ sender: 'lead', text: 'Eu só posso depois das 18:00', timestamp: new Date().toISOString() }],
+    });
+
+    const ai = { models: { generateContent: vi.fn().mockRejectedValue(new Error('Gemini demorou mais de 20000ms — abortando.')) } } as any;
+
+    const outcome = await sendOperatorGuidedFollowUp(TENANT_A, withGuidance!, {
+      ai,
+      metaAccessToken: 'token',
+      metaPhoneNumberId: 'phone-id',
+      tenantName: 'Monique',
+    });
+
+    expect(outcome.sent).toBe(false);
+    expect((outcome as { reason: string }).reason).toContain('demorou demais ou falhou');
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(reviewAutoReplyBeforeSend).not.toHaveBeenCalled();
+
+    const updated = await getEscalation(TENANT_A, seeded.id);
+    expect(updated?.resolved).toBe(false);
+    expect(updated?.operatorReplyConsumedAt).toBeFalsy();
+  });
 });
