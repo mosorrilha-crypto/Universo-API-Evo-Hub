@@ -90,6 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeAgentTools = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.agent;
   const canSeeCatalog = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.catalog;
   const canSeeQuality = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.quality;
+  const canSeeSystemLogs = hasRoleAtLeast(currentUser?.role, 'saas_admin') || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.systemLogs);
   const canSeeSaasMaster = canAccessSaasAdmin ?? hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
@@ -110,7 +111,7 @@ export const Header: React.FC<HeaderProps> = ({
     ...(canSeeAgentTools ? [{ id: 'knowledge' as ActiveTab, label: copy.agentCatalog, icon: <Brain className="w-4 h-4" /> }] : []),
     ...(canSeeCatalog ? [{ id: 'catalog' as ActiveTab, label: copy.publicCatalog, icon: <Link2 className="w-4 h-4" /> }] : []),
     ...(canSeeQuality ? [{ id: 'quality' as ActiveTab, label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' as const }] : []),
-    ...(hasRoleAtLeast(currentUser?.role, 'admin') ? [{ id: 'system_logs' as ActiveTab, label: copy.systemLogs, icon: <ScrollText className="w-4 h-4" />, accent: 'sky' as const }] : []),
+    ...(canSeeSystemLogs ? [{ id: 'system_logs' as ActiveTab, label: copy.systemLogs, icon: <ScrollText className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
   const saasNavigation: NavigationItem[] = canSeeSaasMaster ? [
     { id: 'saas', label: copy.companies, icon: <Layers className="w-4 h-4" /> },

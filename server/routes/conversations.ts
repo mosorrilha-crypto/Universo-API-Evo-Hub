@@ -38,6 +38,7 @@ import {
 } from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, updateFinancialTransactionBySourceRef, isDuplicateSourceRefError } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
+import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -87,6 +88,8 @@ interface ConversationsRouterDeps {
   googleClientId?: string;
   /** Injeção de teste; produção resolve o entitlement no contexto RLS do tenant. */
   isFinancialModuleEnabled?: () => Promise<boolean>;
+  /** Injeção de teste; produção consulta a liberação do recurso para o tenant. */
+  isSystemLogsModuleEnabled?: () => Promise<boolean>;
   googleClientSecret?: string;
   googleRedirectUri?: string;
 }
@@ -125,10 +128,22 @@ function sendKnowledgeBaseDocumentError(res: Response, error: unknown): Response
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri, isFinancialModuleEnabled }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri, isFinancialModuleEnabled, isSystemLogsModuleEnabled }: ConversationsRouterDeps): Router {
   const router = Router();
   const financialModuleEnabled = isFinancialModuleEnabled || isFinancialModuleEnabledForCurrentTenant;
+  const systemLogsModuleEnabled = isSystemLogsModuleEnabled || isSystemLogsModuleEnabledForCurrentTenant;
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
+
+  function requireSystemLogsModule() {
+    return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
+      tenantOf(req);
+      if (req.user?.role === 'saas_admin') return next();
+      if (!(await systemLogsModuleEnabled())) {
+        return res.status(403).json({ error: 'Logs do Sistema ainda não estão habilitados para esta empresa. Solicite a liberação ao administrador da plataforma.', code: 'system_logs_module_disabled' });
+      }
+      next();
+    });
+  }
 
   /**
    * Comprovante rejeitado (achado numa auditoria, 16/08/2026): setPaymentVerification
@@ -1756,33 +1771,33 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
   // Logs técnicos auditáveis: a página administrativa registra revisão e resolução,
   // mas não aciona push, WhatsApp nem qualquer ação sobre conversas ou agenda.
-  router.get('/api/system-incidents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/system-incidents', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const status = ['open', 'reviewed', 'resolved', 'archived'].includes(String(req.query.status)) ? String(req.query.status) as 'open' | 'reviewed' | 'resolved' | 'archived' : undefined;
     const requestedLimit = Number(req.query.limit);
     const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 500)) : 200;
     res.json({ incidents: await listSystemIncidents(tenantOf(req), { status, limit }) });
   }));
 
-  router.post('/api/system-incidents/:id/review', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/system-incidents/:id/review', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const incident = await reviewSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
     if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
     res.json({ incident });
   }));
 
-  router.post('/api/system-incidents/:id/resolve', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/system-incidents/:id/resolve', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const resolutionNote = typeof req.body?.resolutionNote === 'string' ? req.body.resolutionNote : undefined;
     const incident = await resolveSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id }, resolutionNote);
     if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
     res.json({ incident });
   }));
 
-  router.post('/api/system-incidents/:id/archive', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/system-incidents/:id/archive', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const incident = await archiveSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
     if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
     res.json({ incident });
   }));
 
-  router.post('/api/system-incidents/:id/restore', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/system-incidents/:id/restore', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const incident = await restoreSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
     if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
     res.json({ incident });

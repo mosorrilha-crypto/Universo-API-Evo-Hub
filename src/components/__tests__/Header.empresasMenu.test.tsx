@@ -47,6 +47,7 @@ const fullyEnabledCapabilities: TenantNavigationCapabilities = {
   agent: true,
   catalog: true,
   quality: true,
+  systemLogs: true,
 };
 
 function renderHeader(
@@ -94,7 +95,8 @@ describe('grupos de navegação no desktop', () => {
       growth: false,
       catalog: false,
       quality: false,
-    });
+      systemLogs: false,
+    }, { ...saasAdmin, role: 'admin' });
 
     expect(screen.queryByRole('button', { name: 'Agenda' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Financeiro' })).toBeNull();
@@ -104,7 +106,7 @@ describe('grupos de navegação no desktop', () => {
     const menu = screen.getByRole('menu', { name: 'Configurar' });
     expect(within(menu).queryByRole('menuitem', { name: 'Catálogo público' })).toBeNull();
     expect(within(menu).queryByRole('menuitem', { name: 'Qualidade do agente' })).toBeNull();
-    expect(within(menu).getByRole('menuitem', { name: 'Logs do sistema' })).not.toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Logs do sistema' })).toBeNull();
     expect(within(menu).getByRole('menuitem', { name: 'Agente & catálogo' })).not.toBeNull();
   });
 
@@ -129,6 +131,13 @@ describe('grupos de navegação no desktop', () => {
 
     expect(screen.getByRole('button', { name: 'Empresas' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Plataforma' })).toBeNull();
+  });
+
+  it('mantém Logs do Sistema disponível ao SaaS Admin antes da liberação para a empresa', async () => {
+    const user = userEvent.setup();
+    renderHeader({ ...fullyEnabledCapabilities, systemLogs: false });
+    await user.click(screen.getByRole('button', { name: 'Configurar' }));
+    expect(within(screen.getByRole('menu', { name: 'Configurar' })).getByRole('menuitem', { name: 'Logs do sistema' })).not.toBeNull();
   });
 
   it('não mostra Empresas para o administrador interno de um tenant', () => {

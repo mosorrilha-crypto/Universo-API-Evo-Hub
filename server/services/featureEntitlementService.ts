@@ -10,6 +10,8 @@ export interface FeatureDefinition {
   domain: string;
   kind: 'boolean' | 'quota' | 'configurable';
   status: 'active' | 'retired';
+  /** Recursos novos iniciam fechados; ausência preserva fixtures legadas. */
+  default_enabled?: boolean;
 }
 
 export interface PlanFeatureRule {
@@ -107,7 +109,7 @@ export function resolveEffectiveEntitlements({
       const rule = rulesByFeature.get(feature.id);
       const override = overridesByFeature.get(feature.id);
       const hasOverride = Boolean(override && (override.enabled !== null || override.limit_value !== null || Object.keys(objectOrEmpty(override.config)).length));
-      const enabled = override?.enabled ?? rule?.enabled ?? true;
+      const enabled = override?.enabled ?? rule?.enabled ?? feature.default_enabled ?? true;
       const limitValue = override?.limit_value ?? rule?.limit_value ?? null;
       const used = usageByFeature.get(feature.id) || 0;
       return {
@@ -190,7 +192,7 @@ async function disableFinancialModuleByDefault(tenantId: string, actorId: string
 export async function listEntitlementCatalog() {
   const db = getPlatformDb();
   const [{ data: features, error: featuresError }, { data: plans, error: plansError }] = await Promise.all([
-    db.from('features').select('id, key, name, domain, kind, status').order('domain').order('key'),
+    db.from('features').select('id, key, name, domain, kind, status, default_enabled').order('domain').order('key'),
     db.from('plans').select('id, key, name, version, status, description').order('key').order('version', { ascending: false }),
   ]);
   if (featuresError) throw new Error(featuresError.message);
@@ -200,7 +202,7 @@ export async function listEntitlementCatalog() {
 
 async function resolveTenantEntitlements(db: ReturnType<typeof getDb>, tenantId: string): Promise<TenantEntitlements> {
   const [{ data: features, error: featuresError }, { data: subscriptions, error: subscriptionsError }, { data: overrides, error: overridesError }, { data: usage, error: usageError }] = await Promise.all([
-    db.from('features').select('id, key, name, domain, kind, status').order('domain').order('key'),
+    db.from('features').select('id, key, name, domain, kind, status, default_enabled').order('domain').order('key'),
     db.from('tenant_subscriptions').select('id, plan_id, status, started_at, ended_at').eq('tenant_id', tenantId).in('status', ['trial', 'active']).is('ended_at', null).order('started_at', { ascending: false }).limit(1),
     db.from('tenant_feature_overrides').select('id, feature_id, enabled, limit_value, config, expires_at, revoked_at, reason, created_at').eq('tenant_id', tenantId).is('revoked_at', null).order('created_at', { ascending: false }),
     db.from('tenant_feature_usage').select('feature_id, metric, period_start, value').eq('tenant_id', tenantId),
