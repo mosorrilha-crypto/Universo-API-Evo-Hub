@@ -13,7 +13,7 @@ import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaS
 import { showEvolutionTyping } from '../services/evolutionSend';
 import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
-import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
@@ -29,6 +29,7 @@ import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
 import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { runWithTenantDbContext } from '../services/tenantDbContext';
+import { logStructured } from '../services/structuredLog';
 import type { GoogleGenAI } from '@google/genai';
 import type { CalendarConfig } from '../services/googleCalendar';
 
@@ -136,7 +137,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // gate de ads_only abaixo (ver comentário na própria função).
       await attachCatalogClickIfMatched(tenantId, phone, text);
       if (await shouldBlockForAdsOnlyMode(tenantId, phone, text)) return;
-      const kb = await getKnowledgeBase(tenantId);
+      const runtimeKnowledgeBase = await getRuntimeKnowledgeBase(tenantId);
+      const kb = runtimeKnowledgeBase.knowledgeBase;
+      logStructured({
+        tenantId,
+        area: 'knowledgeBase',
+        op: 'loadWebhookRuntimeSource',
+        outcome: runtimeKnowledgeBase.source === 'unavailable' ? 'error' : 'success',
+        detail: runtimeKnowledgeBase.fallbackReason
+          ? `source=${runtimeKnowledgeBase.source};reason=${runtimeKnowledgeBase.fallbackReason}`
+          : `source=${runtimeKnowledgeBase.source}`,
+      });
       const kbContext = formatKnowledgeBaseForPrompt(kb);
       const segment = await getTenantSegment(tenantId);
       const history = conversation?.messages.slice(0, -historyExclude);

@@ -72,6 +72,16 @@ O painel visual de documentos tipados foi implementado sem substituir o formulá
 
 Os aperfeiçoamentos não bloqueantes apontados na revisão da PR2 foram incorporados nesta etapa: uma única fonte define campos aceitos e compostos; o fake dos RPCs exige tenant de contexto em testes; e a rota de leitura de um tipo usa filtro direto de `document_type`.
 
+### Implementação da PR4 (27/08/2026)
+
+O runtime passou a obter a Base de Conhecimento por `getRuntimeKnowledgeBase(tenantId)`. A composição aceita exclusivamente os oito documentos no estado `published`; rascunhos e versões `archived` não entram no prompt, catálogo, preço, duração, agendabilidade, mídia ou primeira mensagem. A consulta ocorre novamente a cada carregamento de turno, logo uma nova publicação passa a valer na mensagem seguinte sem aguardar o fim da conversa.
+
+Como proteção de disponibilidade, publicação incompleta ou falha de leitura não derruba atendimento: o adaptador retorna o blob legado preservado e emite log estruturado com a fonte e o motivo, sem registrar conteúdo de negócio. O formulário legado fica visível para auditoria/rollback, mas seu salvamento é bloqueado no painel para não criar divergência. Este corte está sujeito à revisão humana conjunta antes de merge.
+
+#### Ajuste da revisão: catálogo público e cópia administrativa
+
+A revisão da PR4 identificou que `getPublicCatalogBySlug` e a cópia de Base de Conhecimento por `saas_admin` ainda liam o blob diretamente. Isso produziria divergência quando uma publicação tipada atualizasse produto ou preço. Ambos agora usam `getRuntimeKnowledgeBaseForPlatform`, variante restrita aos fluxos cross-tenant deliberados: ela mantém a mesma composição de oito publicações, exclusão de rascunhos/histórico e fallback controlado do agente. Testes com blob propositalmente defasado comprovam que a página pública e a cópia retornam a versão publicada.
+
 O agente chama `composePublishedKnowledgeBase` no início de **cada resposta**. Nenhuma versão é guardada no estado da conversa. Isso garante que uma nova publicação seja usada já no próximo turno, sem fazer o agente responder com conteúdo de rascunho nem ficar preso a preço, catálogo ou regra antiga.
 
 O ganho de qualidade será mensurável por testes de contrato: respostas devem conter apenas dados publicados, preferir preço/duração estruturados, respeitar produto pausado/não agendável e preservar idioma e regras comerciais. Não será criada resposta fictícia para campo ainda não migrado.

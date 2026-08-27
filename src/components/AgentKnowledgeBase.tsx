@@ -64,6 +64,8 @@ interface AgentKnowledgeBaseProps {
   publicCatalogSlug?: string;
   /** Tenant em edição; ativa o painel tipado da PR3 sem interferir no editor legado. */
   activeTenantId?: string;
+  /** PR4: publicação tipada já é a fonte do agente; blob legado fica só como rollback. */
+  usesPublishedKnowledgeBase?: boolean;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -440,6 +442,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   canUseBusinessTemplates = false,
   publicCatalogSlug,
   activeTenantId,
+  usesPublishedKnowledgeBase = false,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -1633,7 +1636,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       </div>
 
-      {activeTenantId && <KnowledgeBaseTypedDocumentsPanel activeTenantId={activeTenantId} />}
+      {activeTenantId && <KnowledgeBaseTypedDocumentsPanel activeTenantId={activeTenantId} isRuntimePublished={usesPublishedKnowledgeBase} />}
 
       <section className="knowledge-workspace__audit rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1819,6 +1822,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <span>Baixar .md (auditoria)</span>
         </button>
       </div>
+
+      {usesPublishedKnowledgeBase && (
+        <div className="rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4">
+          <div className="flex items-start gap-2.5">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+            <div>
+              <p className="text-xs font-bold text-amber-100">Editor legado preservado somente para rollback</p>
+              <p className="mt-1 text-[11px] leading-5 text-slate-400">O agente agora consulta os documentos tipados publicados a cada nova resposta. Use o painel acima para criar rascunhos e publicar alterações. Os campos legados abaixo permanecem visíveis para auditoria, mas seu botão de salvamento está bloqueado para evitar divergência.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area — todas as seções sempre visíveis */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-10">
@@ -3302,9 +3317,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
       <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2">
         {saveError && <div className="max-w-xs rounded-xl border border-rose-500/40 bg-rose-950 px-3 py-2 text-[11px] text-rose-100 shadow-xl">{saveError}</div>}
-        <button type="button" onClick={handleSave} disabled={isSavingKnowledgeBase} className="rounded-2xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white shadow-2xl shadow-emerald-950/80 transition-all hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-80 flex items-center gap-2">
+        <button type="button" onClick={handleSave} disabled={isSavingKnowledgeBase || usesPublishedKnowledgeBase} title={usesPublishedKnowledgeBase ? 'Use os documentos tipados acima para publicar alterações do agente.' : undefined} className="rounded-2xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white shadow-2xl shadow-emerald-950/80 transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 flex items-center gap-2">
           {isSavingKnowledgeBase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          <span>{isSavingKnowledgeBase ? 'Salvando alterações…' : 'Salvar alterações'}</span>
+          <span>{usesPublishedKnowledgeBase ? 'Editor legado (rollback)' : isSavingKnowledgeBase ? 'Salvando alterações…' : 'Salvar alterações'}</span>
         </button>
       </div>
 

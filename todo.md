@@ -64,3 +64,11 @@
 - [x] PR3/#96: permitir edição de rascunho e publicação somente a administradores, com confirmação e histórico auditável.
 - [x] PR3/#96: cobrir UI e cliente com testes, preservando o editor legado e sem alterar o runtime do agente.
 - [x] PR3/#96: validar, documentar e submeter a PR para revisão humana sem auto-merge.
+- [x] PR3/#96: mesclar a PR #457 com autorização explícita e confirmar a integração na main.
+- [x] PR4/#96: revisar contrato de corte, dados publicados e condições de fallback antes de trocar a leitura do agente.
+- [x] PR4/#96: adaptar o runtime para compor somente documentos publicados, com fallback seguro e observabilidade.
+- [x] PR4/#96: testar equivalência, atualização entre respostas, isolamento de tenant e regressão de atendimento.
+- [x] PR4/#96: validar, documentar e abrir a mudança para revisão humana conjunta, sem auto-merge.
+- [x] PR4/#96 revisão: migrar o catálogo público para a fonte publicada e eliminar divergência de preço após publicação.
+- [x] PR4/#96 revisão: migrar a cópia administrativa de Base de Conhecimento para a fonte publicada ou registrar risco explícito.
+- [x] PR4/#96 revisão: testar catálogo/cópia contra publicação, fallback e isolamento; atualizar PR e aguardar nova revisão.

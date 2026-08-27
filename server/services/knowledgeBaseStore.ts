@@ -4,12 +4,12 @@
  * pra resposta automática. Migrado pra tabela Postgres `knowledge_base`
  * (Bloco 2.A), 1 registro (jsonb) por tenant_id.
  *
- * ISSUE-0096 — durante a transição, `getKnowledgeBase` continua lendo o
- * blob legado. As funções de documentos tipados abaixo existem para provar a
- * equivalência antes do corte explícito do runtime; nunca devem ser usadas
- * como fallback silencioso.
+ * ISSUE-0096 — `getKnowledgeBase` mantém o acesso explícito ao blob de
+ * rollback. O runtime do agente usa `getRuntimeKnowledgeBase`, que só aceita
+ * a fonte tipada se os oito documentos publicados estiverem completos; em
+ * qualquer lacuna, volta ao legado de modo rastreável para preservar serviço.
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 
 /** Comparação visual real de um procedimento, mantida inline como as fotos de exemplo da Base de Conhecimento. */
 export interface BeforeAfterPair {
@@ -575,9 +575,11 @@ export function composeKnowledgeBaseDocuments(documents: readonly KnowledgeBaseD
   return composed;
 }
 
-/** Lista somente as versões publicadas do tenant autenticado no banco. */
-export async function getPublishedKnowledgeBaseDocuments(tenantId: string): Promise<KnowledgeBaseDocument[]> {
-  const db = getDb();
+/** Leitura interna que recebe o cliente já escolhido pelo fluxo autorizado. */
+async function getPublishedKnowledgeBaseDocumentsFromDb(
+  tenantId: string,
+  db: ReturnType<typeof getDb>,
+): Promise<KnowledgeBaseDocument[]> {
   const { data, error } = await db
     .from('knowledge_base_documents')
     .select('id, tenant_id, document_type, version, status, data, created_at, updated_at, published_at')
@@ -588,9 +590,74 @@ export async function getPublishedKnowledgeBaseDocuments(tenantId: string): Prom
   return ((data || []) as KnowledgeBaseDocumentRow[]).map(normalizeKnowledgeBaseDocument);
 }
 
+/** Lista somente as versões publicadas do tenant autenticado no banco. */
+export async function getPublishedKnowledgeBaseDocuments(tenantId: string): Promise<KnowledgeBaseDocument[]> {
+  return getPublishedKnowledgeBaseDocumentsFromDb(tenantId, getDb());
+}
+
 /** Composição de conveniência usada apenas por testes e futuros endpoints da etapa de publicação. */
 export async function composePublishedKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase> {
   return composeKnowledgeBaseDocuments(await getPublishedKnowledgeBaseDocuments(tenantId));
+}
+
+export type RuntimeKnowledgeBaseSource = 'published_documents' | 'legacy_blob' | 'unavailable';
+
+export interface RuntimeKnowledgeBaseResult {
+  knowledgeBase: AgentKnowledgeBase | null;
+  source: RuntimeKnowledgeBaseSource;
+  /** Motivo controlado, próprio para log; nunca contém conteúdo comercial ou do cliente. */
+  fallbackReason?: 'published_documents_incomplete' | 'published_documents_unavailable' | 'legacy_blob_unavailable';
+}
+
+/**
+ * Fonte efetiva do agente após a PR4. Não fixa a KB por conversa: cada chamada
+ * consulta novamente as versões publicadas. Rascunhos e históricos arquivados
+ * ficam fora desta função por construção.
+ */
+async function getKnowledgeBaseFromDb(tenantId: string, db: ReturnType<typeof getDb>): Promise<AgentKnowledgeBase | null> {
+  const { data } = await db.from('knowledge_base').select('data').eq('tenant_id', tenantId).maybeSingle();
+  return (data?.data as AgentKnowledgeBase | undefined) || null;
+}
+
+async function getRuntimeKnowledgeBaseFromDb(
+  tenantId: string,
+  db: ReturnType<typeof getDb>,
+): Promise<RuntimeKnowledgeBaseResult> {
+  try {
+    const publishedDocuments = await getPublishedKnowledgeBaseDocumentsFromDb(tenantId, db);
+    const publishedTypes = new Set(publishedDocuments.map((document) => document.documentType));
+    const hasCompletePublication = KNOWLEDGE_BASE_DOCUMENT_TYPES.every((documentType) => publishedTypes.has(documentType));
+    if (hasCompletePublication) {
+      return { knowledgeBase: composeKnowledgeBaseDocuments(publishedDocuments), source: 'published_documents' };
+    }
+
+    const legacyKnowledgeBase = await getKnowledgeBaseFromDb(tenantId, db);
+    return legacyKnowledgeBase
+      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_incomplete' }
+      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+  } catch {
+    // A indisponibilidade de uma leitura nova não pode derrubar atendimento
+    // enquanto a base legada ainda existe. autoReply registra esta fonte em
+    // log estruturado para que a recuperação não fique silenciosa.
+    const legacyKnowledgeBase = await getKnowledgeBaseFromDb(tenantId, db).catch(() => null);
+    return legacyKnowledgeBase
+      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_unavailable' }
+      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+  }
+}
+
+/** Fonte efetiva usada por rotas com contexto RLS do tenant (agente e painel). */
+export async function getRuntimeKnowledgeBase(tenantId: string): Promise<RuntimeKnowledgeBaseResult> {
+  return getRuntimeKnowledgeBaseFromDb(tenantId, getDb());
+}
+
+/**
+ * Fonte efetiva para fluxos deliberadamente cross-tenant: catálogo público por
+ * slug e cópia por saas_admin. Não deve ser chamada de rotas autenticadas de
+ * tenant; nelas use getRuntimeKnowledgeBase para preservar a policy RLS.
+ */
+export async function getRuntimeKnowledgeBaseForPlatform(tenantId: string): Promise<RuntimeKnowledgeBaseResult> {
+  return getRuntimeKnowledgeBaseFromDb(tenantId, getPlatformDb());
 }
 
 export interface KnowledgeBaseDocumentState {
@@ -726,9 +793,7 @@ export async function listKnowledgeBaseDocumentEvents(tenantId: string, document
 }
 
 export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
-  const db = getDb();
-  const { data } = await db.from('knowledge_base').select('data').eq('tenant_id', tenantId).maybeSingle();
-  return (data?.data as AgentKnowledgeBase | undefined) || null;
+  return getKnowledgeBaseFromDb(tenantId, getDb());
 }
 
 export async function setKnowledgeBase(tenantId: string, kb: AgentKnowledgeBase): Promise<void> {

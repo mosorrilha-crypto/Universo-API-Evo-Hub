@@ -10,7 +10,8 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold, type TrackedAppointment } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { getKnowledgeBase, resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import * as knowledgeBaseStore from './knowledgeBaseStore';
 import { createPreReservation, updatePreReservationStatus } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
@@ -23,7 +24,7 @@ import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
 import { callGroqJsonCompletion } from './groqClient';
-import { withStructuredLog } from './structuredLog';
+import { logStructured, withStructuredLog } from './structuredLog';
 import { buildAgentContextPack, deriveContactMemoryPatch, loadAgentContextPack, type AgentContextPack } from './agentContextPack';
 import { upsertContactAgentMemory } from './contactAgentMemoryStore';
 import { recordAgentTurnTrace } from './agentTurnTraceStore';
@@ -32,6 +33,36 @@ import { listRecentApprovedReplyExamples, formatApprovedReplyExamplesForPrompt }
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
+
+/**
+ * PR4/#96: consulta a fonte efetiva em cada ponto de decisão do turno. Não há
+ * cache por conversa: uma publicação entre mensagens vale no próximo uso. O
+ * log informa apenas fonte e motivo de fallback, nunca conteúdo de negócio.
+ */
+async function getRuntimeKnowledgeBaseForReply(tenantId: string): Promise<AgentKnowledgeBase | null> {
+  // Alguns testes unitários antigos simulam somente o carregador legado. A
+  // aplicação real sempre exporta getRuntimeKnowledgeBase; este fallback é
+  // exclusivo para mocks isolados e evita reescrever suítes não relacionadas.
+  let runtimeLoader: typeof knowledgeBaseStore.getRuntimeKnowledgeBase | undefined;
+  try {
+    runtimeLoader = knowledgeBaseStore.getRuntimeKnowledgeBase;
+  } catch {
+    // O proxy de alguns mocks do Vitest lança quando se consulta um export
+    // ausente, em vez de devolver undefined como um namespace ESM comum.
+    runtimeLoader = undefined;
+  }
+  const result = runtimeLoader
+    ? await runtimeLoader(tenantId)
+    : { knowledgeBase: await knowledgeBaseStore.getKnowledgeBase(tenantId), source: 'legacy_blob' as const, fallbackReason: 'published_documents_unavailable' as const };
+  logStructured({
+    tenantId,
+    area: 'knowledgeBase',
+    op: 'loadRuntimeSource',
+    outcome: result.source === 'unavailable' ? 'error' : 'success',
+    detail: result.fallbackReason ? `source=${result.source};reason=${result.fallbackReason}` : `source=${result.source}`,
+  });
+  return result.knowledgeBase;
+}
 
 /**
  * Credenciais Meta pra fazer o agente enviar mídia de verdade (Epic 4.5.2) —
@@ -743,7 +774,7 @@ async function notifyMetaCapiEvent(tenantId: string, phone: string, eventName: s
   const ctwaClid = await getConversationCtwaClid(tenantId, phone);
   if (!ctwaClid) return;
 
-  const kb = await getKnowledgeBase(tenantId);
+  const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
   const value = resolveProductAmountByName(kb, titulo);
 
   await fireMetaCapiEventForTenant(tenantId, {
@@ -1229,7 +1260,7 @@ async function runAgendamentoTools(
   }
 
   const historyText = buildHistoryText(history);
-  const kb = await getKnowledgeBase(tenantId);
+  const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
   // Etapa 2 — achado numa auditoria: antes disso TODO agendamento caía num
   // fallback fixo de "90 minutos" no prompt, mesmo pra serviços de 30min
   // (Diseño con Henna) ou 180min (Combo Triple) — bloqueando a agenda real
@@ -1374,7 +1405,7 @@ export async function executeApprovedCalendarActions(
   }
 
   const action = actions[0];
-  const kb = await getKnowledgeBase(tenantId);
+  const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
   const result = await executeCalendarTool(tenantId, action.name, action.args, phone, cfg, kb, contactName, messageId);
   const hadError = 'erro' in result.response || 'escalonar' in result.response;
   const preReservationId = typeof result.response.pre_reserva_id === 'string'
@@ -1531,7 +1562,7 @@ async function runMidiaTool(
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   groqApiKey?: string
 ): Promise<{ actionsSummary: string[] }> {
-  const kb = await getKnowledgeBase(tenantId);
+  const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
   const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64 || p.variants?.some((variant) => variant.exampleImageBase64));
   const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId || p.variants?.some((variant) => variant.exampleVideoId));
   if (!productsWithPhoto.length && !productsWithVideo.length) return { actionsSummary: [] };
@@ -1899,7 +1930,7 @@ export async function generateAutoReplyForText(
     if (isFirstCampaignContact) {
       const campaignTheme = adHeadline ? ` com o tema "${adHeadline}"` : '';
       const baseAdContext = `Este é o primeiro contato de uma lead que chegou por um anúncio "Clique para WhatsApp"${campaignTheme}. A mensagem inicial pode ter sido pré-preenchida pelo próprio anúncio: trate-a como SINAL DE INTERESSE, nunca como pedido confirmado de agendamento, preço aceito ou escolha definitiva do serviço. Faça uma abertura curta, contextual e sem pressão. A microconversão deste turno é conseguir uma resposta livre da lead sobre o que ela quer ver primeiro (por exemplo: valor, resultado/como funciona ou disponibilidade). NÃO consulte, ofereça nem cite horários agora; NÃO mande preço, duração e catálogo completos de uma vez; NÃO faça a pergunta genérica “qual serviço você busca?” se o tema da campanha já permite uma referência mais útil. Se a lead tiver digitado uma pergunta concreta além do texto padrão, responda essa pergunta antes de convidá-la a escolher o próximo assunto. Nunca repita a menção ao anúncio nos turnos seguintes.`;
-      const kb = await getKnowledgeBase(tenantId);
+      const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
       const matchedService = adHeadline ? findServiceNamedInHeadline(adHeadline, kb?.products) : undefined;
       adContext = matchedService
         ? `${baseAdContext} O tema corresponde ao serviço "${matchedService.name}". Você pode mencioná-lo de forma breve, mas sem pressupor que ela quer fechar: apresente o benefício em uma frase e pergunte o que ela prefere saber primeiro.`

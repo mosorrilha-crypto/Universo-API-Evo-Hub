@@ -48,6 +48,32 @@ function startServer(role: string) {
   });
 }
 
+function completePublishedDocuments(tenantId: string) {
+  const documentTypes = [
+    'business_profile', 'brand_voice', 'service_catalog', 'pricing_policies',
+    'opening_hours', 'faq', 'human_handoff_rules', 'media_assets',
+  ];
+  return documentTypes.map((documentType) => ({
+    id: `${tenantId}-${documentType}`,
+    tenant_id: tenantId,
+    document_type: documentType,
+    version: 2,
+    status: 'published',
+    data: documentType === 'business_profile'
+      ? { companyName: 'Empresa Publicada' }
+      : documentType === 'service_catalog'
+        ? { products: [{ name: 'Serviço Publicado', price: 'Gs 200.000', exampleVideoId: 'video-storage-origem' }] }
+        : documentType === 'pricing_policies'
+          ? { businessRules: ['Regra publicada'] }
+          : documentType === 'media_assets'
+            ? { firstContactBlocks: [{ id: 'texto', type: 'text', text: 'Olá publicado!' }, { id: 'video', type: 'video', videoId: 'video-storage-origem' }] }
+            : {},
+    created_at: '2026-08-27T00:00:00.000Z',
+    updated_at: '2026-08-27T00:00:00.000Z',
+    published_at: '2026-08-27T00:00:00.000Z',
+  }));
+}
+
 beforeEach(() => {
   supabase = createFakeSupabase({
     tenants: [
@@ -98,6 +124,21 @@ describe('GET /api/admin/tenants/:id/knowledge-base', () => {
     ({ server, baseUrl } = await startServer('saas_admin'));
     const res = await fetch(`${baseUrl}/api/admin/tenants/${OTHER_TENANT_ID}/knowledge-base`);
     expect(res.status).toBe(404);
+  });
+
+  it('copia a publicação tipada vigente, não a versão defasada do blob de rollback', async () => {
+    supabase.__tables.knowledge_base_documents = completePublishedDocuments(SOURCE_TENANT_ID);
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${SOURCE_TENANT_ID}/knowledge-base`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.knowledgeBase.companyName).toBe('Empresa Publicada');
+    expect(body.knowledgeBase.businessRules).toEqual(['Regra publicada']);
+    expect(body.knowledgeBase.products).toEqual([expect.objectContaining({ name: 'Serviço Publicado', price: 'Gs 200.000' })]);
+    expect(body.knowledgeBase.products[0].exampleVideoId).toBeUndefined();
+    expect(body.knowledgeBase.firstContactBlocks).toEqual([{ id: 'texto', type: 'text', text: 'Olá publicado!' }]);
   });
 
   it('admin comum (não saas_admin) é rejeitado com 403', async () => {
