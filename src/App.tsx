@@ -1327,7 +1327,7 @@ export const App: React.FC = () => {
               showToast(`Lead ${newLead.name} cadastrado no CRM`);
             }}
             onDeleteLead={handleDeleteLead}
-            escalationsPendingCount={escalations.filter((e) => !e.resolved).length}
+            escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
             onGoToEscalations={() => handleSetActiveTab('escalations')}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
