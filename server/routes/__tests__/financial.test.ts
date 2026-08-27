@@ -316,8 +316,53 @@ describe('DELETE /api/financial/transactions/:id', () => {
   });
 });
 
+describe('Contas a Pagar e Receber', () => {
+  it('cria um recebível, permite baixa parcial e gera realizado apenas no momento da baixa', async () => {
+    const accountRes = await fetch(`${baseUrl}/api/financial/accounts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Banco principal', accountType: 'bank', openingBalance: 0 }),
+    });
+    const { account } = await accountRes.json();
+
+    const titleRes = await fetch(`${baseUrl}/api/financial/titles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction: 'receivable', description: 'Pacote de serviços', counterpartyName: 'Clarice', originalAmount: 150, dueDate: '2026-09-10', paymentMethod: 'PIX' }),
+    });
+    expect(titleRes.status).toBe(201);
+    const { title } = await titleRes.json();
+    expect(title).toMatchObject({ direction: 'receivable', status: 'open', openAmount: 150 });
+
+    const settlementRes = await fetch(`${baseUrl}/api/financial/titles/${title.id}/settlements`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: 50, financialAccountId: account.id, paymentMethod: 'PIX' }),
+    });
+    expect(settlementRes.status).toBe(201);
+    const settled = await settlementRes.json();
+    expect(settled.title).toMatchObject({ status: 'partial', openAmount: 100 });
+
+    const transactionsRes = await fetch(`${baseUrl}/api/financial/transactions`);
+    const transactionsData = await transactionsRes.json();
+    expect(transactionsData.transactions).toEqual(expect.arrayContaining([expect.objectContaining({ entryType: 'income', status: 'pago', amount: 50, accountId: account.id })]));
+  });
+
+  it('recusa baixa acima do valor aberto', async () => {
+    const accountRes = await fetch(`${baseUrl}/api/financial/accounts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Caixa', accountType: 'cash', openingBalance: 0 }),
+    });
+    const { account } = await accountRes.json();
+    const titleRes = await fetch(`${baseUrl}/api/financial/titles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction: 'payable', description: 'Aluguel', counterpartyName: 'Imobiliária', originalAmount: 100, dueDate: '2026-09-05' }),
+    });
+    const { title } = await titleRes.json();
+    const res = await fetch(`${baseUrl}/api/financial/titles/${title.id}/settlements`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: 101, financialAccountId: account.id, paymentMethod: 'PIX' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('estrutura operacional do Financeiro', () => {
-  it('cria categoria, conta, item e recebe uma compra com estoque e despesa rastreáveis', async () => {
+  it('cria categoria, conta, item e recebe uma compra com estoque e título a pagar rastreáveis', async () => {
     const categoryRes = await fetch(`${baseUrl}/api/financial/categories`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Insumos', kind: 'cost' }),
     });
@@ -347,9 +392,9 @@ describe('estrutura operacional do Financeiro', () => {
     const inventoryData = await inventoryRes.json();
     expect(inventoryData.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: item.id, onHandQuantity: 4, averageUnitCost: 12 })]));
 
-    const transactionsRes = await fetch(`${baseUrl}/api/financial/transactions`);
-    const transactionsData = await transactionsRes.json();
-    expect(transactionsData.transactions).toEqual(expect.arrayContaining([expect.objectContaining({ entryType: 'expense', amount: 48, productName: 'Compra de estoque — Fornecedor Beauty' })]));
+    const titlesRes = await fetch(`${baseUrl}/api/financial/titles`);
+    const titlesData = await titlesRes.json();
+    expect(titlesData.titles).toEqual(expect.arrayContaining([expect.objectContaining({ direction: 'payable', originalAmount: 48, openAmount: 48, description: 'Compra de estoque — Fornecedor Beauty' })]));
   });
 });
 

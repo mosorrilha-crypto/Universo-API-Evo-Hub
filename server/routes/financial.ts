@@ -31,6 +31,13 @@ import {
   type InventoryItemType,
   type StockMovementType,
 } from '../services/financialOperationsStore';
+import {
+  createFinancialTitle,
+  listFinancialTitles,
+  listFinancialTitleSettlements,
+  settleFinancialTitle,
+  type FinancialTitleDirection,
+} from '../services/financialTitleStore';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireRole, resolveTenantId } from '../middleware/rbac';
@@ -54,6 +61,7 @@ const CATEGORY_KINDS: FinancialCategoryKind[] = ['income', 'expense', 'cost'];
 const ACCOUNT_TYPES: FinancialAccountType[] = ['cash', 'bank', 'digital_wallet', 'card'];
 const INVENTORY_ITEM_TYPES: InventoryItemType[] = ['product', 'supply'];
 const STOCK_ADJUSTMENT_TYPES: Extract<StockMovementType, 'adjustment_in' | 'adjustment_out' | 'loss'>[] = ['adjustment_in', 'adjustment_out', 'loss'];
+const TITLE_DIRECTIONS: FinancialTitleDirection[] = ['payable', 'receivable'];
 
 function requireFinancialModule(isFinancialModuleEnabled?: FinancialRouterDeps['isFinancialModuleEnabled']) {
   return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
@@ -135,6 +143,58 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
   router.delete('/api/financial/transactions/:id', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteFinancialTransaction(tenantOf(req), req.params.id);
     res.json({ success: true });
+  }));
+
+  // Títulos representam compromissos ou direitos previstos. Dinheiro realizado
+  // só é criado no endpoint de baixa, evitando confundir fluxo projetado com saldo.
+  router.get('/api/financial/titles', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ titles: await listFinancialTitles(tenantOf(req)) });
+  }));
+
+  router.post('/api/financial/titles', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { direction, description, counterpartyName, counterpartyReference, originalAmount, issueDate, dueDate, competenceDate, paymentMethod, categoryId, notes } = req.body || {};
+    if (!TITLE_DIRECTIONS.includes(direction)) return res.status(400).json({ error: `direction inválido — esperado um de: ${TITLE_DIRECTIONS.join(', ')}.` });
+    if (typeof description !== 'string' || description.trim().length < 2 || description.trim().length > 180) return res.status(400).json({ error: 'description precisa ter entre 2 e 180 caracteres.' });
+    if (typeof counterpartyName !== 'string' || counterpartyName.trim().length < 2 || counterpartyName.trim().length > 120) return res.status(400).json({ error: 'counterpartyName precisa ter entre 2 e 120 caracteres.' });
+    if (counterpartyReference !== undefined && (typeof counterpartyReference !== 'string' || counterpartyReference.length > 120)) return res.status(400).json({ error: 'counterpartyReference, quando informado, precisa ter até 120 caracteres.' });
+    if (typeof originalAmount !== 'number' || !Number.isFinite(originalAmount) || originalAmount <= 0) return res.status(400).json({ error: 'originalAmount precisa ser um número maior que zero.' });
+    if (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(dueDate)) return res.status(400).json({ error: 'dueDate precisa estar no formato ISO de data.' });
+    if (issueDate !== undefined && (typeof issueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(issueDate))) return res.status(400).json({ error: 'issueDate, quando informado, precisa estar no formato ISO de data.' });
+    if (competenceDate !== undefined && (typeof competenceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(competenceDate))) return res.status(400).json({ error: 'competenceDate, quando informado, precisa estar no formato ISO de data.' });
+    if (paymentMethod !== undefined && !PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
+    if (categoryId !== undefined && (typeof categoryId !== 'string' || !categoryId)) return res.status(400).json({ error: 'categoryId, quando informado, precisa ser texto não vazio.' });
+    if (notes !== undefined && (typeof notes !== 'string' || notes.length > 1000)) return res.status(400).json({ error: 'notes, quando informado, precisa ter até 1000 caracteres.' });
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      res.status(201).json({ title: await createFinancialTitle(tenantOf(req), {
+        direction, description: description.trim(), counterpartyName: counterpartyName.trim(),
+        counterpartyReference: typeof counterpartyReference === 'string' && counterpartyReference.trim() ? counterpartyReference.trim() : undefined,
+        originalAmount, issueDate: typeof issueDate === 'string' ? issueDate : today, dueDate,
+        competenceDate: typeof competenceDate === 'string' ? competenceDate : undefined,
+        paymentMethod, categoryId: typeof categoryId === 'string' ? categoryId : undefined,
+        notes: typeof notes === 'string' && notes.trim() ? notes.trim() : undefined,
+      }) });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Não foi possível criar o título financeiro.' });
+    }
+  }));
+
+  router.get('/api/financial/titles/:id/settlements', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    res.json({ settlements: await listFinancialTitleSettlements(tenantOf(req), req.params.id) });
+  }));
+
+  router.post('/api/financial/titles/:id/settlements', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { amount, financialAccountId, paymentMethod, settledAt, notes } = req.body || {};
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount precisa ser um número maior que zero.' });
+    if (typeof financialAccountId !== 'string' || !financialAccountId) return res.status(400).json({ error: 'financialAccountId é obrigatório.' });
+    if (!PAYMENT_METHODS.includes(paymentMethod)) return res.status(400).json({ error: `paymentMethod inválido — esperado um de: ${PAYMENT_METHODS.join(', ')}.` });
+    if (settledAt !== undefined && (typeof settledAt !== 'string' || Number.isNaN(Date.parse(settledAt)))) return res.status(400).json({ error: 'settledAt, quando informado, precisa ser uma data ISO válida.' });
+    if (notes !== undefined && (typeof notes !== 'string' || notes.length > 1000)) return res.status(400).json({ error: 'notes, quando informado, precisa ter até 1000 caracteres.' });
+    try {
+      res.status(201).json(await settleFinancialTitle(tenantOf(req), req.params.id, { amount, financialAccountId, paymentMethod, settledAt, notes: typeof notes === 'string' && notes.trim() ? notes.trim() : undefined, operatorName: req.user?.name || 'Painel Financeiro' }));
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || 'Não foi possível baixar o título.' });
+    }
   }));
 
   router.get('/api/financial/categories', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
