@@ -9,7 +9,7 @@
  * buraco assim que os dados entram no editor.
  */
 import { describe, expect, it } from 'vitest';
-import { ensureUniqueIds, emptyKnowledgeBase, moniqueStudioKnowledgeBase } from '../AgentKnowledgeBase';
+import { ensureUniqueIds, emptyKnowledgeBase, moniqueStudioKnowledgeBase, TYPED_DOCUMENT_NAVIGATION } from '../AgentKnowledgeBase';
 
 interface TestProduct {
   id?: string;
@@ -91,5 +91,16 @@ describe('emptyKnowledgeBase (fallback correto pra tenant sem dado real)', () =>
 
   it('moniqueStudioKnowledgeBase continua existindo (usado só como preset explícito, nunca mais como fallback silencioso)', () => {
     expect(moniqueStudioKnowledgeBase.products.length).toBeGreaterThan(0);
+  });
+});
+
+describe('navegação visível dos documentos tipados', () => {
+  it('expõe os oito tipos na interface administrativa, incluindo o atalho próprio de horários', () => {
+    expect(TYPED_DOCUMENT_NAVIGATION).toHaveLength(8);
+    expect(TYPED_DOCUMENT_NAVIGATION.map((item) => item.documentType)).toEqual([
+      'business_profile', 'brand_voice', 'service_catalog', 'pricing_policies',
+      'opening_hours', 'faq', 'human_handoff_rules', 'media_assets',
+    ]);
+    expect(TYPED_DOCUMENT_NAVIGATION.find((item) => item.documentType === 'opening_hours')?.sections).toEqual([]);
   });
 });
