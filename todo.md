@@ -83,4 +83,4 @@
 - [x] Adicionar busca/filtros/paginação na listagem de anúncios do dashboard
 - [x] Atualizar testes de rota e serviço para criação de conjuntos e anúncios
 - [x] Validar experiência desktop/mobile, build e testes automatizados
-- [ ] Atualizar PR #468 com a implementação concluída
+- [x] Atualizar PR #468 com a implementação concluída
