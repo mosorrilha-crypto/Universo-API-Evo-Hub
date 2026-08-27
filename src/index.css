@@ -668,9 +668,14 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero p { display: none; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions button { width: 100%; min-height: 2.45rem; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article { padding: .65rem; }
-  .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child,
+  .agenda-financeiro-workspace--agenda-mobile-today .agenda-financeiro-workspace__pending { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2),
+  .agenda-financeiro-workspace--agenda-mobile-calendar .agenda-financeiro-workspace__pending { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
+  .agenda-financeiro-workspace--agenda-mobile-pending .agenda-financeiro-workspace__metrics,
+  .agenda-financeiro-workspace--agenda-mobile-pending .agenda-financeiro-workspace__empty,
+  .agenda-financeiro-workspace--agenda-mobile-pending .agenda-financeiro-workspace__calendar { display: none; }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }

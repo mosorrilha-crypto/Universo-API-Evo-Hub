@@ -81,3 +81,12 @@
 - [ ] Cobrir por teste a normalização segura de métricas opcionais de landing page
 - [ ] Validar a Central de Tráfego no mobile, build e checks da correção
 - [ ] Publicar a correção do erro #100 na branch principal
+
+- [x] Abrir a PR única do CRM Hoje e confirmar checks verdes
+- [x] Mesclar a PR única do CRM Hoje na branch principal
+
+- [x] Auditar a interface da Agenda e suas integrações reais
+- [x] Mapear o processo de agendamento, confirmação, atendimento, cobrança e pós-atendimento
+- [x] Identificar automações, gatilhos, responsáveis, estados e lacunas da Agenda
+- [x] Refinar a navegação e compactação sem duplicar o que já foi entregue
+- [x] Validar e documentar o fluxo completo da Agenda
