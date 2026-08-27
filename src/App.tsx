@@ -1256,6 +1256,7 @@ export const App: React.FC = () => {
             eyebrow="Caixa e recebimentos"
             description="Acompanhe receitas, despesas e cobranças em aberto em uma área dedicada."
             accent="blue"
+            compact
           >
           <FinancialWorkspace
             transactions={transactions}

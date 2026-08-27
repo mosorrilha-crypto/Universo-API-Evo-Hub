@@ -37,6 +37,10 @@ afterEach(() => {
   cleanup();
 });
 
+function mobileNavigation(name: RegExp) {
+  return screen.getAllByRole('button', { name }).find((button) => button.className.includes('text-center'));
+}
+
 describe('FinancialWorkspace — navegação por contexto', () => {
   it('abre no resumo e troca para títulos sem empilhar os dois painéis', () => {
     render(<FinancialWorkspace {...props} />);
@@ -44,21 +48,33 @@ describe('FinancialWorkspace — navegação por contexto', () => {
     expect(screen.getByText('Resumo financeiro visível')).not.toBeNull();
     expect(screen.getByText('Área operacional: titles').closest('[hidden]')).not.toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /títulos/i }));
+    fireEvent.click(mobileNavigation(/títulos/i)!);
 
     expect(screen.getByText('Resumo financeiro visível').closest('[hidden]')).not.toBeNull();
     expect(screen.getByText('Área operacional: titles')).not.toBeNull();
-    expect(screen.getByRole('button', { name: /títulos/i }).getAttribute('aria-pressed')).toBe('true');
+    expect(mobileNavigation(/títulos/i)?.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('permite que um atalho contextual leve diretamente para compras', () => {
     render(<FinancialWorkspace {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /títulos/i }));
+    fireEvent.click(mobileNavigation(/títulos/i)!);
     fireEvent.click(screen.getByRole('button', { name: 'Ir para compras' }));
 
     expect(screen.getByText('Área operacional: purchases')).not.toBeNull();
-    const purchasesNavigation = screen.getAllByRole('button', { name: /compras/i }).find((button) => button.hasAttribute('aria-pressed'));
+    const purchasesNavigation = mobileNavigation(/compras/i);
     expect(purchasesNavigation?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('mantém estoque e estrutura no menu compacto Mais do celular', () => {
+    render(<FinancialWorkspace {...props} />);
+
+    fireEvent.click(mobileNavigation(/^mais$/i)!);
+
+    expect(screen.getByRole('menu')).not.toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: /estoque/i }));
+
+    expect(screen.getByText('Área operacional: inventory')).not.toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

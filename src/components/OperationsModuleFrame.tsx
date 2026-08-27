@@ -1,3 +1,4 @@
+/** Moldura operacional — variante compacta remove hero redundante no Financeiro móvel. */
 import React from 'react';
 import { CalendarDays, CircleDollarSign, Sparkles } from 'lucide-react';
 
@@ -6,13 +7,14 @@ type OperationsModuleFrameProps = {
   eyebrow: string;
   description: string;
   accent?: 'blue' | 'green';
+  compact?: boolean;
   children: React.ReactNode;
 };
 
-export default function OperationsModuleFrame({ title, eyebrow, description, accent = 'blue', children }: OperationsModuleFrameProps) {
+export default function OperationsModuleFrame({ title, eyebrow, description, accent = 'blue', compact = false, children }: OperationsModuleFrameProps) {
   const Icon = accent === 'green' ? CircleDollarSign : CalendarDays;
   return (
-    <section className={`operations-module-frame operations-module-frame--${accent}`} aria-label={title}>
+    <section className={`operations-module-frame operations-module-frame--${accent}${compact ? ' operations-module-frame--compact' : ''}`} aria-label={title}>
       <header className="operations-module-frame__header">
         <div className="operations-module-frame__identity">
           <div className="operations-module-frame__icon" aria-hidden="true"><Icon size={18} /></div>

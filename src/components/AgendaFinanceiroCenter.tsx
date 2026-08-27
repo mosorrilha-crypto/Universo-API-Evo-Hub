@@ -1,3 +1,4 @@
+/** Financeiro móvel — resumo denso e detalhes extensos exibidos somente quando solicitados. */
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
@@ -60,6 +61,8 @@ interface AgendaFinanceiroCenterProps {
   onAddRecurringExpense?: (input: { description: string; amount: number; paymentMethod: PaymentMethod; dayOfMonth: number }) => Promise<boolean>;
   onToggleRecurringExpense?: (id: string, active: boolean) => void;
   onDeleteRecurringExpense?: (id: string) => void;
+  /** No celular, fluxo e recorrências abrem como detalhe em vez de alongar a página inicial. */
+  mobileDetail?: 'flow' | 'recurring' | null;
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
@@ -98,6 +101,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   onAddRecurringExpense,
   onToggleRecurringExpense,
   onDeleteRecurringExpense,
+  mobileDetail = null,
 }) => {
   const { language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -403,7 +407,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   );
 
   return (
-    <div className="agenda-financeiro-workspace space-y-5 animate-page-enter">
+    <div className={`agenda-financeiro-workspace agenda-financeiro-workspace--${view} agenda-financeiro-workspace--financial-detail-${mobileDetail || 'closed'} space-y-5 animate-page-enter`}>
       <section className="agenda-financeiro-workspace__hero operations-hero overflow-hidden rounded-3xl border p-6 sm:p-8">
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div className="max-w-2xl">
