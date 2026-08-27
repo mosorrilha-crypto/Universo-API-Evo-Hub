@@ -49,14 +49,17 @@ const fullyEnabledCapabilities: TenantNavigationCapabilities = {
   quality: true,
 };
 
-function renderHeader(capabilities: TenantNavigationCapabilities = fullyEnabledCapabilities) {
+function renderHeader(
+  capabilities: TenantNavigationCapabilities = fullyEnabledCapabilities,
+  currentUser: UserProfile = saasAdmin,
+) {
   return render(
     <AppPreferencesProvider>
       <Header
         activeTab="whatsapp"
         setActiveTab={vi.fn()}
         savedCount={0}
-        currentUser={saasAdmin}
+        currentUser={currentUser}
         onOpenLoginModal={vi.fn()}
         onLogout={vi.fn()}
         tenants={[activeTenant]}
@@ -119,14 +122,24 @@ describe('grupos de navegação no desktop', () => {
     ]);
   });
 
-  it('mantém a gestão multi-tenant isolada no menu Plataforma', async () => {
-    const user = userEvent.setup();
+  it('mostra Empresas como item direto e exclusivo do SaaS Admin', () => {
     renderHeader();
 
-    await user.click(screen.getByRole('button', { name: 'Plataforma' }));
+    expect(screen.getByRole('button', { name: 'Empresas' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Plataforma' })).toBeNull();
+  });
 
-    const menu = screen.getByRole('menu', { name: 'Plataforma' });
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Empresas']);
+  it('não mostra Empresas para o administrador interno de um tenant', () => {
+    renderHeader(fullyEnabledCapabilities, {
+      ...saasAdmin,
+      id: 'admin-clic',
+      tenantId: 'tenant-clic',
+      email: 'admin@clic.example',
+      role: 'admin',
+    });
+
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Plataforma' })).toBeNull();
   });
 
   it('fecha Configurar com Escape e devolve o foco ao gatilho', async () => {
