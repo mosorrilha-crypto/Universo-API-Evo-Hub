@@ -63,6 +63,8 @@ interface AgendaFinanceiroCenterProps {
   onDeleteRecurringExpense?: (id: string) => void;
   /** No celular, fluxo e recorrências abrem como detalhe em vez de alongar a página inicial. */
   mobileDetail?: 'flow' | 'recurring' | null;
+  /** A Agenda abre em compromissos de hoje; o calendário mensal entra sob demanda no celular. */
+  mobileAgendaView?: 'today' | 'calendar';
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
@@ -102,6 +104,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   onToggleRecurringExpense,
   onDeleteRecurringExpense,
   mobileDetail = null,
+  mobileAgendaView = 'today',
 }) => {
   const { language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -407,7 +410,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   );
 
   return (
-    <div className={`agenda-financeiro-workspace agenda-financeiro-workspace--${view} agenda-financeiro-workspace--financial-detail-${mobileDetail || 'closed'} space-y-5 animate-page-enter`}>
+    <div className={`agenda-financeiro-workspace agenda-financeiro-workspace--${view} agenda-financeiro-workspace--financial-detail-${mobileDetail || 'closed'} agenda-financeiro-workspace--agenda-mobile-${mobileAgendaView} space-y-5 animate-page-enter`}>
       <section className="agenda-financeiro-workspace__hero operations-hero overflow-hidden rounded-3xl border p-6 sm:p-8">
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div className="max-w-2xl">

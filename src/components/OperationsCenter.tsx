@@ -28,6 +28,8 @@ interface OperationsCenterProps {
   canSeeFinancial: boolean;
   canSeeAdminTools: boolean;
   onNavigate: (tab: ActiveTab) => void;
+  /** A moldura móvel define a prioridade visual sem alterar regras ou dados. */
+  mobileSection?: 'priorities' | 'shortcuts' | 'setup';
 }
 
 const currency = (value: number, tenant: Tenant) => new Intl.NumberFormat(tenant.locale || 'es-PY', {
@@ -56,6 +58,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   canSeeFinancial,
   canSeeAdminTools,
   onNavigate,
+  mobileSection = 'priorities',
 }) => {
   const { language, t } = useAppPreferences();
   const summary = useMemo(() => {
@@ -124,7 +127,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
   ].filter((action) => action.visible);
 
   return (
-    <section className="space-y-4 animate-page-enter">
+    <section className={`operations-center operations-center--mobile-${mobileSection} space-y-4 animate-page-enter`}>
       <div className="operations-hero relative overflow-hidden rounded-2xl border border-white/8 px-4 py-4 sm:px-5 sm:py-5">
         <div className="relative flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
@@ -147,11 +150,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         </div>
       </div>
 
-      <TenantActivationChecklist
-        status={activation}
-        canConfigure={canSeeAdminTools}
-        onNavigate={onNavigate}
-      />
+      <div className="operations-center__activation"><TenantActivationChecklist status={activation} canConfigure={canSeeAdminTools} onNavigate={onNavigate} /></div>
 
       <section className="operations-quick-access rounded-2xl border border-slate-800/55 bg-slate-900/65 p-3.5 shadow-none sm:p-4" aria-labelledby="quick-access-heading">
         <div className="flex items-center justify-between gap-3">
@@ -175,7 +174,7 @@ export const OperationsCenter: React.FC<OperationsCenterProps> = ({
         </div>
       </section>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="operations-center__metrics grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard label={t('humanPending')} value={summary.unresolved.length} detail={t('humanPendingDetail')} icon={<ShieldAlert className="h-4 w-4" />} tone="amber" onClick={() => onNavigate('escalations')} />
         <MetricCard label={t('leadsInProgress')} value={summary.openLeads.length} detail={t('leadsInProgressDetail')} icon={<UsersRound className="h-4 w-4" />} tone="emerald" onClick={() => onNavigate('crm')} />
         <MetricCard label={t('nextActions')} value={summary.uncompletedTasks.length} detail={t('nextActionsDetail')} icon={<Clock3 className="h-4 w-4" />} tone="sky" onClick={() => onNavigate('crm')} />

@@ -632,7 +632,7 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .operations-module-frame--compact { gap: .6rem; }
   .operations-module-frame--compact > .operations-module-frame__header { display: none; }
 
-  .financial-workspace__nav { top: .45rem; border-radius: .95rem; padding: .3rem; }
+  .financial-workspace__nav { position: static; top: auto; border-radius: .95rem; padding: .3rem; }
   .financial-workspace__mobile-detail-close { position: fixed; right: 1rem; bottom: 1rem; z-index: 60; min-height: 2.75rem; border-radius: 999px; padding: 0 .95rem; color: #102018; background: #5ebf92; box-shadow: 0 12px 30px rgba(0, 0, 0, .38); font-size: .72rem; font-weight: 800; }
 
   .agenda-financeiro-workspace--financial { gap: .65rem; }
@@ -658,6 +658,59 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--financial-detail-flow > section:has(> div > div > select) { padding: .95rem; }
   .agenda-financeiro-workspace--financial-detail-recurring > section:has(> div .lucide-repeat) { padding: .95rem; }
   .agenda-financeiro-workspace--financial > section:has(.lucide-circle-dollar-sign) { margin: 0; border-radius: .9rem; padding: .85rem; }
+
+  .agenda-mobile-workspace > nav { position: static; }
+  .agenda-financeiro-workspace--agenda { gap: .65rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero { border-radius: 1rem; padding: .8rem .9rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero > div { gap: .65rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl > div { margin-bottom: .25rem; font-size: .58rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero h1 { font-size: 1.25rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero p { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions button { width: 100%; min-height: 2.45rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article { padding: .65rem; }
+  .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
+
+  .crm-mobile-workspace > nav { position: static; }
+  .crm-workspace { gap: .65rem; }
+  .crm-workspace__hero { padding: .8rem .9rem; border-radius: 1rem; }
+  .crm-workspace__hero p { display: none; }
+  .crm-workspace__hero .crm-workspace__actions { gap: .4rem; }
+  .crm-workspace__hero .crm-workspace__actions > button { min-height: 2.35rem; }
+  .crm-workspace__hero .crm-workspace__actions > div { width: 100%; }
+  .crm-workspace__hero .crm-workspace__actions > div button { flex: 1; justify-content: center; }
+  .crm-workspace--mobile-leads .crm-workspace__metrics,
+  .crm-workspace--mobile-board .crm-workspace__metrics { display: none; }
+  .crm-workspace--mobile-insights .crm-workspace__hero,
+  .crm-workspace--mobile-insights .crm-workspace__filters,
+  .crm-workspace--mobile-insights .crm-workspace__kanban,
+  .crm-workspace--mobile-insights .crm-workspace__list { display: none; }
+  .crm-workspace--mobile-insights .crm-workspace__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
+  .crm-workspace--mobile-insights .crm-workspace__metrics > * { min-height: auto; padding: .65rem; }
+  .crm-workspace--mobile-board .crm-workspace__list { display: none; }
+  .crm-workspace--mobile-board .crm-workspace__kanban { margin-right: -.1rem; padding-right: .1rem; }
+  .crm-workspace--mobile-board .crm-workspace__kanban > * { flex-basis: min(84vw, 19rem); max-height: 62dvh; }
+  .crm-workspace--mobile-leads .crm-workspace__kanban { display: none; }
+  .crm-workspace--mobile-leads .crm-workspace__list { max-height: 62dvh; overflow: auto; }
+
+  .operations-home-mobile-workspace > nav { position: static; }
+  .operations-center { gap: .65rem; }
+  .operations-center .operations-hero { padding: .8rem .9rem; border-radius: 1rem; }
+  .operations-center .operations-hero p { display: none; }
+  .operations-center--mobile-priorities .operations-center__activation,
+  .operations-center--mobile-priorities .operations-quick-access { display: none; }
+  .operations-center--mobile-priorities .operations-center__metrics > :nth-child(n+3) { display: none; }
+  .operations-center--mobile-shortcuts .operations-hero,
+  .operations-center--mobile-shortcuts .operations-center__activation,
+  .operations-center--mobile-shortcuts .operations-center__metrics,
+  .operations-center--mobile-shortcuts .operations-smart-queue { display: none; }
+  .operations-center--mobile-setup .operations-hero,
+  .operations-center--mobile-setup .operations-quick-access,
+  .operations-center--mobile-setup .operations-center__metrics,
+  .operations-center--mobile-setup .operations-smart-queue { display: none; }
+  .operations-center__metrics > * { min-height: 4.7rem; padding: .65rem; }
+  .operations-center__metrics > * > span:last-child { font-size: .85rem; }
 }
 
 /* Modelo estrutural 6a: contexto essencial dentro da conversa, sem terceira coluna permanente */

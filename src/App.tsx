@@ -16,14 +16,14 @@ import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import AtendimentoWorkspaceFrame from './components/AtendimentoWorkspaceFrame';
 import OperationsModuleFrame from './components/OperationsModuleFrame';
-import { OperatorCRM } from './components/OperatorCRM';
+import { CrmWorkspace } from './components/CrmWorkspace';
 import { EscalationsPanel } from './components/EscalationsPanel';
-import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
+import { AgendaWorkspace } from './components/AgendaWorkspace';
 import { FinancialWorkspace } from './components/FinancialWorkspace';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKnowledgeBase';
 import { PublicCatalogSettings } from './components/PublicCatalogSettings';
-import { OperationsCenter } from './components/OperationsCenter';
+import { OperationsHomeWorkspace } from './components/OperationsHomeWorkspace';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
 import { LoginModal } from './components/LoginModal';
@@ -1140,7 +1140,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'home' && (
-          <OperationsCenter
+          <OperationsHomeWorkspace
             activeTenant={activeTenant}
             currentUser={currentUser}
             leads={leads}
@@ -1214,8 +1214,8 @@ export const App: React.FC = () => {
         </div>
 
         {activeTab === 'crm' && (
-          <OperationsModuleFrame title="CRM e Vendas" eyebrow="Relacionamento comercial" description="Acompanhe oportunidades, clientes e próximas ações em uma visão conectada ao atendimento." accent="blue">
-          <OperatorCRM
+          <OperationsModuleFrame title="CRM e Vendas" eyebrow="Relacionamento comercial" description="Acompanhe oportunidades, clientes e próximas ações em uma visão conectada ao atendimento." accent="blue" compact>
+          <CrmWorkspace
             leads={leads}
             onUpdateLead={handleUpdateLead}
             onDeleteLead={handleDeleteLead}
@@ -1224,7 +1224,7 @@ export const App: React.FC = () => {
               showToast('Leads limpos do CRM');
             }}
             currentUser={currentUser || GUEST_USER}
-                        onNavigateToFinancial={handleNavigateToFinancial}
+            onNavigateToFinancial={handleNavigateToFinancial}
           />
           </OperationsModuleFrame>
         )}
@@ -1234,9 +1234,9 @@ export const App: React.FC = () => {
             eyebrow="Vendas e atendimento"
             description="Transforme oportunidades em horários confirmados e acompanhe a próxima ação comercial."
             accent="green"
+            compact
           >
-          <AgendaFinanceiroCenter
-            scope="agenda"
+          <AgendaWorkspace
             transactions={transactions}
             onAddTransaction={handleAddTransaction}
             onUpdateTransactionStatus={handleUpdateTransactionStatus}

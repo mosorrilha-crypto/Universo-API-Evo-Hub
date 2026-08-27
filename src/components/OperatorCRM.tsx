@@ -40,6 +40,8 @@ interface OperatorCRMProps {
   currentOperator?: any;
   tenantId?: string;
   onNavigateToFinancial?: (lead: LeadInfo) => void;
+  /** A moldura móvel escolhe o contexto visível sem alterar os dados do CRM. */
+  mobileSection?: 'leads' | 'insights' | 'board';
 }
 
 const STAGES_BASE: { id: CRMStage; label: string; color: string; badge: string }[] = [
@@ -59,6 +61,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   currentUser: propCurrentUser,
   currentOperator,
   onNavigateToFinancial,
+  mobileSection = 'leads',
 }) => {
   const { language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -75,6 +78,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   const leads = propLeads || [];
   const currentUser = propCurrentUser || currentOperator || { name: 'Operador Admin', id: 'op_1' };
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+  const displayViewMode = mobileSection === 'leads' ? 'list' : mobileSection === 'board' ? 'kanban' : viewMode;
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [selectedLead, setSelectedLead] = useState<LeadInfo | null>(null);
@@ -271,7 +275,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   };
 
   return (
-    <div className="crm-workspace space-y-5 animate-page-enter">
+    <div className={`crm-workspace crm-workspace--mobile-${mobileSection} space-y-5 animate-page-enter`}>
       {/* Header Banner */}
       <div className="crm-workspace__hero bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border border-slate-800 rounded-card p-5 sm:p-6 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
@@ -326,7 +330,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
             <button
               onClick={() => setViewMode('kanban')}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                viewMode === 'kanban'
+                displayViewMode === 'kanban'
                   ? 'bg-emerald-600 text-slate-950 font-bold shadow'
                   : 'text-slate-400 hover:text-white'
               }`}
@@ -337,7 +341,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
             <button
               onClick={() => setViewMode('list')}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                viewMode === 'list'
+                displayViewMode === 'list'
                   ? 'bg-emerald-600 text-slate-950 font-bold shadow'
                   : 'text-slate-400 hover:text-white'
               }`}
@@ -429,7 +433,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       </div>
 
       {/* Main View Area: KANBAN vs LIST */}
-      {viewMode === 'kanban' ? (
+      {displayViewMode === 'kanban' ? (
         <div className="crm-workspace__kanban grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 overflow-x-auto pb-4">
           {STAGES.map((stage) => {
             const columnLeads = filteredLeads.filter((l) => getLeadStage(l) === stage.id);
@@ -551,7 +555,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
         </div>
       ) : (
         /* LIST VIEW */
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+        <div className="crm-workspace__list bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
