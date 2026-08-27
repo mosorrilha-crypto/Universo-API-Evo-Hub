@@ -63,8 +63,8 @@ interface AgendaFinanceiroCenterProps {
   onDeleteRecurringExpense?: (id: string) => void;
   /** No celular, fluxo e recorrências abrem como detalhe em vez de alongar a página inicial. */
   mobileDetail?: 'flow' | 'recurring' | null;
-  /** A Agenda abre em compromissos de hoje; o calendário mensal entra sob demanda no celular. */
-  mobileAgendaView?: 'today' | 'calendar';
+  /** A Agenda abre em compromissos de hoje; calendário e pendências entram sob demanda no celular. */
+  mobileAgendaView?: 'today' | 'calendar' | 'pending';
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
@@ -166,6 +166,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     return eventDate.getFullYear() === today.getFullYear() && eventDate.getMonth() === today.getMonth() && eventDate.getDate() === today.getDate() && !event.completed;
   });
   const nextAppointments = events.filter((event) => new Date(event.startIso).getTime() >= Date.now() && !event.completed).sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso)).slice(0, 5);
+  const pendingAppointments = nextAppointments.filter((event) => event.payment?.status !== 'pago');
   const hasOperationalData = view === 'agenda' ? events.length > 0 : transactions.length > 0;
 
   const changeMonth = (offset: number) => {

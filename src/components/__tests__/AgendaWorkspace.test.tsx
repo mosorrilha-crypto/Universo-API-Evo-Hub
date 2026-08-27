@@ -25,7 +25,7 @@ describe('AgendaWorkspace — navegação móvel', () => {
     render(<AgendaWorkspace {...props} />);
 
     expect(screen.getByText('Visão ativa: today')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Hoje' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Hoje' }).getAttribute('aria-current')).toBe('page');
   });
 
   it('abre o calendário mensal apenas quando o operador solicita', () => {
@@ -34,6 +34,15 @@ describe('AgendaWorkspace — navegação móvel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Calendário' }));
 
     expect(screen.getByText('Visão ativa: calendar')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Calendário' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Calendário' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('abre a fila de pendências sem renderizar uma quarta área no menu', () => {
+    render(<AgendaWorkspace {...props} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pendências' }));
+
+    expect(screen.getByText('Visão ativa: pending')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Pendências' }).getAttribute('aria-current')).toBe('page');
   });
 });
