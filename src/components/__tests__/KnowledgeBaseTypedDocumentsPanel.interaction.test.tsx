@@ -55,6 +55,7 @@ describe('KnowledgeBaseTypedDocumentsPanel — fluxos administrativos', () => {
 
     await screen.findByText('Versão 1');
     const editor = screen.getByLabelText('Conteúdo estruturado do rascunho');
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toContain('Empresa original'));
     fireEvent.change(editor, { target: { value: '{\n  "companyName": "Empresa revisada"\n}' } });
     await user.click(screen.getByRole('button', { name: 'Salvar rascunho' }));
 
