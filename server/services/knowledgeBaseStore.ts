@@ -4,10 +4,10 @@
  * pra resposta automática. Migrado pra tabela Postgres `knowledge_base`
  * (Bloco 2.A), 1 registro (jsonb) por tenant_id.
  *
- * ISSUE-0096 — durante a transição, `getKnowledgeBase` continua lendo o
- * blob legado. As funções de documentos tipados abaixo existem para provar a
- * equivalência antes do corte explícito do runtime; nunca devem ser usadas
- * como fallback silencioso.
+ * ISSUE-0096 — `getKnowledgeBase` mantém o acesso explícito ao blob de
+ * rollback. O runtime do agente usa `getRuntimeKnowledgeBase`, que só aceita
+ * a fonte tipada se os oito documentos publicados estiverem completos; em
+ * qualquer lacuna, volta ao legado de modo rastreável para preservar serviço.
  */
 import { getDb } from './db';
 
@@ -591,6 +591,44 @@ export async function getPublishedKnowledgeBaseDocuments(tenantId: string): Prom
 /** Composição de conveniência usada apenas por testes e futuros endpoints da etapa de publicação. */
 export async function composePublishedKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase> {
   return composeKnowledgeBaseDocuments(await getPublishedKnowledgeBaseDocuments(tenantId));
+}
+
+export type RuntimeKnowledgeBaseSource = 'published_documents' | 'legacy_blob' | 'unavailable';
+
+export interface RuntimeKnowledgeBaseResult {
+  knowledgeBase: AgentKnowledgeBase | null;
+  source: RuntimeKnowledgeBaseSource;
+  /** Motivo controlado, próprio para log; nunca contém conteúdo comercial ou do cliente. */
+  fallbackReason?: 'published_documents_incomplete' | 'published_documents_unavailable' | 'legacy_blob_unavailable';
+}
+
+/**
+ * Fonte efetiva do agente após a PR4. Não fixa a KB por conversa: cada chamada
+ * consulta novamente as versões publicadas. Rascunhos e históricos arquivados
+ * ficam fora desta função por construção.
+ */
+export async function getRuntimeKnowledgeBase(tenantId: string): Promise<RuntimeKnowledgeBaseResult> {
+  try {
+    const publishedDocuments = await getPublishedKnowledgeBaseDocuments(tenantId);
+    const publishedTypes = new Set(publishedDocuments.map((document) => document.documentType));
+    const hasCompletePublication = KNOWLEDGE_BASE_DOCUMENT_TYPES.every((documentType) => publishedTypes.has(documentType));
+    if (hasCompletePublication) {
+      return { knowledgeBase: composeKnowledgeBaseDocuments(publishedDocuments), source: 'published_documents' };
+    }
+
+    const legacyKnowledgeBase = await getKnowledgeBase(tenantId);
+    return legacyKnowledgeBase
+      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_incomplete' }
+      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+  } catch {
+    // A indisponibilidade de uma leitura nova não pode derrubar atendimento
+    // enquanto a base legada ainda existe. autoReply registra esta fonte em
+    // log estruturado para que a recuperação não fique silenciosa.
+    const legacyKnowledgeBase = await getKnowledgeBase(tenantId).catch(() => null);
+    return legacyKnowledgeBase
+      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_unavailable' }
+      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+  }
 }
 
 export interface KnowledgeBaseDocumentState {

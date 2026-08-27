@@ -49,6 +49,7 @@ vi.mock('../knowledgeBaseStore', async () => {
   return {
     ...actual,
     getKnowledgeBase: vi.fn(async () => mockKb),
+    getRuntimeKnowledgeBase: vi.fn(async () => ({ knowledgeBase: mockKb, source: 'published_documents' as const })),
   };
 });
 vi.mock('../preReservationStore', () => ({ createPreReservation, updatePreReservationStatus }));

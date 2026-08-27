@@ -43,6 +43,7 @@ vi.mock('../knowledgeBaseStore', async () => {
   return {
     ...actual, // findProductDurationMinutes/isNonBookableProduct REAIS — é isso que este arquivo testa
     getKnowledgeBase: vi.fn(async () => mockKb),
+    getRuntimeKnowledgeBase: vi.fn(async () => ({ knowledgeBase: mockKb, source: 'published_documents' as const })),
   };
 });
 

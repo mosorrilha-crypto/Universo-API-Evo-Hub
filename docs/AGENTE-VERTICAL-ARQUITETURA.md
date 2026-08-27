@@ -75,12 +75,11 @@ Classificação completa das 30 seções do script definitivo (mensagem do dono 
 
 ## 3. Schema da Base do Tenant — de blob único pra documentos tipados
 
-O runtime atual ainda lê `knowledge_base.data`, um jsonb único (companyName, agentGoal,
-toneOfVoice, businessModel, pricingAndPolicies, products[], businessRules[], faqs[]). Desde
-26/08/2026, a migration `0057_knowledge_base_typed_documents.sql` mantém em paralelo os
-documentos tipados publicados para transição segura; o corte da fonte de leitura ainda não foi
-feito. A forma alvo organiza a base por **tipo de documento**, cada um com seu próprio ciclo de
-vida (versão e status) em vez de tudo editado junto:
+Desde a PR4 (27/08/2026), o runtime do agente lê os documentos `published` de
+`knowledge_base_documents`, compostos para o mesmo contrato de contexto usado pelos prompts e
+ferramentas. A tabela `knowledge_base.data` permanece como rollback e não é removida. A forma
+tipada organiza a base por **tipo de documento**, cada um com seu próprio ciclo de vida (versão
+e status) em vez de tudo editado junto:
 
 | document_type | Conteúdo | Novo em relação a hoje |
 |---|---|---|
@@ -93,18 +92,18 @@ vida (versão e status) em vez de tudo editado junto:
 | `human_handoff_rules` | Gatilhos de encaminhamento (deste tenant, além dos de segmento) | Novo |
 | `media_assets` | As 3 fotos de referência + regra de uso | Já existe parcial (`exampleImageBase64` por produto) |
 
-Cada documento carrega `tenant_id`, `version`, `status` (`draft`/`published`), `updated_at`,
-`updated_by` — resolve o "editar sem risco" (rascunho vs. publicado) e a auditoria que
-faltavam. Nesta primeira etapa, há oito documentos `published` v1 por tenant legado e eventos
-de publicação; rotas de edição/publicação serão introduzidas sem alterar o agente até o corte
-revisado.
+Cada documento carrega `tenant_id`, `version`, `status` (`draft`/`published`/`archived`),
+`updated_at`, `updated_by` — resolve o "editar sem risco" (rascunho vs. publicado) e a auditoria
+que faltavam. O runtime só aceita a composição se os oito tipos estiverem `published`; ignora
+rascunhos e histórico arquivado. Em lacuna ou indisponibilidade, aplica fallback explícito ao
+blob legado e registra a fonte em log estruturado, sem interromper o atendimento.
 
 **Regra de publicação (fechada em 06/08/2026):** só `admin` ou `saas_admin` publica
 (`draft` → `published`) — role já existe no RBAC (Bloco 2.D), não é conceito novo. O agente
-sempre lê a versão `published` mais recente **no início de cada resposta**, nunca fixa a
-versão pro resto de uma conversa em andamento — evita o cenário "cliente reclama de preço
-antigo porque o agente decorou a versão de ontem" se alguém publicar uma correção no meio de
-um atendimento.
+consulta a versão `published` mais recente a cada carregamento de contexto, antes das decisões
+do turno; não fixa a versão no processo ou no restante de uma conversa em andamento. Assim, uma
+publicação feita entre duas mensagens passa a valer na próxima resposta, sem que rascunhos sejam
+expostos ao cliente.
 
 ## 4. As 4 integrações novas pra chegar em 10/10
 

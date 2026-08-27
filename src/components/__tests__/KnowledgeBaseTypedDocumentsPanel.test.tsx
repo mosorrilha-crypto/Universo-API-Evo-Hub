@@ -12,4 +12,11 @@ describe('KnowledgeBaseTypedDocumentsPanel', () => {
     expect(html).toContain('agente ainda continua usando a Base de Conhecimento legada');
     expect(html).not.toContain('Publicar automaticamente');
   });
+
+  it('informa que a publicação vale na próxima resposta quando o runtime tipado está ativo', () => {
+    const html = renderToStaticMarkup(<KnowledgeBaseTypedDocumentsPanel activeTenantId="tenant-a" isRuntimePublished />);
+
+    expect(html).toContain('A cada nova resposta, o agente consulta somente os documentos publicados.');
+    expect(html).not.toContain('Publicar automaticamente');
+  });
 });
