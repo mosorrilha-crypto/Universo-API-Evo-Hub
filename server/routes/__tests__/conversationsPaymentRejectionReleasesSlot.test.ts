@@ -49,6 +49,7 @@ beforeAll(async () => {
       googleClientId: 'client-id',
       googleClientSecret: 'client-secret',
       googleRedirectUri: 'https://example.test/oauth-callback',
+      isAgendaModuleEnabled: async () => true,
     })
   );
   await new Promise<void>((resolve) => {

@@ -10,9 +10,11 @@ const TENANT_B = '22222222-2222-2222-2222-222222222222';
 let server: Server;
 let baseUrl: string;
 let supabase: ReturnType<typeof createFakeSupabase>;
+let authenticatedRole: 'admin' | 'saas_admin' = 'admin';
+let qualityModuleEnabled = true;
 
 function fakeAuthenticateToken(req: any, _res: any, next: any) {
-  req.user = { id: 'admin-a', tenantId: TENANT_A, role: 'admin' };
+  req.user = { id: 'admin-a', tenantId: TENANT_A, role: authenticatedRole };
   next();
 }
 
@@ -34,7 +36,10 @@ function correctionEvent(id: string, tenantId: string, createdAt: string) {
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
-  app.use(createQualityAuditRouter({ authenticateToken: fakeAuthenticateToken as any }));
+  app.use(createQualityAuditRouter({
+    authenticateToken: fakeAuthenticateToken as any,
+    isQualityModuleEnabled: async () => qualityModuleEnabled,
+  }));
   await new Promise<void>((resolve) => { server = app.listen(0, () => resolve()); });
   const address = server.address();
   baseUrl = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`;
@@ -43,6 +48,8 @@ beforeAll(async () => {
 afterAll(() => server.close());
 
 beforeEach(() => {
+  authenticatedRole = 'admin';
+  qualityModuleEnabled = true;
   supabase = createFakeSupabase({
     quality_audit_events: [
       correctionEvent('a', TENANT_A, '2026-08-22T10:00:00.000Z'),
@@ -57,6 +64,24 @@ beforeEach(() => {
 });
 
 describe('fila de revisão de padrões de memória', () => {
+  it('recusa a rota quando Qualidade está desabilitada para o administrador do tenant', async () => {
+    qualityModuleEnabled = false;
+
+    const response = await fetch(`${baseUrl}/api/quality-audit/memory-pattern-reviews/sync`, { method: 'POST' });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: 'quality_module_disabled' });
+  });
+
+  it('mantém a auditoria disponível ao SaaS Admin mesmo se Qualidade estiver bloqueada no tenant', async () => {
+    authenticatedRole = 'saas_admin';
+    qualityModuleEnabled = false;
+
+    const response = await fetch(`${baseUrl}/api/quality-audit/memory-pattern-reviews/sync`, { method: 'POST' });
+
+    expect(response.status).toBe(200);
+  });
+
   it('materializa somente candidatos do tenant autenticado e devolve agregados redigidos', async () => {
     const response = await fetch(`${baseUrl}/api/quality-audit/memory-pattern-reviews/sync`, { method: 'POST' });
     expect(response.status).toBe(200);

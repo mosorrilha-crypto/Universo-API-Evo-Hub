@@ -38,6 +38,7 @@ import {
 } from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, updateFinancialTransactionBySourceRef, isDuplicateSourceRefError } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
+import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
 import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
@@ -88,6 +89,8 @@ interface ConversationsRouterDeps {
   googleClientId?: string;
   /** Injeção de teste; produção resolve o entitlement no contexto RLS do tenant. */
   isFinancialModuleEnabled?: () => Promise<boolean>;
+  /** Injeção de teste; produção consulta a liberação da Agenda para o tenant. */
+  isAgendaModuleEnabled?: () => Promise<boolean>;
   /** Injeção de teste; produção consulta a liberação do recurso para o tenant. */
   isSystemLogsModuleEnabled?: () => Promise<boolean>;
   googleClientSecret?: string;
@@ -128,9 +131,10 @@ function sendKnowledgeBaseDocumentError(res: Response, error: unknown): Response
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri, isFinancialModuleEnabled, isSystemLogsModuleEnabled }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri, isFinancialModuleEnabled, isAgendaModuleEnabled, isSystemLogsModuleEnabled }: ConversationsRouterDeps): Router {
   const router = Router();
   const financialModuleEnabled = isFinancialModuleEnabled || isFinancialModuleEnabledForCurrentTenant;
+  const agendaModuleEnabled = isAgendaModuleEnabled || isAgendaModuleEnabledForCurrentTenant;
   const systemLogsModuleEnabled = isSystemLogsModuleEnabled || isSystemLogsModuleEnabledForCurrentTenant;
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
 
@@ -140,6 +144,21 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       if (req.user?.role === 'saas_admin') return next();
       if (!(await systemLogsModuleEnabled())) {
         return res.status(403).json({ error: 'Logs do Sistema ainda não estão habilitados para esta empresa. Solicite a liberação ao administrador da plataforma.', code: 'system_logs_module_disabled' });
+      }
+      next();
+    });
+  }
+
+  function requireAgendaModule() {
+    return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
+      tenantOf(req);
+      // O SaaS Admin administra a liberação por empresa e audita o módulo.
+      if (req.user?.role === 'saas_admin') return next();
+      if (!(await agendaModuleEnabled())) {
+        return res.status(403).json({
+          error: 'Agenda não está habilitada para esta empresa. Solicite a liberação ao administrador da plataforma.',
+          code: 'agenda_module_disabled',
+        });
       }
       next();
     });
@@ -955,7 +974,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // rota GET expondo isso. Achado real em produção: um agendamento com sinal
   // pago ficou preso em "pending_verification" por não ter botão nenhum no
   // produto pra confirmar.
-  router.get('/api/conversations/:phone/appointment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/conversations/:phone/appointment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const appointment = await getAppointmentForPhone(tenantOf(req), req.params.phone);
     res.json({ appointment: appointment || null });
   }));
@@ -969,7 +988,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // autoReply.ts) + a linha em appointments com source='manual', pra entrar
   // no mesmo lembrete automático — mas sem disparar Purchase pro Meta CAPI
   // (decisão do dono do produto: sem origem de anúncio rastreável).
-  router.post('/api/conversations/:phone/manual-appointment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/conversations/:phone/manual-appointment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (!calendarConfig) {
       return res.status(503).json({ error: 'Google Calendar não configurado neste servidor.' });
     }
@@ -1179,7 +1198,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // Hoje NENHUM botão do painel chama este endpoint diretamente — mantido
   // como caminho de API (coberto por testes, ver
   // conversationsVerifyPayment*.test.ts) por precaução, não removido.
-  router.post('/api/conversations/:phone/verify-payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/conversations/:phone/verify-payment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status } = req.body || {};
     if (status !== 'verified' && status !== 'rejected') {
       return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
@@ -2004,7 +2023,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // de marcar o pagamento, reusa o mesmo pipeline do operator-reply acima
   // (issue #97) pra já avisar o cliente com o motivo, texto livre se dentro
   // da janela de 24h ou template de reengajamento se não.
-  router.post('/api/escalations/:id/resolve-payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/escalations/:id/resolve-payment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const operatorId = req.user?.id;
     if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });

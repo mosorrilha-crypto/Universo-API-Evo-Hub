@@ -42,6 +42,7 @@ function startServer(deps: Record<string, any> = CALENDAR_DEPS) {
       metaAccessToken: 'tok',
       jwtSecret: 'test-secret',
       metaPhoneNumberId: 'pn',
+      isAgendaModuleEnabled: async () => true,
       ...deps,
     })
   );

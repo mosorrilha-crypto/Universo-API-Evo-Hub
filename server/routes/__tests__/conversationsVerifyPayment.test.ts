@@ -30,6 +30,7 @@ beforeAll(async () => {
       metaAccessToken: 'tok',
       jwtSecret: 'test-secret',
       metaPhoneNumberId: 'pn',
+      isAgendaModuleEnabled: async () => true,
     })
   );
   await new Promise<void>((resolve) => {

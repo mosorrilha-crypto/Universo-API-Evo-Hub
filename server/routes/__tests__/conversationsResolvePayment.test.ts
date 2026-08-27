@@ -49,6 +49,7 @@ beforeAll(async () => {
       metaAccessToken: 'tok',
       metaPhoneNumberId: 'pn-1',
       getAi: () => fakeAi as any,
+      isAgendaModuleEnabled: async () => true,
     })
   );
   await new Promise<void>((resolve) => {
