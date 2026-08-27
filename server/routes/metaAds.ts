@@ -13,6 +13,8 @@ import {
 } from '../services/metaAdsInsightsService';
 import {
   createMetaCampaign,
+  createMetaAdSet,
+  createMetaAd,
   MetaAdsManagementConfigurationError,
   MetaAdsManagementRequestError,
   MetaAdsManagementValidationError,
@@ -80,6 +82,28 @@ export function createMetaAdsRouter({ authenticateToken }: MetaAdsRouterDeps): R
     } catch (error: any) {
       return sendMetaManagementError(res, error);
     }
+  }));
+
+  router.post('/api/meta-ads/adsets', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const confirmation = req.body?.confirmation;
+    const idempotencyKey = req.header('Idempotency-Key');
+    if (!idempotencyKey) return res.status(400).json({ error: 'A operação precisa de um header Idempotency-Key.' });
+    if (confirmation !== 'CONFIRMAR_NO_UNIVERSO') return res.status(428).json({ error: 'Confirme a criação do conjunto como PAUSED antes de continuar.' });
+    try {
+      const adSet = await createMetaAdSet(tenantOf(req), req.body || {}, idempotencyKey);
+      return res.status(201).json({ success: true, adSet });
+    } catch (error: any) { return sendMetaManagementError(res, error); }
+  }));
+
+  router.post('/api/meta-ads/ads', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const confirmation = req.body?.confirmation;
+    const idempotencyKey = req.header('Idempotency-Key');
+    if (!idempotencyKey) return res.status(400).json({ error: 'A operação precisa de um header Idempotency-Key.' });
+    if (confirmation !== 'CONFIRMAR_NO_UNIVERSO') return res.status(428).json({ error: 'Confirme a criação do anúncio como PAUSED antes de continuar.' });
+    try {
+      const ad = await createMetaAd(tenantOf(req), req.body || {}, idempotencyKey);
+      return res.status(201).json({ success: true, ad });
+    } catch (error: any) { return sendMetaManagementError(res, error); }
   }));
 
   router.post('/api/meta-ads/campaigns/:campaignId/status', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {

@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 const mocks = vi.hoisted(() => ({
   createMetaCampaign: vi.fn(),
+  createMetaAdSet: vi.fn(),
+  createMetaAd: vi.fn(),
   updateMetaCampaignStatus: vi.fn(),
   updateMetaCampaignBudget: vi.fn(),
 }));
@@ -53,6 +55,8 @@ afterAll(() => server.close());
 beforeEach(() => {
   role = 'admin';
   mocks.createMetaCampaign.mockReset();
+  mocks.createMetaAdSet.mockReset();
+  mocks.createMetaAd.mockReset();
   mocks.updateMetaCampaignStatus.mockReset();
   mocks.updateMetaCampaignBudget.mockReset();
 });
@@ -84,6 +88,26 @@ describe('Central de Anúncios Meta — guardrails da rota', () => {
       expect.objectContaining({ tenantId: 'tenant-injetado', name: 'Campanha' }),
       'meta-route-test-123457',
     );
+  });
+
+  it('exige confirmação para conjunto e anúncio antes de chamar os serviços', async () => {
+    const adSetResponse = await fetch(`${baseUrl}/api/meta-ads/adsets`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'meta-route-test-adset' }, body: JSON.stringify({ campaignId: 'campaign-1', name: 'Conjunto', dailyBudgetMinor: 1000, targeting: {} }) });
+    const adResponse = await fetch(`${baseUrl}/api/meta-ads/ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'meta-route-test-ad' }, body: JSON.stringify({ adSetId: 'adset-1', name: 'Anúncio' }) });
+    expect(adSetResponse.status).toBe(428);
+    expect(adResponse.status).toBe(428);
+    expect(mocks.createMetaAdSet).not.toHaveBeenCalled();
+    expect(mocks.createMetaAd).not.toHaveBeenCalled();
+  });
+
+  it('encaminha conjunto e anúncio com tenant do JWT e idempotência', async () => {
+    mocks.createMetaAdSet.mockResolvedValue({ id: 'adset-1', status: 'PAUSED' });
+    mocks.createMetaAd.mockResolvedValue({ id: 'ad-1', status: 'PAUSED' });
+    const adSetResponse = await fetch(`${baseUrl}/api/meta-ads/adsets`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'meta-route-test-adset-ok' }, body: JSON.stringify({ campaignId: 'campaign-1', name: 'Conjunto', dailyBudgetMinor: 1000, targeting: {}, confirmation: 'CONFIRMAR_NO_UNIVERSO' }) });
+    const adResponse = await fetch(`${baseUrl}/api/meta-ads/ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'meta-route-test-ad-ok' }, body: JSON.stringify({ adSetId: 'adset-1', name: 'Anúncio', creativeId: 'creative-1', confirmation: 'CONFIRMAR_NO_UNIVERSO' }) });
+    expect(adSetResponse.status).toBe(201);
+    expect(adResponse.status).toBe(201);
+    expect(mocks.createMetaAdSet).toHaveBeenCalledWith(TENANT_ID, expect.objectContaining({ campaignId: 'campaign-1' }), 'meta-route-test-adset-ok');
+    expect(mocks.createMetaAd).toHaveBeenCalledWith(TENANT_ID, expect.objectContaining({ adSetId: 'adset-1' }), 'meta-route-test-ad-ok');
   });
 
   it('recusa operador, mesmo com confirmação', async () => {

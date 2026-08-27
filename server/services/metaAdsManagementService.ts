@@ -14,7 +14,7 @@ export const META_CLICK_TO_WHATSAPP_OBJECTIVES = [
 
 export type MetaClickToWhatsAppObjective = typeof META_CLICK_TO_WHATSAPP_OBJECTIVES[number];
 export type MetaCampaignMutationStatus = 'PAUSED' | 'ACTIVE' | 'ARCHIVED';
-export type MetaAdsOperation = 'create_campaign' | 'update_campaign_status' | 'update_campaign_budget';
+export type MetaAdsOperation = 'create_campaign' | 'create_adset' | 'create_ad' | 'update_campaign_status' | 'update_campaign_budget';
 
 export interface MetaManagedCampaign {
   id: string;
@@ -23,6 +23,9 @@ export interface MetaManagedCampaign {
   status?: MetaCampaignMutationStatus;
   dailyBudgetMinor?: number;
 }
+
+export interface MetaManagedAdSet { id: string; name?: string; campaignId?: string; status?: MetaCampaignMutationStatus; dailyBudgetMinor?: number; }
+export interface MetaManagedAd { id: string; name?: string; adSetId?: string; status?: MetaCampaignMutationStatus; }
 
 interface MetaAdsManagementCredentials {
   adAccountId: string;
@@ -61,10 +64,21 @@ function validAdAccountId(value: unknown): string {
 function validCampaignId(value: unknown): string {
   const normalized = typeof value === 'string' ? value.trim() : '';
   if (!/^\d+$/.test(normalized)) {
-    throw new MetaAdsManagementValidationError('O identificador da campanha informado é inválido.');
+    throw new MetaAdsManagementValidationError('O identificador informado é inválido.');
   }
   return normalized;
 }
+
+const validResourceName = (value: unknown, label: string): string => {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (normalized.length < 2 || normalized.length > MAX_CAMPAIGN_NAME_LENGTH) throw new MetaAdsManagementValidationError(`O nome de ${label} deve ter entre 2 e ${MAX_CAMPAIGN_NAME_LENGTH} caracteres.`);
+  return normalized;
+};
+
+const validObjectJson = (value: unknown, label: string): string => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new MetaAdsManagementValidationError(`${label} precisa ser um objeto JSON válido.`);
+  return JSON.stringify(value);
+};
 
 function validIdempotencyKey(value: unknown): string {
   const normalized = typeof value === 'string' ? value.trim() : '';
@@ -287,6 +301,50 @@ export async function createMetaCampaign(
     return { id: payload.id, name, objective, status: 'PAUSED' };
   });
   return payloadToCampaign(result);
+}
+
+export async function createMetaAdSet(
+  tenantId: string,
+  input: { campaignId: unknown; name: unknown; dailyBudgetMinor: unknown; targeting: unknown; billingEvent?: unknown; optimizationGoal?: unknown },
+  idempotencyKey: string,
+): Promise<MetaManagedAdSet> {
+  const credentials = await getManagementCredentials(tenantId);
+  const campaignId = validCampaignId(input.campaignId);
+  const name = validResourceName(input.name, 'conjunto');
+  const dailyBudgetMinor = validDailyBudgetMinor(input.dailyBudgetMinor);
+  const targeting = validObjectJson(input.targeting, 'A segmentação');
+  const billingEvent = typeof input.billingEvent === 'string' && input.billingEvent.trim() ? input.billingEvent.trim().toUpperCase() : 'IMPRESSIONS';
+  const optimizationGoal = typeof input.optimizationGoal === 'string' && input.optimizationGoal.trim() ? input.optimizationGoal.trim().toUpperCase() : 'CONVERSATIONS';
+  const result = await runIdempotentMutation(tenantId, idempotencyKey, 'create_adset', campaignId, async () => {
+    await assertCampaignBelongsToAccount(credentials, campaignId);
+    const payload = await graphRequest<{ id?: string }>(`${credentials.adAccountId}/adsets`, 'POST', { name, campaign_id: campaignId, daily_budget: String(dailyBudgetMinor), billing_event: billingEvent, optimization_goal: optimizationGoal, targeting, status: 'PAUSED' }, credentials.accessToken);
+    if (!payload.id) throw new MetaAdsManagementRequestError('A Meta não devolveu o identificador do conjunto criado.');
+    return { id: payload.id, name, campaignId, dailyBudgetMinor, status: 'PAUSED' };
+  });
+  return { id: String(result.id || ''), name: String(result.name || name), campaignId, dailyBudgetMinor: Number(result.dailyBudgetMinor || dailyBudgetMinor), status: 'PAUSED' };
+}
+
+export async function createMetaAd(
+  tenantId: string,
+  input: { adSetId: unknown; name: unknown; creativeId?: unknown; objectStoryId?: unknown },
+  idempotencyKey: string,
+): Promise<MetaManagedAd> {
+  const credentials = await getManagementCredentials(tenantId);
+  const adSetId = validCampaignId(input.adSetId);
+  const name = validResourceName(input.name, 'anúncio');
+  const creativeId = typeof input.creativeId === 'string' ? input.creativeId.trim() : '';
+  const objectStoryId = typeof input.objectStoryId === 'string' ? input.objectStoryId.trim() : '';
+  if (!creativeId && !objectStoryId) throw new MetaAdsManagementValidationError('Informe um creativeId ou objectStoryId para criar o anúncio.');
+  const result = await runIdempotentMutation(tenantId, idempotencyKey, 'create_ad', adSetId, async () => {
+    const adset = await graphRequest<{ campaign_id?: string }>(adSetId, 'GET', { fields: 'campaign_id' }, credentials.accessToken);
+    if (!adset.campaign_id) throw new MetaAdsManagementRequestError('Não foi possível validar o conjunto informado.');
+    await assertCampaignBelongsToAccount(credentials, adset.campaign_id);
+    const creative = creativeId ? JSON.stringify({ creative_id: creativeId }) : JSON.stringify({ object_story_id: objectStoryId });
+    const payload = await graphRequest<{ id?: string }>(`${credentials.adAccountId}/ads`, 'POST', { name, adset_id: adSetId, creative, status: 'PAUSED' }, credentials.accessToken);
+    if (!payload.id) throw new MetaAdsManagementRequestError('A Meta não devolveu o identificador do anúncio criado.');
+    return { id: payload.id, name, adSetId, status: 'PAUSED' };
+  });
+  return { id: String(result.id || ''), name: String(result.name || name), adSetId, status: 'PAUSED' };
 }
 
 export async function updateMetaCampaignStatus(

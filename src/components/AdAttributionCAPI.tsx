@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LeadInfo, CAPIConfig, MetaCAPIEvent } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { TrafficCenter } from './TrafficCenter';
@@ -50,6 +50,34 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
   const isSpanish = language === 'es';
   const leads = propLeads || [];
   const [activeTab, setActiveTab] = useState<'traffic_center' | 'overview' | 'ai_insights' | 'capi_settings' | 'utm_simulator'>('traffic_center');
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadChannelFilter, setLeadChannelFilter] = useState<'all' | 'meta_ads' | 'google_ads' | 'organic' | 'direct'>('all');
+  const [leadPage, setLeadPage] = useState(1);
+  const attributionFilterKey = 'growth_attribution_filters_v1';
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(attributionFilterKey) || '{}');
+      if (typeof saved.search === 'string') setLeadSearch(saved.search);
+      if (['all', 'meta_ads', 'google_ads', 'organic', 'direct'].includes(saved.channel)) setLeadChannelFilter(saved.channel);
+    } catch { /* preferências inválidas não bloqueiam a análise */ }
+  }, []);
+  useEffect(() => {
+    localStorage.setItem(attributionFilterKey, JSON.stringify({ search: leadSearch, channel: leadChannelFilter }));
+    setLeadPage(1);
+  }, [leadSearch, leadChannelFilter]);
+  const filteredAttributionLeads = useMemo(() => {
+    const query = leadSearch.trim().toLocaleLowerCase();
+    return leads.filter((lead) => {
+      const channel = lead.attribution?.sourceChannel || 'whatsapp_direct';
+      const matchesChannel = leadChannelFilter === 'all' || (leadChannelFilter === 'meta_ads' ? channel === 'meta_ads' || channel === 'instagram_ads' : leadChannelFilter === 'google_ads' ? channel === 'google_ads' : leadChannelFilter === 'organic' ? channel.includes('organic') : channel === 'whatsapp_direct');
+      if (!matchesChannel) return false;
+      if (!query) return true;
+      return [lead.name, lead.phone, lead.attribution?.channelLabel, lead.attribution?.campaignName, lead.attribution?.adName, lead.attribution?.utmParams?.utm_source].filter(Boolean).join(' ').toLocaleLowerCase().includes(query);
+    });
+  }, [leads, leadSearch, leadChannelFilter]);
+  const attributionPageSize = 10;
+  const attributionPageCount = Math.max(1, Math.ceil(filteredAttributionLeads.length / attributionPageSize));
+  const visibleAttributionLeads = filteredAttributionLeads.slice((leadPage - 1) * attributionPageSize, leadPage * attributionPageSize);
 
   // Meta CAPI Configuration State
   const [capiConfig, setCapiConfig] = useState<CAPIConfig>(() => {
@@ -593,6 +621,13 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_180px_auto] gap-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+              <label className="sr-only" htmlFor="lead-attribution-search">{isSpanish ? 'Buscar lead, campaña o anuncio' : 'Buscar lead, campanha ou anúncio'}</label>
+              <input id="lead-attribution-search" value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} placeholder={isSpanish ? 'Buscar lead, campaña o anuncio' : 'Buscar lead, campanha ou anúncio'} className="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-500" />
+              <label className="sr-only" htmlFor="lead-attribution-channel">Filtrar canal</label>
+              <select id="lead-attribution-channel" value={leadChannelFilter} onChange={(event) => setLeadChannelFilter(event.target.value as typeof leadChannelFilter)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-500"><option value="all">{isSpanish ? 'Todos los canales' : 'Todos os canais'}</option><option value="meta_ads">Meta Ads</option><option value="google_ads">Google Ads</option><option value="organic">{isSpanish ? 'Orgánico' : 'Orgânico'}</option><option value="direct">{isSpanish ? 'Directo' : 'Direto'}</option></select>
+              <button type="button" onClick={() => { setLeadSearch(''); setLeadChannelFilter('all'); }} className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800">{isSpanish ? 'Limpiar' : 'Limpar'}</button>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
@@ -606,7 +641,7 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {leads.map((lead) => {
+                  {visibleAttributionLeads.map((lead) => {
                     const channel = lead.attribution?.sourceChannel || 'whatsapp_direct';
                     const isMeta = channel === 'meta_ads' || channel === 'instagram_ads';
                     const isGoogle = channel === 'google_ads';
@@ -704,6 +739,10 @@ export const AdAttributionCAPI: React.FC<AdAttributionCAPIProps> = ({
                   })}
                 </tbody>
               </table>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-slate-800 pt-3 text-xs text-slate-400">
+              <span>{filteredAttributionLeads.length} {isSpanish ? 'leads encontrados' : 'leads encontrados'} · {leadPage} / {attributionPageCount}</span>
+              <div className="flex gap-2"><button type="button" disabled={leadPage <= 1} onClick={() => setLeadPage((page) => Math.max(1, page - 1))} className="rounded-lg border border-slate-700 px-3 py-1.5 disabled:opacity-40">‹</button><button type="button" disabled={leadPage >= attributionPageCount} onClick={() => setLeadPage((page) => Math.min(attributionPageCount, page + 1))} className="rounded-lg border border-slate-700 px-3 py-1.5 disabled:opacity-40">›</button></div>
             </div>
           </div>
 
