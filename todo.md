@@ -90,3 +90,11 @@
 - [x] Concluir o diagnóstico do CRM antes de iniciar a próxima seção
 - [x] Após o CRM, auditar e refinar a página de Agenda pelo mesmo workflow
 - [x] Validar a Agenda em mobile e desktop com testes e build
+
+- [x] Aguardar e confirmar checks remotos da PR #481
+- [x] Integrar a melhoria da Agenda na branch principal após autorização
+
+- [x] Reduzir cabeçalho e hero da Agenda no mobile
+- [x] Trocar cards e ações gigantes por uma hierarquia operacional compacta
+- [x] Preservar menu Hoje, Calendário, Pendências e ação de novo agendamento
+- [x] Validar a compactação em mobile e desktop e atualizar a PR
