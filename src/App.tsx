@@ -216,7 +216,9 @@ export const App: React.FC = () => {
   const canManageAgent = canSeeAdminTools && tenantCapabilities.agent;
   const canSeeCatalog = canSeeAdminTools && tenantCapabilities.catalog;
   const canSeeQuality = canSeeAdminTools && tenantCapabilities.quality;
-  const canSeeSystemLogs = canSeeAdminTools;
+  // Recurso novo: SaaS Admin sempre audita; admins de tenant só acessam após
+  // liberação explícita no Centro de Controle para a empresa ativa.
+  const canSeeSystemLogs = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.systemLogs);
   const canSeeSaasMaster = isSaasSessionConfirmed && hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem

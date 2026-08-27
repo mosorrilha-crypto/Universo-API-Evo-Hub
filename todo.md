@@ -98,3 +98,10 @@
 - [x] Trocar cards e ações gigantes por uma hierarquia operacional compacta
 - [x] Preservar menu Hoje, Calendário, Pendências e ação de novo agendamento
 - [x] Validar a compactação em mobile e desktop e atualizar a PR
+
+- [x] Mapear todas as páginas e capacidades disponíveis por empresa e as telas ainda sem controle centralizado.
+- [x] Definir quais recursos passam a ser configuráveis pelo Centro de Controle SaaS Admin, com comportamento seguro para recursos existentes.
+- [x] Implementar controles por empresa no SaaS Admin e enforcement correspondente no frontend e backend.
+- [x] Cobrir permissões, isolamento multi-tenant, desativação e reativação por testes; validar lint, suíte e build.
+- [ ] Submeter a alteração para revisão humana e aguardar autorização explícita antes de qualquer merge.
+- [x] Confirmar se Logs do Sistema e demais páginas administrativas novas já consomem o contrato existente de capacidades por empresa, sem criar configuração paralela.

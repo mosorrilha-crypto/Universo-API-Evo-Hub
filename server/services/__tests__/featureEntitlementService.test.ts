@@ -13,6 +13,14 @@ describe('resolveEffectiveEntitlements', () => {
     expect(agenda).toMatchObject({ key: 'booking.calendar', enabled: true, source: 'compatibility', limitValue: null, remaining: null });
   });
 
+  it('mantém uma feature nova fechada quando seu default explícito é false', () => {
+    const [systemLogs] = resolveEffectiveEntitlements({
+      features: [{ id: 'feature-system-logs', key: 'operations.system_logs', name: 'Logs do Sistema', domain: 'operations', kind: 'configurable', status: 'active', default_enabled: false }],
+      rules: [], overrides: [], usage: [],
+    });
+    expect(systemLogs).toMatchObject({ key: 'operations.system_logs', enabled: false, source: 'compatibility' });
+  });
+
   it('calcula uso e restante a partir da regra do plano', () => {
     const [, ai] = resolveEffectiveEntitlements({
       features,
