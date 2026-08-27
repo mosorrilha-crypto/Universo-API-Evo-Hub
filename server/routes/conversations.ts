@@ -1477,6 +1477,50 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   const MAX_DOCUMENTS_PER_TENANT = 30;
   const MAX_TOTAL_BYTES_PER_TENANT = 200 * 1024 * 1024; // 200MB
 
+  // Operação visual da Base tipada: sobe o binário sem editar knowledge_base.data.
+  // A associação do arquivo acontece somente quando o formulário salva o rascunho
+  // `media_assets`, preservando a publicação atual até a confirmação explícita.
+  router.post('/api/knowledge-base/document-storage', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { fileName, mimeType, base64 } = req.body || {};
+    if (!fileName?.trim() || !base64) {
+      return res.status(400).json({ error: 'Campos "fileName" e "base64" são obrigatórios.' });
+    }
+    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buffer.length > MAX_DOCUMENT_BYTES) {
+      return res.status(400).json({ error: `Arquivo maior que ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB.` });
+    }
+
+    const mediaAssets = await getKnowledgeBaseDocumentState(tenantId, 'media_assets');
+    const data = mediaAssets.draft?.data || mediaAssets.published?.data || {};
+    const existingDocs = Array.isArray(data.documents) ? data.documents as Array<{ sizeBytes?: number }> : [];
+    if (existingDocs.length >= MAX_DOCUMENTS_PER_TENANT) {
+      return res.status(400).json({ error: `Limite de ${MAX_DOCUMENTS_PER_TENANT} documentos atingido. Apague algum documento antigo antes de enviar um novo.` });
+    }
+    const existingTotalBytes = existingDocs.reduce((sum, document) => sum + (typeof document.sizeBytes === 'number' ? document.sizeBytes : 0), 0);
+    if (existingTotalBytes + buffer.length > MAX_TOTAL_BYTES_PER_TENANT) {
+      const remainingMb = Math.max(0, (MAX_TOTAL_BYTES_PER_TENANT - existingTotalBytes) / (1024 * 1024)).toFixed(1);
+      return res.status(400).json({ error: `Limite de ${MAX_TOTAL_BYTES_PER_TENANT / (1024 * 1024)}MB no total atingido (restam ${remainingMb}MB). Apague algum documento antigo antes de enviar um novo.` });
+    }
+
+    const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const resolvedMimeType = mimeType || 'application/octet-stream';
+    await uploadKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId, buffer, resolvedMimeType);
+    const extractedText = await extractTextFromDocument(buffer, resolvedMimeType, fileName);
+    res.json({
+      document: {
+        id: docId,
+        fileName: String(fileName).trim(),
+        fileSize: `${(buffer.length / (1024 * 1024)).toFixed(1)} MB`,
+        sizeBytes: buffer.length,
+        mimeType: resolvedMimeType,
+        uploadDate: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        status: 'Processado' as const,
+        extractedText,
+      },
+    });
+  }));
+
   // Upload real de documento anexado à base de conhecimento — até aqui a
   // aba "Documentos Anexados" era só um registro visual fictício (achado
   // real: 2 "documentos" hardcoded no preset da Monique que nunca

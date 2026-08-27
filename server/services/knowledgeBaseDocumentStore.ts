@@ -32,8 +32,10 @@ export async function extractTextFromDocument(buffer: Buffer, mimeType: string, 
       return buffer.toString('utf-8').trim().slice(0, MAX_EXTRACTED_TEXT_CHARS) || undefined;
     }
     return undefined;
-  } catch (err: any) {
-    console.warn(`⚠️  [KB Documentos] Falha ao extrair texto de "${fileName}" (${mimeType}):`, err.message);
+  } catch {
+    // Nome, tipo e erro podem carregar conteúdo controlado por upload. O log
+    // fixo mantém a observabilidade sem abrir espaço para injeção de linhas.
+    console.warn('⚠️  [KB Documentos] Falha ao extrair texto de documento enviado.');
     return undefined;
   }
 }
