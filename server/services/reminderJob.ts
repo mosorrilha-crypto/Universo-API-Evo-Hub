@@ -16,7 +16,8 @@ import { wasReminderSent, markReminderSent, type ReminderType } from './reminder
 import { sendWhatsAppTemplateMessage } from './metaSend';
 import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForTenant } from './tenantResolver';
-import { getTenantBusinessHours, getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
+import { getTenantReminderLanguage, type ReminderLanguage } from './tenantProfileStore';
+import { recordOutgoingMessage } from './conversationStore';
 import { startPeriodicJob } from './periodicJob';
 
 // O Paraguai opera atualmente em UTC-3 durante todo o ano. Algumas versões
@@ -161,13 +162,21 @@ async function checkAndSendRemindersForTenant(
   // com hoje — sem checar a HORA. Resultado: um agendamento marcado pra
   // hoje disparava "Bom dia! Só confirmando..." no primeiro tick depois da
   // meia-noite (ex: 00:30), horas antes de qualquer horário razoável.
-  // Usa o horário de abertura configurado do tenant pra hoje como corte —
-  // sem expediente configurado (ou falha ao buscar), cai num horário seguro
-  // fixo em vez de travar o lembrete pra sempre.
-  const FALLBACK_EARLIEST_HHMM = '07:00';
-  const businessHours = await getTenantBusinessHours(tenantId).catch(() => null);
-  const todayWeekday = new Date(`${todayKey}T12:00:00Z`).getUTCDay();
-  const earliestHHmm = businessHours?.[String(todayWeekday)]?.open || FALLBACK_EARLIEST_HHMM;
+  //
+  // Achado real (27/08/2026): um agendamento feito HOJE pra amanhã disparava
+  // o lembrete "dia_anterior" no mesmo tick seguinte à criação (ex: cliente
+  // fecha o horário às 15:46, lembrete "amanhã, às X" sai às 16:50) — a
+  // cliente recebia esse reforço minutos depois de já ter confirmado o
+  // horário na própria conversa, e outro lembrete de manhã no dia do
+  // compromisso: duas mensagens de confirmação em poucas horas pro mesmo
+  // agendamento. Decisão do dono do produto: só manda o lembrete da véspera
+  // pra quem agendou com 72h+ de antecedência (compromisso "fresco" não
+  // precisa de reforço na véspera, só a confirmação da manhã do dia).
+  const DIA_ANTERIOR_MIN_LEAD_HOURS = 72;
+  // Horários fixos por tipo de lembrete (decisão do dono do produto,
+  // 27/08/2026) — substituem o corte por horário de abertura do tenant, que
+  // servia só pra evitar o lembrete de madrugada.
+  const EARLIEST_HHMM_BY_TYPE: Record<ReminderType, string> = { dia_anterior: '08:30', mesmo_dia: '07:30' };
   const { hora: nowHHmm } = dateAndTimeInTz(new Date());
   const language: ReminderLanguage = await getTenantReminderLanguage(tenantId).catch(() => 'es' as ReminderLanguage);
 
@@ -180,7 +189,11 @@ async function checkAndSendRemindersForTenant(
     if (eventDateKey === tomorrowKey) type = 'dia_anterior';
     else if (eventDateKey === todayKey) type = 'mesmo_dia';
     if (!type) continue;
-    if (nowHHmm < earliestHHmm) continue; // fora do horário razoável pra mandar — tenta de novo no próximo tick
+    if (nowHHmm < EARLIEST_HHMM_BY_TYPE[type]) continue; // fora do horário definido pra este tipo — tenta de novo no próximo tick
+    if (type === 'dia_anterior') {
+      const leadHours = (new Date(event.startIso).getTime() - new Date(appt.createdAt).getTime()) / (60 * 60 * 1000);
+      if (leadHours < DIA_ANTERIOR_MIN_LEAD_HOURS) continue; // agendado muito perto do compromisso — a confirmação do dia já basta
+    }
     if (await wasReminderSent(tenantId, event.id, type)) continue;
 
     const dayWord = language === 'es'
@@ -221,6 +234,18 @@ async function checkAndSendRemindersForTenant(
         messageId = result?.messageId;
       }
       await markReminderSent(tenantId, event.id, type);
+      // Achado real (27/08/2026): o lembrete nunca era gravado na conversa —
+      // sumia do histórico que o painel mostra e do contexto que o agente
+      // recompõe se for reativado depois (autoReply.ts lê conversation.messages).
+      // `evolutionMessage` já é o texto equivalente ao aprovado no template
+      // Meta (mesmo corpo, mesmos parâmetros), então serve como registro em
+      // qualquer canal.
+      await recordOutgoingMessage(
+        tenantId,
+        appt.phone,
+        { type: 'text', text: evolutionMessage, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
+        'ai'
+      ).catch((err) => console.warn(`⚠️  [Lembretes] Falha ao gravar lembrete no histórico de ${appt.phone}:`, (err as Error).message));
       // `messageId` (wamid) fica no log só pra poder cruzar depois com um
       // eventual status "failed" que chega via webhook (webhooks.ts) —
       // achado real (20/08/2026): sem isso não tinha como confirmar se um
