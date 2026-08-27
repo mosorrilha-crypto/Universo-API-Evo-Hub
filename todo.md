@@ -111,4 +111,6 @@
 
 - [x] Reproduzir e corrigir a perda de visibilidade dos recursos operacionais na sessão SaaS Admin.
 - [x] Garantir por teste que SaaS Admin vê os recursos para auditoria, enquanto admins internos continuam sujeitos à liberação por tenant.
-- [ ] Submeter a correção de acesso para revisão humana antes de aplicar a migration 0063 no Supabase.
+- [x] Submeter a correção de acesso para revisão humana antes de aplicar a migration 0063 no Supabase.
+
+- [x] Revogar a execução pública da função de trigger de entitlements e confirmar que os avisos de segurança do Supabase foram eliminados.
