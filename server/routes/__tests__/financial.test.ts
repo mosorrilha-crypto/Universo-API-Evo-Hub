@@ -96,6 +96,13 @@ describe('GET /api/financial/recurring-expenses', () => {
     expect(data.recurringExpenses).toHaveLength(1);
     expect(data.recurringExpenses[0]).toMatchObject({ id: 'rec-1', description: 'Aluguel do salão', dayOfMonth: 5, active: true });
   });
+
+  it('mantém a auditoria financeira disponível ao SaaS Admin mesmo com o módulo bloqueado para o tenant', async () => {
+    authenticatedRole = 'saas_admin';
+    financialModuleEnabled = false;
+    const res = await fetch(`${baseUrl}/api/financial/recurring-expenses`);
+    expect(res.status).toBe(200);
+  });
 });
 
 describe('POST /api/financial/recurring-expenses', () => {

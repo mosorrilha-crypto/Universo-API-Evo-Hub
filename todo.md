@@ -105,3 +105,10 @@
 - [x] Cobrir permissões, isolamento multi-tenant, desativação e reativação por testes; validar lint, suíte e build.
 - [ ] Submeter a alteração para revisão humana e aguardar autorização explícita antes de qualquer merge.
 - [x] Confirmar se Logs do Sistema e demais páginas administrativas novas já consomem o contrato existente de capacidades por empresa, sem criar configuração paralela.
+
+- [x] Auditar os recursos existentes no catálogo de entitlements, frontend e backend para confirmar bloqueio efetivo por tenant.
+- [x] Consolidar recursos aderentes, lacunas de enforcement e prioridade de correção sem alterar dados ou configuração de produção.
+
+- [x] Reproduzir e corrigir a perda de visibilidade dos recursos operacionais na sessão SaaS Admin.
+- [x] Garantir por teste que SaaS Admin vê os recursos para auditoria, enquanto admins internos continuam sujeitos à liberação por tenant.
+- [ ] Submeter a correção de acesso para revisão humana antes de aplicar a migration 0063 no Supabase.
