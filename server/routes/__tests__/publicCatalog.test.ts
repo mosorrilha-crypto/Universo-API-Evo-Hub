@@ -154,6 +154,24 @@ describe('GET /api/public/catalog/:slug/whatsapp-click', () => {
     expect(message).not.toBe('Hola, quiero información sobre Combo Full Face '); // tem algo (o code) depois do espaço
   });
 
+  it('remove espaços do telefone antes de montar o link do wa.me (achado de auditoria, 27/08/2026: número salvo como "595994 798081" gerava wa.me/595994%20798081, inválido pro WhatsApp)', async () => {
+    const seed = {
+      tenants: [{
+        id: 'tenant-monique',
+        slug: 'monique',
+        public_catalog_enabled: true,
+        public_whatsapp_phone: '595994 798081',
+      }],
+    };
+    ({ server, baseUrl } = await startServer(seed));
+
+    const response = await fetch(`${baseUrl}/api/public/catalog/monique/whatsapp-click?msg=${encodeURIComponent('oi')}`, { redirect: 'manual' });
+
+    expect(response.status).toBe(302);
+    const location = response.headers.get('location')!;
+    expect(location.startsWith('https://wa.me/595994798081?text=')).toBe(true);
+  });
+
   it('404 pra slug sem catálogo habilitado ou sem telefone configurado', async () => {
     ({ server, baseUrl } = await startServer({
       tenants: [{ id: 'tenant-x', slug: 'sem-telefone', public_catalog_enabled: true, public_whatsapp_phone: null }],
