@@ -101,6 +101,19 @@ const FIRST_CONTACT_BLOCK_META: Record<FirstContactBlockType, { label: string; i
   file: { label: 'Arquivo', icon: <Paperclip className="w-3.5 h-3.5" />, color: 'text-sky-400' },
 };
 
+// A Base tem oito documentos tipados; estes atalhos tornam a estrutura
+// explícita sem obrigar o administrador a editar JSON ou conhecer o backend.
+export const TYPED_DOCUMENT_NAVIGATION = [
+  { documentType: 'business_profile', label: 'Perfil do negócio', detail: 'Empresa, objetivo e localização', icon: Building2, sections: ['s1'] },
+  { documentType: 'brand_voice', label: 'Voz da marca', detail: 'Tom, idioma e forma de responder', icon: MessageSquare, sections: ['s1'] },
+  { documentType: 'service_catalog', label: 'Catálogo de serviços', detail: 'Serviços, variações, preços e mídias', icon: DollarSign, sections: ['s3'] },
+  { documentType: 'pricing_policies', label: 'Preços e políticas', detail: 'Pagamento, cancelamento e condições', icon: ShieldAlert, sections: ['s1', 's2'] },
+  { documentType: 'opening_hours', label: 'Horários de atendimento', detail: 'Expediente usado pela agenda real', icon: Clock, sections: [] },
+  { documentType: 'faq', label: 'Perguntas frequentes', detail: 'Dúvidas e respostas aprovadas', icon: HelpCircle, sections: ['s4'] },
+  { documentType: 'human_handoff_rules', label: 'Encaminhamento humano', detail: 'Regras e limites de atendimento', icon: ShieldAlert, sections: ['s2'] },
+  { documentType: 'media_assets', label: 'Mídias e documentos', detail: 'Anexos e primeiro contato', icon: Paperclip, sections: ['s5', 's6'] },
+] as const;
+
 function AuditMetric({ label, value, tone }: { label: string; value: string | number; tone: 'emerald' | 'sky' | 'amber' | 'rose' | 'slate' }) {
   const styles = {
     emerald: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300',
@@ -1683,6 +1696,18 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
   const selectedProduct = formData.products.find((p) => p.id === selectedProductId) || null;
 
+  const handleOpenTypedDocument = (documentType: typeof TYPED_DOCUMENT_NAVIGATION[number]['documentType']) => {
+    const target = TYPED_DOCUMENT_NAVIGATION.find((item) => item.documentType === documentType);
+    if (!target) return;
+    if (documentType === 'opening_hours') {
+      setShowHoursEditor(true);
+      return;
+    }
+    setOpenSections((previous) => ({ ...previous, ...Object.fromEntries(target.sections.map((section) => [section, true])) }));
+    const firstSection = target.sections[0];
+    if (firstSection) window.setTimeout(() => document.getElementById(`knowledge-base-section-${firstSection}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+
   if (showKnowledgeBaseDocumentation) {
     return <KnowledgeBaseDocumentation isRuntimePublished={usesPublishedKnowledgeBase} onBack={() => setShowKnowledgeBaseDocumentation(false)} />;
   }
@@ -1691,14 +1716,14 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     <div className="knowledge-workspace space-y-6 max-w-7xl mx-auto">
       
       {/* Top Header Banner */}
-      <div className="knowledge-workspace__hero p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl flex items-center justify-between gap-3">
+      <div className="knowledge-workspace__hero flex flex-col items-stretch gap-3 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 p-4 shadow-xl sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center space-x-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0">
             <Brain className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h2 className="text-base font-bold text-white tracking-tight truncate">
+              <h2 className="text-sm font-bold tracking-tight text-white sm:text-base">
                 Base de Conhecimento & Regras do Agente
               </h2>
               <span className="hidden sm:flex px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40 items-center gap-1">
@@ -1713,12 +1738,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* Primary Header Actions */}
-        <div className="flex items-center space-x-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:flex-shrink-0">
           <button
             type="button"
             onClick={() => setShowKnowledgeBaseDocumentation(true)}
-            className="px-3 py-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-100 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            className="flex items-center gap-1.5 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition-all hover:bg-cyan-500/20"
             title="Abrir mapa lógico, fluxograma e guia de uso da Base de Conhecimento"
+            aria-label="Abrir documentação da Base de Conhecimento"
           >
             <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Documentação</span>
@@ -1726,8 +1752,9 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           <button
             type="button"
             onClick={() => setShowHoursEditor(true)}
-            className="px-3 py-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-100 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-500/20"
             title="Configurar os horários reais de atendimento e agenda"
+            aria-label="Configurar horários de atendimento"
           >
             <Clock className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Horários</span>
@@ -1737,7 +1764,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               href={`/catalogo/${encodeURIComponent(publicCatalogSlug)}`}
               target="_blank"
               rel="noreferrer"
-              className="px-3 py-2 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
+              className="flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-200 transition-all hover:bg-sky-500/20"
               title="Abrir catálogo público"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -1746,7 +1773,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           )}
           <button
             onClick={handleResetToDefault}
-            className="px-3 py-2 rounded-xl border border-slate-800 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+            className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-400 transition-all hover:bg-slate-800 hover:text-white"
             title="Restaurar padrão"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -1768,6 +1795,28 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <span className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-100">{typedDocumentStates.filter((state) => state.published).length}/8 publicados</span>
               <span className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-2.5 py-1.5 text-[10px] font-bold text-amber-100">{typedDraftDocumentTypes.length} rascunho(s)</span>
+            </div>
+          </div>
+          <div className="mt-4 border-t border-cyan-400/15 pt-4">
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-slate-100">Documentos da sua Base</p>
+                <p className="mt-0.5 text-[10px] text-slate-500">Toque em um item para abrir o formulário visual correspondente.</p>
+              </div>
+              <span className="text-[10px] font-semibold text-cyan-200">8 tipos</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {TYPED_DOCUMENT_NAVIGATION.map((item) => {
+                const state = typedDocumentStates.find((documentState) => documentState.documentType === item.documentType);
+                const Icon = item.icon;
+                const status = state?.draft ? 'Rascunho pendente' : state?.published ? `Publicado v${state.published.version}` : 'Ainda não publicado';
+                return (
+                  <button key={item.documentType} type="button" onClick={() => handleOpenTypedDocument(item.documentType)} className="group flex min-h-20 items-start gap-2.5 rounded-xl border border-slate-800 bg-slate-950/65 p-3 text-left transition-colors hover:border-cyan-400/35 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-300/60">
+                    <span className="mt-0.5 rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-1.5 text-cyan-200"><Icon className="h-3.5 w-3.5" /></span>
+                    <span className="min-w-0"><span className="block text-[11px] font-bold text-slate-200 group-hover:text-cyan-100">{item.label}</span><span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{item.detail}</span><span className={`mt-1.5 block text-[10px] font-semibold ${state?.draft ? 'text-amber-200' : state?.published ? 'text-emerald-200' : 'text-slate-500'}`}>{status}</span></span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </section>
@@ -1962,7 +2011,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-10">
 
         {/* SECTION 1: General Profile & Goal */}
-        <div className="space-y-5">
+        <div id="knowledge-base-section-s1" className="space-y-5 scroll-mt-5">
           <button
             type="button"
             onClick={() => toggleSection('s1')}
@@ -2139,7 +2188,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 2: Business Rules & Constraints */}
-        <div className="space-y-5">
+        <div id="knowledge-base-section-s2" className="space-y-5 scroll-mt-5">
           <button
             type="button"
             onClick={() => toggleSection('s2')}
@@ -2259,7 +2308,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 3: Products & Pricing */}
-        <div className="space-y-5">
+        <div id="knowledge-base-section-s3" className="space-y-5 scroll-mt-5">
           <button
             type="button"
             onClick={() => toggleSection('s3')}
@@ -2736,7 +2785,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 4: FAQs & Common Questions */}
-        <div className="space-y-5">
+        <div id="knowledge-base-section-s4" className="space-y-5 scroll-mt-5">
           <button
             type="button"
             onClick={() => toggleSection('s4')}
@@ -2811,7 +2860,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
 
         {/* SECTION 5: Document Uploads */}
-        <div className="space-y-5">
+        <div id="knowledge-base-section-s5" className="space-y-5 scroll-mt-5">
           <button
             type="button"
             onClick={() => toggleSection('s5')}
@@ -2954,7 +3003,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             mensagem do cliente. Ver server/services/firstContactMessage.ts.
             Nenhum bloco = comportamento de sempre (a IA responde a 1ª
             mensagem normalmente), sem precisar de um toggle separado. */}
-        <div className="space-y-5">
+        <div id="knowledge-base-section-s6" className="space-y-5 scroll-mt-5">
           <button
             type="button"
             onClick={() => toggleSection('s6')}
