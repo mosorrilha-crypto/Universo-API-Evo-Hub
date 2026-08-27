@@ -69,3 +69,6 @@
 - [x] PR4/#96: adaptar o runtime para compor somente documentos publicados, com fallback seguro e observabilidade.
 - [x] PR4/#96: testar equivalência, atualização entre respostas, isolamento de tenant e regressão de atendimento.
 - [x] PR4/#96: validar, documentar e abrir a mudança para revisão humana conjunta, sem auto-merge.
+- [x] PR4/#96 revisão: migrar o catálogo público para a fonte publicada e eliminar divergência de preço após publicação.
+- [x] PR4/#96 revisão: migrar a cópia administrativa de Base de Conhecimento para a fonte publicada ou registrar risco explícito.
+- [ ] PR4/#96 revisão: testar catálogo/cópia contra publicação, fallback e isolamento; atualizar PR e aguardar nova revisão.

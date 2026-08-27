@@ -96,7 +96,10 @@ Cada documento carrega `tenant_id`, `version`, `status` (`draft`/`published`/`ar
 `updated_at`, `updated_by` — resolve o "editar sem risco" (rascunho vs. publicado) e a auditoria
 que faltavam. O runtime só aceita a composição se os oito tipos estiverem `published`; ignora
 rascunhos e histórico arquivado. Em lacuna ou indisponibilidade, aplica fallback explícito ao
-blob legado e registra a fonte em log estruturado, sem interromper o atendimento.
+blob legado e registra a fonte em log estruturado, sem interromper o atendimento. O catálogo
+público e a cópia cross-tenant autorizada usam a mesma composição por uma variante de plataforma
+explícita; assim, uma publicação de preço não deixa a página pública ou um novo tenant com dado
+defasado.
 
 **Regra de publicação (fechada em 06/08/2026):** só `admin` ou `saas_admin` publica
 (`draft` → `published`) — role já existe no RBAC (Bloco 2.D), não é conceito novo. O agente

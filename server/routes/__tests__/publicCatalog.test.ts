@@ -21,6 +21,24 @@ async function startServer(seed: Record<string, any[]>) {
   });
 }
 
+function completePublishedDocuments(tenantId: string, serviceCatalog: Record<string, unknown>) {
+  const documentTypes = [
+    'business_profile', 'brand_voice', 'service_catalog', 'pricing_policies',
+    'opening_hours', 'faq', 'human_handoff_rules', 'media_assets',
+  ];
+  return documentTypes.map((documentType) => ({
+    id: `${tenantId}-${documentType}`,
+    tenant_id: tenantId,
+    document_type: documentType,
+    version: 2,
+    status: 'published',
+    data: documentType === 'service_catalog' ? serviceCatalog : {},
+    created_at: '2026-08-27T00:00:00.000Z',
+    updated_at: '2026-08-27T00:00:00.000Z',
+    published_at: '2026-08-27T00:00:00.000Z',
+  }));
+}
+
 afterEach(async () => {
   if (server) {
     await new Promise<void>((resolve) => server!.close(() => resolve()));
@@ -89,6 +107,28 @@ describe('GET /api/public/catalog/:slug', () => {
     const missingResponse = await fetch(`${baseUrl}/api/public/catalog/desconhecido`);
     expect(privateResponse.status).toBe(404);
     expect(missingResponse.status).toBe(404);
+  });
+
+  it('usa o catálogo da publicação tipada, não o preço defasado do blob de rollback', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{ id: 'tenant-monique', name: 'Monique', slug: 'monique', currency: 'PYG', locale: 'es-PY', public_catalog_enabled: true }],
+      knowledge_base: [{
+        tenant_id: 'tenant-monique',
+        data: { products: [{ name: 'Microlips', price: 'Gs 550.000', priceAmount: 550000 }] },
+      }],
+      knowledge_base_documents: completePublishedDocuments('tenant-monique', {
+        products: [{ name: 'Microlips', price: 'Gs 600.000', priceAmount: 600000, description: 'Preço publicado.' }],
+      }),
+    }));
+
+    const response = await fetch(`${baseUrl}/api/public/catalog/monique`);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.catalog.products).toEqual([expect.objectContaining({
+      name: 'Microlips', price: 'Gs 600.000', priceAmount: 600000, description: 'Preço publicado.',
+    })]);
+    expect(JSON.stringify(body)).not.toContain('550.000');
   });
 });
 

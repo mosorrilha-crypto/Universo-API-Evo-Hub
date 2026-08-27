@@ -6,7 +6,7 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { setEvolutionWebhook } from '../services/evolutionSend';
 import { getGlobalPromptLayerRow, setGlobalPromptLayer } from '../services/globalPromptStore';
-import { getKnowledgeBase } from '../services/knowledgeBaseStore';
+import { getRuntimeKnowledgeBaseForPlatform } from '../services/knowledgeBaseStore';
 import { LEGACY_DEFAULT_TENANT_ID } from '../services/tenantContext';
 import {
   changeTenantSubscription,
@@ -892,7 +892,9 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // firstContactMessage.ts). Conteúdo inline (imagem base64 de produto e
   // de bloco de 1º contato) não tem esse problema, continua igual.
   router.get('/api/admin/tenants/:id/knowledge-base', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const kb = await getKnowledgeBase(req.params.id);
+    // A cópia é um fluxo cross-tenant exclusivo de saas_admin. Usa a mesma
+    // publicação vigente do agente para não clonar preços/catálogo defasados.
+    const kb = (await getRuntimeKnowledgeBaseForPlatform(req.params.id)).knowledgeBase;
     if (!kb) return res.status(404).json({ error: 'Este tenant ainda não tem Base de Conhecimento salva.' });
     res.json({
       knowledgeBase: {

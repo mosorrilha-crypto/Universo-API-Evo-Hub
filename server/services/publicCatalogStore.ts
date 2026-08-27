@@ -9,6 +9,7 @@ import {
   type ProductVariant,
   type BeforeAfterPair,
   type AgentKnowledgeBase,
+  getRuntimeKnowledgeBaseForPlatform,
 } from './knowledgeBaseStore';
 
 export interface PublicBeforeAfterPair {
@@ -179,13 +180,12 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
   if (error) throw error;
   if (!tenant?.slug || tenant.public_catalog_enabled !== true) return null;
 
-  const { data: knowledgeBaseRow, error: knowledgeBaseError } = await getPlatformDb()
-    .from('knowledge_base')
-    .select('data')
-    .eq('tenant_id', tenant.id)
-    .maybeSingle();
-  if (knowledgeBaseError) throw knowledgeBaseError;
-  const knowledgeBase = knowledgeBaseRow?.data as AgentKnowledgeBase | undefined;
+  // A rota pública não possui JWT de operador, por isso usa a variante de
+  // plataforma explicitamente permitida. Ela conserva o mesmo fallback
+  // tipado→legado do agente e evita catálogo público defasado depois de uma
+  // publicação administrativa.
+  const runtimeKnowledgeBase = await getRuntimeKnowledgeBaseForPlatform(tenant.id);
+  const knowledgeBase = runtimeKnowledgeBase.knowledgeBase;
   if (!knowledgeBase) return null;
 
   const catalog = await toPublicCatalog(tenant, knowledgeBase.products || []);
