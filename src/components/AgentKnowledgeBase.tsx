@@ -2506,7 +2506,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 })()}
               </div>
 
-              <div className="lg:col-span-3">
+              <div className={selectedProduct ? 'fixed inset-x-0 bottom-0 top-16 z-50 overflow-y-auto border-t border-emerald-400/25 bg-slate-950 p-3 shadow-2xl lg:static lg:z-auto lg:col-span-3 lg:overflow-visible lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none' : 'lg:col-span-3'}>
                 {!selectedProduct ? (
                   <div className="h-full min-h-[280px] flex items-center justify-center p-6 text-center text-xs text-slate-500 bg-slate-950/60 rounded-xl border border-dashed border-slate-800">
                     Selecione um item na lista ao lado pra editar, ou crie um novo com "Criar item".
@@ -2514,6 +2514,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 ) : (
                   <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between space-y-2 relative group">
                   {(() => { const prod = selectedProduct; return (<>
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-3 lg:hidden">
+                    <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wide text-emerald-300">Editar produto</p><p className="truncate text-sm font-bold text-white">{prod.name}</p></div>
+                    <button type="button" onClick={() => setSelectedProductId(null)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[10px] font-bold text-slate-200 hover:bg-slate-800"><X className="h-3.5 w-3.5" /> Fechar</button>
+                  </div>
                   <div className="absolute top-3 right-3 z-10 flex items-center gap-0.5">
                     <button
                       type="button"
