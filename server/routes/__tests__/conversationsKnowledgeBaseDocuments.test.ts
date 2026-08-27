@@ -18,6 +18,7 @@ let supabase: ReturnType<typeof createFakeSupabase>;
 
 function fakeAuthenticateToken(req: any, _res: any, next: any) {
   req.user = { id: currentOperator, tenantId: currentTenant, role: currentRole };
+  supabase.__setRpcTenant(currentTenant);
   next();
 }
 

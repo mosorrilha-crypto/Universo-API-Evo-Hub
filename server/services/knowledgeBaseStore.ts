@@ -434,16 +434,10 @@ const KNOWLEDGE_BASE_DOCUMENT_FIELDS: Record<KnowledgeBaseDocumentType, readonly
   media_assets: ['documents', 'firstContactBlocks'],
 };
 
-const KNOWLEDGE_BASE_DOCUMENT_DATA_KEYS: Record<KnowledgeBaseDocumentType, readonly string[]> = {
-  business_profile: ['companyName', 'agentGoal', 'businessModel', 'locationMapsUrl'],
-  brand_voice: ['toneOfVoice'],
-  service_catalog: ['products'],
-  pricing_policies: ['pricingAndPolicies', 'businessRules'],
-  opening_hours: [],
-  faq: ['faqs'],
-  human_handoff_rules: [],
-  media_assets: ['documents', 'firstContactBlocks'],
-};
+// Fonte única de verdade: os campos aceitos na API são exatamente os campos
+// que a composição publicada entrega ao agente. Evita divergência silenciosa
+// entre validação de rascunho e adaptação no corte futuro de runtime.
+const KNOWLEDGE_BASE_DOCUMENT_DATA_KEYS: Record<KnowledgeBaseDocumentType, readonly string[]> = KNOWLEDGE_BASE_DOCUMENT_FIELDS;
 
 export class KnowledgeBaseDocumentValidationError extends Error {
   constructor(message: string) {
@@ -662,8 +656,20 @@ export async function listKnowledgeBaseDocumentStates(tenantId: string): Promise
 }
 
 export async function getKnowledgeBaseDocumentState(tenantId: string, documentType: KnowledgeBaseDocumentType): Promise<KnowledgeBaseDocumentState> {
-  const states = await listKnowledgeBaseDocumentStates(tenantId);
-  return states.find((state) => state.documentType === documentType)!;
+  const db = getDb();
+  const { data, error } = await db
+    .from('knowledge_base_documents')
+    .select(DOCUMENT_SELECT_COLUMNS)
+    .eq('tenant_id', tenantId)
+    .eq('document_type', documentType)
+    .in('status', ['published', 'draft']);
+  if (error) throw error;
+  const liveDocuments = ((data || []) as KnowledgeBaseDocumentRow[]).map(normalizeKnowledgeBaseDocument);
+  return {
+    documentType,
+    published: liveDocuments.find((document) => document.status === 'published') || null,
+    draft: liveDocuments.find((document) => document.status === 'draft') || null,
+  };
 }
 
 /** Cria ou atualiza exclusivamente o rascunho, sem tocar em publicação. */
