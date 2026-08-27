@@ -233,7 +233,7 @@ function extractMessagingConversationCost(stats: GraphActionStat[] | undefined, 
   return nullableNumber(stats.find((item) => item.action_type === actionType)?.value);
 }
 
-function actionValue(stats: GraphActionStat[] | undefined, names: string[]): number {
+export function extractActionValue(stats: GraphActionStat[] | undefined, names: string[]): number {
   if (!Array.isArray(stats)) return 0;
   const match = stats.find((item) => names.includes(String(item.action_type || '')));
   return numberOrZero(match?.value);
@@ -380,9 +380,9 @@ function toTrafficAd(insight: GraphInsightRow | undefined, ad: GraphAdRow | unde
     costPerMessagingConversation: costFromMeta ?? (messaging.value > 0 ? spend / messaging.value : null),
     cpm: nullableNumber(insight?.cpm) ?? (impressions > 0 ? (spend / impressions) * 1000 : null),
     frequency: nullableNumber(insight?.frequency),
-    outboundClicks: numberOrZero(insight?.outbound_clicks) || actionValue(insight?.actions, ['outbound_clicks', 'link_click']),
-    landingPageViews: numberOrZero(insight?.landing_page_views) || actionValue(insight?.actions, ['landing_page_view']),
-    videoThruPlays: numberOrZero(insight?.video_thruplay_watched_actions) || actionValue(insight?.actions, ['video_view']),
+    outboundClicks: numberOrZero(insight?.outbound_clicks) || extractActionValue(insight?.actions, ['outbound_click', 'outbound_clicks', 'link_click']),
+    landingPageViews: extractActionValue(insight?.actions, ['landing_page_view']),
+    videoThruPlays: numberOrZero(insight?.video_thruplay_watched_actions) || extractActionValue(insight?.actions, ['video_view']),
     qualityRanking: insight?.quality_ranking || null,
     engagementRateRanking: insight?.engagement_rate_ranking || null,
     conversionRateRanking: insight?.conversion_rate_ranking || null,
@@ -407,7 +407,7 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
         use_account_attribution_setting: 'true',
         fields: [
           'account_currency', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name',
-          'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm', 'frequency', 'outbound_clicks', 'landing_page_views', 'video_thruplay_watched_actions', 'actions', 'cost_per_action_type',
+          'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm', 'frequency', 'video_thruplay_watched_actions', 'actions', 'cost_per_action_type',
           'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'date_start', 'date_stop',
         ].join(','),
       },
