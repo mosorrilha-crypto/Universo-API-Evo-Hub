@@ -76,6 +76,37 @@ describe('PATCH /api/admin/tenants/:id', () => {
     expect(res.status).toBe(404);
   });
 
+  // Incidente real em produção (27/08/2026): o slug do tenant real da Monique
+  // foi trocado pra "Pestañas por Monique" (espaço + acento) ao editar o nome
+  // pelo painel — a rota aceitava qualquer string, e isso derrubou os dois
+  // catálogos públicos e os anúncios ativos até alguém notar e reverter via SQL.
+  it('rejeita slug com espaço, acento ou maiúscula (nunca deixa o catálogo público cair)', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste' }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: 'Pestañas por Monique' }),
+    });
+    expect(res.status).toBe(400);
+    expect(supabase.__tables.tenants.find((t: any) => t.id === 'tenant-a')?.slug).toBe('monique-teste');
+  });
+
+  it('aceita slug minúsculo com números e hífen', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: null }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: 'clic-piscinas-2' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tenant.slug).toBe('clic-piscinas-2');
+  });
+
   it('admin comum (não saas_admin) é rejeitado com 403', async () => {
     supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X' }] });
     ({ server, baseUrl } = await startServer('admin'));

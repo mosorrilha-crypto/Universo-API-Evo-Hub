@@ -1713,13 +1713,15 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-slate-400">Slug (opcional, usado no catálogo público)</label>
+              <label className="mb-1 block text-xs text-slate-400">Slug (opcional, vira parte da URL pública do catálogo — ex: /catalogo/minha-empresa)</label>
               <input
                 type="text"
                 value={editingTenant.slug}
                 onChange={(e) => setEditingTenant({ ...editingTenant, slug: e.target.value })}
+                placeholder="minha-empresa"
                 className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
               />
+              <p className="mt-1 text-[10px] text-amber-400/90">Só minúsculas, números e hífen — sem espaço, acento ou maiúscula. Mudar o slug de um tenant com catálogo público ativo derruba a URL antiga na hora.</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>

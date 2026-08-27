@@ -40,6 +40,22 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
+/**
+ * Formato exigido pro `slug` de um tenant: minúsculas, dígitos e hífen, sem
+ * espaço/acento/maiúscula. Mesma forma que a rota pública já exige na URL
+ * (`^\/catalogo\/([a-z0-9][a-z0-9-]{0,79})\/?$`, `src/main.tsx`) — um slug
+ * fora desse formato nunca bate com nenhuma URL real, então salvá-lo assim
+ * derruba o catálogo público em silêncio, sem erro nenhum na hora de salvar.
+ *
+ * Achado real em produção (27/08/2026): o slug do tenant real da Monique foi
+ * trocado pelo painel de "monique-teste" pra "Pestañas por Monique" (espaço +
+ * acento) ao editar só o nome — a rota aceitou de bom grado, sem validar
+ * nada, e os dois catálogos públicos (além dos 5 anúncios ativos apontando
+ * pra lá) saíram do ar até alguém notar e reverter via SQL direto no banco.
+ */
+const TENANT_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
+const TENANT_SLUG_FORMAT_ERROR = 'Slug inválido: use só letras minúsculas, números e hífen (ex: "minha-empresa"), sem espaço, acento ou maiúscula — esse valor vira parte da URL pública do catálogo.';
+
 export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl, sharedMetaPhoneNumberId }: AdminRouterDeps): Router {
   const router = Router();
 
@@ -99,6 +115,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, slug, currency, locale, secondaryCurrency, secondaryLocale, phoneNumberId, accessToken, wabaId, mode, segment } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
+    if (slug && !TENANT_SLUG_PATTERN.test(slug)) return res.status(400).json({ error: TENANT_SLUG_FORMAT_ERROR });
 
     const { data: tenant, error: tenantError } = await db()
       .from('tenants')
@@ -157,7 +174,10 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       if (!String(name).trim()) return res.status(400).json({ error: 'Campo "name" não pode ficar vazio.' });
       patch.name = name;
     }
-    if (slug !== undefined) patch.slug = slug || null;
+    if (slug !== undefined) {
+      if (slug && !TENANT_SLUG_PATTERN.test(slug)) return res.status(400).json({ error: TENANT_SLUG_FORMAT_ERROR });
+      patch.slug = slug || null;
+    }
     if (currency !== undefined) patch.currency = currency;
     if (locale !== undefined) patch.locale = locale;
     if (segment !== undefined) patch.segment = segment;
