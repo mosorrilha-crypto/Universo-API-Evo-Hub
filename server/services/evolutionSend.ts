@@ -111,13 +111,22 @@ export async function sendEvolutionMediaMessage(
 
   const isAudio = mimeType.startsWith('audio/');
   const mediatype = isAudio ? 'audio' : mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('video/') ? 'video' : 'document';
+  // Achado real (27/08/2026): `exampleImageBase64` do catálogo é salvo como
+  // data URI completa ("data:image/png;base64,...", vindo direto do upload
+  // no navegador) e um chamador (runMidiaTool em autoReply.ts) mandava esse
+  // valor sem tirar o prefixo — a Evolution API rejeita com "Owned media
+  // must be a url or base64", derrubando silenciosamente o envio da foto de
+  // exemplo pro cliente. Limpa aqui, na função de envio, pra proteger todo
+  // chamador de uma vez (mesmo padrão de limpeza já usado nos outros
+  // pontos que montam esse payload manualmente).
+  const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
 
   const res = await fetch(`${apiUrl!.replace(/\/$/, '')}/message/sendMedia/${instanceName}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: apiKey! },
     body: JSON.stringify({
       number: to,
-      media: base64,
+      media: cleanBase64,
       mediatype,
       mimetype: mimeType,
       caption: isAudio ? undefined : caption,
