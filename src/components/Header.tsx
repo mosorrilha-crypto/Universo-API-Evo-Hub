@@ -46,7 +46,7 @@ interface HeaderProps {
 }
 
 type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
-type ToolsMenuKind = 'configuration' | 'platform';
+type ToolsMenuKind = 'configuration';
 type DesktopMenuPosition = { top: number; left: number };
 
 const firstName = (name?: string | null) => (name || 'Operador').trim().split(/\s+/)[0] || 'Operador';
@@ -68,10 +68,9 @@ export const Header: React.FC<HeaderProps> = ({
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const mobileTenantMenuRef = useRef<HTMLDivElement>(null);
   const configurationButtonRef = useRef<HTMLButtonElement>(null);
-  const platformButtonRef = useRef<HTMLButtonElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [openToolsMenu, setOpenToolsMenu] = useState<'configuration' | 'platform' | null>(null);
+  const [openToolsMenu, setOpenToolsMenu] = useState<'configuration' | null>(null);
   const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
   const [desktopMenuPosition, setDesktopMenuPosition] = useState<DesktopMenuPosition | null>(null);
   const isSpanish = language === 'es';
@@ -90,9 +89,9 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   const primaryNavigation: NavigationItem[] = [
@@ -108,11 +107,10 @@ export const Header: React.FC<HeaderProps> = ({
     ...(canSeeCatalog ? [{ id: 'catalog' as ActiveTab, label: copy.publicCatalog, icon: <Link2 className="w-4 h-4" /> }] : []),
     ...(canSeeQuality ? [{ id: 'quality' as ActiveTab, label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
-  const platformNavigation: NavigationItem[] = canSeeSaasMaster ? [
+  const saasNavigation: NavigationItem[] = canSeeSaasMaster ? [
     { id: 'saas', label: copy.companies, icon: <Layers className="w-4 h-4" /> },
   ] : [];
   const isConfigurationActive = configurationNavigation.some((item) => item.id === activeTab);
-  const isPlatformActive = platformNavigation.some((item) => item.id === activeTab);
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -129,9 +127,8 @@ export const Header: React.FC<HeaderProps> = ({
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        const trigger = openToolsMenu === 'configuration' ? configurationButtonRef.current : platformButtonRef.current;
         setOpenToolsMenu(null);
-        trigger?.focus();
+        configurationButtonRef.current?.focus();
       }
     };
     const closeOnViewportChange = () => setOpenToolsMenu(null);
@@ -172,8 +169,7 @@ export const Header: React.FC<HeaderProps> = ({
   const scrollTabs = (direction: 'left' | 'right') => tabsRef.current?.scrollBy({ left: direction === 'left' ? -320 : 320, behavior: 'smooth' });
   const toggleToolsMenu = (kind: ToolsMenuKind, placement: 'mobile' | 'desktop') => {
     if (placement === 'desktop' && openToolsMenu !== kind) {
-      const trigger = kind === 'configuration' ? configurationButtonRef.current : platformButtonRef.current;
-      const triggerBounds = trigger?.getBoundingClientRect();
+      const triggerBounds = configurationButtonRef.current?.getBoundingClientRect();
       if (triggerBounds) {
         setDesktopMenuPosition({
           top: triggerBounds.bottom + 8,
@@ -195,7 +191,7 @@ export const Header: React.FC<HeaderProps> = ({
   const renderToolsMenu = (kind: ToolsMenuKind, placement: 'mobile' | 'desktop', label: string, items: NavigationItem[], isActive: boolean) => {
     if (!items.length) return null;
     const isOpen = openToolsMenu === kind;
-    const triggerRef = kind === 'configuration' ? configurationButtonRef : platformButtonRef;
+    const triggerRef = configurationButtonRef;
     return (
       <div className={placement === 'desktop' ? 'relative shrink-0' : 'w-full'} data-tools-menu>
         <button
@@ -230,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-1"><button type="button" onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')} className="rounded-md border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-200" title={isSpanish ? 'Português' : 'Español'}>{isSpanish ? 'PT' : 'ES'}</button><button type="button" onClick={toggleTheme} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-800" title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button><button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setOpenToolsMenu(null); setIsMobileTenantMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}</button></div>
       </div>
       {isMobileMenuOpen && <div className="border-t border-slate-800 pb-3 pt-2 md:hidden">
-        <div className="flex flex-col gap-1 pb-1">{primaryNavigation.map(renderTab)}{renderToolsMenu('configuration', 'mobile', copy.configure, configurationNavigation, isConfigurationActive)}{renderToolsMenu('platform', 'mobile', copy.platformGroup, platformNavigation, isPlatformActive)}</div>
+        <div className="flex flex-col gap-1 pb-1">{primaryNavigation.map(renderTab)}{renderToolsMenu('configuration', 'mobile', copy.configure, configurationNavigation, isConfigurationActive)}{saasNavigation.map(renderTab)}</div>
         <div className="relative mt-3 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" ref={mobileTenantMenuRef}>
           <div className="flex items-center justify-between gap-2">
             {canSeeSaasMaster && tenants.length > 1 ? (
@@ -316,7 +312,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         ))}
       </div>
-      <div className="hidden items-center border-t border-slate-800/80 py-1.5 md:flex"><button type="button" onClick={() => scrollTabs('left')} className="mr-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.previous}><ChevronLeft className="w-4 h-4" /></button><div ref={tabsRef} className="flex w-full items-center gap-1 overflow-x-auto scroll-smooth py-0.5">{primaryNavigation.map(renderTab)}{renderToolsMenu('configuration', 'desktop', copy.configure, configurationNavigation, isConfigurationActive)}{renderToolsMenu('platform', 'desktop', copy.platformGroup, platformNavigation, isPlatformActive)}</div><button type="button" onClick={() => scrollTabs('right')} className="ml-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.next}><ChevronRight className="w-4 h-4" /></button></div>
+      <div className="hidden items-center border-t border-slate-800/80 py-1.5 md:flex"><button type="button" onClick={() => scrollTabs('left')} className="mr-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.previous}><ChevronLeft className="w-4 h-4" /></button><div ref={tabsRef} className="flex w-full items-center gap-1 overflow-x-auto scroll-smooth py-0.5">{primaryNavigation.map(renderTab)}{renderToolsMenu('configuration', 'desktop', copy.configure, configurationNavigation, isConfigurationActive)}{saasNavigation.map(renderTab)}</div><button type="button" onClick={() => scrollTabs('right')} className="ml-1 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.next}><ChevronRight className="w-4 h-4" /></button></div>
     </div>
   </header>;
 };
