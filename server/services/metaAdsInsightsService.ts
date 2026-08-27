@@ -78,6 +78,14 @@ export interface MetaTrafficOverview {
   campaigns: MetaTrafficCampaign[];
   ads: MetaTrafficAd[];
   warnings: string[];
+  accountSummary: {
+    balanceDue: number | null;
+    amountSpent: number | null;
+    spendCap: number | null;
+    availableSpendCap: number | null;
+    currency: string;
+    accountStatus: string | null;
+  };
 }
 
 interface MetaAdsCredentials {
@@ -129,6 +137,14 @@ interface GraphCampaignRow {
   configured_status?: string;
 }
 
+interface GraphAccountRow {
+  balance?: string | number;
+  amount_spent?: string | number;
+  spend_cap?: string | number;
+  currency?: string;
+  account_status?: string | number;
+}
+
 export class MetaAdsConfigurationError extends Error {}
 export class MetaAdsRequestError extends Error {}
 /** A Meta retorna o código 190 quando o token foi revogado, expirou ou ficou inválido. */
@@ -143,6 +159,11 @@ function nullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = typeof value === 'number' ? value : Number.parseFloat(String(value));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function calculateAvailableSpendCap(spendCap: number | null, amountSpent: number | null): number | null {
+  if (spendCap === null || amountSpent === null) return null;
+  return Math.max(0, spendCap - amountSpent);
 }
 
 function validAdAccountId(value: string): string {
@@ -345,7 +366,7 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
   }
 
   const queryBase = { limit: '250' };
-  const [insightsResponse, adsResponse, campaignsResponse] = await Promise.all([
+  const [insightsResponse, adsResponse, campaignsResponse, accountResponse] = await Promise.all([
     graphGet<{ data?: GraphInsightRow[] }>(
       `${credentials.adAccountId}/insights`,
       {
@@ -371,6 +392,11 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
       { ...queryBase, fields: 'id,name,effective_status,configured_status' },
       credentials.accessToken
     ),
+    graphGet<GraphAccountRow>(
+      credentials.adAccountId,
+      { fields: 'balance,amount_spent,spend_cap,currency,account_status' },
+      credentials.accessToken
+    ).catch(() => ({} as GraphAccountRow)),
   ]);
 
   const insights = insightsResponse.data || [];
@@ -458,6 +484,20 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
     ? summary.spend / summary.messagingConversations
     : null;
 
+  const firstInsight = insights[0];
+  const accountBalance = nullableNumber(accountResponse.balance);
+  const accountAmountSpent = nullableNumber(accountResponse.amount_spent);
+  const accountSpendCap = nullableNumber(accountResponse.spend_cap);
+  const availableSpendCap = calculateAvailableSpendCap(accountSpendCap, accountAmountSpent);
+  const accountSummary = {
+    balanceDue: accountBalance,
+    amountSpent: accountAmountSpent,
+    spendCap: accountSpendCap,
+    availableSpendCap,
+    currency: accountResponse.currency || firstInsight?.account_currency || 'BRL',
+    accountStatus: accountResponse.account_status === undefined ? null : String(accountResponse.account_status),
+  };
+
   const warnings: string[] = [];
   if (summary.spend > 0 && summary.messagingConversations === 0) {
     warnings.push('A Meta não retornou conversas iniciadas neste período. Verifique se o objetivo e a métrica de resultado da campanha estão configurados para mensagens.');
@@ -466,7 +506,6 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
     warnings.push('Os rankings de qualidade ainda não estão disponíveis para estes anúncios ou não atingiram volume suficiente.');
   }
 
-  const firstInsight = insights[0];
   return {
     datePreset,
     dateStart: firstInsight?.date_start || null,
@@ -478,6 +517,7 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
     campaigns: [...campaignMap.values()].sort((a, b) => b.spend - a.spend),
     ads: trafficAds.sort((a, b) => b.spend - a.spend),
     warnings,
+    accountSummary,
   };
 }
 
