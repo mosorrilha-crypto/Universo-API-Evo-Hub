@@ -2,6 +2,7 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { authSessionRateLimiter } from '../middleware/rateLimit';
 
 interface AuthRouterDeps {
   jwtSecret: string;
@@ -77,6 +78,41 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
       res.json({ token, operator: { name: operator.name, email: operator.email, role: operator.role, tenantId: operator.tenant_id } });
     } catch (e: any) {
       res.status(401).json({ error: e.message || 'Falha na autenticação' });
+    }
+  });
+
+  // A UI pode ter um perfil antigo salvo no navegador, mas ele nunca é
+  // autoridade para liberar a administração SaaS. Esta rota valida o JWT e
+  // relê o registro atual do operador, garantindo que uma alteração de papel
+  // no banco tenha efeito logo no próximo carregamento do aplicativo.
+  router.get('/api/auth/session', authSessionRateLimiter, async (req, res) => {
+    try {
+      if (!supabase) throw new Error('Serviço de autenticação indisponível.');
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      if (!token) return res.sendStatus(401);
+
+      const payload = jwt.verify(token, jwtSecret) as { id?: string };
+      if (!payload.id) return res.sendStatus(403);
+
+      const { data, error } = await supabase
+        .from('operators')
+        .select('id, tenant_id, email, name, role')
+        .eq('id', payload.id)
+        .maybeSingle();
+      if (error || !data) return res.sendStatus(403);
+
+      res.json({
+        operator: {
+          id: data.id,
+          tenantId: data.tenant_id,
+          email: data.email,
+          name: data.name,
+          role: data.role,
+        },
+      });
+    } catch {
+      return res.sendStatus(403);
     }
   });
 

@@ -27,7 +27,7 @@ import { OperationsHomeWorkspace } from './components/OperationsHomeWorkspace';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
 import { LoginModal } from './components/LoginModal';
-import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
+import { getAuthToken, setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
 import { hasRoleAtLeast } from './lib/roles';
 import {
@@ -146,6 +146,46 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  // Um perfil em localStorage só melhora a continuidade visual; nunca libera
+  // a plataforma SaaS até que a sessão seja confirmada pelo servidor.
+  const [isSaasSessionConfirmed, setIsSaasSessionConfirmed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!getAuthToken()) {
+      setCurrentUser(null);
+      return () => { cancelled = true; };
+    }
+
+    apiFetch('/api/auth/session')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const operator = data?.operator;
+        if (!operator?.id || !operator?.tenantId || !operator?.role) {
+          setAuthToken(null);
+          setCurrentUser(null);
+          return;
+        }
+        setCurrentUser((previous) => ({
+          id: operator.id,
+          tenantId: operator.tenantId,
+          name: operator.name || previous?.name || 'Operador',
+          email: operator.email || previous?.email || '',
+          role: operator.role,
+          avatar: previous?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+          department: previous?.department || 'Operador',
+        }));
+        setIsSaasSessionConfirmed(operator.role === 'saas_admin');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setIsSaasSessionConfirmed(false);
+        setCurrentUser(null);
+      });
+
+    return () => { cancelled = true; };
+  }, []);
 
   // Persiste a última aba escolhida para que um refresh seja apenas um
   // refresh: o operador volta ao mesmo contexto em vez de cair sempre em
@@ -174,7 +214,7 @@ export const App: React.FC = () => {
   const canManageAgent = canSeeAdminTools && tenantCapabilities.agent;
   const canSeeCatalog = canSeeAdminTools && tenantCapabilities.catalog;
   const canSeeQuality = canSeeAdminTools && tenantCapabilities.quality;
-  const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
+  const canSeeSaasMaster = isSaasSessionConfirmed && hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
@@ -1132,6 +1172,7 @@ export const App: React.FC = () => {
           handleSetActiveTab('home');
           setCurrentUser(null);
           setAuthToken(null);
+          setIsSaasSessionConfirmed(false);
           setIsLoginModalOpen(true);
           clearCachedTenantScopedData();
           showToast('Sessão encerrada');
@@ -1140,6 +1181,7 @@ export const App: React.FC = () => {
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
                 capabilities={tenantCapabilities}
+        canAccessSaasAdmin={canSeeSaasMaster}
       />
       {activeTab !== 'whatsapp' && canSeeConversations && (
         <FloatingAttendanceButton
@@ -1435,6 +1477,7 @@ export const App: React.FC = () => {
         onLogin={(usr, token) => {
           setCurrentUser(usr);
           setAuthToken(token || null);
+          setIsSaasSessionConfirmed(Boolean(token) && usr.role === 'saas_admin');
           setIsLoginModalOpen(false);
           showToast(`Bem-vindo, ${usr.name}!`);
         }}
