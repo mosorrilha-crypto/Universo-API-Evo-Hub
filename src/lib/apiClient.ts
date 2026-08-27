@@ -73,9 +73,8 @@ export const setTenantOverride = (tenantId: string | null) => {
 
 export const getTenantOverride = () => tenantOverride;
 
-// Callback disparado quando o servidor rejeita explicitamente o token da
-// sessão (403 — token presente mas inválido/expirado, ver server/middleware/auth.ts:
-// jwt.verify falhou). App.tsx registra isso pra forçar um novo login com
+// Callback disparado somente quando o servidor marca explicitamente o token
+// da sessão como inválido/expirado (ver server/middleware/auth.ts). App.tsx registra isso pra forçar um novo login com
 // aviso, em vez de deixar a tela travada com dados velhos e falhas
 // silenciosas.
 //
@@ -106,7 +105,10 @@ export const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {})
     headers.set('X-Tenant-Id', tenantOverride);
   }
   const response = await fetch(input, { ...init, headers });
-  if (response.status === 403 && currentToken) {
+  // 403 também é a resposta normal de RBAC quando uma sessão válida não tem
+  // papel suficiente. Só o middleware de autenticação marca token inválido;
+  // sem essa distinção, abrir uma área administrativa fazia logout indevido.
+  if (response.status === 403 && currentToken && response.headers.get('X-Auth-Session-Invalid') === 'true') {
     setAuthToken(null);
     onUnauthorized?.();
   }
