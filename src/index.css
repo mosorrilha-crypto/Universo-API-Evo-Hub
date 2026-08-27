@@ -626,6 +626,40 @@ html[data-theme='light'] .operations-module-frame__badge { color:#0369a1; backgr
 html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; background:rgba(14,165,233,.07); }
 @media (max-width:640px) { .operations-module-frame__header { align-items:flex-start; flex-direction:column; } .operations-module-frame__badge { white-space:normal; } }
 
+/* Financeiro móvel — a primeira dobra apresenta contexto, métricas e atalhos;
+   fluxo e recorrências viram detalhes em uma folha sobreposta, sem página longa. */
+@media (max-width: 639px) {
+  .operations-module-frame--compact { gap: .6rem; }
+  .operations-module-frame--compact > .operations-module-frame__header { display: none; }
+
+  .financial-workspace__nav { top: .45rem; border-radius: .95rem; padding: .3rem; }
+  .financial-workspace__mobile-detail-close { position: fixed; right: 1rem; bottom: 1rem; z-index: 60; min-height: 2.75rem; border-radius: 999px; padding: 0 .95rem; color: #102018; background: #5ebf92; box-shadow: 0 12px 30px rgba(0, 0, 0, .38); font-size: .72rem; font-weight: 800; }
+
+  .agenda-financeiro-workspace--financial { gap: .65rem; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__hero { border-radius: 1rem; padding: .75rem .85rem; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__hero > div { flex-direction: column; gap: .6rem; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__hero .max-w-2xl > div,
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__hero .max-w-2xl > p { display: none; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__hero h1 { font-size: 1.2rem; line-height: 1.15; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__actions button { min-height: 2.4rem; padding: .5rem; font-size: .68rem; }
+
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__metrics > article { min-width: 0; border-radius: .9rem; padding: .65rem; box-shadow: none; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__metrics > article > div > span:last-child { display: none; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__metrics > article > div > span:first-child { overflow: hidden; color: #94a3b8; font-size: .58rem; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__metrics > article > p:nth-child(2) { margin-top: .4rem; overflow: hidden; font-size: .88rem; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+  .agenda-financeiro-workspace--financial .agenda-financeiro-workspace__metrics > article > p:last-child { margin-top: .3rem; overflow: hidden; font-size: .57rem; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+
+  .agenda-financeiro-workspace--financial > section:has(> div > div > select),
+  .agenda-financeiro-workspace--financial > section:has(> div .lucide-repeat) { display: none; }
+  .agenda-financeiro-workspace--financial-detail-flow > section:has(> div > div > select),
+  .agenda-financeiro-workspace--financial-detail-recurring > section:has(> div .lucide-repeat) { position: fixed; inset: .75rem; z-index: 50; display: block; max-height: calc(100dvh - 1.5rem); overflow-y: auto; border-color: rgba(94, 191, 146, .35); background: #151c22; box-shadow: 0 28px 70px rgba(0, 0, 0, .55); }
+  .agenda-financeiro-workspace--financial-detail-flow > section:has(> div > div > select) { padding: .95rem; }
+  .agenda-financeiro-workspace--financial-detail-recurring > section:has(> div .lucide-repeat) { padding: .95rem; }
+  .agenda-financeiro-workspace--financial > section:has(.lucide-circle-dollar-sign) { margin: 0; border-radius: .9rem; padding: .85rem; }
+}
+
 /* Modelo estrutural 6a: contexto essencial dentro da conversa, sem terceira coluna permanente */
 .atendimento-context-strip { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:11px 24px; border-bottom:1px solid var(--border-subtle, #1b242b); background:var(--surface-sunken, #11161b); }
 .atendimento-context-strip__copy { min-width:0; }
