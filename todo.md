@@ -57,3 +57,10 @@
 - [x] PR2/#96: garantir publicação somente por `admin`/`saas_admin`, sem aceitar `tenant_id` externo nem sobrescrever publicação.
 - [x] PR2/#96: cobrir autorização, isolamento, conflito, auditoria e exclusão de rascunhos do caminho publicado.
 - [x] PR2/#96: validar lint, testes e build; atualizar documentação e registrar a entrega para revisão humana.
+- [x] PR2/#96: mesclar a PR #455 após autorização explícita e confirmar a integração na branch principal.
+- [x] PR3/#96: revisar editor legado, contratos de documentos tipados e sugestões da revisão da PR2.
+- [x] PR3/#96: eliminar duplicação dos campos permitidos, tornar o fake RPC realmente tenant-scoped e otimizar leitura por tipo.
+- [x] PR3/#96: implementar cliente HTTP e painel administrativo de estados publicado/rascunho por tipo documental.
+- [x] PR3/#96: permitir edição de rascunho e publicação somente a administradores, com confirmação e histórico auditável.
+- [x] PR3/#96: cobrir UI e cliente com testes, preservando o editor legado e sem alterar o runtime do agente.
+- [x] PR3/#96: validar, documentar e submeter a PR para revisão humana sem auto-merge.

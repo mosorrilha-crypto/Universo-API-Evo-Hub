@@ -1300,6 +1300,7 @@ export const App: React.FC = () => {
         {activeTab === 'knowledge' && canSeeAdminTools && kbLoaded && (
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
+            activeTenantId={activeTenant.id}
             businessHours={businessHours}
             onSaveBusinessHours={async (updatedHours) => {
               try {

@@ -46,6 +46,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
+import { KnowledgeBaseTypedDocumentsPanel } from './KnowledgeBaseTypedDocumentsPanel';
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
@@ -61,6 +62,8 @@ interface AgentKnowledgeBaseProps {
   canUseBusinessTemplates?: boolean;
   /** Slug do tenant ativo para abrir a pré-visualização pública sem autenticação. */
   publicCatalogSlug?: string;
+  /** Tenant em edição; ativa o painel tipado da PR3 sem interferir no editor legado. */
+  activeTenantId?: string;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -436,6 +439,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   onFetchTenantKnowledgeBase,
   canUseBusinessTemplates = false,
   publicCatalogSlug,
+  activeTenantId,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -1628,6 +1632,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           </button>
         </div>
       </div>
+
+      {activeTenantId && <KnowledgeBaseTypedDocumentsPanel activeTenantId={activeTenantId} />}
 
       <section className="knowledge-workspace__audit rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

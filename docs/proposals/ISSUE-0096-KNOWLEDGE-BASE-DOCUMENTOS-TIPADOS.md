@@ -60,11 +60,17 @@ O adaptador `composePublishedKnowledgeBase(tenantId)` devolve o contrato legado 
 
 ## RBAC, isolamento e qualidade de resposta
 
-Todas as rotas resolvem `tenantId` exclusivamente de `req.user.tenantId` (com a exceção controlada do header de tenant para `saas_admin`). A API da PR2 é exclusiva de `admin` e `saas_admin`, pois revela rascunhos e ainda não há editor com permissões granulares. A edição nunca atualiza uma versão publicada: ela cria ou atualiza o rascunho seguinte.
+Todas as rotas resolvem `tenantId` exclusivamente de `req.user.tenantId` (com a exceção controlada do header de tenant para `saas_admin`). A API da PR2 e o editor da PR3 são exclusivos de `admin` e `saas_admin`, pois revelam rascunhos e o editor legado real já era admin-only. A edição nunca atualiza uma versão publicada: ela cria ou atualiza o rascunho seguinte.
 
 Uma publicação não sobrescreve a versão anterior. O RPC transacional arquiva a publicação vigente, promove o único rascunho e registra o evento `published` na mesma transação, sob trava por tenant/tipo e mantendo o índice único parcial como segunda barreira. A criação/edição de rascunho também registra seu evento na mesma transação; não há janela em que documento e auditoria possam divergir.
 
 > **Metadado `lastSaved`:** a auditoria da PR1 confirmou que ele pertence apenas à UI legada e não é consumido pelo agente. A PR2 não o copia para `data`; na PR3, o editor deverá exibir estado derivado de `updated_at` e `published_at`.
+
+### Implementação da PR3 (27/08/2026)
+
+O painel visual de documentos tipados foi implementado sem substituir o formulário legado. Ele permite selecionar o tipo, comparar a publicação com o rascunho, editar conteúdo estruturado, salvar rascunho, abrir a trilha de auditoria e confirmar a publicação em modal deliberado. A interface repete que o agente ainda usa o blob legado, removendo qualquer ambiguidade de que o botão de publicação alteraria respostas em produção antes da PR4.
+
+Os aperfeiçoamentos não bloqueantes apontados na revisão da PR2 foram incorporados nesta etapa: uma única fonte define campos aceitos e compostos; o fake dos RPCs exige tenant de contexto em testes; e a rota de leitura de um tipo usa filtro direto de `document_type`.
 
 O agente chama `composePublishedKnowledgeBase` no início de **cada resposta**. Nenhuma versão é guardada no estado da conversa. Isso garante que uma nova publicação seja usada já no próximo turno, sem fazer o agente responder com conteúdo de rascunho nem ficar preso a preço, catálogo ou regra antiga.
 

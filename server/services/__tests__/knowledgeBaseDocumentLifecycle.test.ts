@@ -32,6 +32,7 @@ describe('ciclo de vida de documentos tipados', () => {
       knowledge_base_document_events: [],
     });
     initDb(supabase as any);
+    supabase.__setRpcTenant(TENANT_A);
   });
 
   afterEach(() => initDb(null));
@@ -84,6 +85,14 @@ describe('ciclo de vida de documentos tipados', () => {
       draft: expect.objectContaining({ tenantId: TENANT_A, version: 2 }),
     });
     expect(JSON.stringify(states)).not.toContain('Empresa B');
+  });
+
+  it('usa o tenant do contexto RPC, não a ordem dos dados semeados, ao criar o rascunho', async () => {
+    supabase.__setRpcTenant(TENANT_B);
+    const draft = await saveKnowledgeBaseDocumentDraft(TENANT_B, 'business_profile', { companyName: 'Empresa B revisada' }, 'operator-b');
+
+    expect(draft).toMatchObject({ tenantId: TENANT_B, version: 2, status: 'draft' });
+    expect(supabase.__tables.knowledge_base_documents.filter((row: any) => row.tenant_id === TENANT_A && row.status === 'draft')).toHaveLength(0);
   });
 
   it('rejeita campos fora do contrato e catálogo estruturalmente inválido antes de persistir', () => {

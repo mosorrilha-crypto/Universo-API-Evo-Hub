@@ -147,6 +147,7 @@ function buildConversationListSummaries(tables: Tables): Row[] {
 
 export function createFakeSupabase(seed: Tables = {}) {
   const tables: Tables = seed;
+  let rpcTenantId: string | null = null;
   return {
     from(table: string) {
       const rows = table === 'conversation_list_summaries'
@@ -161,17 +162,24 @@ export function createFakeSupabase(seed: Tables = {}) {
       };
     },
     rpc(functionName: string, args: Record<string, any>) {
+      if (!rpcTenantId) {
+        return {
+          async single() {
+            return { data: null, error: { code: '42501', message: 'Contexto de tenant ausente no fake RPC' } };
+          },
+        };
+      }
       if (functionName === 'save_knowledge_base_document_draft') {
         const documents = tables.knowledge_base_documents || (tables.knowledge_base_documents = []);
         const events = tables.knowledge_base_document_events || (tables.knowledge_base_document_events = []);
-        const matchingDocuments = documents.filter((row) => row.document_type === args.p_document_type);
+        const matchingDocuments = documents.filter((row) => row.tenant_id === rpcTenantId && row.document_type === args.p_document_type);
         const draft = matchingDocuments.find((row) => row.status === 'draft');
         return {
           async single() {
             const now = new Date().toISOString();
             const saved = draft || {
               id: randomUUID(),
-              tenant_id: matchingDocuments[0]?.tenant_id || 'tenant-a',
+              tenant_id: rpcTenantId,
               document_type: args.p_document_type,
               version: Math.max(0, ...matchingDocuments.map((row) => Number(row.version) || 0)) + 1,
               status: 'draft',
@@ -205,7 +213,7 @@ export function createFakeSupabase(seed: Tables = {}) {
 
       const documents = tables.knowledge_base_documents || (tables.knowledge_base_documents = []);
       const events = tables.knowledge_base_document_events || (tables.knowledge_base_document_events = []);
-      const draft = documents.find((row) => row.document_type === args.p_document_type && row.status === 'draft');
+      const draft = documents.find((row) => row.tenant_id === rpcTenantId && row.document_type === args.p_document_type && row.status === 'draft');
       if (!draft) {
         return {
           async single() {
@@ -236,6 +244,10 @@ export function createFakeSupabase(seed: Tables = {}) {
           return { data: draft, error: null };
         },
       };
+    },
+    /** Modela o tenant derivado do JWT que os RPCs reais leem via RLS. */
+    __setRpcTenant(tenantId: string | null) {
+      rpcTenantId = tenantId;
     },
     __tables: tables,
   } as any;
