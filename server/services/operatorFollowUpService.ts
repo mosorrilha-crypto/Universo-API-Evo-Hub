@@ -20,7 +20,7 @@ import type { GoogleGenAI } from '@google/genai';
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 import { getConversation, recordOutgoingMessage } from './conversationStore';
 import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage } from './metaSend';
-import { markOperatorGuidanceConsumed, type Escalation } from './escalationStore';
+import { logEscalation, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, type Escalation } from './escalationStore';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 
 const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -124,7 +124,22 @@ export async function sendOperatorGuidedFollowUp(
   }, { ai: deps.ai });
   if (!safety.approved) {
     console.warn(`🛡️ [Revisor pré-envio] retomada guiada bloqueada para ${escalation.phone}: ${safety.reason}`);
-    return { sent: false, reason: `Revisor pré-envio bloqueou o rascunho (${safety.severity}): ${safety.reason}` };
+    // Achado real (26/08/2026): sem isto, um bloqueio aqui só aparecia como um
+    // toast passageiro no painel — a orientação do operador ficava "pendente"
+    // pra sempre e ele não tinha como revisar/editar/enviar o texto que a IA
+    // tentou mandar. Reaproveita o mesmo mecanismo do bloqueio normal
+    // (mesmo sourceKey do webhooks.ts) pra atualizar este card com o novo
+    // rascunho bloqueado, disponível em "Aprovar e enviar".
+    await logEscalation(
+      tenantId,
+      escalation.phone,
+      escalation.contactName,
+      `Revisor pré-envio bloqueou a retomada guiada pela orientação do operador (${safety.source}, risco ${safety.severity}): ${safety.reason} Rascunho bloqueado: ${message}`,
+      escalation.lastMessage || escalation.operatorReply,
+      'general',
+      { sourceKey: reviewerEscalationSourceKey(escalation.phone), priority: 'high', blockedDraft: message }
+    );
+    return { sent: false, reason: `Revisor pré-envio bloqueou o rascunho (${safety.severity}): ${safety.reason} Revise em "Aprovar e enviar".` };
   }
 
   await sendWhatsAppTextMessage(deps.metaPhoneNumberId, deps.metaAccessToken, escalation.phone, message);
