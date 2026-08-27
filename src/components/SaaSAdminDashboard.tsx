@@ -718,7 +718,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [segmentFilter, setSegmentFilter] = useState<string>('all');
-  const [activeAdminTab, setActiveAdminTab] = useState<'tenants' | 'users' | 'tokens_telemetry' | 'roadmap' | 'global_prompt'>('tenants');
+  const [activeAdminTab, setActiveAdminTab] = useState<'tenants' | 'tokens_telemetry' | 'roadmap' | 'global_prompt'>('tenants');
 
   // Camada 1 (Global) do prompt do agente — editável por saas_admin sem
   // PR+deploy (ver server/services/globalPromptStore.ts). content null =
@@ -952,8 +952,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const DEFAULT_USER_AVATAR = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [userSearch, setUserSearch] = useState('');
-  const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -1000,6 +998,41 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   const [isSavingTenantEdit, setIsSavingTenantEdit] = useState(false);
   const [tenantEditError, setTenantEditError] = useState<string | null>(null);
   const [entitlementsTenant, setEntitlementsTenant] = useState<{ id: string; name: string } | null>(null);
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [isCreatingCompany, setIsCreatingCompany] = useState(false);
+  const [createCompanyError, setCreateCompanyError] = useState<string | null>(null);
+
+  const openAddUserForTenant = (tenantId: string) => {
+    setNewUserTenantId(tenantId);
+    setNewUserName('');
+    setNewUserEmail('');
+    setNewUserPassword('');
+    setNewUserRole('operator');
+    setUserFormError(null);
+    setIsAddUserModalOpen(true);
+  };
+
+  const handleCreateCompany = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!newCompanyName.trim()) return;
+    setIsCreatingCompany(true);
+    setCreateCompanyError(null);
+    try {
+      const response = await apiFetch('/api/admin/tenants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newCompanyName.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      setNewCompanyName('');
+      await fetchRealTenants();
+    } catch (error: any) {
+      setCreateCompanyError(error.message || 'Falha ao criar a empresa.');
+    } finally {
+      setIsCreatingCompany(false);
+    }
+  };
 
   const openEditTenant = (t: (typeof realTenants)[number]) => {
     setTenantEditError(null);
@@ -1428,7 +1461,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       <div className="saas-workspace__banner bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
         <p className="text-xs text-slate-400 flex items-center gap-2">
           <Layers className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          Controle de empresas cadastradas, conexões de WhatsApp e cotas de IA Gemini.
+          Empresas, operadores, conexões e capacidades reunidos no mesmo contexto de gestão.
         </p>
       </div>
 
@@ -1446,17 +1479,6 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           <span>Tenants & Conexões</span>
         </button>
 
-        <button
-          onClick={() => setActiveAdminTab('users')}
-          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-2 transition-all cursor-pointer ${
-            activeAdminTab === 'users'
-              ? 'bg-sky-600 text-white shadow-md shadow-sky-950/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Gerenciador de Usuários ({usersList.length})</span>
-        </button>
 
         <button
           onClick={() => setActiveAdminTab('roadmap')}
@@ -1540,8 +1562,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
           <div className="bg-slate-900/75 border border-slate-800/70 rounded-2xl p-3.5 shadow-none space-y-3.5 sm:p-4">
             <div className="flex flex-col items-start justify-between gap-2.5 sm:flex-row sm:items-center">
               <div>
-                <h2 className="text-base font-bold text-white">Lista de Clientes SaaS (Tenants Cadastrados)</h2>
-                <p className="text-xs text-slate-400">Empresas reais cadastradas no banco — cada linha corresponde a um tenant de verdade.</p>
+                <h2 className="text-base font-bold text-white">Empresas e operadores</h2>
+                <p className="text-xs text-slate-400">Cada card reúne a empresa, seus acessos e as ações de gestão em um só lugar.</p>
               </div>
 
               <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -1556,6 +1578,19 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                   <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
                 </div>
 
+                <form onSubmit={handleCreateCompany} className="flex w-full gap-1.5 sm:w-auto">
+                  <input
+                    type="text"
+                    value={newCompanyName}
+                    onChange={(event) => setNewCompanyName(event.target.value)}
+                    placeholder="Nome da nova empresa"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:border-emerald-500 focus:outline-none sm:w-48"
+                  />
+                  <button type="submit" disabled={!newCompanyName.trim() || isCreatingCompany} className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
+                    <Plus className="h-3.5 w-3.5" /> {isCreatingCompany ? 'Criando...' : 'Nova empresa'}
+                  </button>
+                </form>
+
                 <select
                   value={segmentFilter}
                   onChange={(e) => setSegmentFilter(e.target.value)}
@@ -1569,8 +1604,10 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               </div>
             </div>
 
+            {createCompanyError && <p role="alert" className="rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-200">{createCompanyError}</p>}
+
             <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-800/70 pt-2.5" aria-label="Ações de conexão">
-              <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Conexões</span>
+              <span className="mr-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Conexões por empresa</span>
               <GerenciarCredenciaisCapi />
               <GerenciarCredenciaisInstagram />
               <ConectarEvolutionQrCode />
@@ -1584,119 +1621,54 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
               </div>
             ) : (
               <>
-                <div className="space-y-2 sm:hidden">
-                  {filteredRealTenants.map((t) => (
-                    <article key={t.id} className="rounded-xl bg-slate-950/45 px-3 py-2.5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-sm font-bold text-white">{t.name}</h3>
-                          <p className="mt-0.5 truncate font-mono text-[10px] text-slate-500">{t.slug || t.id}</p>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {filteredRealTenants.map((tenant) => {
+                    const tenantUsers = usersList.filter((user) => user.tenantId === tenant.id);
+                    return <article key={tenant.id} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/45">
+                      <div className="border-b border-slate-800 bg-slate-900/70 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Empresa</p>
+                            <h3 className="mt-1 truncate text-base font-black text-white">{tenant.name}</h3>
+                            <p className="mt-1 truncate font-mono text-[10px] text-slate-500">{tenant.slug || tenant.id}</p>
+                          </div>
+                          {!tenant.isActive ? (
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-500/10 px-2 py-1 text-[10px] font-semibold text-rose-300"><Lock className="h-3 w-3" /> Bloqueada</span>
+                          ) : tenant.whatsappConnected ? (
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-300"><CheckCircle2 className="h-3 w-3" /> Conectada</span>
+                          ) : (
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-400"><AlertCircle className="h-3 w-3" /> Sem conexão</span>
+                          )}
                         </div>
-                        {!t.isActive ? (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-500/10 px-2 py-1 text-[10px] font-semibold text-rose-300">
-                            <Lock className="h-3 w-3" /> Bloqueado
-                          </span>
-                        ) : t.whatsappConnected ? (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-300">
-                            <CheckCircle2 className="h-3 w-3" /> Conectado
-                          </span>
-                        ) : (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-800/70 px-2 py-1 text-[10px] font-semibold text-slate-400">
-                            <AlertCircle className="h-3 w-3" /> Offline
-                          </span>
-                        )}
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-slate-400">
+                          <span><span className="mr-1 uppercase tracking-wide text-slate-600">Segmento</span>{tenant.segment || '—'}</span>
+                          <span><span className="mr-1 uppercase tracking-wide text-slate-600">Moeda</span>{tenant.currency} / {tenant.locale}</span>
+                        </div>
                       </div>
-                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] text-slate-400">
-                        <span><span className="mr-1 uppercase tracking-wide text-slate-600">Segmento</span>{t.segment || '—'}</span>
-                        <span><span className="mr-1 uppercase tracking-wide text-slate-600">Moeda</span>{t.currency} / {t.locale}</span>
-                        <span><span className="mr-1 uppercase tracking-wide text-slate-600">Criado</span>{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</span>
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-slate-800/70 pt-2">
-                        <button type="button" onClick={() => openEditTenant(t)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
-                          <Pencil className="h-3 w-3" /> Editar
-                        </button>
-                        <button type="button" onClick={() => openBillingModal(t)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
-                          <CreditCard className="h-3 w-3" /> Pagamentos
-                        </button>
-                        <button type="button" onClick={() => setEntitlementsTenant({ id: t.id, name: t.name })} className="inline-flex items-center gap-1 rounded-lg bg-sky-950/60 px-2 py-1 text-[10px] font-semibold text-sky-200 hover:bg-sky-900/60">
-                          <Layers className="h-3 w-3" /> Capacidades
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleTenantBlock(t)}
-                          disabled={busyBlockTenantId === t.id}
-                          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold disabled:opacity-50 ${t.isActive ? 'bg-amber-950/60 text-amber-300 hover:bg-amber-900/60' : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60'}`}
-                        >
-                          {t.isActive ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />} {t.isActive ? 'Bloquear' : 'Reativar'}
-                        </button>
-                        <button type="button" onClick={() => openDeleteTenant(t)} className="inline-flex items-center gap-1 rounded-lg bg-rose-950/60 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-900/60">
-                          <Trash2 className="h-3 w-3" /> Excluir
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
 
-                <div className="responsive-table-scroll hidden overflow-x-auto sm:block">
-                  <table className="min-w-[680px] w-full text-left text-xs text-slate-300">
-                    <thead className="bg-slate-950 border-b border-slate-800 text-slate-400 uppercase font-semibold text-[10px]">
-                      <tr>
-                        <th className="p-3">Empresa / Tenant</th>
-                        <th className="p-3">Segmento</th>
-                        <th className="p-3">Moeda / Idioma</th>
-                        <th className="p-3">WhatsApp</th>
-                        <th className="p-3">Criado em</th>
-                        <th className="p-3">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/80">
-                      {filteredRealTenants.map((t) => (
-                        <tr key={t.id} className="transition-colors hover:bg-slate-800/50">
-                          <td className="p-3">
-                            <div className="text-sm font-bold text-white">{t.name}</div>
-                            <div className="font-mono text-[10px] text-slate-500">ID: {t.id}{t.slug ? ` (${t.slug})` : ''}</div>
-                          </td>
-                          <td className="p-3 text-slate-300">{t.segment || '—'}</td>
-                          <td className="p-3 text-slate-300">{t.currency} / {t.locale}</td>
-                          <td className="p-3">
-                            {!t.isActive ? (
-                              <span className="flex items-center gap-1 text-[10px] text-rose-400"><Lock className="h-3 w-3" /> Bloqueado</span>
-                            ) : t.whatsappConnected ? (
-                              <span className="flex items-center gap-1 text-[10px] text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Conectado</span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-[10px] text-slate-500"><AlertCircle className="h-3 w-3" /> Não conectado</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-slate-400">{t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '—'}</td>
-                          <td className="p-3">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <button type="button" onClick={() => openEditTenant(t)} title="Editar empresa" className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
-                                <Pencil className="h-3 w-3" /> Editar
-                              </button>
-                              <button type="button" onClick={() => openBillingModal(t)} title="Histórico de pagamento" className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700">
-                                <CreditCard className="h-3 w-3" /> Pagamentos
-                              </button>
-                              <button type="button" onClick={() => setEntitlementsTenant({ id: t.id, name: t.name })} title="Plano e capacidades" className="inline-flex items-center gap-1 rounded-lg bg-sky-950/60 px-2 py-1 text-[10px] font-semibold text-sky-200 hover:bg-sky-900/60">
-                                <Layers className="h-3 w-3" /> Capacidades
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleToggleTenantBlock(t)}
-                                disabled={busyBlockTenantId === t.id}
-                                title={t.isActive ? 'Bloquear acesso' : 'Reativar acesso'}
-                                className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold disabled:opacity-50 ${t.isActive ? 'bg-amber-950/60 text-amber-300 hover:bg-amber-900/60' : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60'}`}
-                              >
-                                {t.isActive ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />} {t.isActive ? 'Bloquear' : 'Reativar'}
-                              </button>
-                              <button type="button" onClick={() => openDeleteTenant(t)} title="Excluir empresa" className="inline-flex items-center gap-1 rounded-lg bg-rose-950/60 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-900/60">
-                                <Trash2 className="h-3 w-3" /> Excluir
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      <div className="p-4">
+                        <div className="mb-2 flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-white">Usuários desta empresa</p><p className="mt-0.5 text-[10px] text-slate-500">{tenantUsers.length} acesso(s) vinculado(s)</p></div><button type="button" onClick={() => openAddUserForTenant(tenant.id)} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[10px] font-bold text-white transition hover:bg-sky-500"><Plus className="h-3.5 w-3.5" /> Adicionar</button></div>
+                        {isLoadingUsers ? <div className="rounded-xl bg-slate-900/70 px-3 py-4 text-center text-xs text-slate-500">Carregando usuários...</div> : tenantUsers.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 px-3 py-4 text-center text-xs text-slate-500">Nenhum usuário vinculado. Adicione o primeiro acesso.</div> : <div className="space-y-2">
+                          {tenantUsers.map((user) => <div key={user.id} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 p-2.5">
+                            <img src={user.avatar || DEFAULT_USER_AVATAR} alt="" className="h-8 w-8 shrink-0 rounded-full border border-slate-700 object-cover" />
+                            <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-white">{user.name}</p><p className="truncate font-mono text-[10px] text-slate-500">{user.email}</p></div>
+                            <select value={user.role} disabled={savingRoleForUserId === user.id} onChange={(event) => handleUpdateUserRole(user.id, event.target.value as UserRole)} aria-label={`Função de ${user.name}`} className="max-w-28 rounded-lg border border-slate-700 bg-slate-950 px-1.5 py-1 text-[10px] font-bold text-slate-200 focus:border-sky-500 focus:outline-none disabled:opacity-50">
+                              <option value="operator">Operador</option><option value="manager">Gerente</option><option value="admin">Administrador</option><option value="saas_admin" disabled={!isSaasAdminUser}>SaaS Admin</option>
+                            </select>
+                            <div className="flex shrink-0 gap-1"><button type="button" onClick={() => openEditCredentials(user)} title="Editar acesso" className="rounded-lg border border-slate-700 bg-slate-800 p-1.5 text-slate-200 transition hover:bg-slate-700"><KeyRound className="h-3.5 w-3.5" /></button><button type="button" onClick={() => handleDeleteUser(user.id, user.name)} title="Excluir usuário" className="rounded-lg border border-rose-900/70 bg-rose-950/40 p-1.5 text-rose-300 transition hover:bg-rose-900/60"><Trash2 className="h-3.5 w-3.5" /></button></div>
+                          </div>)}
+                        </div>}
+
+                        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-800 pt-3">
+                          <button type="button" onClick={() => openEditTenant(tenant)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:bg-slate-700"><Pencil className="h-3 w-3" /> Empresa</button>
+                          <button type="button" onClick={() => openBillingModal(tenant)} className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 transition hover:bg-slate-700"><CreditCard className="h-3 w-3" /> Pagamentos</button>
+                          <button type="button" onClick={() => setEntitlementsTenant({ id: tenant.id, name: tenant.name })} className="inline-flex items-center gap-1 rounded-lg bg-sky-950/60 px-2 py-1 text-[10px] font-semibold text-sky-200 transition hover:bg-sky-900/60"><Layers className="h-3 w-3" /> Capacidades</button>
+                          <button type="button" onClick={() => handleToggleTenantBlock(tenant)} disabled={busyBlockTenantId === tenant.id} className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition disabled:opacity-50 ${tenant.isActive ? 'bg-amber-950/60 text-amber-300 hover:bg-amber-900/60' : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60'}`}>{tenant.isActive ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}{tenant.isActive ? 'Bloquear' : 'Reativar'}</button>
+                          <button type="button" onClick={() => openDeleteTenant(tenant)} className="inline-flex items-center gap-1 rounded-lg bg-rose-950/60 px-2 py-1 text-[10px] font-semibold text-rose-300 transition hover:bg-rose-900/60"><Trash2 className="h-3 w-3" /> Excluir</button>
+                        </div>
+                      </div>
+                    </article>;
+                  })}
                 </div>
               </>
             )}
@@ -2356,162 +2328,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         </div>
       )}
 
-      {/* TAB CONTENT: GERENCIADOR DE USUÁRIOS E OPERADORES */}
-      {activeAdminTab === 'users' && (
-        <div className="space-y-6 animate-fade-in">
-          {/* Top Actions & KPI Row */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-              <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Users className="w-5 h-5 text-sky-400" />
-                  Gerenciador de Usuários e Operadores do Sistema
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Cadastre novos usuários, altere permissões de acesso e gerencie os operadores por empresa (Tenant)
-                </p>
-              </div>
-
-              <button
-                onClick={() => setIsAddUserModalOpen(true)}
-                className="py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-sky-950/40 flex items-center space-x-2 transition-all cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Novo Usuário / Operador</span>
-              </button>
-            </div>
-
-            {/* User Search & Filter Bar */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Buscar por nome, e-mail..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div className="flex items-center space-x-2 w-full sm:w-auto">
-                <span className="text-xs text-slate-400">Filtrar Função:</span>
-                <select
-                  value={userRoleFilter}
-                  onChange={(e) => setUserRoleFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
-                >
-                  <option value="all">Todas as Funções</option>
-                  <option value="saas_admin">SaaS Master Admin</option>
-                  <option value="admin">Administrador</option>
-                  <option value="manager">Gerente</option>
-                  <option value="operator">Operador</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Users Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold">
-                  <tr>
-                    <th className="p-3 rounded-l-xl">Usuário / Operador</th>
-                    <th className="p-3">E-mail de Acesso</th>
-                    <th className="p-3">Função & Permissão</th>
-                    <th className="p-3">Empresa (Tenant)</th>
-                    <th className="p-3 text-right rounded-r-xl">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {isLoadingUsers ? (
-                    <tr>
-                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">Carregando usuários...</td>
-                    </tr>
-                  ) : usersList.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500">Nenhum usuário cadastrado ainda.</td>
-                    </tr>
-                  ) : (
-                    usersList
-                      .filter((u) => {
-                        const matchesSearch =
-                          u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-                          u.email.toLowerCase().includes(userSearch.toLowerCase());
-                        const matchesRole = userRoleFilter === 'all' || u.role === userRoleFilter;
-                        return matchesSearch && matchesRole;
-                      })
-                      .map((usr) => {
-                        const tenantObj = realTenants.find((t) => t.id === usr.tenantId);
-                        return (
-                          <tr key={usr.id} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="p-3 font-semibold text-white flex items-center space-x-3">
-                              <img
-                                src={usr.avatar || DEFAULT_USER_AVATAR}
-                                alt={usr.name}
-                                className="w-8 h-8 rounded-full object-cover border border-slate-700"
-                              />
-                              <span>{usr.name}</span>
-                            </td>
-                            <td className="p-3 text-slate-300 font-mono text-[11px]">{usr.email}</td>
-                            <td className="p-3">
-                              {(() => {
-                                const roleColors: Record<UserRole, string> = {
-                                  saas_admin: 'bg-sky-950 text-sky-300 border-sky-800',
-                                  admin: 'bg-sky-950 text-sky-300 border-sky-800/80',
-                                  manager: 'bg-blue-950 text-blue-300 border-blue-800/80',
-                                  operator: 'bg-emerald-950 text-emerald-300 border-emerald-800/80',
-                                };
-                                return (
-                                  <select
-                                    value={usr.role}
-                                    disabled={savingRoleForUserId === usr.id}
-                                    onChange={(e) => handleUpdateUserRole(usr.id, e.target.value as UserRole)}
-                                    title="Alterar função e permissão deste usuário"
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer disabled:opacity-50 disabled:cursor-wait focus:outline-none ${roleColors[usr.role]}`}
-                                  >
-                                    <option value="operator">Operador</option>
-                                    <option value="manager">Gerente</option>
-                                    <option value="admin">Administrador</option>
-                                    {/* Sempre renderizada (senão uma linha já saas_admin ficaria sem
-                                        opção correspondente pra quem não é saas_admin) — mas
-                                        desabilitada pra quem não pode escolhê-la, mesma regra do
-                                        backend (PATCH /api/admin/operators/:id). */}
-                                    <option value="saas_admin" disabled={!isSaasAdminUser}>SaaS Master Admin</option>
-                                  </select>
-                                );
-                              })()}
-                            </td>
-                            <td className="p-3">
-                              <span className="text-slate-300 font-medium">
-                                {tenantObj ? tenantObj.name : usr.tenantId}
-                              </span>
-                            </td>
-                            <td className="p-3 text-right">
-                              <button
-                                onClick={() => openEditCredentials(usr)}
-                                className="mr-1.5 p-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg transition-colors cursor-pointer"
-                                title="Trocar login (e-mail) e/ou senha"
-                              >
-                                <KeyRound className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteUser(usr.id, usr.name)}
-                                className="p-1.5 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg transition-colors cursor-pointer"
-                                title="Excluir Usuário"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Usuários são gerenciados no card da empresa correspondente. */}
 
       {/* NEW USER MODAL */}
       {isAddUserModalOpen && (
@@ -2529,8 +2346,8 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 <Users className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">Cadastrar Novo Usuário / Operador</h2>
-                <p className="text-xs text-slate-400">Preencha os dados e defina o nível de acesso à plataforma</p>
+                <h2 className="text-base font-bold text-white">Adicionar usuário à empresa</h2>
+                <p className="text-xs text-slate-400">O acesso ficará vinculado a {realTenants.find((tenant) => tenant.id === newUserTenantId)?.name || 'esta empresa'}.</p>
               </div>
             </div>
 
@@ -2590,23 +2407,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                 </div>
               </div>
 
-              {isSaasAdminUser && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Empresa (Tenant)</label>
-                  <select
-                    value={newUserTenantId}
-                    onChange={(e) => setNewUserTenantId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
-                  >
-                    {realTenants.length === 0 && <option value="">Carregando tenants...</option>}
-                    {realTenants.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <p className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-[11px] text-sky-100">O usuário será criado na empresa acima. Para vincular a outra empresa, abra o card dela e use “Adicionar”.</p>
 
               {userFormError && (
                 <p className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{userFormError}</p>
