@@ -31,6 +31,11 @@ export interface MetaTrafficAd {
   cpc: number | null;
   messagingConversations: number;
   costPerMessagingConversation: number | null;
+  cpm: number | null;
+  frequency: number | null;
+  outboundClicks: number;
+  landingPageViews: number;
+  videoThruPlays: number;
   qualityRanking: string | null;
   engagementRateRanking: string | null;
   conversionRateRanking: string | null;
@@ -49,6 +54,11 @@ export interface MetaTrafficCampaign {
   ctr: number | null;
   messagingConversations: number;
   costPerMessagingConversation: number | null;
+  cpm: number | null;
+  frequency: number | null;
+  outboundClicks: number;
+  landingPageViews: number;
+  videoThruPlays: number;
   adsCount: number;
   activeAdsCount: number;
   pendingReviewAdsCount: number;
@@ -71,6 +81,11 @@ export interface MetaTrafficOverview {
     cpc: number | null;
     messagingConversations: number;
     costPerMessagingConversation: number | null;
+    cpm: number | null;
+    frequency: number | null;
+    outboundClicks: number;
+    landingPageViews: number;
+    videoThruPlays: number;
     activeAdsCount: number;
     pendingReviewAdsCount: number;
     disapprovedAdsCount: number;
@@ -112,6 +127,11 @@ interface GraphInsightRow {
   clicks?: string | number;
   ctr?: string | number;
   cpc?: string | number;
+  cpm?: string | number;
+  frequency?: string | number;
+  outbound_clicks?: string | number;
+  landing_page_views?: string | number;
+  video_thruplay_watched_actions?: string | number;
   actions?: GraphActionStat[];
   cost_per_action_type?: GraphActionStat[];
   quality_ranking?: string;
@@ -211,6 +231,12 @@ export function extractMessagingConversations(stats?: GraphActionStat[]): { acti
 function extractMessagingConversationCost(stats: GraphActionStat[] | undefined, actionType: string | null): number | null {
   if (!actionType || !Array.isArray(stats)) return null;
   return nullableNumber(stats.find((item) => item.action_type === actionType)?.value);
+}
+
+function actionValue(stats: GraphActionStat[] | undefined, names: string[]): number {
+  if (!Array.isArray(stats)) return 0;
+  const match = stats.find((item) => names.includes(String(item.action_type || '')));
+  return numberOrZero(match?.value);
 }
 
 export function isMetaAccessTokenExpired(payload: any): boolean {
@@ -352,6 +378,11 @@ function toTrafficAd(insight: GraphInsightRow | undefined, ad: GraphAdRow | unde
     cpc: nullableNumber(insight?.cpc) ?? (clicks > 0 ? spend / clicks : null),
     messagingConversations: messaging.value,
     costPerMessagingConversation: costFromMeta ?? (messaging.value > 0 ? spend / messaging.value : null),
+    cpm: nullableNumber(insight?.cpm) ?? (impressions > 0 ? (spend / impressions) * 1000 : null),
+    frequency: nullableNumber(insight?.frequency),
+    outboundClicks: numberOrZero(insight?.outbound_clicks) || actionValue(insight?.actions, ['outbound_clicks', 'link_click']),
+    landingPageViews: numberOrZero(insight?.landing_page_views) || actionValue(insight?.actions, ['landing_page_view']),
+    videoThruPlays: numberOrZero(insight?.video_thruplay_watched_actions) || actionValue(insight?.actions, ['video_view']),
     qualityRanking: insight?.quality_ranking || null,
     engagementRateRanking: insight?.engagement_rate_ranking || null,
     conversionRateRanking: insight?.conversion_rate_ranking || null,
@@ -376,7 +407,7 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
         use_account_attribution_setting: 'true',
         fields: [
           'account_currency', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name',
-          'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'actions', 'cost_per_action_type',
+          'spend', 'impressions', 'reach', 'clicks', 'ctr', 'cpc', 'cpm', 'frequency', 'outbound_clicks', 'landing_page_views', 'video_thruplay_watched_actions', 'actions', 'cost_per_action_type',
           'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'date_start', 'date_stop',
         ].join(','),
       },
@@ -434,6 +465,11 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
       ctr: null,
       messagingConversations: 0,
       costPerMessagingConversation: null,
+      cpm: null,
+      frequency: null,
+      outboundClicks: 0,
+      landingPageViews: 0,
+      videoThruPlays: 0,
       adsCount: 0,
       activeAdsCount: 0,
       pendingReviewAdsCount: 0,
@@ -444,6 +480,9 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
     current.reach += ad.reach;
     current.clicks += ad.clicks;
     current.messagingConversations += ad.messagingConversations;
+    current.outboundClicks += ad.outboundClicks;
+    current.landingPageViews += ad.landingPageViews;
+    current.videoThruPlays += ad.videoThruPlays;
     current.adsCount += 1;
     if (ad.deliveryStatus === 'active') current.activeAdsCount += 1;
     if (ad.deliveryStatus === 'pending_review') current.pendingReviewAdsCount += 1;
@@ -461,6 +500,9 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
     total.reach += ad.reach;
     total.clicks += ad.clicks;
     total.messagingConversations += ad.messagingConversations;
+    total.outboundClicks += ad.outboundClicks;
+    total.landingPageViews += ad.landingPageViews;
+    total.videoThruPlays += ad.videoThruPlays;
     if (ad.deliveryStatus === 'active') total.activeAdsCount += 1;
     if (ad.deliveryStatus === 'pending_review') total.pendingReviewAdsCount += 1;
     if (ad.deliveryStatus === 'disapproved') total.disapprovedAdsCount += 1;
@@ -474,12 +516,18 @@ export async function getMetaTrafficOverview(tenantId: string, datePreset: Traff
     cpc: null,
     messagingConversations: 0,
     costPerMessagingConversation: null,
+    cpm: null,
+    frequency: null,
+    outboundClicks: 0,
+    landingPageViews: 0,
+    videoThruPlays: 0,
     activeAdsCount: 0,
     pendingReviewAdsCount: 0,
     disapprovedAdsCount: 0,
   });
   summary.ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : null;
   summary.cpc = summary.clicks > 0 ? summary.spend / summary.clicks : null;
+  summary.cpm = summary.impressions > 0 ? (summary.spend / summary.impressions) * 1000 : null;
   summary.costPerMessagingConversation = summary.messagingConversations > 0
     ? summary.spend / summary.messagingConversations
     : null;

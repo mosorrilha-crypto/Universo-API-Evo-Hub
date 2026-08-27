@@ -72,3 +72,15 @@
 - [x] PR4/#96 revisão: migrar o catálogo público para a fonte publicada e eliminar divergência de preço após publicação.
 - [x] PR4/#96 revisão: migrar a cópia administrativa de Base de Conhecimento para a fonte publicada ou registrar risco explícito.
 - [x] PR4/#96 revisão: testar catálogo/cópia contra publicação, fallback e isolamento; atualizar PR e aguardar nova revisão.
+
+- [x] Dashboard de Crescimento com filtros persistentes por conta, período, status e ordenação
+- [x] Exibição de saldo/limite restante da conta Meta quando a API disponibilizar spend cap e gasto acumulado
+- [x] Busca, filtros por canal/status e paginação na Origem de Leads
+- [x] Endpoints protegidos e idempotentes para criação de conjuntos e anúncios Meta
+- [x] Formulário compacto para criar conjuntos e anúncios sempre pausados, com confirmação textual
+- [x] Ampliar insights com CPM, frequência, cliques de saída, visualizações de página de destino e ThruPlays
+- [x] Adicionar controles persistentes para ocultar/exibir grupos de métricas no dashboard
+- [x] Adicionar busca/filtros/paginação na listagem de anúncios do dashboard
+- [x] Atualizar testes de rota e serviço para criação de conjuntos e anúncios
+- [x] Validar experiência desktop/mobile, build e testes automatizados
+- [ ] Atualizar PR #468 com a implementação concluída
