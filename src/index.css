@@ -661,18 +661,31 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
 
   .agenda-mobile-workspace > nav { position: static; }
   .agenda-financeiro-workspace--agenda { gap: .65rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero { border-radius: 1rem; padding: .8rem .9rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero > div { gap: .65rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl > div { margin-bottom: .25rem; font-size: .58rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero h1 { font-size: 1.25rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero { border-radius: .9rem; padding: .65rem .8rem; background: transparent; box-shadow: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero > div { align-items: center; gap: .35rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl { width: 100%; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl > div { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero h1 { font-size: 1.15rem; line-height: 1.15; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero p { display: none; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions button { width: 100%; min-height: 2.45rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article { padding: .65rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions { width: 100%; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions button { width: auto; min-height: 2.15rem; padding: .45rem .7rem; font-size: .7rem; box-shadow: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics { gap: .45rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article { min-height: 0; padding: .55rem .65rem; border-radius: .9rem; box-shadow: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:nth-child(2) { margin-top: .25rem; font-size: 1.35rem; line-height: 1; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:last-child { margin-top: .25rem; font-size: .62rem; line-height: 1.2; }
   .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
   .agenda-financeiro-workspace--agenda-mobile-pending > section:has(.grid-cols-7) > div:first-child { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-pending > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div { border-radius: 1rem; padding: .75rem; box-shadow: none; }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child p { display: none; }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child { margin-bottom: .55rem; }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:nth-child(2) { margin-bottom: .5rem; }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:nth-child(2) p { line-height: 1.15; }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) { padding: .75rem; }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) h2 { font-size: .9rem; }
+  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) p { display: none; }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }
