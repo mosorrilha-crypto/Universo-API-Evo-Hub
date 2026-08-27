@@ -19,7 +19,7 @@ import OperationsModuleFrame from './components/OperationsModuleFrame';
 import { OperatorCRM } from './components/OperatorCRM';
 import { EscalationsPanel } from './components/EscalationsPanel';
 import { AgendaFinanceiroCenter } from './components/AgendaFinanceiroCenter';
-import { FinancialOperationsCenter } from './components/FinancialOperationsCenter';
+import { FinancialWorkspace } from './components/FinancialWorkspace';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKnowledgeBase';
 import { PublicCatalogSettings } from './components/PublicCatalogSettings';
@@ -1257,8 +1257,7 @@ export const App: React.FC = () => {
             description="Acompanhe receitas, despesas e cobranças em aberto em uma área dedicada."
             accent="blue"
           >
-          <AgendaFinanceiroCenter
-            scope="financial"
+          <FinancialWorkspace
             transactions={transactions}
             onAddTransaction={handleAddTransaction}
             onUpdateTransactionStatus={handleUpdateTransactionStatus}
@@ -1272,11 +1271,6 @@ export const App: React.FC = () => {
             onAddRecurringExpense={handleAddRecurringExpense}
             onToggleRecurringExpense={handleToggleRecurringExpense}
             onDeleteRecurringExpense={handleDeleteRecurringExpense}
-          />
-          <FinancialOperationsCenter
-            currency={activeTenant.currency}
-            locale={activeTenant.locale}
-            onToast={showToast}
           />
           </OperationsModuleFrame>
         )}
