@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 import { KnowledgeBaseTypedDocumentsPanel } from './KnowledgeBaseTypedDocumentsPanel';
+import { KnowledgeBaseDocumentation } from './KnowledgeBaseDocumentation';
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
@@ -455,6 +456,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [isSavingKnowledgeBase, setIsSavingKnowledgeBase] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isBusinessTemplatesOpen, setIsBusinessTemplatesOpen] = useState(false);
+  const [showKnowledgeBaseDocumentation, setShowKnowledgeBaseDocumentation] = useState(false);
 
   // Gavetas (accordion) das 6 seções da aba — pedido real (20/08/2026): a
   // aba tinha ficado extensa demais com tudo sempre visível de uma vez
@@ -1586,6 +1588,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
   const selectedProduct = formData.products.find((p) => p.id === selectedProductId) || null;
 
+  if (showKnowledgeBaseDocumentation) {
+    return <KnowledgeBaseDocumentation isRuntimePublished={usesPublishedKnowledgeBase} onBack={() => setShowKnowledgeBaseDocumentation(false)} />;
+  }
+
   return (
     <div className="knowledge-workspace space-y-6 max-w-7xl mx-auto">
       
@@ -1613,6 +1619,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
         {/* Primary Header Actions */}
         <div className="flex items-center space-x-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowKnowledgeBaseDocumentation(true)}
+            className="px-3 py-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-100 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            title="Abrir mapa lógico, fluxograma e guia de uso da Base de Conhecimento"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Documentação</span>
+          </button>
           {publicCatalogSlug && (
             <a
               href={`/catalogo/${encodeURIComponent(publicCatalogSlug)}`}
