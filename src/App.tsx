@@ -1252,7 +1252,7 @@ export const App: React.FC = () => {
             tenants={tenants}
             canSwitchTenant={canSeeSaasMaster}
             onSelectTenant={handleSelectTenant}
-            pendingCount={escalations.filter((e) => !e.resolved).length}
+            pendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
             leadCount={leads.length}
             onOpenEscalations={() => handleSetActiveTab('escalations')}
           >
