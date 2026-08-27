@@ -1,5 +1,6 @@
 import { getDb } from './db';
-import { createFinancialTransaction, type PaymentMethod } from './financialStore';
+import { type PaymentMethod } from './financialStore';
+import { createFinancialTitle } from './financialTitleStore';
 
 export type FinancialCategoryKind = 'income' | 'expense' | 'cost';
 export type FinancialAccountType = 'cash' | 'bank' | 'digital_wallet' | 'card';
@@ -12,19 +13,19 @@ export interface FinancialAccountRecord { id: string; name: string; accountType:
 export interface InventoryItemRecord { id: string; name: string; sku?: string; itemType: InventoryItemType; unit: string; onHandQuantity: number; reorderPoint: number; averageUnitCost: number; active: boolean; }
 export interface StockMovementRecord { id: string; inventoryItemId: string; movementType: StockMovementType; quantity: number; unitCost: number; reason?: string; sourceRef?: string; occurredAt: string; }
 export interface PurchaseItemInput { inventoryItemId: string; quantity: number; unitCost: number; }
-export interface PurchaseOrderRecord { id: string; supplierName: string; status: PurchaseStatus; paymentMethod: PaymentMethod; notes?: string; totalAmount: number; receivedAt?: string; financialTransactionId?: string; items?: PurchaseItemInput[]; }
+export interface PurchaseOrderRecord { id: string; supplierName: string; status: PurchaseStatus; paymentMethod: PaymentMethod; notes?: string; totalAmount: number; receivedAt?: string; financialTransactionId?: string; financialTitleId?: string; items?: PurchaseItemInput[]; }
 
 const CATEGORY_COLUMNS = 'id, name, kind, color, active';
 const ACCOUNT_COLUMNS = 'id, name, account_type, opening_balance, active';
 const INVENTORY_COLUMNS = 'id, name, sku, item_type, unit, on_hand_quantity, reorder_point, average_unit_cost, active';
 const STOCK_COLUMNS = 'id, inventory_item_id, movement_type, quantity, unit_cost, reason, source_ref, occurred_at';
-const PURCHASE_COLUMNS = 'id, supplier_name, status, payment_method, notes, total_amount, received_at, financial_transaction_id';
+const PURCHASE_COLUMNS = 'id, supplier_name, status, payment_method, notes, total_amount, received_at, financial_transaction_id, financial_title_id';
 
 const toCategory = (row: any): FinancialCategoryRecord => ({ id: row.id, name: row.name, kind: row.kind, color: row.color || undefined, active: row.active });
 const toAccount = (row: any): FinancialAccountRecord => ({ id: row.id, name: row.name, accountType: row.account_type, openingBalance: Number(row.opening_balance), active: row.active });
 const toInventoryItem = (row: any): InventoryItemRecord => ({ id: row.id, name: row.name, sku: row.sku || undefined, itemType: row.item_type, unit: row.unit, onHandQuantity: Number(row.on_hand_quantity), reorderPoint: Number(row.reorder_point), averageUnitCost: Number(row.average_unit_cost), active: row.active });
 const toStockMovement = (row: any): StockMovementRecord => ({ id: row.id, inventoryItemId: row.inventory_item_id, movementType: row.movement_type, quantity: Number(row.quantity), unitCost: Number(row.unit_cost), reason: row.reason || undefined, sourceRef: row.source_ref || undefined, occurredAt: row.occurred_at });
-const toPurchase = (row: any): PurchaseOrderRecord => ({ id: row.id, supplierName: row.supplier_name, status: row.status, paymentMethod: row.payment_method, notes: row.notes || undefined, totalAmount: Number(row.total_amount), receivedAt: row.received_at || undefined, financialTransactionId: row.financial_transaction_id || undefined });
+const toPurchase = (row: any): PurchaseOrderRecord => ({ id: row.id, supplierName: row.supplier_name, status: row.status, paymentMethod: row.payment_method, notes: row.notes || undefined, totalAmount: Number(row.total_amount), receivedAt: row.received_at || undefined, financialTransactionId: row.financial_transaction_id || undefined, financialTitleId: row.financial_title_id || undefined });
 
 export async function listFinancialCategories(tenantId: string) {
   const { data, error } = await getDb().from('financial_categories').select(CATEGORY_COLUMNS).eq('tenant_id', tenantId).order('name');
@@ -137,9 +138,15 @@ export async function receivePurchaseOrder(tenantId: string, purchaseId: string)
     const { error: updateError } = await db.from('inventory_items').update({ on_hand_quantity: nextQuantity, average_unit_cost: nextAverageCost, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', item.id);
     if (updateError) throw updateError;
   }
-  const expense = await createFinancialTransaction(tenantId, { id: crypto.randomUUID(), leadId: `supplier:${purchase.supplierName}`, leadName: purchase.supplierName, leadPhone: 'N/A', productName: `Compra de estoque — ${purchase.supplierName}`, amount: purchase.totalAmount, paymentMethod: purchase.paymentMethod, status: 'pendente', date: new Date().toISOString(), channel: 'Compra de estoque', sourceRef: `purchase:${purchaseId}`, entryType: 'expense' });
   const receivedAt = new Date().toISOString();
-  const { data: received, error: receivedError } = await db.from('purchase_orders').update({ status: 'received', received_at: receivedAt, financial_transaction_id: expense.id, updated_at: receivedAt }).eq('tenant_id', tenantId).eq('id', purchaseId).select(PURCHASE_COLUMNS).single();
+  const title = await createFinancialTitle(tenantId, {
+    direction: 'payable', description: `Compra de estoque — ${purchase.supplierName}`,
+    counterpartyName: purchase.supplierName, counterpartyReference: `supplier:${purchase.supplierName}`,
+    originalAmount: purchase.totalAmount, issueDate: receivedAt, dueDate: receivedAt,
+    paymentMethod: purchase.paymentMethod, purchaseOrderId: purchaseId,
+    sourceRef: `purchase:${purchaseId}`, notes: purchase.notes,
+  });
+  const { data: received, error: receivedError } = await db.from('purchase_orders').update({ status: 'received', received_at: receivedAt, financial_title_id: title.id, updated_at: receivedAt }).eq('tenant_id', tenantId).eq('id', purchaseId).select(PURCHASE_COLUMNS).single();
   if (receivedError) throw receivedError;
   return toPurchase(received);
 }

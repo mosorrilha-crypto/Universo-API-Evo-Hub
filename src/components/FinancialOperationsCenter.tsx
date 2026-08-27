@@ -4,13 +4,14 @@
  * navegação global, evitando poluição do painel de empresas não habilitadas.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Box, CheckCircle2, CirclePlus, Landmark, PackageCheck, RefreshCw, ShoppingCart, Tags } from 'lucide-react';
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Box, CheckCircle2, CirclePlus, Landmark, PackageCheck, RefreshCw, ShoppingCart, Tags, WalletCards } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 
 type Category = { id: string; name: string; kind: 'income' | 'expense' | 'cost'; active: boolean };
 type Account = { id: string; name: string; accountType: 'cash' | 'bank' | 'digital_wallet' | 'card'; openingBalance: number; active: boolean };
 type InventoryItem = { id: string; name: string; sku?: string; itemType: 'product' | 'supply'; unit: string; onHandQuantity: number; reorderPoint: number; averageUnitCost: number; active: boolean };
 type Purchase = { id: string; supplierName: string; status: 'draft' | 'receiving' | 'received' | 'cancelled'; paymentMethod: string; totalAmount: number; receivedAt?: string };
+type FinancialTitle = { id: string; direction: 'payable' | 'receivable'; status: 'open' | 'overdue' | 'partial' | 'settled' | 'cancelled'; description: string; counterpartyName: string; originalAmount: number; openAmount: number; dueDate: string; paymentMethod?: string; categoryId?: string };
 
 interface FinancialOperationsCenterProps {
   currency: string;
@@ -27,6 +28,7 @@ export function FinancialOperationsCenter({ currency, locale, onToast }: Financi
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [titles, setTitles] = useState<FinancialTitle[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +48,14 @@ export function FinancialOperationsCenter({ currency, locale, onToast }: Financi
   const [purchaseQuantity, setPurchaseQuantity] = useState('1');
   const [purchaseUnitCost, setPurchaseUnitCost] = useState('0');
   const [purchasePaymentMethod, setPurchasePaymentMethod] = useState('PIX');
+  const [titleDirection, setTitleDirection] = useState<FinancialTitle['direction']>('payable');
+  const [titleDescription, setTitleDescription] = useState('');
+  const [titleCounterparty, setTitleCounterparty] = useState('');
+  const [titleAmount, setTitleAmount] = useState('0');
+  const [titleDueDate, setTitleDueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [titlePaymentMethod, setTitlePaymentMethod] = useState('PIX');
+  const [titleCategoryId, setTitleCategoryId] = useState('');
+  const [settlementAccountByTitle, setSettlementAccountByTitle] = useState<Record<string, string>>({});
 
   const lowStockItems = useMemo(() => items.filter((item) => item.onHandQuantity <= item.reorderPoint), [items]);
 
@@ -58,13 +68,15 @@ export function FinancialOperationsCenter({ currency, locale, onToast }: Financi
         apiFetch('/api/financial/accounts'),
         apiFetch('/api/financial/inventory/items'),
         apiFetch('/api/financial/purchases'),
+        apiFetch('/api/financial/titles'),
       ]);
       if (responses.some((response) => !response.ok)) throw new Error('Não foi possível carregar a estrutura operacional.');
-      const [categoryData, accountData, itemData, purchaseData] = await Promise.all(responses.map((response) => response.json()));
+      const [categoryData, accountData, itemData, purchaseData, titleData] = await Promise.all(responses.map((response) => response.json()));
       setCategories(categoryData.categories || []);
       setAccounts(accountData.accounts || []);
       setItems(itemData.items || []);
       setPurchases(purchaseData.purchases || []);
+      setTitles(titleData.titles || []);
     } catch (loadError: any) {
       setError(loadError.message || 'Não foi possível carregar a estrutura operacional.');
     } finally {
@@ -100,12 +112,22 @@ export function FinancialOperationsCenter({ currency, locale, onToast }: Financi
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Não foi possível receber a compra.');
       await load();
-      onToast('Compra recebida: estoque e despesa pendente atualizados.');
+      onToast('Compra recebida: estoque e conta a pagar atualizados.');
     } catch (receiveError: any) {
       setError(receiveError.message || 'Não foi possível receber a compra.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const settleTitle = async (title: FinancialTitle) => {
+    const accountId = settlementAccountByTitle[title.id] || accounts[0]?.id;
+    if (!accountId) {
+      setError('Cadastre uma conta financeira antes de baixar um título.');
+      return;
+    }
+    const result = await submit(`/api/financial/titles/${title.id}/settlements`, { amount: title.openAmount, financialAccountId: accountId, paymentMethod: title.paymentMethod || 'PIX' }, `${title.direction === 'payable' ? 'Pagamento' : 'Recebimento'} confirmado e lançado no caixa.`);
+    if (result) setSettlementAccountByTitle((current) => ({ ...current, [title.id]: accountId }));
   };
 
   return (
@@ -167,6 +189,24 @@ export function FinancialOperationsCenter({ currency, locale, onToast }: Financi
             <button disabled={saving || !items.length} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-sky-400 px-2.5 py-2 text-xs font-bold text-slate-950 transition hover:bg-sky-300 disabled:opacity-50"><ShoppingCart className="h-3.5 w-3.5" /> Criar compra</button>
           </form>
           <div className="mt-3 space-y-1.5">{purchases.slice(0, 4).map((purchase) => <div key={purchase.id} className="rounded-lg bg-slate-950/45 px-2.5 py-2"><div className="flex items-center justify-between gap-2"><span className="truncate text-xs font-bold text-slate-200">{purchase.supplierName}</span><span className="shrink-0 text-[10px] text-slate-500">{formatMoney(purchase.totalAmount, currency, locale)}</span></div>{purchase.status === 'draft' ? <button disabled={saving} onClick={() => receivePurchase(purchase.id)} className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300 hover:text-emerald-100 disabled:opacity-50"><PackageCheck className="h-3.5 w-3.5" /> Receber e lançar despesa</button> : <span className="mt-1.5 inline-block text-[10px] font-semibold text-slate-500">Recebida</span>}</div>)}</div>
+        </section>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[.8fr_1.2fr]">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/65 p-3.5" aria-labelledby="financial-titles-create-heading">
+          <div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-300">Fluxo previsto</p><h3 id="financial-titles-create-heading" className="mt-1 text-sm font-bold text-white">Nova conta a pagar ou receber</h3><p className="mt-1 text-xs leading-5 text-slate-400">O título entra na previsão. O caixa só muda quando a baixa é confirmada.</p></div>
+          <form className="mt-3 space-y-2" onSubmit={async (event) => { event.preventDefault(); const result = await submit('/api/financial/titles', { direction: titleDirection, description: titleDescription, counterpartyName: titleCounterparty, originalAmount: Number(titleAmount), dueDate: titleDueDate, paymentMethod: titlePaymentMethod, categoryId: titleCategoryId || undefined }, 'Título financeiro criado.'); if (result) { setTitleDescription(''); setTitleCounterparty(''); setTitleAmount('0'); } }}>
+            <div className="grid grid-cols-2 gap-2"><select value={titleDirection} onChange={(event) => setTitleDirection(event.target.value as FinancialTitle['direction'])} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-white focus:border-violet-400 focus:outline-none"><option value="payable">Conta a pagar</option><option value="receivable">Conta a receber</option></select><input value={titleDueDate} onChange={(event) => setTitleDueDate(event.target.value)} required type="date" className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-white focus:border-violet-400 focus:outline-none" /></div>
+            <input value={titleDescription} onChange={(event) => setTitleDescription(event.target.value)} required minLength={2} maxLength={180} placeholder="Descrição" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white placeholder:text-slate-600 focus:border-violet-400 focus:outline-none" />
+            <div className="grid grid-cols-2 gap-2"><input value={titleCounterparty} onChange={(event) => setTitleCounterparty(event.target.value)} required minLength={2} maxLength={120} placeholder={titleDirection === 'payable' ? 'Fornecedor' : 'Cliente'} className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white placeholder:text-slate-600 focus:border-violet-400 focus:outline-none" /><input value={titleAmount} onChange={(event) => setTitleAmount(event.target.value)} required inputMode="decimal" placeholder="Valor" className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white placeholder:text-slate-600 focus:border-violet-400 focus:outline-none" /></div>
+            <div className="grid grid-cols-2 gap-2"><select value={titleCategoryId} onChange={(event) => setTitleCategoryId(event.target.value)} className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-white focus:border-violet-400 focus:outline-none"><option value="">Sem categoria</option>{categories.filter((category) => category.active && (titleDirection === 'payable' ? category.kind !== 'income' : category.kind === 'income')).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><select value={titlePaymentMethod} onChange={(event) => setTitlePaymentMethod(event.target.value)} className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-white focus:border-violet-400 focus:outline-none"><option>PIX</option><option>Transferência Bancária</option><option>Cartão de Crédito</option><option>Boleto Bancário</option></select></div>
+            <button disabled={saving} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-violet-300 px-2.5 py-2 text-xs font-bold text-slate-950 transition hover:bg-violet-200 disabled:opacity-50"><CirclePlus className="h-3.5 w-3.5" /> Criar título</button>
+          </form>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/65 p-3.5" aria-labelledby="financial-titles-list-heading">
+          <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-300">Previsão e baixa</p><h3 id="financial-titles-list-heading" className="mt-1 text-sm font-bold text-white">Contas a Pagar e Receber</h3></div><span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-200"><WalletCards className="h-3.5 w-3.5" /> {titles.filter((title) => !['settled', 'cancelled'].includes(title.status)).length} em aberto</span></div>
+          <div className="mt-3 space-y-1.5">{titles.length ? titles.map((title) => <div key={title.id} className="rounded-xl bg-slate-950/45 px-3 py-2.5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-xs font-bold text-slate-100">{title.description}</p><p className="mt-0.5 text-[10px] text-slate-500">{title.direction === 'payable' ? 'A pagar' : 'A receber'} · {title.counterpartyName} · vence {new Date(`${title.dueDate}T12:00:00`).toLocaleDateString(locale || 'pt-BR')}</p></div><div className="shrink-0 text-right"><p className="text-xs font-bold text-slate-200">{formatMoney(title.openAmount, currency, locale)}</p><p className={`mt-0.5 text-[10px] font-semibold ${title.status === 'overdue' ? 'text-rose-300' : title.status === 'settled' ? 'text-emerald-300' : 'text-violet-200'}`}>{title.status === 'overdue' ? 'Vencido' : title.status === 'settled' ? 'Liquidado' : title.status === 'partial' ? 'Parcial' : 'Em aberto'}</p></div></div>{!['settled', 'cancelled'].includes(title.status) && <div className="mt-2 flex gap-2"><select value={settlementAccountByTitle[title.id] || accounts[0]?.id || ''} onChange={(event) => setSettlementAccountByTitle((current) => ({ ...current, [title.id]: event.target.value }))} disabled={saving || !accounts.length} className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-[10px] text-white focus:border-violet-400 focus:outline-none"><option value="">Selecione a conta</option>{accounts.filter((account) => account.active).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select><button type="button" onClick={() => settleTitle(title)} disabled={saving || !accounts.length} className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-400 px-2 py-1.5 text-[10px] font-bold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-50">{title.direction === 'payable' ? <ArrowUpFromLine className="h-3.5 w-3.5" /> : <ArrowDownToLine className="h-3.5 w-3.5" />}{title.direction === 'payable' ? 'Pagar' : 'Receber'}</button></div>}</div>) : <div className="rounded-xl bg-slate-950/45 px-3 py-5 text-center text-xs text-slate-500">Nenhum título previsto. Crie uma conta a pagar ou receber para projetar o caixa.</div>}</div>
         </section>
       </div>
     </section>
