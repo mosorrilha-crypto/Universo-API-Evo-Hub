@@ -88,3 +88,8 @@
 - [ ] Verificar branch, diff local e checks da PR #468 antes do merge autorizado
 - [ ] Fazer merge da PR #468 somente após validação final
 - [ ] Confirmar a integração da PR #468 na branch principal
+
+- [x] Corrigir erro #100 da Meta removendo `landing_page_views` da consulta de Insights
+- [x] Cobrir por teste a leitura de `landing_page_view` via `actions`
+- [x] Validar a Central de Tráfego com lint, suíte completa, build e revisão mobile
+- [ ] Enviar e integrar a correção do erro #100 na branch principal

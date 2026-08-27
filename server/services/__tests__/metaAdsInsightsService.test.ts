@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractMessagingConversations,
+  extractActionValue,
   isMetaAccessTokenExpired,
   isTrafficDatePreset,
   trafficDeliveryLabel,
@@ -35,6 +36,14 @@ describe('metaAdsInsightsService', () => {
   it('não inventa conversas quando a Meta não retornou uma ação de mensagens', () => {
     expect(extractMessagingConversations([{ action_type: 'link_click', value: '23' }]))
       .toEqual({ actionType: null, value: 0 });
+  });
+
+  it('lê landing page views pelo action_type oficial e não depende de campo inválido', () => {
+    expect(extractActionValue([
+      { action_type: 'landing_page_view', value: '12' },
+      { action_type: 'outbound_click', value: '18' },
+    ], ['landing_page_view'])).toBe(12);
+    expect(extractActionValue(undefined, ['landing_page_view'])).toBe(0);
   });
 
   it('reconhece o erro de token expirado devolvido pela Meta', () => {
