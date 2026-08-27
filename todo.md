@@ -84,3 +84,7 @@
 - [x] Atualizar testes de rota e serviço para criação de conjuntos e anúncios
 - [x] Validar experiência desktop/mobile, build e testes automatizados
 - [x] Atualizar PR #468 com a implementação concluída
+
+- [ ] Verificar branch, diff local e checks da PR #468 antes do merge autorizado
+- [ ] Fazer merge da PR #468 somente após validação final
+- [ ] Confirmar a integração da PR #468 na branch principal
