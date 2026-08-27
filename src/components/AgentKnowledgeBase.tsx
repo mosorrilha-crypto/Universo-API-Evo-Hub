@@ -46,8 +46,19 @@ import {
   Pencil
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
-import { KnowledgeBaseTypedDocumentsPanel } from './KnowledgeBaseTypedDocumentsPanel';
 import { KnowledgeBaseDocumentation } from './KnowledgeBaseDocumentation';
+import {
+  type KnowledgeBaseDocumentState,
+  listKnowledgeBaseDocumentStates,
+  publishKnowledgeBaseDocument,
+  saveKnowledgeBaseDocumentDraft,
+} from '../lib/knowledgeBaseDocuments';
+import {
+  VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES,
+  composeVisualKnowledgeBaseFromDocuments,
+  documentPayloadsMatch,
+  splitVisualKnowledgeBaseIntoDocuments,
+} from '../lib/knowledgeBaseVisualDocuments';
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
@@ -457,6 +468,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isBusinessTemplatesOpen, setIsBusinessTemplatesOpen] = useState(false);
   const [showKnowledgeBaseDocumentation, setShowKnowledgeBaseDocumentation] = useState(false);
+  const [showHoursEditor, setShowHoursEditor] = useState(false);
+  const [typedDocumentStates, setTypedDocumentStates] = useState<KnowledgeBaseDocumentState[]>([]);
+  const [isLoadingTypedDocuments, setIsLoadingTypedDocuments] = useState(false);
+  const [isPublishingTypedDocuments, setIsPublishingTypedDocuments] = useState(false);
 
   // Gavetas (accordion) das 6 seções da aba — pedido real (20/08/2026): a
   // aba tinha ficado extensa demais com tudo sempre visível de uma vez
@@ -465,6 +480,37 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // inicial; o estado não persiste entre sessões, é só de UI.
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const toggleSection = (key: string) => setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const hydrateVisualFormFromTypedDocuments = (states: KnowledgeBaseDocumentState[]) => {
+    const typedKnowledgeBase = composeVisualKnowledgeBaseFromDocuments(states);
+    setFormData((previous) => ({
+      ...typedKnowledgeBase,
+      products: ensureUniqueIds(typedKnowledgeBase.products, 'prod'),
+      faqs: ensureUniqueIds(typedKnowledgeBase.faqs, 'faq'),
+      documents: ensureUniqueIds(typedKnowledgeBase.documents, 'doc'),
+      firstContactBlocks: ensureUniqueIds(typedKnowledgeBase.firstContactBlocks, 'fcblock'),
+      lastSaved: previous.lastSaved,
+    }));
+  };
+
+  useEffect(() => {
+    if (!usesPublishedKnowledgeBase || !activeTenantId) return;
+    let cancelled = false;
+    setIsLoadingTypedDocuments(true);
+    void listKnowledgeBaseDocumentStates()
+      .then((states) => {
+        if (cancelled) return;
+        setTypedDocumentStates(states);
+        hydrateVisualFormFromTypedDocuments(states);
+      })
+      .catch((error) => {
+        if (!cancelled) setSaveError(error instanceof Error ? error.message : 'Não foi possível carregar a Base de Conhecimento publicada.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingTypedDocuments(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTenantId, usesPublishedKnowledgeBase]);
 
   // Recurso separado (tabela `tenants`, não a base de conhecimento) — save
   // próprio, não passa pelo handleSave/onSaveKnowledgeBase de cima.
@@ -493,7 +539,8 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const handleSaveHours = async () => {
     setIsSavingHours(true);
     try {
-      await onSaveBusinessHours(hoursForm);
+      const saved = await onSaveBusinessHours(hoursForm);
+      if (saved) setShowHoursEditor(false);
     } finally {
       setIsSavingHours(false);
     }
@@ -602,6 +649,25 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setSaveError(null);
     setIsSavedToast(false);
     try {
+      if (usesPublishedKnowledgeBase) {
+        if (!activeTenantId) throw new Error('Empresa ativa indisponível para salvar a Base de Conhecimento.');
+        const payloads = splitVisualKnowledgeBaseIntoDocuments(updated);
+        const changedTypes = VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES.filter((documentType) => {
+          const state = typedDocumentStates.find((item) => item.documentType === documentType);
+          const current = state?.draft?.data || state?.published?.data || {};
+          return !documentPayloadsMatch(current, payloads[documentType]);
+        });
+        for (const documentType of changedTypes) {
+          await saveKnowledgeBaseDocumentDraft(documentType, payloads[documentType]);
+        }
+        const refreshedStates = await listKnowledgeBaseDocumentStates();
+        setTypedDocumentStates(refreshedStates);
+        hydrateVisualFormFromTypedDocuments(refreshedStates);
+        setFormData((previous) => ({ ...previous, lastSaved: updated.lastSaved }));
+        setIsSavedToast(true);
+        setTimeout(() => setIsSavedToast(false), 4000);
+        return;
+      }
       const saved = await onSaveKnowledgeBase(updated);
       if (!saved) {
         setSaveError('Não foi possível salvar no servidor. Revise sua conexão e tente novamente.');
@@ -614,6 +680,35 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       setSaveError('Não foi possível salvar no servidor. Revise sua conexão e tente novamente.');
     } finally {
       setIsSavingKnowledgeBase(false);
+    }
+  };
+
+  const typedDraftDocumentTypes = VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES.filter((documentType) =>
+    Boolean(typedDocumentStates.find((state) => state.documentType === documentType)?.draft),
+  );
+
+  const handlePublishTypedDrafts = async () => {
+    if (!usesPublishedKnowledgeBase || !typedDraftDocumentTypes.length || isPublishingTypedDocuments) return;
+    const message = typedDraftDocumentTypes.length === 1
+      ? 'Publicar este rascunho? A mudança passará a valer no agente e no catálogo na próxima leitura.'
+      : `Publicar os ${typedDraftDocumentTypes.length} rascunhos pendentes? Cada mudança passará a valer no agente e no catálogo na próxima leitura.`;
+    if (!window.confirm(message)) return;
+
+    setIsPublishingTypedDocuments(true);
+    setSaveError(null);
+    try {
+      for (const documentType of typedDraftDocumentTypes) {
+        await publishKnowledgeBaseDocument(documentType);
+      }
+      const refreshedStates = await listKnowledgeBaseDocumentStates();
+      setTypedDocumentStates(refreshedStates);
+      hydrateVisualFormFromTypedDocuments(refreshedStates);
+      setIsSavedToast(true);
+      setTimeout(() => setIsSavedToast(false), 4000);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Não foi possível publicar todas as alterações. Revise os rascunhos e tente novamente.');
+    } finally {
+      setIsPublishingTypedDocuments(false);
     }
   };
 
@@ -1272,7 +1367,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       const res = await apiFetch('/api/knowledge-base/first-contact-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64, oldFileId }),
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64, oldFileId: usesPublishedKnowledgeBase ? undefined : oldFileId }),
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}) as any);
@@ -1628,6 +1723,15 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
             <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Documentação</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setShowHoursEditor(true)}
+            className="px-3 py-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-100 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            title="Configurar os horários reais de atendimento e agenda"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Horários</span>
+          </button>
           {publicCatalogSlug && (
             <a
               href={`/catalogo/${encodeURIComponent(publicCatalogSlug)}`}
@@ -1651,7 +1755,23 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       </div>
 
-      {activeTenantId && <KnowledgeBaseTypedDocumentsPanel activeTenantId={activeTenantId} isRuntimePublished={usesPublishedKnowledgeBase} />}
+      {usesPublishedKnowledgeBase && (
+        <section className="rounded-2xl border border-cyan-400/25 bg-[radial-gradient(circle_at_92%_0%,rgba(34,211,238,0.14),transparent_38%),#0f172a] p-4 shadow-md">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10 text-cyan-200"><FileCheck className="h-5 w-5" /></div>
+              <div>
+                <p className="text-xs font-bold text-cyan-100">Uma Base de Conhecimento publicada</p>
+                <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">Edite todos os campos visuais abaixo. <strong className="font-semibold text-slate-200">Salvar rascunho</strong> prepara a alteração; <strong className="font-semibold text-slate-200">Publicar alterações</strong> torna os rascunhos ativos para o agente e o catálogo. Você não precisa preencher códigos ou JSON.</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <span className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-100">{typedDocumentStates.filter((state) => state.published).length}/8 publicados</span>
+              <span className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-2.5 py-1.5 text-[10px] font-bold text-amber-100">{typedDraftDocumentTypes.length} rascunho(s)</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="knowledge-workspace__audit rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_95%_0%,rgba(16,185,129,0.13),transparent_34%),#0f172a] p-4 shadow-md">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1825,7 +1945,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           exatamente onde já estava, nada foi fundido. */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="text-xs font-bold text-slate-400">
-          Todos os campos da Base de Conhecimento, numa página só
+          Configuração visual da Base de Conhecimento
         </span>
         <button
           type="button"
@@ -1838,19 +1958,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </button>
       </div>
 
-      {usesPublishedKnowledgeBase && (
-        <div className="rounded-2xl border border-amber-400/25 bg-amber-400/5 p-4">
-          <div className="flex items-start gap-2.5">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-            <div>
-              <p className="text-xs font-bold text-amber-100">Editor legado preservado somente para rollback</p>
-              <p className="mt-1 text-[11px] leading-5 text-slate-400">O agente agora consulta os documentos tipados publicados a cada nova resposta. Use o painel acima para criar rascunhos e publicar alterações. Os campos legados abaixo permanecem visíveis para auditoria, mas seu botão de salvamento está bloqueado para evitar divergência.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Area — todas as seções sempre visíveis */}
+      {/* Formulário visual da fonte tipada — todas as seções permanecem editáveis. */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-10">
 
         {/* SECTION 1: General Profile & Goal */}
@@ -1961,7 +2069,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               />
             </div>
 
-            {/* Horário de Funcionamento — recurso separado (tabela `tenants`),
+            {!usesPublishedKnowledgeBase && <>{/* Horário de Funcionamento — recurso separado (tabela `tenants`),
                 usado de verdade pelo agendamento automático real (autoReply.ts/
                 googleCalendar.ts) pra nunca oferecer horário fora do
                 expediente. Save próprio, independente do botão "Salvar Regras
@@ -2025,7 +2133,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                   );
                 })}
               </div>
-            </div>
+            </div></>}
           </div>
           )}
         </div>
@@ -3330,13 +3438,56 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
         </div>
       )}
 
-      <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2">
-        {saveError && <div className="max-w-xs rounded-xl border border-rose-500/40 bg-rose-950 px-3 py-2 text-[11px] text-rose-100 shadow-xl">{saveError}</div>}
-        <button type="button" onClick={handleSave} disabled={isSavingKnowledgeBase || usesPublishedKnowledgeBase} title={usesPublishedKnowledgeBase ? 'Use os documentos tipados acima para publicar alterações do agente.' : undefined} className="rounded-2xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white shadow-2xl shadow-emerald-950/80 transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 flex items-center gap-2">
-          {isSavingKnowledgeBase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          <span>{usesPublishedKnowledgeBase ? 'Editor legado (rollback)' : isSavingKnowledgeBase ? 'Salvando alterações…' : 'Salvar alterações'}</span>
-        </button>
-      </div>
+      {showHoursEditor && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/80 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="business-hours-title">
+          <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-t-3xl border border-emerald-400/25 bg-slate-900 shadow-2xl sm:rounded-3xl">
+            <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-800 bg-slate-900/95 px-5 py-4 backdrop-blur">
+              <div className="flex gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-500/10 text-emerald-200"><Clock className="h-5 w-5" /></div>
+                <div>
+                  <h3 id="business-hours-title" className="text-sm font-bold text-white">Horários de atendimento</h3>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-400">Esta configuração alimenta a agenda real. O agente não oferece nem confirma horários fora do expediente cadastrado.</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setShowHoursEditor(false)} className="rounded-lg border border-slate-700 p-2 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white" aria-label="Fechar horários de atendimento"><X className="h-4 w-4" /></button>
+            </header>
+            <div className="space-y-2 p-5">
+              <p className="mb-3 text-xs text-slate-400">Marque os dias com atendimento e informe abertura e encerramento. Dias desmarcados permanecem como <strong className="font-semibold text-slate-200">sem atendimento</strong>.</p>
+              {WEEKDAY_LABELS.map(({ key, label }) => {
+                const dayHours = hoursForm[key];
+                const enabled = !!dayHours;
+                return (
+                  <div key={key} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/75 p-3 text-xs">
+                    <label className="flex w-32 items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={enabled} onChange={(event) => handleToggleDay(key, event.target.checked)} className="h-3.5 w-3.5 accent-emerald-500 cursor-pointer" />
+                      <span className={enabled ? 'font-semibold text-white' : 'text-slate-500'}>{label}</span>
+                    </label>
+                    {enabled ? <div className="flex items-center gap-2"><input type="time" value={dayHours!.open} onChange={(event) => handleDayTimeChange(key, 'open', event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none" /><span className="text-slate-500">até</span><input type="time" value={dayHours!.close} onChange={(event) => handleDayTimeChange(key, 'close', event.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none" /></div> : <span className="italic text-slate-600">sem atendimento</span>}
+                  </div>
+                );
+              })}
+            </div>
+            <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-800 bg-slate-900/95 px-5 py-4 backdrop-blur">
+              <button type="button" onClick={() => setShowHoursEditor(false)} disabled={isSavingHours} className="rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 disabled:opacity-50">Cancelar</button>
+              <button type="button" onClick={() => void handleSaveHours()} disabled={isSavingHours} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">{isSavingHours ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}{isSavingHours ? 'Salvando…' : 'Salvar horário'}</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-md">
+        {saveError && <div className="mb-3 rounded-xl border border-rose-500/40 bg-rose-950/70 px-3 py-2 text-[11px] text-rose-100">{saveError}</div>}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-2xl text-xs leading-5 text-slate-400">{usesPublishedKnowledgeBase ? 'Primeiro salve o rascunho. Depois revise e publique as alterações pendentes; somente a publicação muda a próxima resposta do agente e o catálogo público.' : 'Salve as alterações para atualizar a Base de Conhecimento do agente.'}</p>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {usesPublishedKnowledgeBase && <button type="button" onClick={handlePublishTypedDrafts} disabled={!typedDraftDocumentTypes.length || isPublishingTypedDocuments || isLoadingTypedDocuments} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold text-emerald-100 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50">{isPublishingTypedDocuments ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCheck className="h-4 w-4" />}Publicar alterações{typedDraftDocumentTypes.length ? ` (${typedDraftDocumentTypes.length})` : ''}</button>}
+            <button type="button" onClick={handleSave} disabled={isSavingKnowledgeBase || isLoadingTypedDocuments} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-950/40 transition-all hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">
+              {isSavingKnowledgeBase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              <span>{isSavingKnowledgeBase ? 'Salvando…' : usesPublishedKnowledgeBase ? 'Salvar rascunho' : 'Salvar alterações'}</span>
+            </button>
+          </div>
+        </div>
+      </section>
 
       {/* Bottom Save Notification Toast / Banner */}
       {isSavedToast && (
