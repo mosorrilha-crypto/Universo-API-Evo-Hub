@@ -708,6 +708,8 @@ interface SaaSAdminDashboardProps {
   activeTenant?: Tenant;
   tenantId?: string;
   onSelectTenant?: (tenant: Tenant) => void;
+  /** Acesso direto do SaaS Admin ao contexto operacional do tenant, sem autenticar como operador. */
+  onEnterTenant?: (tenant: Tenant) => void;
   onAddTenant?: (newTenant: Tenant) => void;
   onUpdateTenant?: (updatedTenant: Tenant) => void;
   currentUser?: UserProfile | any;
@@ -715,6 +717,7 @@ interface SaaSAdminDashboardProps {
 
 export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   currentUser,
+  onEnterTenant,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [segmentFilter, setSegmentFilter] = useState<string>('all');
@@ -1644,6 +1647,16 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                           <span><span className="mr-1 uppercase tracking-wide text-slate-600">Segmento</span>{tenant.segment || '—'}</span>
                           <span><span className="mr-1 uppercase tracking-wide text-slate-600">Moeda</span>{tenant.currency} / {tenant.locale}</span>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => onEnterTenant?.(tenant)}
+                          disabled={!tenant.isActive || !onEnterTenant}
+                          title={tenant.isActive ? 'Abrir esta empresa como administrador SaaS' : 'Empresa bloqueada: reative antes de acessar'}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          {tenant.isActive ? 'Acessar empresa sem senha' : 'Empresa bloqueada'}
+                        </button>
                       </div>
 
                       <div className="p-4">
