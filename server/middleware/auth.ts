@@ -23,9 +23,9 @@ export function createAuthenticateToken(jwtSecret: string) {
     if (!token) return res.sendStatus(401);
 
     jwt.verify(token, jwtSecret, (err: any, user: any) => {
-      if (err) return res.sendStatus(403);
+      if (err) return res.status(403).set('X-Auth-Session-Invalid', 'true').json({ error: 'Sessão expirada ou inválida.' });
       if (!user?.tenantId) {
-        return res.status(403).json({ error: 'Sessão autenticada sem tenant. Acesso recusado.' });
+        return res.status(403).set('X-Auth-Session-Invalid', 'true').json({ error: 'Sessão autenticada sem tenant. Acesso recusado.' });
       }
 
       req.user = user;
