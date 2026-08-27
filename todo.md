@@ -72,3 +72,12 @@
 - [x] PR4/#96 revisão: migrar o catálogo público para a fonte publicada e eliminar divergência de preço após publicação.
 - [x] PR4/#96 revisão: migrar a cópia administrativa de Base de Conhecimento para a fonte publicada ou registrar risco explícito.
 - [x] PR4/#96 revisão: testar catálogo/cópia contra publicação, fallback e isolamento; atualizar PR e aguardar nova revisão.
+
+- [x] Verificar branch, diff local e checks da PR #468 antes do merge autorizado
+- [x] Fazer merge da PR #468 somente após validação final
+- [x] Confirmar a integração da PR #468 na branch principal
+
+- [ ] Corrigir erro #100 da Meta removendo campo inválido da consulta de Insights
+- [ ] Cobrir por teste a normalização segura de métricas opcionais de landing page
+- [ ] Validar a Central de Tráfego no mobile, build e checks da correção
+- [ ] Publicar a correção do erro #100 na branch principal
