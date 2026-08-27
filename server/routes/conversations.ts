@@ -582,6 +582,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       // player de áudio do painel (GET /api/media/:messageId) herdaria o
       // mesmo problema de reprodução que motivou a conversão.
       await saveMediaImage(supabaseUrl, supabaseKey, messageId, uploadBase64, uploadMimeType);
+      // Achado real (27/08/2026): áudio ENVIADO pelo operador nunca era
+      // transcrito — só o placeholder fixo "🎤 Áudio enviado" ficava salvo
+      // pra sempre, diferente do áudio recebido do cliente (webhooks.ts +
+      // transcriptionQueue.ts). Como autoReply.ts monta o histórico do
+      // agente a partir de message.text, isso era uma brecha real de
+      // contexto: uma instrução dada por voz pelo operador nunca chegava ao
+      // agente. Mesmo mecanismo já usado em /retry-transcription (acima)
+      // pro lado de entrada; aguardado (não fire-and-forget) porque o
+      // handler já espera o envio real terminar antes de responder, e assim
+      // fica determinístico — uma falha de transcrição nunca derruba a
+      // resposta de sucesso, o áudio real já foi entregue ao cliente nesse
+      // ponto.
+      if (msgType === 'audio') {
+        try {
+          const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, uploadBase64, uploadMimeType, {
+            leadName: conv?.name,
+            customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+          });
+          await updateMessageText(tenantId, req.params.phone, messageId, outcome.result.transcription);
+        } catch (transcriptionError) {
+          console.warn(`⚠️  [Conversas] Falha ao transcrever áudio enviado (messageId=${messageId}):`, (transcriptionError as Error).message);
+        }
+      }
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
