@@ -40,3 +40,14 @@ export const commercialInterestRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Muitas solicitações a partir desta conexão. Aguarde uma hora e tente novamente.' },
 });
+
+
+// Confirmação de sessão é chamada ao abrir o aplicativo. Limite moderado por
+// IP evita abuso de validação de token sem prejudicar recargas normais.
+export const authSessionRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas verificações de sessão. Aguarde um minuto e tente novamente.' },
+});

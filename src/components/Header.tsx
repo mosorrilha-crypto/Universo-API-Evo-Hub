@@ -43,6 +43,8 @@ interface HeaderProps {
   activeTenant: Tenant;
   onSelectTenant: (tenant: Tenant) => void;
   capabilities: TenantNavigationCapabilities;
+  /** Confirmação vinda do servidor; impede que perfil antigo do navegador libere Empresas. */
+  canAccessSaasAdmin?: boolean;
 }
 
 type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
@@ -62,6 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTenant,
   onSelectTenant,
   capabilities,
+  canAccessSaasAdmin,
 }) => {
   const { language, setLanguage, theme, setTheme } = useAppPreferences();
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -86,7 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeAgentTools = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.agent;
   const canSeeCatalog = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.catalog;
   const canSeeQuality = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.quality;
-  const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
+  const canSeeSaasMaster = canAccessSaasAdmin ?? hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
     platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'

@@ -88,3 +88,33 @@ describe('POST /api/auth/login', () => {
     expect(res.status).toBe(401);
   });
 });
+
+
+describe('GET /api/auth/session', () => {
+  it('devolve o papel e o tenant do operador associado ao JWT', async () => {
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'monique@pestanaspormonique.com', password: 'senha-real-123' }),
+    });
+    const { token } = await login.json();
+
+    const response = await fetch(`${baseUrl}/api/auth/session`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      operator: {
+        id: 'op-1',
+        tenantId: REAL_TENANT_UUID,
+        role: 'admin',
+      },
+    });
+  });
+
+  it('recusa uma consulta sem token de sessão', async () => {
+    const response = await fetch(`${baseUrl}/api/auth/session`);
+    expect(response.status).toBe(401);
+  });
+});
