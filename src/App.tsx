@@ -1160,6 +1160,10 @@ export const App: React.FC = () => {
             tenants={tenants}
             activeTenant={activeTenant}
             onSelectTenant={handleSelectTenant}
+            onEnterTenant={(tenant) => {
+              handleSelectTenant(tenant);
+              handleSetActiveTab('home');
+            }}
             onAddTenant={(newT) => {
               setTenants((prev) => [newT, ...prev]);
               showToast(`Nova empresa ${newT.name} cadastrada`);
