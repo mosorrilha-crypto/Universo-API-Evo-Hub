@@ -73,23 +73,20 @@
 - [x] PR4/#96 revisão: migrar a cópia administrativa de Base de Conhecimento para a fonte publicada ou registrar risco explícito.
 - [x] PR4/#96 revisão: testar catálogo/cópia contra publicação, fallback e isolamento; atualizar PR e aguardar nova revisão.
 
-- [x] Dashboard de Crescimento com filtros persistentes por conta, período, status e ordenação
-- [x] Exibição de saldo/limite restante da conta Meta quando a API disponibilizar spend cap e gasto acumulado
-- [x] Busca, filtros por canal/status e paginação na Origem de Leads
-- [x] Endpoints protegidos e idempotentes para criação de conjuntos e anúncios Meta
-- [x] Formulário compacto para criar conjuntos e anúncios sempre pausados, com confirmação textual
-- [x] Ampliar insights com CPM, frequência, cliques de saída, visualizações de página de destino e ThruPlays
-- [x] Adicionar controles persistentes para ocultar/exibir grupos de métricas no dashboard
-- [x] Adicionar busca/filtros/paginação na listagem de anúncios do dashboard
-- [x] Atualizar testes de rota e serviço para criação de conjuntos e anúncios
-- [x] Validar experiência desktop/mobile, build e testes automatizados
-- [x] Atualizar PR #468 com a implementação concluída
+- [x] Verificar branch, diff local e checks da PR #468 antes do merge autorizado
+- [x] Fazer merge da PR #468 somente após validação final
+- [x] Confirmar a integração da PR #468 na branch principal
 
-- [ ] Verificar branch, diff local e checks da PR #468 antes do merge autorizado
-- [ ] Fazer merge da PR #468 somente após validação final
-- [ ] Confirmar a integração da PR #468 na branch principal
+- [x] Corrigir erro #100 da Meta removendo campo inválido da consulta de Insights
+- [x] Cobrir por teste a normalização segura de métricas opcionais de landing page
+- [x] Validar a Central de Tráfego no mobile, build e checks da correção
+- [x] Publicar a correção do erro #100 na branch principal
 
-- [x] Corrigir erro #100 da Meta removendo `landing_page_views` da consulta de Insights
-- [x] Cobrir por teste a leitura de `landing_page_view` via `actions`
-- [x] Validar a Central de Tráfego com lint, suíte completa, build e revisão mobile
-- [ ] Enviar e integrar a correção do erro #100 na branch principal
+- [x] Auditar a página de CRM e mapear o fluxo completo de lead até pós-venda
+- [x] Identificar automações existentes, gatilhos, ações, responsáveis e pontos sem cobertura
+- [x] Propor menu interno e organização compacta para a operação mobile do CRM
+- [x] Entregar mapa de processos e plano de automação para aprovação antes de implementar
+
+- [x] Concluir o diagnóstico do CRM antes de iniciar a próxima seção
+- [x] Após o CRM, auditar e refinar a página de Agenda pelo mesmo workflow
+- [x] Validar a Agenda em mobile e desktop com testes e build

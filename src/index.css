@@ -671,6 +671,8 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
+  .agenda-financeiro-workspace--agenda-mobile-pending > section:has(.grid-cols-7) > div:first-child { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-pending > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }
