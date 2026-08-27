@@ -5,6 +5,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActiveTab, Tenant, UserProfile } from '../types';
 import { hasRoleAtLeast } from '../lib/roles';
+import type { TenantNavigationCapabilities } from '../lib/tenantCapabilities';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
   Brain,
@@ -41,7 +42,7 @@ interface HeaderProps {
   tenants: Tenant[];
   activeTenant: Tenant;
   onSelectTenant: (tenant: Tenant) => void;
-  financialModuleEnabled: boolean;
+  capabilities: TenantNavigationCapabilities;
 }
 
 type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
@@ -60,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
   tenants,
   activeTenant,
   onSelectTenant,
-  financialModuleEnabled,
+  capabilities,
 }) => {
   const { language, setLanguage, theme, setTheme } = useAppPreferences();
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -75,31 +76,38 @@ export const Header: React.FC<HeaderProps> = ({
   const [desktopMenuPosition, setDesktopMenuPosition] = useState<DesktopMenuPosition | null>(null);
   const isSpanish = language === 'es';
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'blue' : theme === 'blue' ? 'clean' : 'dark');
-  // TASK-0038: liberar por papel real, não pela app estar instalada — ver
-  // comentário equivalente em App.tsx.
-  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager');
-  const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
+  // A navegação só aparece quando o papel tem permissão E a capacidade está
+  // habilitada para a empresa ativa. O segundo critério impede que o Admin
+  // SaaS veja, no tenant selecionado, recursos bloqueados no card de controle.
+  const canSeeConversations = hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.conversations;
+  const canSeeCrm = hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.crm;
+  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.agenda;
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.financial;
+  const canSeeGrowth = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.growth;
+  const canSeeAgentTools = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.agent;
+  const canSeeCatalog = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.catalog;
+  const canSeeQuality = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.quality;
   const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: financialModuleEnabled ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: financialModuleEnabled ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', platformGroup: 'Plataforma', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   const primaryNavigation: NavigationItem[] = [
     { id: 'home', label: copy.today, icon: <Home className="w-4 h-4" /> },
-    { id: 'whatsapp', label: copy.conversations, icon: <MessageSquare className="w-4 h-4" /> },
-    { id: 'crm', label: copy.sales, icon: <Kanban className="w-4 h-4" /> },
-    ...(canSeeFinancial ? [{ id: 'agenda' as ActiveTab, label: copy.schedule, icon: <CalendarDays className="w-4 h-4" /> }] : []),
-    ...(canSeeFinancial && financialModuleEnabled ? [{ id: 'financial' as ActiveTab, label: copy.financial, icon: <WalletCards className="w-4 h-4" /> }] : []),
-    ...(canSeeAdminTools ? [{ id: 'attribution' as ActiveTab, label: copy.growth, icon: <Target className="w-4 h-4" />, accent: 'sky' as const }] : []),
+    ...(canSeeConversations ? [{ id: 'whatsapp' as ActiveTab, label: copy.conversations, icon: <MessageSquare className="w-4 h-4" /> }] : []),
+    ...(canSeeCrm ? [{ id: 'crm' as ActiveTab, label: copy.sales, icon: <Kanban className="w-4 h-4" /> }] : []),
+    ...(canSeeAgenda ? [{ id: 'agenda' as ActiveTab, label: copy.schedule, icon: <CalendarDays className="w-4 h-4" /> }] : []),
+    ...(canSeeFinancial ? [{ id: 'financial' as ActiveTab, label: copy.financial, icon: <WalletCards className="w-4 h-4" /> }] : []),
+    ...(canSeeGrowth ? [{ id: 'attribution' as ActiveTab, label: copy.growth, icon: <Target className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
-  const configurationNavigation: NavigationItem[] = canSeeAdminTools ? [
-    { id: 'knowledge', label: copy.agentCatalog, icon: <Brain className="w-4 h-4" /> },
-    { id: 'catalog', label: copy.publicCatalog, icon: <Link2 className="w-4 h-4" /> },
-    { id: 'quality', label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' },
-  ] : [];
+  const configurationNavigation: NavigationItem[] = [
+    ...(canSeeAgentTools ? [{ id: 'knowledge' as ActiveTab, label: copy.agentCatalog, icon: <Brain className="w-4 h-4" /> }] : []),
+    ...(canSeeCatalog ? [{ id: 'catalog' as ActiveTab, label: copy.publicCatalog, icon: <Link2 className="w-4 h-4" /> }] : []),
+    ...(canSeeQuality ? [{ id: 'quality' as ActiveTab, label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' as const }] : []),
+  ];
   const platformNavigation: NavigationItem[] = canSeeSaasMaster ? [
     { id: 'saas', label: copy.companies, icon: <Layers className="w-4 h-4" /> },
   ] : [];

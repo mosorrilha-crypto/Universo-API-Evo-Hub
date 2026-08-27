@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppPreferencesProvider } from '../../contexts/AppPreferencesContext';
 import { Header } from '../Header';
 import { Tenant, UserProfile } from '../../types';
+import type { TenantNavigationCapabilities } from '../../lib/tenantCapabilities';
 
 const activeTenant: Tenant = {
   id: 'tenant-monique',
@@ -37,7 +38,18 @@ const saasAdmin: UserProfile = {
   department: 'Operações',
 };
 
-function renderHeader(financialModuleEnabled = true) {
+const fullyEnabledCapabilities: TenantNavigationCapabilities = {
+  conversations: true,
+  crm: true,
+  agenda: true,
+  financial: true,
+  growth: true,
+  agent: true,
+  catalog: true,
+  quality: true,
+};
+
+function renderHeader(capabilities: TenantNavigationCapabilities = fullyEnabledCapabilities) {
   return render(
     <AppPreferencesProvider>
       <Header
@@ -50,7 +62,7 @@ function renderHeader(financialModuleEnabled = true) {
         tenants={[activeTenant]}
         activeTenant={activeTenant}
         onSelectTenant={vi.fn()}
-        financialModuleEnabled={financialModuleEnabled}
+        capabilities={capabilities}
       />
     </AppPreferencesProvider>,
   );
@@ -63,11 +75,33 @@ afterEach(() => cleanup());
 // logo e botão de menu parcialmente cobertos, toque no menu não registrava.
 // Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>.
 describe('grupos de navegação no desktop', () => {
-  it('oculta Financeiro sem ocultar Agenda quando o módulo não foi liberado', () => {
-    renderHeader(false);
+  it('oculta exclusivamente Financeiro sem ocultar Agenda quando o módulo não foi liberado', () => {
+    renderHeader({ ...fullyEnabledCapabilities, financial: false });
 
     expect(screen.getByRole('button', { name: 'Agenda' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Financeiro' })).toBeNull();
+  });
+
+  it('remove todos os menus correspondentes às capacidades bloqueadas da empresa ativa', async () => {
+    const user = userEvent.setup();
+    renderHeader({
+      ...fullyEnabledCapabilities,
+      agenda: false,
+      financial: false,
+      growth: false,
+      catalog: false,
+      quality: false,
+    });
+
+    expect(screen.queryByRole('button', { name: 'Agenda' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Financeiro' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Crescimento' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Configurar' }));
+    const menu = screen.getByRole('menu', { name: 'Configurar' });
+    expect(within(menu).queryByRole('menuitem', { name: 'Catálogo público' })).toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Qualidade do agente' })).toBeNull();
+    expect(within(menu).getByRole('menuitem', { name: 'Agente & catálogo' })).not.toBeNull();
   });
 
   it('agrupa a configuração do agente e o catálogo no menu Configurar', async () => {

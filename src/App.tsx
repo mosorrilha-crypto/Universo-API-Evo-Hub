@@ -30,6 +30,10 @@ import { LoginModal } from './components/LoginModal';
 import { setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
 import { hasRoleAtLeast } from './lib/roles';
+import {
+  EMPTY_TENANT_NAVIGATION_CAPABILITIES,
+  resolveTenantNavigationCapabilities,
+} from './lib/tenantCapabilities';
 
 import { INITIAL_TENANTS } from './data/mockTenants';
 
@@ -151,22 +155,26 @@ export const App: React.FC = () => {
     safeSetLocalStorage(ACTIVE_TAB_STORAGE_KEY, tab);
   };
 
-  // Restrição de telas por papel (issue #159 original + TASK-0038: o app
-  // instalado (PWA) escondia Financeiro/Admin/SaaS Master de TODO MUNDO,
-  // mesmo de quem tinha papel pra ver (ex: o próprio dono do produto como
-  // saas_admin) — bloqueio era por "está instalado?", não por credencial
-  // real. Agora a regra é só o papel, igual ao navegador: quem tem o papel
-  // vê a tela também no app instalado; quem não tem continua sem ver nem
-  // no navegador. Mesmos níveis usados em Header.tsx pra esconder os
-  // botões das abas — repetido aqui pra também travar o CONTEÚDO: esconder
-  // só o botão não bastaria se activeTab ficasse apontando pra uma aba
-  // proibida (ex: troca de usuário no meio da sessão, sem reload da página).
-  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager');
-  const canSeeFinancialByRole = hasRoleAtLeast(currentUser?.role, 'manager');
+  // Cada tela operacional exige o papel adequado E a capacidade contratada
+  // para a empresa ativa. A verificação é repetida no conteúdo, pois ocultar
+  // apenas o botão do menu não impede uma aba restaurada do localStorage.
+  const [tenantCapabilitiesState, setTenantCapabilitiesState] = useState(() => ({
+    tenantId: null as string | null,
+    values: EMPTY_TENANT_NAVIGATION_CAPABILITIES,
+  }));
+  const tenantCapabilities = tenantCapabilitiesState.tenantId === activeTenant.id
+    ? tenantCapabilitiesState.values
+    : EMPTY_TENANT_NAVIGATION_CAPABILITIES;
+  const canSeeConversations = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.conversations;
+  const canSeeCrm = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.crm;
+  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.agenda;
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.financial;
   const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
+  const canSeeGrowth = canSeeAdminTools && tenantCapabilities.growth;
+  const canManageAgent = canSeeAdminTools && tenantCapabilities.agent;
+  const canSeeCatalog = canSeeAdminTools && tenantCapabilities.catalog;
+  const canSeeQuality = canSeeAdminTools && tenantCapabilities.quality;
   const canSeeSaasMaster = hasRoleAtLeast(currentUser?.role, 'saas_admin');
-  const [financialModuleEnabled, setFinancialModuleEnabled] = useState(false);
-  const canSeeFinancial = canSeeFinancialByRole && financialModuleEnabled;
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
@@ -177,19 +185,26 @@ export const App: React.FC = () => {
     if (!currentUser) return;
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
+      (activeTab === 'whatsapp' && !canSeeConversations) ||
+      (activeTab === 'crm' && !canSeeCrm) ||
       (activeTab === 'agenda' && !canSeeAgenda) ||
       (activeTab === 'financial' && !canSeeFinancial) ||
-      (['attribution', 'knowledge', 'catalog', 'quality'].includes(activeTab) && !canSeeAdminTools);
-    if (blocked) handleSetActiveTab('whatsapp');
+      (activeTab === 'attribution' && !canSeeGrowth) ||
+      (activeTab === 'knowledge' && !canManageAgent) ||
+      (activeTab === 'catalog' && !canSeeCatalog) ||
+      (activeTab === 'quality' && !canSeeQuality);
+    if (blocked) handleSetActiveTab('home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canSeeAgenda, canSeeFinancial, currentUser?.role]);
+  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, currentUser?.role]);
 
-  // Financeiro é opcional por empresa. A decisão vem do contrato self-scoped
-  // do tenant e falha fechada para não expor navegação ou dados sem liberação.
+  // A decisão vem do contrato self-scoped do tenant e falha fechada. O estado
+  // carrega o tenant de origem, evitando que uma troca de empresa mostre por
+  // um instante os recursos da empresa anterior.
   useEffect(() => {
     let cancelled = false;
+    const tenantId = activeTenant.id;
     if (!currentUser) {
-      setFinancialModuleEnabled(false);
+      setTenantCapabilitiesState({ tenantId: null, values: EMPTY_TENANT_NAVIGATION_CAPABILITIES });
       return () => { cancelled = true; };
     }
     const refreshEntitlements = () => {
@@ -197,15 +212,20 @@ export const App: React.FC = () => {
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
           if (cancelled) return;
-          setFinancialModuleEnabled(Boolean((data?.entitlements || []).find((item: { key?: string; enabled?: boolean }) => item.key === 'sales.financial' && item.enabled)));
+          setTenantCapabilitiesState({
+            tenantId,
+            values: resolveTenantNavigationCapabilities(data?.entitlements),
+          });
         })
-        .catch(() => { if (!cancelled) setFinancialModuleEnabled(false); });
-    };
-    const onEntitlementsChanged = (event: Event) => {
-      const tenantId = (event as CustomEvent<{ tenantId?: string }>).detail?.tenantId;
-      if (!tenantId || tenantId === activeTenant.id) refreshEntitlements();
+        .catch(() => {
+          if (!cancelled) setTenantCapabilitiesState({ tenantId, values: EMPTY_TENANT_NAVIGATION_CAPABILITIES });
+        });
     };
     refreshEntitlements();
+    const onEntitlementsChanged = (event: Event) => {
+      const changedTenantId = (event as CustomEvent<{ tenantId?: string }>).detail?.tenantId;
+      if (!changedTenantId || changedTenantId === tenantId) refreshEntitlements();
+    };
     window.addEventListener('universo:entitlements-changed', onEntitlementsChanged);
     return () => {
       cancelled = true;
@@ -1119,10 +1139,9 @@ export const App: React.FC = () => {
         tenants={tenants}
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
-        financialModuleEnabled={canSeeFinancial}
+                capabilities={tenantCapabilities}
       />
-
-      {activeTab !== 'whatsapp' && (
+      {activeTab !== 'whatsapp' && canSeeConversations && (
         <FloatingAttendanceButton
           storageKey={`floating_attendance_position:${currentUser?.id || 'guest'}`}
           onOpen={() => handleSetActiveTab('whatsapp')}
@@ -1184,7 +1203,7 @@ export const App: React.FC = () => {
             perdendo temporariamente mensagens reais recém-chegadas do
             polling até o próximo ciclo de 8s. Bug real relatado em
             produção: mensagem aparecia e sumia da conversa. */}
-        <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
+        {canSeeConversations && <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
           <AtendimentoWorkspaceFrame
             activeTenantName={activeTenant.name}
             activeTenant={activeTenant}
@@ -1215,9 +1234,8 @@ export const App: React.FC = () => {
             openLeadRequestId={whatsAppOpenLead?.requestId}
           />
           </AtendimentoWorkspaceFrame>
-        </div>
-
-        {activeTab === 'crm' && (
+                </div>}
+        {activeTab === 'crm' && canSeeCrm && (
           <OperationsModuleFrame title="CRM e Vendas" eyebrow="Relacionamento comercial" description="Acompanhe oportunidades, clientes e próximas ações em uma visão conectada ao atendimento." accent="blue" compact>
           <CrmWorkspace
             leads={leads}
@@ -1279,7 +1297,7 @@ export const App: React.FC = () => {
           />
           </OperationsModuleFrame>
         )}
-        {activeTab === 'attribution' && canSeeAdminTools && (
+        {activeTab === 'attribution' && canSeeGrowth && (
           <AdAttributionCAPI
             leads={leads}
             onTriggerCAPIEvent={(lead, eventName) => {
@@ -1292,11 +1310,11 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'knowledge' && canSeeAdminTools && !kbLoaded && (
+        {activeTab === 'knowledge' && canManageAgent && !kbLoaded && (
           <div className="p-6 text-sm text-slate-400">Carregando base de conhecimento…</div>
         )}
 
-        {activeTab === 'knowledge' && canSeeAdminTools && kbLoaded && (
+        {activeTab === 'knowledge' && canManageAgent && kbLoaded && (
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
             activeTenantId={activeTenant.id}
@@ -1365,7 +1383,7 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'catalog' && canSeeAdminTools && (
+        {activeTab === 'catalog' && canSeeCatalog && (
           <PublicCatalogSettings
             tenantSlug={activeTenant.slug}
             tenantName={activeTenant.name}
@@ -1399,7 +1417,7 @@ export const App: React.FC = () => {
                     />
           </OperationsModuleFrame>
         )}
-        {activeTab === 'quality' && canSeeAdminTools && (
+        {activeTab === 'quality' && canSeeQuality && (
           <OperationsModuleFrame title="Qualidade da IA" eyebrow="Aprendizado operacional" description="Transforme revisões humanas em regras e melhorias consistentes para o atendimento." accent="green">
             <QualityAuditCenter onToast={showToast} />
           </OperationsModuleFrame>
