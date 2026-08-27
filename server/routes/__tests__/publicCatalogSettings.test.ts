@@ -182,6 +182,19 @@ describe('PUT /api/public-catalog-settings', () => {
     expect(body.whatsappMessageProduct).toBe('Hola, quiero info sobre {produto}.');
   });
 
+  it('remove espaços e símbolos do WhatsApp ao salvar (achado de auditoria, 27/08/2026: "595994 798081" salvo com espaço quebrava o link do wa.me)', async () => {
+    const put = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, whatsappPhone: '595994 798081' }),
+    });
+    expect(put.status).toBe(200);
+
+    const get = await fetch(`${baseUrl}/api/public-catalog-settings`);
+    const body = await get.json();
+    expect(body.whatsappPhone).toBe('595994798081');
+  });
+
   it('nunca escreve no tenant de outra sessão', async () => {
     await fetch(`${baseUrl}/api/public-catalog-settings`, {
       method: 'PUT',

@@ -1432,7 +1432,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       .from('tenants')
       .update({
         public_catalog_enabled: enabled,
-        public_whatsapp_phone: whatsappPhone?.trim() || null,
+        public_whatsapp_phone: whatsappPhone?.replace(/\D/g, '') || null,
         public_instagram_url: instagramUrl?.trim() || null,
         public_location_maps_url: locationMapsUrl?.trim() || null,
         public_address: address?.trim() || null,
