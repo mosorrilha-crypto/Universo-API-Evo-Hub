@@ -99,18 +99,16 @@
 - [x] Preservar menu Hoje, Calendário, Pendências e ação de novo agendamento
 - [x] Validar a compactação em mobile e desktop e atualizar a PR
 
-- [x] Mapear todas as páginas e capacidades disponíveis por empresa e as telas ainda sem controle centralizado.
-- [x] Definir quais recursos passam a ser configuráveis pelo Centro de Controle SaaS Admin, com comportamento seguro para recursos existentes.
-- [x] Implementar controles por empresa no SaaS Admin e enforcement correspondente no frontend e backend.
-- [x] Cobrir permissões, isolamento multi-tenant, desativação e reativação por testes; validar lint, suíte e build.
-- [ ] Submeter a alteração para revisão humana e aguardar autorização explícita antes de qualquer merge.
-- [x] Confirmar se Logs do Sistema e demais páginas administrativas novas já consomem o contrato existente de capacidades por empresa, sem criar configuração paralela.
+- [x] Abrir follow-up da compactação visual da Agenda na PR #485
+- [x] Confirmar checks remotos verdes da PR #485
+- [x] Integrar a PR #485 na branch principal após autorização explícita
 
-- [x] Auditar os recursos existentes no catálogo de entitlements, frontend e backend para confirmar bloqueio efetivo por tenant.
-- [x] Consolidar recursos aderentes, lacunas de enforcement e prioridade de correção sem alterar dados ou configuração de produção.
+- [x] Reavaliar o escopo combinado de UI, CRM Hoje, Agenda e automação
+- [x] Inspecionar dependências, contratos, permissões, sincronização e riscos de uma PR única
+- [x] Consolidar a implementação em um único plano executável e sem sobreposição
+- [x] Definir critérios de aceite, testes, validação mobile/desktop e estratégia de merge da PR única
 
-- [x] Reproduzir e corrigir a perda de visibilidade dos recursos operacionais na sessão SaaS Admin.
-- [x] Garantir por teste que SaaS Admin vê os recursos para auditoria, enquanto admins internos continuam sujeitos à liberação por tenant.
-- [x] Submeter a correção de acesso para revisão humana antes de aplicar a migration 0063 no Supabase.
-
-- [x] Revogar a execução pública da função de trigger de entitlements e confirmar que os avisos de segurança do Supabase foram eliminados.
+- [x] Implementar a PR única do CRM Hoje com prioridade objetiva e fontes de dados explícitas
+- [x] Garantir critérios de aceite mensuráveis para abertura de contexto e confirmação de estado
+- [x] Validar a PR única com testes, lint, build e revisão mobile/desktop
+- [ ] Abrir a PR única e mesclar somente após checks verdes e autorização explícita

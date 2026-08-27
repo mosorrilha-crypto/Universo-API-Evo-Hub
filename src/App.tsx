@@ -1346,6 +1346,9 @@ export const App: React.FC = () => {
             }}
             currentUser={currentUser || GUEST_USER}
             onNavigateToFinancial={handleNavigateToFinancial}
+            escalations={escalations}
+            transactions={transactions}
+            onGoToEscalations={() => handleSetActiveTab('escalations')}
           />
           </OperationsModuleFrame>
         )}

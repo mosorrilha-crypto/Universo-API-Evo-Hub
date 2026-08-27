@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { BarChart3, Kanban, UsersRound } from 'lucide-react';
 import { OperatorCRM } from './OperatorCRM';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
-import type { LeadInfo, UserProfile } from '../types';
+import type { EscalationInfo, FinancialTransaction, LeadInfo, UserProfile } from '../types';
 
 type CrmMobileSection = 'leads' | 'insights' | 'board';
 
@@ -14,6 +14,9 @@ interface CrmWorkspaceProps {
   onClearAllLeads?: () => void;
   currentUser?: UserProfile | null;
   onNavigateToFinancial?: (lead: LeadInfo) => void;
+  onGoToEscalations?: () => void;
+  escalations?: EscalationInfo[];
+  transactions?: FinancialTransaction[];
 }
 
 export function CrmWorkspace(props: CrmWorkspaceProps) {

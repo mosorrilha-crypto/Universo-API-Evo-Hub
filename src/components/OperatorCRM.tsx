@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { LeadInfo, CRMStage, UserProfile, CRMOperatorNote, CRMTask, LeadSourceChannel } from '../types';
+import React, { useMemo, useState } from 'react';
+import { LeadInfo, CRMStage, UserProfile, CRMOperatorNote, CRMTask, LeadSourceChannel, EscalationInfo, FinancialTransaction } from '../types';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
@@ -40,6 +40,9 @@ interface OperatorCRMProps {
   currentOperator?: any;
   tenantId?: string;
   onNavigateToFinancial?: (lead: LeadInfo) => void;
+  onGoToEscalations?: () => void;
+  escalations?: EscalationInfo[];
+  transactions?: FinancialTransaction[];
   /** A moldura móvel escolhe o contexto visível sem alterar os dados do CRM. */
   mobileSection?: 'leads' | 'insights' | 'board';
 }
@@ -61,6 +64,9 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   currentUser: propCurrentUser,
   currentOperator,
   onNavigateToFinancial,
+  onGoToEscalations,
+  escalations = [],
+  transactions = [],
   mobileSection = 'leads',
 }) => {
   const { language } = useAppPreferences();
@@ -82,6 +88,8 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [selectedLead, setSelectedLead] = useState<LeadInfo | null>(null);
+  type InternalSection = 'today' | 'pipeline' | 'filters' | 'activities';
+  const [internalSection, setInternalSection] = useState<InternalSection>('today');
 
   // New Note State
   const [newNoteText, setNewNoteText] = useState('');
@@ -194,6 +202,53 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   const wonValue = wonLeads.reduce((acc, l) => acc + (getLeadValue(l) ?? 0), 0);
   const conversionRate = leads.length ? Math.round((wonLeads.length / leads.length) * 100) : 0;
 
+  type TodayItem = {
+    id: string;
+    kind: 'payment' | 'escalation' | 'conversation' | 'negotiation' | 'task';
+    title: string;
+    context: string;
+    priority: number;
+    actionLabel: string;
+    lead?: LeadInfo;
+    escalation?: EscalationInfo;
+  };
+
+  const todayItems = useMemo<TodayItem[]>(() => {
+    const items: TodayItem[] = [];
+    const leadById = new Map(leads.map((lead) => [lead.id, lead]));
+    transactions.filter((transaction) => transaction.status === 'pendente' || transaction.status === 'atrasado').forEach((transaction) => {
+      const lead = leadById.get(transaction.leadId) || leads.find((item) => item.phone === transaction.leadPhone);
+      if (lead) items.push({ id: `payment-${transaction.id}`, kind: 'payment', title: lead.name, context: `${isSpanish ? 'Cobro' : 'Cobrança'} · ${formatAmount(transaction.amount)} · ${transaction.status}`, priority: transaction.status === 'atrasado' ? 1 : 2, actionLabel: isSpanish ? 'Revisar cobro' : 'Revisar cobrança', lead });
+    });
+    escalations.filter((item) => !item.resolved && item.status !== 'archived').forEach((escalation) => {
+      const lead = leads.find((item) => item.phone === escalation.phone);
+      items.push({ id: `escalation-${escalation.id}`, kind: 'escalation', title: escalation.contactName || escalation.phone, context: `${isSpanish ? 'Escalamiento' : 'Escalonamento'} · ${escalation.reason}`, priority: escalation.priority === 'critical' ? 1 : escalation.priority === 'high' ? 2 : 3, actionLabel: isSpanish ? 'Abrir y decidir' : 'Abrir e decidir', lead, escalation });
+    });
+    leads.forEach((lead) => {
+      const stage = getLeadStage(lead);
+      const openTasks = (lead.crmTasks || []).filter((task) => !task.completed);
+      openTasks.forEach((task) => items.push({ id: `task-${lead.id}-${task.id}`, kind: 'task', title: lead.name, context: `${isSpanish ? 'Tarea' : 'Tarefa'} · ${task.title} · ${task.dueDate}`, priority: 3, actionLabel: isSpanish ? 'Abrir tarea' : 'Abrir tarefa', lead }));
+      if (!openTasks.length && (stage === 'proposta' || stage === 'negociacao')) items.push({ id: `negotiation-${lead.id}`, kind: 'negotiation', title: lead.name, context: `${isSpanish ? 'Negociación sin tarea abierta' : 'Negociação sem tarefa aberta'} · ${lead.attribution?.channelLabel || (isSpanish ? 'Origen no informado' : 'Origem não informada')}`, priority: 4, actionLabel: isSpanish ? 'Retomar' : 'Retomar', lead });
+      if (!openTasks.length && lead.hasConversation && (stage === 'novo' || stage === 'contato')) items.push({ id: `conversation-${lead.id}`, kind: 'conversation', title: lead.name, context: `${isSpanish ? 'Conversación para responder' : 'Conversa para responder'} · ${lead.fullAnalysis?.conversationSummary || lead.phone}`, priority: 3, actionLabel: isSpanish ? 'Responder' : 'Responder', lead });
+    });
+    return items.sort((a, b) => a.priority - b.priority).slice(0, 12);
+  }, [escalations, isSpanish, leads, transactions]);
+
+  const activityItems = useMemo(() => leads.flatMap((lead) => (lead.crmTasks || []).filter((task) => !task.completed).map((task) => ({ lead, task }))).slice(0, 12), [leads]);
+
+  const handleTodayItem = (item: TodayItem) => {
+    if (item.kind === 'escalation' && !item.lead) {
+      onGoToEscalations?.();
+      return;
+    }
+    if (item.kind === 'payment' && item.lead && onNavigateToFinancial) {
+      onNavigateToFinancial(item.lead);
+      return;
+    }
+    if (item.lead) setSelectedLead(item.lead);
+    if (item.kind === 'escalation') onGoToEscalations?.();
+  };
+
   const handleStageChange = (lead: LeadInfo, newStage: CRMStage) => {
     const updated: LeadInfo = {
       ...lead,
@@ -275,7 +330,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   };
 
   return (
-    <div className={`crm-workspace crm-workspace--mobile-${mobileSection} space-y-5 animate-page-enter`}>
+    <div className={`crm-workspace crm-workspace--mobile-${mobileSection} crm-workspace--internal-${internalSection} space-y-5 animate-page-enter`}>
       {/* Header Banner */}
       <div className="crm-workspace__hero bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border border-slate-800 rounded-card p-5 sm:p-6 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
@@ -305,27 +360,6 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
             <span>{isSpanish ? 'Nuevo lead' : 'Novo lead'}</span>
           </button>
 
-          {/* Apaga TODOS os leads do CRM, reais inclusive (onClearAllLeads chama
-              setLeads([]) em App.tsx) — rótulo/tooltip corrigidos (achado na
-              auditoria "Raio-X do Universo"): dizia "leads fictícios de
-              teste", mas desde que o CRM passou a mesclar leads reais
-              (GET /api/crm/leads), esse botão apaga cliente de verdade
-              também. Confirmação abaixo já é honesta sobre isso. */}
-          {onClearAllLeads && leads.length > 0 && (
-            <button
-              onClick={() => {
-                if (window.confirm(isSpanish ? `¿Seguro que querés eliminar TODOS los ${leads.length} leads? Esta acción no se puede deshacer.` : `Tem certeza que deseja apagar TODOS os ${leads.length} leads? Isso não pode ser desfeito.`)) {
-                  onClearAllLeads();
-                }
-              }}
-              className="px-3 py-2 bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-800/60 font-semibold text-xs rounded-xl flex items-center space-x-1 transition-all"
-              title={isSpanish ? 'Elimina todos los leads del CRM — acción irreversible' : 'Apaga todos os leads do CRM — ação irreversível'}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isSpanish ? 'Limpiar todos' : 'Limpar todos'}</span>
-            </button>
-          )}
-
           <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center space-x-1">
             <button
               onClick={() => setViewMode('kanban')}
@@ -352,6 +386,28 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
           </div>
         </div>
       </div>
+
+      <nav className="crm-workspace__internal-nav grid grid-cols-4 gap-1 rounded-2xl border border-slate-800 bg-slate-950/90 p-1.5" aria-label={isSpanish ? 'Secciones de ventas' : 'Seções de vendas'}>
+        {([
+          ['today', isSpanish ? 'Hoy' : 'Hoje', CheckCircle2],
+          ['pipeline', isSpanish ? 'Pipeline' : 'Pipeline', Kanban],
+          ['filters', isSpanish ? 'Filtros' : 'Filtros', Filter],
+          ['activities', isSpanish ? 'Actividad' : 'Atividades', Clock],
+        ] as const).map(([id, label, Icon]) => <button key={id} type="button" onClick={() => setInternalSection(id)} aria-current={internalSection === id ? 'page' : undefined} className={`flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-bold transition-colors ${internalSection === id ? 'bg-emerald-400 text-slate-950' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}
+      </nav>
+
+      <section className="crm-workspace__today rounded-2xl border border-emerald-500/20 bg-slate-900/75 p-3 sm:p-4" aria-labelledby="crm-today-title">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-300">{isSpanish ? 'Próxima acción' : 'Próxima ação'}</p><h2 id="crm-today-title" className="mt-1 text-base font-bold text-white">{isSpanish ? 'CRM Hoy' : 'CRM Hoje'}</h2></div>
+          <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300">{todayItems.length} {isSpanish ? 'pendientes' : 'pendências'}</span>
+        </div>
+        {todayItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 px-3 py-6 text-center text-xs text-slate-400">{isSpanish ? 'No hay próximas acciones pendientes.' : 'Nenhuma próxima ação pendente.'}</div> : <div className="space-y-2">{todayItems.map((item) => <article key={item.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3"><div className={`h-2 w-2 shrink-0 rounded-full ${item.priority === 1 ? 'bg-rose-400' : item.priority === 2 ? 'bg-amber-300' : 'bg-emerald-400'}`} aria-hidden="true" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-white">{item.title}</p><p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{item.context}</p></div><button type="button" onClick={() => handleTodayItem(item)} className="shrink-0 rounded-lg bg-emerald-400 px-2.5 py-1.5 text-[10px] font-black text-slate-950 hover:bg-emerald-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">{item.actionLabel}</button></article>)}</div>}
+      </section>
+
+      <section className="crm-workspace__activities rounded-2xl border border-slate-800 bg-slate-900/75 p-3 sm:p-4" aria-labelledby="crm-activities-title">
+        <div className="mb-3 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{isSpanish ? 'Seguimiento' : 'Acompanhamento'}</p><h2 id="crm-activities-title" className="mt-1 text-base font-bold text-white">{isSpanish ? 'Actividades abiertas' : 'Atividades abertas'}</h2></div><span className="text-[10px] font-bold text-slate-400">{activityItems.length}</span></div>
+        {activityItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 px-3 py-6 text-center text-xs text-slate-400">{isSpanish ? 'No hay tareas abiertas.' : 'Nenhuma tarefa aberta.'}</div> : <div className="space-y-2">{activityItems.map(({ lead, task }) => <button key={`${lead.id}-${task.id}`} type="button" onClick={() => setSelectedLead(lead)} className="flex w-full items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-left hover:border-emerald-500/40"><Clock className="h-4 w-4 shrink-0 text-amber-300" /><span className="min-w-0 flex-1"><strong className="block truncate text-xs text-white">{task.title}</strong><small className="mt-0.5 block truncate text-[11px] text-slate-400">{lead.name} · {task.dueDate}</small></span><ChevronRight className="h-4 w-4 shrink-0 text-slate-500" /></button>)}</div>}
+      </section>
 
       {/* Metric Cards Bar */}
       <div className="crm-workspace__metrics grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
