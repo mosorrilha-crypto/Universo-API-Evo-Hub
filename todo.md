@@ -112,3 +112,10 @@
 - [x] Garantir critérios de aceite mensuráveis para abertura de contexto e confirmação de estado
 - [x] Validar a PR única com testes, lint, build e revisão mobile/desktop
 - [ ] Abrir a PR única e mesclar somente após checks verdes e autorização explícita
+
+- [x] Implementar em uma única PR a evolução operacional do CRM Hoje
+- [x] Adicionar deduplicação e prioridade objetiva sem duplicar consultas
+- [x] Melhorar tarefas com prazo, responsável, tipo, prioridade e ação direta
+- [x] Integrar estados de sincronização entre CRM Hoje e Agenda
+- [x] Validar critérios de aceite mobile/desktop, testes, lint e build
+- [ ] Abrir a PR única e aguardar autorização explícita para merge

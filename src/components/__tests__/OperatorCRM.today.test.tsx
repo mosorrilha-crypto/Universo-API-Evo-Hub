@@ -59,6 +59,21 @@ describe('OperatorCRM — fila Hoje', () => {
     expect(onNavigateToFinancial).toHaveBeenCalledWith(lead);
   });
 
+  it('deduplica múltiplas pendências do mesmo lead mantendo a ação mais urgente', () => {
+    render(<OperatorCRM leads={[lead]} currentUser={user} transactions={[transaction]} escalations={[]} onUpdateLead={vi.fn()} onNavigateToFinancial={vi.fn()} />);
+
+    expect(screen.getAllByRole('button', { name: 'Revisar cobrança' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Revisar cobrança' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Abrir tarefa' })).toBeNull();
+  });
+
+  it('mostra o estado de sincronização sem alterar a ação da fila', () => {
+    render(<OperatorCRM leads={[lead]} currentUser={user} syncState="saving" onUpdateLead={vi.fn()} />);
+
+    expect(screen.getByText('Salvando…')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Abrir tarefa' })).not.toBeNull();
+  });
+
   it('alterna a seção interna sem perder a fila ou criar outra consulta', () => {
     render(<OperatorCRM leads={[lead]} currentUser={user} transactions={[]} escalations={[]} onUpdateLead={vi.fn()} />);
 
