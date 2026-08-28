@@ -3,6 +3,11 @@ import { getTenantEntitlements } from './featureEntitlementService';
 /** Qualidade do agente é liberada por tenant pelo SaaS Admin e falha fechada fora desse contrato. */
 export const QUALITY_MODULE_FEATURE_KEY = 'quality.agent_review';
 
+function sanitizeForLog(value: unknown): string {
+  const message = value instanceof Error ? value.message : String(value);
+  return message.replace(/[\r\n]+/g, ' ');
+}
+
 export async function isQualityModuleEnabledForCurrentTenant(): Promise<boolean> {
   try {
     const { entitlements } = await getTenantEntitlements();
@@ -10,7 +15,7 @@ export async function isQualityModuleEnabledForCurrentTenant(): Promise<boolean>
       entitlement.key === QUALITY_MODULE_FEATURE_KEY && entitlement.enabled
     ));
   } catch (error) {
-    console.warn('⚠️ [Qualidade] Não foi possível resolver o entitlement do tenant; módulo mantido desabilitado.', error instanceof Error ? error.message : String(error));
+    console.warn('⚠️ [Qualidade] Não foi possível resolver o entitlement do tenant; módulo mantido desabilitado.', sanitizeForLog(error));
     return false;
   }
 }
