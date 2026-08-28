@@ -551,13 +551,20 @@ export function PublicCatalogMoniqueConcierge() {
                 <p className="helper">Pensá en cómo querés salir del estudio y elegí la opción que más se acerca a vos.</p>
                 <div className="option-grid">
                   {objectives.map((item) => (
-                    <button key={item.id} onClick={() => { if (!suppressObjectiveClicks) setObjective(item.id); }} className={objective === item.id ? 'option selected' : 'option'}>
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        if (suppressObjectiveClicks) return;
+                        setObjective(item.id);
+                        window.setTimeout(() => setStep(2), 220);
+                      }}
+                      className={objective === item.id ? 'option selected' : 'option'}
+                    >
                       <span className="option-icon">{objective === item.id ? <Check size={17} /> : item.id === 'natural' ? 'N' : item.id === 'practical' ? 'T' : item.id === 'brows' ? 'C' : 'L'}</span>
                       <span><b>{item.title}</b><small>{item.text}</small><em className="option-service">Te recomendamos: {item.recommendation}</em></span>
                     </button>
                   ))}
                 </div>
-                <button disabled={!objective} onClick={() => setStep(2)} className="next-cta">Continuar <ArrowRight size={16} /></button>
               </div>
             )}
             {step === 2 && (
