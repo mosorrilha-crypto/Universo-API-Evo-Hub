@@ -142,9 +142,9 @@ const objectives = [
  * direto no WhatsApp pra quem não precisa da evaluación completa.
  */
 const startingPoints = [
-  { title: 'Resultado natural', text: 'Quiero verme arreglada sin que se note que hice algo.', message: 'Hola Monique, quiero un resultado natural, sin que se note que hice algo. ¿Qué me recomendás?' },
-  { title: 'Rutina más práctica', text: 'Quiero ahorrar tiempo frente al espejo todos los días.', message: 'Hola Monique, quiero simplificar mi rutina diaria. ¿Qué me recomendás para ahorrar tiempo?' },
-  { title: 'Transformación completa', text: 'Quiero renovar cejas, labios y pestañas en una sola sesión.', message: 'Hola Monique, me interesa el Combo Full Face para renovar cejas, labios y pestañas. ¿Me contás más?' },
+  { title: 'Resultado natural', text: 'Quiero verme arreglada sin que se note que hice algo.', recommendation: 'Lash Lift o Diseño con Hilo', message: 'Hola Monique, quiero un resultado natural, sin que se note que hice algo. ¿Qué me recomendás?' },
+  { title: 'Rutina más práctica', text: 'Quiero ahorrar tiempo frente al espejo todos los días.', recommendation: 'Lash Lift, Browlamination o Combo', message: 'Hola Monique, quiero simplificar mi rutina diaria. ¿Qué me recomendás para ahorrar tiempo?' },
+  { title: 'Transformación completa', text: 'Quiero renovar cejas, labios y pestañas en una sola sesión.', recommendation: 'Combo Full Face', message: 'Hola Monique, me interesa el Combo Full Face para renovar cejas, labios y pestañas. ¿Me contás más?' },
 ];
 
 const resultImages = [
@@ -285,6 +285,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option b, .concierge-scope .option small { display: block; }
         .concierge-scope .option b { color: #263345; font-size: .86rem; }
         .concierge-scope .option small { margin-top: .3rem; color: #7a8797; font-size: .73rem; line-height: 1.35; }
+        .concierge-scope .option-service { display: block; margin-top: .45rem; color: #3157d5; font-size: .66rem; font-weight: 800; font-style: normal; }
         .concierge-scope .next-cta { display: inline-flex; margin-top: 1.35rem; padding: .9rem 1rem; border: 0; background: #3157d5; color: #fff; }
         .concierge-scope .next-cta:disabled { cursor: not-allowed; opacity: .45; transform: none; }
         .concierge-scope .triage-actions { display: flex; gap: .7rem; margin-top: 1.4rem; }
@@ -309,7 +310,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .starting-point:hover { border-color: #9eb0df; transform: translateY(-2px); box-shadow: 0 .5rem 1rem rgba(49,87,213,.08); }
         .concierge-scope .starting-point b { color: #263345; font-size: .82rem; }
         .concierge-scope .starting-point span { color: #718093; font-size: .72rem; line-height: 1.4; }
-        .concierge-scope .starting-point small { display: inline-flex; align-items: center; gap: .25rem; margin-top: .25rem; color: #3157d5; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+        .concierge-scope .starting-point-service { display: block; margin-top: .5rem; color: #3157d5; font-size: .68rem; font-weight: 800; font-style: normal; }
+        .concierge-scope .starting-point small { display: inline-flex; align-items: center; gap: .25rem; margin-top: .5rem; color: #3157d5; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
         .concierge-scope .catalog-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2rem; }
         .concierge-scope .service-card { display: flex; min-height: 13rem; flex-direction: column; justify-content: space-between; border: 1px solid #e0e5ed; border-radius: .75rem; background: #f9fafc; padding: 1.15rem; transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
         .concierge-scope .service-card:hover { border-color: #9eb0df; transform: translateY(-3px); box-shadow: 0 .7rem 1.3rem rgba(39,55,80,.08); }
@@ -402,6 +404,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option.selected .option-icon { background: #d39a38; color: #17100a; }
         .concierge-scope .option b { color: #fff7e9; }
         .concierge-scope .option small { color: #cdbfae; }
+        .concierge-scope .option-service { color: #e8b95e; }
         .concierge-scope .back-cta { border-color: #6b4c27; color: #d4bd98; }
         .concierge-scope .field span { color: #d7c29d; }
         .concierge-scope .field input, .concierge-scope .field select, .concierge-scope .field textarea { border-color: #6b4c27; background: #211a13; color: #fff7e9; }
@@ -419,6 +422,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .starting-point:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
         .concierge-scope .starting-point b { color: #24190f; }
         .concierge-scope .starting-point span { color: #75624c; }
+        .concierge-scope .starting-point-service { color: #9b6417; }
         .concierge-scope .starting-point small { color: #9b6417; }
         .concierge-scope .service-card { border-color: #d8c6aa; background: #fbf6ed; overflow: hidden; }
         .concierge-scope .service-card:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
@@ -542,7 +546,7 @@ export function PublicCatalogMoniqueConcierge() {
                   {objectives.map((item) => (
                     <button key={item.id} onClick={() => { if (!suppressObjectiveClicks) setObjective(item.id); }} className={objective === item.id ? 'option selected' : 'option'}>
                       <span className="option-icon">{objective === item.id ? <Check size={17} /> : item.id === 'natural' ? 'N' : item.id === 'practical' ? 'T' : item.id === 'brows' ? 'C' : 'L'}</span>
-                      <span><b>{item.title}</b><small>{item.text}</small></span>
+                      <span><b>{item.title}</b><small>{item.text}</small><em className="option-service">Te recomendamos: {item.recommendation}</em></span>
                     </button>
                   ))}
                 </div>
@@ -631,6 +635,7 @@ export function PublicCatalogMoniqueConcierge() {
               <a key={point.title} href={whatsappClickUrl(point.message)} target="_blank" rel="noreferrer" className="starting-point" onClick={trackWhatsAppContact}>
                 <b>{point.title}</b>
                 <span>{point.text}</span>
+                <em className="starting-point-service">Te recomendamos: {point.recommendation}</em>
                 <small>Consultar <ArrowRight size={12} /></small>
               </a>
             ))}
