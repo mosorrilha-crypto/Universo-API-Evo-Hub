@@ -1428,6 +1428,22 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         return res.status(400).json({ error: `Campo "${field}" precisa ser string ou null.` });
       }
     }
+    // Fecha o outro lado da trava de server/routes/admin.ts (PATCH
+    // /api/admin/tenants/:id): não dá pra tirar o slug com o catálogo ligado,
+    // e agora também não dá pra ligar o catálogo sem slug — a única ordem
+    // possível vira criar tenant → definir slug (saas_admin) → só depois
+    // ativar o catálogo aqui.
+    if (enabled) {
+      const { data: tenantForSlugCheck, error: tenantSlugError } = await getDb()
+        .from('tenants')
+        .select('slug')
+        .eq('id', tenantOf(req))
+        .maybeSingle();
+      if (tenantSlugError) return res.status(500).json({ error: tenantSlugError.message });
+      if (!tenantForSlugCheck?.slug) {
+        return res.status(400).json({ error: 'Defina um slug pra este tenant (fala com um saas_admin) antes de ativar o catálogo público.' });
+      }
+    }
     const { error } = await getDb()
       .from('tenants')
       .update({

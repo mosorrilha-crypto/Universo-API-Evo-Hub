@@ -195,6 +195,36 @@ describe('PUT /api/public-catalog-settings', () => {
     expect(body.whatsappPhone).toBe('595994798081');
   });
 
+  it('rejeita ativar o catálogo público (enabled: true) num tenant sem slug definido', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: null, public_catalog_enabled: false }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, whatsappPhone: '595981436141' }),
+    });
+    expect(res.status).toBe(400);
+    const tenantRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_A);
+    expect(tenantRow.public_catalog_enabled).toBe(false);
+  });
+
+  it('permite desativar o catálogo (enabled: false) mesmo sem slug — só a ativação exige slug', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: null, public_catalog_enabled: false }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(res.status).toBe(200);
+  });
+
   it('nunca escreve no tenant de outra sessão', async () => {
     await fetch(`${baseUrl}/api/public-catalog-settings`, {
       method: 'PUT',

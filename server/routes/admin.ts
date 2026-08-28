@@ -176,7 +176,21 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     }
     if (slug !== undefined) {
       if (slug && !TENANT_SLUG_PATTERN.test(slug)) return res.status(400).json({ error: TENANT_SLUG_FORMAT_ERROR });
-      patch.slug = slug || null;
+      const normalizedSlug = slug || null;
+      // Incidente real (27/08/2026): trocar o slug de um tenant com catálogo
+      // público já ligado derruba a URL ativa e os anúncios que apontam pra
+      // ela na hora — mesmo com formato válido. Só permite mudar o slug
+      // enquanto o catálogo está desligado (ou se o valor nem mudou de fato).
+      const { data: currentTenant, error: currentTenantError } = await db()
+        .from('tenants')
+        .select('slug, public_catalog_enabled')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (currentTenantError) return res.status(500).json({ error: currentTenantError.message });
+      if (currentTenant?.public_catalog_enabled && currentTenant.slug !== normalizedSlug) {
+        return res.status(400).json({ error: 'Desative o catálogo público antes de mudar o slug deste tenant — ele está em uso pelos anúncios e pela URL pública ativa.' });
+      }
+      patch.slug = normalizedSlug;
     }
     if (currency !== undefined) patch.currency = currency;
     if (locale !== undefined) patch.locale = locale;

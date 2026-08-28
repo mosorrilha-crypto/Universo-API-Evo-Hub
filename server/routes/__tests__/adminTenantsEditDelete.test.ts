@@ -107,6 +107,47 @@ describe('PATCH /api/admin/tenants/:id', () => {
     expect(body.tenant.slug).toBe('clic-piscinas-2');
   });
 
+  it('rejeita trocar o slug (mesmo em formato válido) de um tenant com catálogo público ativo', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste', public_catalog_enabled: true }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: 'monique-studio' }),
+    });
+    expect(res.status).toBe(400);
+    expect(supabase.__tables.tenants.find((t: any) => t.id === 'tenant-a')?.slug).toBe('monique-teste');
+  });
+
+  it('permite salvar outros campos (ex: nome) num tenant com catálogo ativo, desde que o slug enviado seja o mesmo que já está salvo', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste', public_catalog_enabled: true }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Monique - Evolution', slug: 'monique-teste' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tenant).toMatchObject({ name: 'Monique - Evolution', slug: 'monique-teste' });
+  });
+
+  it('permite trocar o slug livremente quando o catálogo público está desligado', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'antigo-slug', public_catalog_enabled: false }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: 'novo-slug' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.tenant.slug).toBe('novo-slug');
+  });
+
   it('admin comum (não saas_admin) é rejeitado com 403', async () => {
     supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X' }] });
     ({ server, baseUrl } = await startServer('admin'));
