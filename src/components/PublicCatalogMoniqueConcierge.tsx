@@ -127,6 +127,15 @@ function whatsappClickUrl(message: string, productName?: string, source: 'novo' 
 /** Mensagem padrão do botão "Hablar directamente por WhatsApp" — pedido real (TASK-0125): pula a triagem pra quem já sabe que quer falar direto. */
 const DIRECT_WHATSAPP_MESSAGE = 'Hola Monique, vi tu catálogo y me gustaría consultar por tus servicios. ¿Podés orientarme?';
 
+/**
+ * Achado da revisão de redundância (28/08/2026): o preenchimento do template
+ * de mensagem ("{produto}" → nome real) estava duplicado entre o card de
+ * produto e o card de variante, com a mesma lógica de fallback repetida.
+ */
+function fillWhatsappTemplate(template: string | undefined, name: string, fallbackName: string): string {
+  return template ? template.split('{produto}').join(name) : `Hola Monique, me interesa ${fallbackName}. Quiero saber si es para mí.`;
+}
+
 const objectives = [
   { id: 'natural', title: 'Quiero verme arreglada sin maquillarme', text: 'Un resultado suave para sentirte linda sin verte producida.', recommendation: 'Lash Lift o Diseño con Hilo' },
   { id: 'practical', title: 'Quiero sentirme lista cada mañana', text: 'Menos tiempo frente al espejo y más tiempo para vos.', recommendation: 'Lash Lift, Browlamination o Combo' },
@@ -238,9 +247,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .brand-mark { display: grid; width: 2.15rem; height: 2.15rem; place-items: center; border: 1px solid #3157d5; border-radius: 50%; color: #3157d5; font-family: 'Cormorant Garamond', Georgia, serif; font-size: .95rem; font-style: italic; }
         .concierge-scope .site-header nav a, .concierge-scope .mobile-menu a { transition: color 160ms var(--ease-out); }
         .concierge-scope .site-header nav a:hover, .concierge-scope .mobile-menu a:hover { color: #3157d5; }
-        .concierge-scope .header-cta, .concierge-scope .primary-cta, .concierge-scope .next-cta, .concierge-scope .light-cta { align-items: center; justify-content: center; gap: .6rem; border-radius: .45rem; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
-        .concierge-scope .header-cta { padding: .75rem 1rem; background: #3157d5; color: #fff; }
-        .concierge-scope .header-cta:hover, .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: #2444b6; transform: translateY(-2px); }
+        .concierge-scope .primary-cta, .concierge-scope .next-cta, .concierge-scope .light-cta { align-items: center; justify-content: center; gap: .6rem; border-radius: .45rem; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
+        .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: #2444b6; transform: translateY(-2px); }
         .concierge-scope .mobile-menu { display: flex; flex-direction: column; gap: 1rem; padding: 1rem 0 1.25rem; color: #596575; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
         .concierge-scope .hero { overflow: hidden; background: #f7f8fa; padding: 4rem 0 5rem; }
         .concierge-scope .hero-copy h1, .concierge-scope .section-intro h2, .concierge-scope .section-heading h2, .concierge-scope .contact-section h2 { margin-top: 1.2rem; font-family: 'Cormorant Garamond', Georgia, serif; font-size: clamp(3.4rem, 7vw, 6.8rem); font-weight: 600; letter-spacing: -.055em; line-height: .86; }
@@ -369,8 +377,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .brand, .concierge-scope .brand strong { color: #f7efe2; }
         .concierge-scope .brand small { color: #bda982; }
         .concierge-scope .brand-mark { border-color: #d8a64b; color: #e8b95e; }
-        .concierge-scope .header-cta, .concierge-scope .primary-cta, .concierge-scope .next-cta { background: linear-gradient(135deg,#e5b454,#b97922); color: #130f0b; box-shadow: 0 .45rem 1rem rgba(216,166,75,.2); }
-        .concierge-scope .header-cta:hover, .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: linear-gradient(135deg,#f1c86c,#c88a2d); }
+        .concierge-scope .primary-cta, .concierge-scope .next-cta { background: linear-gradient(135deg,#e5b454,#b97922); color: #130f0b; box-shadow: 0 .45rem 1rem rgba(216,166,75,.2); }
+        .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: linear-gradient(135deg,#f1c86c,#c88a2d); }
         .concierge-scope .mobile-menu { background: #0a0908; border-top-color: rgba(214,166,75,.2); }
         .concierge-scope .hero { background: #0a0908; color: #f7efe2; }
         .concierge-scope .hero-copy h1 { color: #f7efe2; }
@@ -471,7 +479,6 @@ export function PublicCatalogMoniqueConcierge() {
             <a href="#servicios">Servicios</a>
             <a href="#resultados">Resultados</a>
           </nav>
-          <a href="#triagem" onClick={handleTriageAnchorClick} className="header-cta hidden md:inline-flex">Encontrar mi servicio <ArrowRight size={14} /></a>
           <button onClick={() => setMenuOpen(!menuOpen)} className="md:hidden" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}>
             {menuOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
@@ -660,9 +667,7 @@ export function PublicCatalogMoniqueConcierge() {
           {catalog && (
             <div className="catalog-grid">
               {catalog.products.map((service) => {
-                const consultMessage = catalog.contact.whatsappMessageProduct
-                  ? catalog.contact.whatsappMessageProduct.split('{produto}').join(service.name)
-                  : `Hola Monique, me interesa ${service.name}. Quiero saber si es para mí.`;
+                const consultMessage = fillWhatsappTemplate(catalog.contact.whatsappMessageProduct, service.name, service.name);
                 const cardImage = service.imageUrl || PROMO_IMAGE_BY_PRODUCT_NAME[service.name];
                 return (
                   <article className="service-card" key={service.name}>
@@ -678,9 +683,7 @@ export function PublicCatalogMoniqueConcierge() {
                         {service.price && <p className="service-price-range">{service.price}</p>}
                         <ul className="service-variants">
                         {service.variants.map((variant) => {
-                          const variantMessage = variant.whatsappMessage
-                            ? variant.whatsappMessage.split('{produto}').join(variant.code)
-                            : `Hola Monique, me interesa ${service.name} (${variant.code}). Quiero saber si es para mí.`;
+                          const variantMessage = fillWhatsappTemplate(variant.whatsappMessage, variant.code, `${service.name} (${variant.code})`);
                           return (
                             <li key={variant.code}>
                               <div className="service-variant-info">
@@ -708,6 +711,17 @@ export function PublicCatalogMoniqueConcierge() {
               })}
             </div>
           )}
+          {/*
+            Achado da revisão de redundância (28/08/2026): este resumo e a
+            Knowledge Base do tenant (campo `pricingAndPolicies`, usado pela
+            IA na conversa privada do WhatsApp) descrevem a mesma política —
+            valores como a seña de Gs 50.000, os 24h de cancelamento e os 15
+            min de tolerância precisam ficar em sincronia manual se algum dia
+            mudarem. Essa duplicação é intencional, não um bug: a KB completa
+            inclui dado bancário (alias/cédula, titular da conta) que não
+            pode ir num JSON público sem autenticação (`/api/public/catalog`)
+            — só este resumo, sem dado sensível, é seguro pra expor aqui.
+          */}
           <details className="policy-box">
             <summary>Información importante antes de confirmar <ChevronDown size={16} /></summary>
             <div>
