@@ -5,7 +5,7 @@
  * com header `apikey`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sendEvolutionTextMessage, sendEvolutionVoiceMessage, showEvolutionTyping, setEvolutionWebhook } from '../evolutionSend';
+import { sendEvolutionMediaMessage, sendEvolutionTextMessage, sendEvolutionVoiceMessage, showEvolutionTyping, setEvolutionWebhook } from '../evolutionSend';
 
 const realFetch = global.fetch;
 
@@ -72,6 +72,41 @@ describe('sendEvolutionVoiceMessage', () => {
   it('propaga uma falha do endpoint PTT', async () => {
     global.fetch = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) })) as any;
     await expect(sendEvolutionVoiceMessage('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'T2dnUw==', 'audio/ogg; codecs=opus')).rejects.toThrow(/HTTP 500/);
+  });
+});
+
+describe('sendEvolutionMediaMessage', () => {
+  it('achado real 27/08/2026: remove o cabeçalho Data URL da foto de exemplo do catálogo antes de mandar pra Evolution API', async () => {
+    // exampleImageBase64 do catálogo é salvo com o prefixo "data:...;base64,"
+    // (vem direto do upload no navegador) — mandar isso pro campo `media` da
+    // Evolution API sem limpar causava "Owned media must be a url or base64"
+    // e derrubava silenciosamente o envio da foto de exemplo pro cliente.
+    const fetchMock = vi.fn(async (_url: string, _options?: any) => ({ ok: true, json: async () => ({}) }));
+    global.fetch = fetchMock as any;
+
+    await sendEvolutionMediaMessage(
+      'inst-1',
+      'https://evo.example.com',
+      'key-1',
+      '595981234567',
+      'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+      'image/jpeg',
+      'foto.jpg',
+      'Lash Lift'
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://evo.example.com/message/sendMedia/inst-1');
+    const body = JSON.parse((options as any).body);
+    expect(body.media).toBe('/9j/4AAQSkZJRg==');
+    expect(body.mediatype).toBe('image');
+  });
+
+  it('propaga uma falha da Evolution API com o corpo do erro', async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ message: ['Owned media must be a url or base64'] }) })) as any;
+    await expect(
+      sendEvolutionMediaMessage('inst-1', 'https://evo.example.com', 'key-1', '595981234567', 'data:image/jpeg;base64,QQ==', 'image/jpeg', 'foto.jpg')
+    ).rejects.toThrow(/HTTP 400/);
   });
 });
 

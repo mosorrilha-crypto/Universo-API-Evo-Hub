@@ -41,6 +41,7 @@ const domainLabel: Record<string, string> = {
   catalog: 'Catálogo',
   channel: 'Canais',
   crm: 'CRM',
+  operations: 'Operação técnica',
   quality: 'Qualidade',
   sales: 'Vendas',
 };

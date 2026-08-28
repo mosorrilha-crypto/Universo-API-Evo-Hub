@@ -38,6 +38,8 @@ import {
 } from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, updateFinancialTransactionBySourceRef, isDuplicateSourceRefError } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
+import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
+import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
@@ -45,6 +47,7 @@ import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
 import { listOperationEvents } from '../services/operationEventStore';
+import { archiveSystemIncident, listSystemIncidents, resolveSystemIncident, restoreSystemIncident, reviewSystemIncident } from '../services/systemIncidentStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
 import { getDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
@@ -87,6 +90,10 @@ interface ConversationsRouterDeps {
   googleClientId?: string;
   /** Injeção de teste; produção resolve o entitlement no contexto RLS do tenant. */
   isFinancialModuleEnabled?: () => Promise<boolean>;
+  /** Injeção de teste; produção consulta a liberação da Agenda para o tenant. */
+  isAgendaModuleEnabled?: () => Promise<boolean>;
+  /** Injeção de teste; produção consulta a liberação do recurso para o tenant. */
+  isSystemLogsModuleEnabled?: () => Promise<boolean>;
   googleClientSecret?: string;
   googleRedirectUri?: string;
 }
@@ -125,10 +132,38 @@ function sendKnowledgeBaseDocumentError(res: Response, error: unknown): Response
  * verdade pelo painel (texto e mídia), e controla o status do agente
  * automático (active/paused/restricted — ver server/services/agentStatus.ts).
  */
-export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri, isFinancialModuleEnabled }: ConversationsRouterDeps): Router {
+export function createConversationsRouter({ authenticateToken, jwtSecret, metaAccessToken, metaPhoneNumberId, evolutionApiUrl, evolutionApiKey, evolutionInstanceName, supabaseUrl, supabaseKey, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri, isFinancialModuleEnabled, isAgendaModuleEnabled, isSystemLogsModuleEnabled }: ConversationsRouterDeps): Router {
   const router = Router();
   const financialModuleEnabled = isFinancialModuleEnabled || isFinancialModuleEnabledForCurrentTenant;
+  const agendaModuleEnabled = isAgendaModuleEnabled || isAgendaModuleEnabledForCurrentTenant;
+  const systemLogsModuleEnabled = isSystemLogsModuleEnabled || isSystemLogsModuleEnabledForCurrentTenant;
   const calendarConfig: CalendarConfig | undefined = googleRedirectUri ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri } : undefined;
+
+  function requireSystemLogsModule() {
+    return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
+      tenantOf(req);
+      if (req.user?.role === 'saas_admin') return next();
+      if (!(await systemLogsModuleEnabled())) {
+        return res.status(403).json({ error: 'Logs do Sistema ainda não estão habilitados para esta empresa. Solicite a liberação ao administrador da plataforma.', code: 'system_logs_module_disabled' });
+      }
+      next();
+    });
+  }
+
+  function requireAgendaModule() {
+    return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
+      tenantOf(req);
+      // O SaaS Admin administra a liberação por empresa e audita o módulo.
+      if (req.user?.role === 'saas_admin') return next();
+      if (!(await agendaModuleEnabled())) {
+        return res.status(403).json({
+          error: 'Agenda não está habilitada para esta empresa. Solicite a liberação ao administrador da plataforma.',
+          code: 'agenda_module_disabled',
+        });
+      }
+      next();
+    });
+  }
 
   /**
    * Comprovante rejeitado (achado numa auditoria, 16/08/2026): setPaymentVerification
@@ -567,6 +602,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       // player de áudio do painel (GET /api/media/:messageId) herdaria o
       // mesmo problema de reprodução que motivou a conversão.
       await saveMediaImage(supabaseUrl, supabaseKey, messageId, uploadBase64, uploadMimeType);
+      // Achado real (27/08/2026): áudio ENVIADO pelo operador nunca era
+      // transcrito — só o placeholder fixo "🎤 Áudio enviado" ficava salvo
+      // pra sempre, diferente do áudio recebido do cliente (webhooks.ts +
+      // transcriptionQueue.ts). Como autoReply.ts monta o histórico do
+      // agente a partir de message.text, isso era uma brecha real de
+      // contexto: uma instrução dada por voz pelo operador nunca chegava ao
+      // agente. Mesmo mecanismo já usado em /retry-transcription (acima)
+      // pro lado de entrada; aguardado (não fire-and-forget) porque o
+      // handler já espera o envio real terminar antes de responder, e assim
+      // fica determinístico — uma falha de transcrição nunca derruba a
+      // resposta de sucesso, o áudio real já foi entregue ao cliente nesse
+      // ponto.
+      if (msgType === 'audio') {
+        try {
+          const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, uploadBase64, uploadMimeType, {
+            leadName: conv?.name,
+            customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+          });
+          await updateMessageText(tenantId, req.params.phone, messageId, outcome.result.transcription);
+        } catch (transcriptionError) {
+          console.warn(`⚠️  [Conversas] Falha ao transcrever áudio enviado (messageId=${messageId}):`, (transcriptionError as Error).message);
+        }
+      }
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
@@ -917,7 +975,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // rota GET expondo isso. Achado real em produção: um agendamento com sinal
   // pago ficou preso em "pending_verification" por não ter botão nenhum no
   // produto pra confirmar.
-  router.get('/api/conversations/:phone/appointment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/conversations/:phone/appointment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const appointment = await getAppointmentForPhone(tenantOf(req), req.params.phone);
     res.json({ appointment: appointment || null });
   }));
@@ -931,7 +989,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // autoReply.ts) + a linha em appointments com source='manual', pra entrar
   // no mesmo lembrete automático — mas sem disparar Purchase pro Meta CAPI
   // (decisão do dono do produto: sem origem de anúncio rastreável).
-  router.post('/api/conversations/:phone/manual-appointment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/conversations/:phone/manual-appointment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (!calendarConfig) {
       return res.status(503).json({ error: 'Google Calendar não configurado neste servidor.' });
     }
@@ -1141,7 +1199,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // Hoje NENHUM botão do painel chama este endpoint diretamente — mantido
   // como caminho de API (coberto por testes, ver
   // conversationsVerifyPayment*.test.ts) por precaução, não removido.
-  router.post('/api/conversations/:phone/verify-payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/conversations/:phone/verify-payment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status } = req.body || {};
     if (status !== 'verified' && status !== 'rejected') {
       return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
@@ -1806,6 +1864,40 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ events });
   }));
 
+  // Logs técnicos auditáveis: a página administrativa registra revisão e resolução,
+  // mas não aciona push, WhatsApp nem qualquer ação sobre conversas ou agenda.
+  router.get('/api/system-incidents', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const status = ['open', 'reviewed', 'resolved', 'archived'].includes(String(req.query.status)) ? String(req.query.status) as 'open' | 'reviewed' | 'resolved' | 'archived' : undefined;
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(Math.floor(requestedLimit), 500)) : 200;
+    res.json({ incidents: await listSystemIncidents(tenantOf(req), { status, limit }) });
+  }));
+
+  router.post('/api/system-incidents/:id/review', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const incident = await reviewSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
+  }));
+
+  router.post('/api/system-incidents/:id/resolve', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const resolutionNote = typeof req.body?.resolutionNote === 'string' ? req.body.resolutionNote : undefined;
+    const incident = await resolveSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id }, resolutionNote);
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
+  }));
+
+  router.post('/api/system-incidents/:id/archive', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const incident = await archiveSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
+  }));
+
+  router.post('/api/system-incidents/:id/restore', authenticateToken, requireRole('admin'), requireSystemLogsModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const incident = await restoreSystemIncident(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!incident) return res.status(404).json({ error: 'Incidente não encontrado.' });
+    res.json({ incident });
+  }));
+
   router.post('/api/escalations/:id/assign', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const operatorId = req.body?.operatorId === null ? null : (req.body?.operatorId || req.user?.id);
     if (operatorId !== null && typeof operatorId !== 'string') return res.status(400).json({ error: 'Campo "operatorId" inválido.' });
@@ -1984,7 +2076,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // de marcar o pagamento, reusa o mesmo pipeline do operator-reply acima
   // (issue #97) pra já avisar o cliente com o motivo, texto livre se dentro
   // da janela de 24h ou template de reengajamento se não.
-  router.post('/api/escalations/:id/resolve-payment', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/escalations/:id/resolve-payment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const operatorId = req.user?.id;
     if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });

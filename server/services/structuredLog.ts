@@ -1,3 +1,5 @@
+import { reportSystemIncident, type SystemIncidentCategory, type SystemIncidentSeverity } from './systemIncidentStore';
+
 /**
  * Log estruturado mínimo por tenant — não é Sentry/observability pesada
  * (ver issue #184, baixa prioridade até ter um gatilho concreto), só
@@ -21,6 +23,52 @@ export interface StructuredLogFields {
   detail?: string;
 }
 
+/** Traduz somente falhas e contingências em itens auditáveis; não envia alertas. */
+export function getSystemIncidentFromStructuredLog(fields: StructuredLogFields): Omit<Parameters<typeof reportSystemIncident>[0], 'tenantId'> | null {
+  const isLegacyFallback = fields.area === 'knowledgeBase' && fields.op === 'loadRuntimeSource' && /source=legacy_blob/.test(fields.detail || '');
+  const isKnowledgeUnavailable = fields.area === 'knowledgeBase' && fields.op === 'loadRuntimeSource' && /source=unavailable/.test(fields.detail || '');
+  if (fields.outcome !== 'error' && !isLegacyFallback && !isKnowledgeUnavailable) return null;
+  const category: SystemIncidentCategory = fields.area === 'knowledgeBase' ? 'knowledge_base'
+    : /auth|session|token/i.test(`${fields.area} ${fields.op}`) ? 'authentication'
+      : /catalog/i.test(`${fields.area} ${fields.op}`) ? 'catalog'
+        : /media|video|upload/i.test(`${fields.area} ${fields.op}`) ? 'media'
+          : /webhook|evolution|meta|calendar|integration/i.test(`${fields.area} ${fields.op}`) ? 'integration' : 'runtime';
+  const severity: SystemIncidentSeverity = isKnowledgeUnavailable || fields.outcome === 'error' && /unavailable|5\d\d|fatal/i.test(fields.detail || '') ? 'critical'
+    : isLegacyFallback || fields.area === 'knowledgeBase' ? 'high' : 'medium';
+  const title = isKnowledgeUnavailable ? 'Runtime da Base de Conhecimento indisponível'
+    : isLegacyFallback ? 'Fonte legada usada como contingência' : `Falha técnica: ${redactSystemIncidentDetail(fields.area)}.${redactSystemIncidentDetail(fields.op)}`;
+  const suggestedAction = isKnowledgeUnavailable
+    ? 'Verifique o banco e o runtime da Base. Preserve o fallback técnico e suspenda publicações até a revisão humana confirmar a recuperação.'
+    : isLegacyFallback
+    ? 'Revise se os oito documentos estão publicados e confira a telemetria da Base antes de qualquer publicação nova.'
+    : category === 'authentication'
+      ? 'Revise papel e capability do usuário afetado. Não invalide sessões nem altere permissões sem confirmação administrativa.'
+      : category === 'catalog' || category === 'media'
+        ? 'Revise a configuração e o arquivo envolvidos. Não altere catálogo, preços ou mídia sem validação humana.'
+        : category === 'integration'
+          ? 'Verifique a credencial e a disponibilidade da integração, sem reenviar mensagens nem modificar agenda automaticamente.'
+          : 'Revise o detalhe, confirme se a falha persiste e siga a correção sugerida pelo módulo afetado. Não altere dados comerciais sem validação.';
+  return {
+    sourceKey: `system:${safeSignal(fields.area)}:${safeSignal(fields.op)}:${isLegacyFallback ? 'legacy-fallback' : isKnowledgeUnavailable ? 'unavailable' : 'error'}`,
+    category, severity, title, detail: redactSystemIncidentDetail(fields.detail), suggestedAction,
+    metadata: { area: fields.area, op: fields.op, outcome: fields.outcome, latencyMs: fields.latencyMs ?? null },
+  };
+}
+
+/** Remove padrões de contato e segredo antes de levar um detalhe para a auditoria administrativa. */
+export function redactSystemIncidentDetail(detail?: string): string {
+  return String(detail || '')
+    .replace(/(?:authorization|token|api[_-]?key|secret|password)\s*[=:]\s*[^\s;,&]+/gi, '[segredo redigido]')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/g, '[token redigido]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[e-mail redigido]')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '[telefone redigido]')
+    .replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600);
+}
+
+function safeSignal(value: string): string {
+  return String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 72) || 'unknown';
+}
+
 /** Uma linha por evento, grep-ável por qualquer campo (`tenant=`, `area=`, `op=`, `outcome=`). */
 export function logStructured(fields: StructuredLogFields): void {
   const parts = [
@@ -34,6 +82,8 @@ export function logStructured(fields: StructuredLogFields): void {
   const line = `[LOG] ${parts.join(' ')}`;
   if (fields.outcome === 'error') console.warn(line);
   else console.log(line);
+  const incident = getSystemIncidentFromStructuredLog(fields);
+  if (incident) void reportSystemIncident({ tenantId: fields.tenantId, ...incident }).catch(() => undefined);
 }
 
 /** Envolve uma operação assíncrona, medindo latência e logando outcome — rethrow sempre em erro, nunca engole a falha. */

@@ -125,6 +125,19 @@ const objectives = [
   { id: 'lips', title: 'Quiero recuperar color y definición', text: 'Labios más definidos, con evaluación previa y expectativas reales.', recommendation: 'Microlips o Neutralización' },
 ];
 
+/**
+ * Achado da revisão de conversão (27/08/2026): a lista completa de serviços
+ * competia demais com a oferta do Combo Full Face, sem nenhum atalho pra
+ * quem já sabe o que quer. Estes 3 caminhos ficam entre o "Resultados" e o
+ * catálogo completo — reduzem a paralisia de escolha oferecendo um contato
+ * direto no WhatsApp pra quem não precisa da evaluación completa.
+ */
+const startingPoints = [
+  { title: 'Resultado natural', text: 'Quiero verme arreglada sin que se note que hice algo.', message: 'Hola Monique, quiero un resultado natural, sin que se note que hice algo. ¿Qué me recomendás?' },
+  { title: 'Rutina más práctica', text: 'Quiero ahorrar tiempo frente al espejo todos los días.', message: 'Hola Monique, quiero simplificar mi rutina diaria. ¿Qué me recomendás para ahorrar tiempo?' },
+  { title: 'Transformación completa', text: 'Quiero renovar cejas, labios y pestañas en una sola sesión.', message: 'Hola Monique, me interesa el Combo Full Face para renovar cejas, labios y pestañas. ¿Me contás más?' },
+];
+
 const resultImages = [
   { src: '/monique-novo/full-face.jpg', alt: 'Resultado real de cejas, pestañas y labios', label: 'Cejas + pestañas' },
   { src: '/monique-novo/brow-lift.jpg', alt: 'Resultado real de brow lift y pestañas', label: 'Brow lift' },
@@ -278,6 +291,12 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .result-card:hover img { transform: scale(1.04); }
         .concierge-scope .result-card span { position: absolute; bottom: .7rem; left: .7rem; border-radius: .35rem; background: rgba(23,32,43,.82); padding: .4rem .55rem; color: #fff; font-size: .58rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .concierge-scope .catalog-section { background: #fff; }
+        .concierge-scope .starting-points { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2.2rem; }
+        .concierge-scope .starting-point { display: flex; flex-direction: column; gap: .3rem; border: 1px solid #dce3ec; border-radius: .75rem; background: #f7f8fa; padding: 1.1rem; transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
+        .concierge-scope .starting-point:hover { border-color: #9eb0df; transform: translateY(-2px); box-shadow: 0 .5rem 1rem rgba(49,87,213,.08); }
+        .concierge-scope .starting-point b { color: #263345; font-size: .82rem; }
+        .concierge-scope .starting-point span { color: #718093; font-size: .72rem; line-height: 1.4; }
+        .concierge-scope .starting-point small { display: inline-flex; align-items: center; gap: .25rem; margin-top: .25rem; color: #3157d5; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
         .concierge-scope .catalog-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2rem; }
         .concierge-scope .service-card { display: flex; min-height: 13rem; flex-direction: column; justify-content: space-between; border: 1px solid #e0e5ed; border-radius: .75rem; background: #f9fafc; padding: 1.15rem; transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
         .concierge-scope .service-card:hover { border-color: #9eb0df; transform: translateY(-3px); box-shadow: 0 .7rem 1.3rem rgba(39,55,80,.08); }
@@ -286,9 +305,27 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .service-meta span:last-child { display: inline-flex; align-items: center; gap: .25rem; }
         .concierge-scope .service-card h3 { margin-top: 1.4rem; font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.8rem; line-height: .95; }
         .concierge-scope .service-card p { margin-top: .55rem; color: #768394; font-size: .75rem; line-height: 1.4; }
+        .concierge-scope .service-card-skeleton { gap: .6rem; }
+        .concierge-scope .skeleton-line { border-radius: .3rem; background: linear-gradient(90deg,#e7ebf1 25%,#f3f5f9 37%,#e7ebf1 63%); background-size: 400% 100%; animation: concierge-skeleton-pulse 1.4s ease-in-out infinite; }
+        .concierge-scope .skeleton-meta { width: 40%; height: .55rem; }
+        .concierge-scope .skeleton-title { width: 70%; height: 1.4rem; margin-top: .5rem; }
+        .concierge-scope .skeleton-text { width: 100%; height: .7rem; margin-top: .5rem; }
+        .concierge-scope .skeleton-text.short { width: 60%; }
+        .concierge-scope .skeleton-price { width: 35%; height: .9rem; }
+        .concierge-scope .skeleton-button { width: 30%; height: .9rem; }
+        @keyframes concierge-skeleton-pulse { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
         .concierge-scope .service-bottom { margin-top: 1.1rem; border-top: 1px solid #e0e5ed; padding-top: .75rem; }
         .concierge-scope .service-bottom b { color: #3157d5; font-size: .78rem; }
         .concierge-scope .service-bottom a { display: inline-flex; align-items: center; gap: .25rem; color: #596575; font-size: .6rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+        .concierge-scope .service-variants { display: flex; flex-direction: column; gap: .55rem; margin-top: 1.1rem; border-top: 1px solid #e0e5ed; padding-top: .75rem; }
+        .concierge-scope .service-variants li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem .6rem; }
+        .concierge-scope .service-variant-info { display: flex; flex-direction: column; min-width: 0; }
+        .concierge-scope .service-variant-info b { color: #263345; font-size: .74rem; }
+        .concierge-scope .service-variant-info small { margin-top: .15rem; color: #8b97a7; font-size: .62rem; line-height: 1.3; }
+        .concierge-scope .service-variant-price { display: flex; flex-shrink: 0; align-items: center; gap: .5rem; }
+        .concierge-scope .service-variant-price > span:first-child { color: #3157d5; font-size: .74rem; font-weight: 800; }
+        .concierge-scope .service-variant-duration { display: inline-flex; align-items: center; gap: .2rem; color: #8b97a7; font-size: .6rem; }
+        .concierge-scope .service-variant-price a { display: inline-flex; align-items: center; gap: .2rem; color: #596575; font-size: .58rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
         .concierge-scope .policy-box { margin-top: 1.2rem; border: 1px solid #dfe5ed; border-radius: .7rem; background: #f7f8fa; padding: 1rem 1.1rem; }
         .concierge-scope .policy-box summary { display: flex; cursor: pointer; align-items: center; justify-content: space-between; color: #445266; font-size: .72rem; font-weight: 800; }
         .concierge-scope .policy-box summary svg { transition: transform 160ms var(--ease-out); }
@@ -303,7 +340,11 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .footer { background: #17202b; padding: 1.4rem 0; color: #c7d0dd; font-size: .6rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
         .concierge-scope .footer a:hover { color: #fff; }
         @media (min-width: 640px) { .concierge-scope .option-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-        @media (max-width: 767px) { .concierge-scope .section-heading { align-items: start; flex-direction: column; } .concierge-scope .results-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .concierge-scope .result-card.featured { grid-column: span 2; grid-row: auto; min-height: 22rem; } .concierge-scope .catalog-grid { grid-template-columns: 1fr; } .concierge-scope .hero { padding-top: 2.5rem; } .concierge-scope .hero-note { left: .65rem; } }
+        @media (max-width: 767px) { .concierge-scope .section-heading { align-items: start; flex-direction: column; } .concierge-scope .results-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .concierge-scope .result-card.featured { grid-column: span 2; grid-row: auto; min-height: 22rem; } .concierge-scope .catalog-grid { grid-template-columns: 1fr; } .concierge-scope .starting-points { grid-template-columns: 1fr; } .concierge-scope .hero { padding-top: 2.5rem; } .concierge-scope .hero-note { left: .65rem; }
+          /* Item P2 da revisão de conversão (27/08/2026): textos auxiliares pequenos demais no celular real. */
+          .concierge-scope .helper, .concierge-scope .option small, .concierge-scope .service-card p, .concierge-scope .service-variant-info small, .concierge-scope .starting-point span, .concierge-scope .field span { font-size: .82rem; line-height: 1.5; }
+          .concierge-scope .service-meta, .concierge-scope .trust-row { font-size: .7rem; }
+        }
 
         /* Black & Gold Atelier — identidade visual correta (captura original, commit c1693b81): preto profundo e dourado, não azul/branco. Sobrescreve as regras acima, na mesma ordem do CSS de origem. */
         .concierge-scope .site-header { background: rgba(10,9,8,.96); border-bottom-color: rgba(214,166,75,.2); color: #f7efe2; }
@@ -357,6 +398,11 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .result-card span { background: rgba(10,9,8,.88); color: #f7efe2; }
         .concierge-scope .catalog-section { background: #f3eadc; }
         .concierge-scope .catalog-section .section-heading > p { color: #665846; }
+        .concierge-scope .starting-point { border-color: #d8c6aa; background: #fbf6ed; }
+        .concierge-scope .starting-point:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
+        .concierge-scope .starting-point b { color: #24190f; }
+        .concierge-scope .starting-point span { color: #75624c; }
+        .concierge-scope .starting-point small { color: #9b6417; }
         .concierge-scope .service-card { border-color: #d8c6aa; background: #fbf6ed; overflow: hidden; }
         .concierge-scope .service-card:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
         .concierge-scope .service-card-image { display: block; width: calc(100% + 2.3rem); aspect-ratio: 4 / 3; margin: -1.15rem -1.15rem 1rem; object-fit: cover; }
@@ -364,8 +410,15 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .service-card h3 { color: #24190f; }
         .concierge-scope .service-card p { color: #75624c; }
         .concierge-scope .service-bottom { border-top-color: #dfcfb6; }
+        .concierge-scope .skeleton-line { background: linear-gradient(90deg,#e7dbc2 25%,#f3ead8 37%,#e7dbc2 63%); background-size: 400% 100%; }
         .concierge-scope .service-bottom b { color: #9b6417; }
         .concierge-scope .service-bottom a { color: #684916; }
+        .concierge-scope .service-variants { border-top-color: #dfcfb6; }
+        .concierge-scope .service-variant-info b { color: #24190f; }
+        .concierge-scope .service-variant-info small { color: #8c795c; }
+        .concierge-scope .service-variant-price > span:first-child { color: #9b6417; }
+        .concierge-scope .service-variant-duration { color: #8c795c; }
+        .concierge-scope .service-variant-price a { color: #684916; }
         .concierge-scope .policy-box { border-color: #d1b88f; background: #f9f0e2; }
         .concierge-scope .policy-box summary { color: #4b351b; }
         .concierge-scope .policy-box div { color: #705f49; }
@@ -392,7 +445,7 @@ export function PublicCatalogMoniqueConcierge() {
             <span><strong>Monique</strong><small>BEAUTY STUDIO</small></span>
           </a>
           <nav className="hidden items-center gap-7 text-[10px] font-bold uppercase tracking-[.14em] text-[#596575] md:flex">
-            <a href="#triagem" onClick={handleTriageAnchorClick}>Triagem</a>
+            <a href="#triagem" onClick={handleTriageAnchorClick}>Evaluación</a>
             <a href="#servicios">Servicios</a>
             <a href="#resultados">Resultados</a>
           </nav>
@@ -403,7 +456,7 @@ export function PublicCatalogMoniqueConcierge() {
         </div>
         {menuOpen && (
           <div className="container mobile-menu md:hidden">
-            <a href="#triagem" onClick={() => { setMenuOpen(false); handleTriageAnchorClick(); }}>Triagem</a>
+            <a href="#triagem" onClick={() => { setMenuOpen(false); handleTriageAnchorClick(); }}>Evaluación</a>
             <a href="#servicios" onClick={() => setMenuOpen(false)}>Servicios</a>
             <a href="#resultados" onClick={() => setMenuOpen(false)}>Resultados</a>
           </div>
@@ -435,7 +488,7 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="kicker"><span className="gold-rule" /> Oferta especial · evaluación</span>
             <h2>Un cuidado completo para entrar en tu <span>próxima etapa.</span></h2>
             <p>Conocé el Combo Full Face y recibí orientación personalizada antes de confirmar. La seña y el horario se coordinan por WhatsApp.</p>
-            <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Agendar mi evaluación <ArrowRight size={16} /></a>
+            <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Iniciar mi evaluación <ArrowRight size={16} /></a>
           </div>
           <div className="gold-promo-media">
             <img src="/monique-novo/promo-combo-full-face.jpg" alt="Arte promocional do Combo Full Face" />
@@ -505,7 +558,7 @@ export function PublicCatalogMoniqueConcierge() {
             {step === 3 && (
               <form onSubmit={submit} className="triage-body">
                 <h3>Listo. Conversemos con contexto.</h3>
-                <p className="helper">Te enviaremos la información de tu triagem junto con tu mensaje.</p>
+                <p className="helper">Te enviaremos la información de tu evaluación junto con tu mensaje.</p>
                 <label className="field">
                   <span>Tu nombre</span>
                   <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="¿Cómo te llamamos?" />
@@ -520,7 +573,7 @@ export function PublicCatalogMoniqueConcierge() {
                 </label>
                 <div className="triage-actions">
                   <button type="button" onClick={() => setStep(2)} className="back-cta">Volver</button>
-                  <button type="submit" className="next-cta">Enviar mi triagem <MessageCircle size={16} /></button>
+                  <button type="submit" className="next-cta">Enviar mi evaluación <MessageCircle size={16} /></button>
                 </div>
                 {sent && <p className="sent-note">Tu mensaje fue preparado en WhatsApp. La confirmación del horario depende de la agenda.</p>}
               </form>
@@ -552,7 +605,31 @@ export function PublicCatalogMoniqueConcierge() {
             <div><span className="section-number">03</span><h2>Catálogo claro.<br /><span>Elegí con confianza.</span></h2></div>
             <p>Precios, duración y objetivo de cada servicio en una sola vista.</p>
           </div>
-          {!catalog && !productsError && <p className="helper">Cargando servicios y precios...</p>}
+          <div className="starting-points">
+            {startingPoints.map((point) => (
+              <a key={point.title} href={whatsappClickUrl(point.message)} target="_blank" rel="noreferrer" className="starting-point" onClick={trackWhatsAppContact}>
+                <b>{point.title}</b>
+                <span>{point.text}</span>
+                <small>Consultar <ArrowRight size={12} /></small>
+              </a>
+            ))}
+          </div>
+          {!catalog && !productsError && (
+            <div className="catalog-grid" aria-label="Cargando servicios y precios" aria-busy="true">
+              {[0, 1, 2].map((index) => (
+                <div className="service-card service-card-skeleton" key={index}>
+                  <div className="skeleton-line skeleton-meta" />
+                  <div className="skeleton-line skeleton-title" />
+                  <div className="skeleton-line skeleton-text" />
+                  <div className="skeleton-line skeleton-text short" />
+                  <div className="service-bottom">
+                    <div className="skeleton-line skeleton-price" />
+                    <div className="skeleton-line skeleton-button" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {productsError && <p className="helper">No se pudieron cargar los servicios en este momento. Probá de nuevo en unos minutos.</p>}
           {catalog && (
             <div className="catalog-grid">
@@ -570,10 +647,33 @@ export function PublicCatalogMoniqueConcierge() {
                     </div>
                     <h3>{service.name}</h3>
                     {service.description && <p>{service.description}</p>}
-                    <div className="service-bottom">
-                      <b>{service.price}</b>
-                      <a href={whatsappClickUrl(consultMessage, service.name)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
-                    </div>
+                    {service.variants?.length ? (
+                      <ul className="service-variants">
+                        {service.variants.map((variant) => {
+                          const variantMessage = variant.whatsappMessage
+                            ? variant.whatsappMessage.split('{produto}').join(variant.code)
+                            : `Hola Monique, me interesa ${service.name} (${variant.code}). Quiero saber si es para mí.`;
+                          return (
+                            <li key={variant.code}>
+                              <div className="service-variant-info">
+                                <b>{variant.code}</b>
+                                {variant.description && <small>{variant.description}</small>}
+                              </div>
+                              <div className="service-variant-price">
+                                <span>{variant.price}</span>
+                                {formatDuration(variant.durationMinutes) && <span className="service-variant-duration"><Clock3 size={11} /> {formatDuration(variant.durationMinutes)}</span>}
+                                <a href={whatsappClickUrl(variantMessage, `${service.name} - ${variant.code}`)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={12} /></a>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <div className="service-bottom">
+                        <b>{service.price}</b>
+                        <a href={whatsappClickUrl(consultMessage, service.name)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
+                      </div>
+                    )}
                   </article>
                 );
               })}
@@ -594,9 +694,9 @@ export function PublicCatalogMoniqueConcierge() {
           <div>
             <span className="section-number light">04</span>
             <h2>Un rato para vos.<br /><span>Un resultado que te acompaña.</span></h2>
-            <p>Si todavía tenés dudas, la triagem te ayuda a encontrar un punto de partida pensado para tu rutina.</p>
+            <p>Si todavía tenés dudas, la evaluación te ayuda a encontrar un punto de partida pensado para tu rutina.</p>
           </div>
-          <a href="#triagem" onClick={handleTriageAnchorClick} className="light-cta">Volver a la triagem <ArrowRight size={16} /></a>
+          <a href="#triagem" onClick={handleTriageAnchorClick} className="light-cta">Volver a la evaluación <ArrowRight size={16} /></a>
         </div>
       </section>
       <footer className="footer">

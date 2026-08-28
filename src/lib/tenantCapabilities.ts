@@ -7,6 +7,7 @@ export const TENANT_NAVIGATION_FEATURES = {
   agent: 'ai.auto_reply',
   catalog: 'catalog.public_page',
   quality: 'quality.agent_review',
+  systemLogs: 'operations.system_logs',
 } as const;
 
 export type TenantNavigationCapability = keyof typeof TENANT_NAVIGATION_FEATURES;
@@ -32,6 +33,7 @@ export const EMPTY_TENANT_NAVIGATION_CAPABILITIES: TenantNavigationCapabilities 
   agent: false,
   catalog: false,
   quality: false,
+  systemLogs: false,
 };
 
 export function resolveTenantNavigationCapabilities(
@@ -52,5 +54,6 @@ export function resolveTenantNavigationCapabilities(
     agent: enabledFeatures.has(TENANT_NAVIGATION_FEATURES.agent),
     catalog: enabledFeatures.has(TENANT_NAVIGATION_FEATURES.catalog),
     quality: enabledFeatures.has(TENANT_NAVIGATION_FEATURES.quality),
+    systemLogs: enabledFeatures.has(TENANT_NAVIGATION_FEATURES.systemLogs),
   };
 }

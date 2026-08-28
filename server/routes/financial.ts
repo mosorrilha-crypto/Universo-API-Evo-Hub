@@ -68,6 +68,9 @@ function requireFinancialModule(isFinancialModuleEnabled?: FinancialRouterDeps['
     // Resolve primeiro o tenant para respeitar o seletor permitido do
     // saas_admin e sincronizar o contexto RLS antes de consultar o contrato.
     tenantOf(req);
+    // O SaaS Admin audita a plataforma e administra a liberação por tenant;
+    // ele não perde visibilidade ao selecionar uma empresa bloqueada.
+    if (req.user?.role === 'saas_admin') return next();
     const enabled = isFinancialModuleEnabled
       ? await isFinancialModuleEnabled(req)
       : await isFinancialModuleEnabledForCurrentTenant();

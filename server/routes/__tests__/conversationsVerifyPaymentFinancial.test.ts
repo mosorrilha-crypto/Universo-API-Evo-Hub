@@ -38,6 +38,7 @@ beforeAll(async () => {
       jwtSecret: 'test-secret',
       metaPhoneNumberId: 'pn',
       isFinancialModuleEnabled: async () => true,
+      isAgendaModuleEnabled: async () => true,
     })
   );
   await new Promise<void>((resolve) => {

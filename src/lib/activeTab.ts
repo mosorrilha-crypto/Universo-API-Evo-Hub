@@ -14,6 +14,7 @@ const ACTIVE_TAB_VALUES: readonly ActiveTab[] = [
   'catalog',
   'escalations',
   'quality',
+  'system_logs',
 ];
 
 export function parseStoredActiveTab(value: string | null): ActiveTab {

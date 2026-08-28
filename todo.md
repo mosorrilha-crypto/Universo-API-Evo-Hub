@@ -90,3 +90,32 @@
 - [x] Concluir o diagnóstico do CRM antes de iniciar a próxima seção
 - [x] Após o CRM, auditar e refinar a página de Agenda pelo mesmo workflow
 - [x] Validar a Agenda em mobile e desktop com testes e build
+
+- [x] Aguardar e confirmar checks remotos da PR #481
+- [x] Integrar a melhoria da Agenda na branch principal após autorização
+
+- [x] Reduzir cabeçalho e hero da Agenda no mobile
+- [x] Trocar cards e ações gigantes por uma hierarquia operacional compacta
+- [x] Preservar menu Hoje, Calendário, Pendências e ação de novo agendamento
+- [x] Validar a compactação em mobile e desktop e atualizar a PR
+
+- [x] Abrir follow-up da compactação visual da Agenda na PR #485
+- [x] Confirmar checks remotos verdes da PR #485
+- [x] Integrar a PR #485 na branch principal após autorização explícita
+
+- [x] Reavaliar o escopo combinado de UI, CRM Hoje, Agenda e automação
+- [x] Inspecionar dependências, contratos, permissões, sincronização e riscos de uma PR única
+- [x] Consolidar a implementação em um único plano executável e sem sobreposição
+- [x] Definir critérios de aceite, testes, validação mobile/desktop e estratégia de merge da PR única
+
+- [x] Implementar a PR única do CRM Hoje com prioridade objetiva e fontes de dados explícitas
+- [x] Garantir critérios de aceite mensuráveis para abertura de contexto e confirmação de estado
+- [x] Validar a PR única com testes, lint, build e revisão mobile/desktop
+- [ ] Abrir a PR única e mesclar somente após checks verdes e autorização explícita
+
+- [x] Implementar em uma única PR a evolução operacional do CRM Hoje
+- [x] Adicionar deduplicação e prioridade objetiva sem duplicar consultas
+- [x] Melhorar tarefas com prazo, responsável, tipo, prioridade e ação direta
+- [x] Integrar estados de sincronização entre CRM Hoje e Agenda
+- [x] Validar critérios de aceite mobile/desktop, testes, lint e build
+- [ ] Abrir a PR única e aguardar autorização explícita para merge

@@ -113,7 +113,17 @@ export async function sendOperatorGuidedFollowUp(
   }
 
   if (!deps.ai) return { sent: false, reason: 'IA indisponível no momento.' };
-  const message = await draftFollowUpMessage(tenantId, deps.ai, escalation.operatorReply, escalation.contactName);
+  let message: string;
+  try {
+    message = await draftFollowUpMessage(tenantId, deps.ai, escalation.operatorReply, escalation.contactName);
+  } catch (error: any) {
+    // Achado real (27/08/2026): sem isto, um timeout/erro do Gemini aqui
+    // derrubava a requisição inteira com 500 (erro não tratado) — o
+    // operador só via um toast genérico de "tente de novo" e a orientação
+    // ficava pendente sem nenhum sinal do que de fato aconteceu.
+    console.warn(`⚠️ [Retomada guiada] IA falhou ao gerar mensagem para ${escalation.phone}: ${error?.message || error}`);
+    return { sent: false, reason: 'A IA demorou demais ou falhou ao gerar a retomada. Tente novamente ou responda manualmente.' };
+  }
   if (!message) return { sent: false, reason: 'IA não conseguiu gerar a mensagem de retomada.' };
   const conversation = await getConversation(tenantId, escalation.phone);
   const safety = await reviewAutoReplyBeforeSend({

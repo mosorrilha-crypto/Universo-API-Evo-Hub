@@ -13,6 +13,7 @@ type Tables = Record<string, Row[]>;
 class FakeQueryBuilder {
   private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'in', string, any]> = [];
   private wantSelect = false;
+  private maximumRows: number | null = null;
 
   constructor(
     private rows: Row[],
@@ -53,6 +54,11 @@ class FakeQueryBuilder {
     return this;
   }
 
+  limit(count: number) {
+    this.maximumRows = count;
+    return this;
+  }
+
   select(_columns?: string) {
     this.wantSelect = true;
     return this;
@@ -70,7 +76,8 @@ class FakeQueryBuilder {
 
   private run(): { data: Row[] | null; error: null } {
     if (this.op === 'select') {
-      return { data: this.rows.filter((row) => this.matches(row)), error: null };
+      const matching = this.rows.filter((row) => this.matches(row));
+      return { data: this.maximumRows === null ? matching : matching.slice(0, this.maximumRows), error: null };
     }
     if (this.op === 'insert') {
       const payloads = Array.isArray(this.payload) ? this.payload : [this.payload];

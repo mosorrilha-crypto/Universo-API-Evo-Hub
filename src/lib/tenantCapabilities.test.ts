@@ -19,6 +19,7 @@ describe('resolveTenantNavigationCapabilities', () => {
       { key: 'growth.meta_ads', enabled: false },
       { key: 'catalog.public_page', enabled: false },
       { key: 'quality.agent_review', enabled: false },
+      { key: 'operations.system_logs', enabled: false },
       { key: 'ai.auto_reply', enabled: true },
       { key: 'crm.follow_ups', enabled: true },
     ])).toEqual({
@@ -30,6 +31,7 @@ describe('resolveTenantNavigationCapabilities', () => {
       agent: true,
       catalog: false,
       quality: false,
+      systemLogs: false,
     });
   });
 });
