@@ -16,6 +16,7 @@ import {
   listEntitlementCatalog,
   revokeTenantFeatureOverride,
 } from '../services/featureEntitlementService';
+import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -40,22 +41,6 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
-/**
- * Formato exigido pro `slug` de um tenant: minúsculas, dígitos e hífen, sem
- * espaço/acento/maiúscula. Mesma forma que a rota pública já exige na URL
- * (`^\/catalogo\/([a-z0-9][a-z0-9-]{0,79})\/?$`, `src/main.tsx`) — um slug
- * fora desse formato nunca bate com nenhuma URL real, então salvá-lo assim
- * derruba o catálogo público em silêncio, sem erro nenhum na hora de salvar.
- *
- * Achado real em produção (27/08/2026): o slug do tenant real da Monique foi
- * trocado pelo painel de "monique-teste" pra "Pestañas por Monique" (espaço +
- * acento) ao editar só o nome — a rota aceitou de bom grado, sem validar
- * nada, e os dois catálogos públicos (além dos 5 anúncios ativos apontando
- * pra lá) saíram do ar até alguém notar e reverter via SQL direto no banco.
- */
-const TENANT_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
-const TENANT_SLUG_FORMAT_ERROR = 'Slug inválido: use só letras minúsculas, números e hífen (ex: "minha-empresa"), sem espaço, acento ou maiúscula — esse valor vira parte da URL pública do catálogo.';
-
 export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl, sharedMetaPhoneNumberId }: AdminRouterDeps): Router {
   const router = Router();
 
@@ -135,7 +120,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       })
       .select('*')
       .single();
-    if (tenantError || !tenant) return res.status(500).json({ error: tenantError?.message || 'Falha ao criar tenant.' });
+    if (tenantError || !tenant) return res.status(500).json({ error: tenantError ? friendlyTenantSlugError(tenantError) : 'Falha ao criar tenant.' });
 
     try {
       await ensureTenantCompatibilitySubscription(tenant.id, req.user?.id || 'saas_admin:tenant-create');
@@ -206,7 +191,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nenhum campo pra atualizar.' });
 
     const { data: tenant, error } = await db().from('tenants').update(patch).eq('id', req.params.id).select('*').maybeSingle();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return res.status(500).json({ error: friendlyTenantSlugError(error) });
     if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
     res.json({ tenant });
   }));

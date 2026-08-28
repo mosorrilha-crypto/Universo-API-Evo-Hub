@@ -61,6 +61,7 @@ import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification,
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
+import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
 import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -1393,12 +1394,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/public-catalog-settings', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { data, error } = await getDb()
       .from('tenants')
-      .select('slug, public_catalog_enabled, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
+      .select('slug, public_catalog_enabled, public_catalog_slug_locked, public_whatsapp_phone, public_instagram_url, public_location_maps_url, public_address, public_hours_label, public_whatsapp_message_general, public_whatsapp_message_product')
       .eq('id', tenantOf(req))
       .maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     res.json({
       slug: data?.slug || null,
+      // Enquanto false, a tela deixa o próprio admin do tenant personalizar o
+      // slug (com preview + confirmação) antes da 1ª ativação — depois de
+      // true (migration 0062), o slug nunca mais pode mudar, nem desligando
+      // o catálogo (ver PUT abaixo e PATCH /api/admin/tenants/:id).
+      slugLocked: data?.public_catalog_slug_locked === true,
       enabled: data?.public_catalog_enabled === true,
       whatsappPhone: data?.public_whatsapp_phone || '',
       instagramUrl: data?.public_instagram_url || '',
@@ -1418,7 +1424,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   router.put('/api/public-catalog-settings', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { enabled, whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel, whatsappMessageGeneral, whatsappMessageProduct } = req.body || {};
+    const { enabled, slug, whatsappPhone, instagramUrl, locationMapsUrl, address, hoursLabel, whatsappMessageGeneral, whatsappMessageProduct } = req.body || {};
     if (typeof enabled !== 'boolean') {
       return res.status(400).json({ error: 'Campo "enabled" precisa ser booleano.' });
     }
@@ -1428,22 +1434,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         return res.status(400).json({ error: `Campo "${field}" precisa ser string ou null.` });
       }
     }
-    // Fecha o outro lado da trava de server/routes/admin.ts (PATCH
-    // /api/admin/tenants/:id): não dá pra tirar o slug com o catálogo ligado,
-    // e agora também não dá pra ligar o catálogo sem slug — a única ordem
-    // possível vira criar tenant → definir slug (saas_admin) → só depois
-    // ativar o catálogo aqui.
-    if (enabled) {
-      const { data: tenantForSlugCheck, error: tenantSlugError } = await getDb()
-        .from('tenants')
-        .select('slug')
-        .eq('id', tenantOf(req))
-        .maybeSingle();
-      if (tenantSlugError) return res.status(500).json({ error: tenantSlugError.message });
-      if (!tenantForSlugCheck?.slug) {
-        return res.status(400).json({ error: 'Defina um slug pra este tenant (fala com um saas_admin) antes de ativar o catálogo público.' });
-      }
+    if (slug !== undefined && slug !== null && typeof slug !== 'string') {
+      return res.status(400).json({ error: 'Campo "slug" precisa ser string ou null.' });
     }
+
+    const { data: currentTenant, error: currentTenantError } = await getDb()
+      .from('tenants')
+      .select('slug, public_catalog_slug_locked')
+      .eq('id', tenantOf(req))
+      .maybeSingle();
+    if (currentTenantError) return res.status(500).json({ error: currentTenantError.message });
+
     const patch: Record<string, unknown> = {
       public_catalog_enabled: enabled,
       public_whatsapp_phone: whatsappPhone?.replace(/\D/g, '') || null,
@@ -1454,16 +1455,46 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       public_whatsapp_message_general: whatsappMessageGeneral?.trim() || null,
       public_whatsapp_message_product: whatsappMessageProduct?.trim() || null,
     };
+
+    // Antes da 1ª ativação (public_catalog_slug_locked ainda false), o
+    // próprio admin do tenant pode personalizar o slug aqui — preview +
+    // confirmação ficam por conta do frontend, o backend só valida formato e
+    // unicidade. Depois de travado, nunca mais aceita um valor diferente:
+    // achado real (27/08/2026) de que desligar o catálogo, trocar o slug e
+    // religar quebrava links já compartilhados (anúncios, favoritos) mesmo
+    // com um slug em formato válido.
+    if (slug !== undefined) {
+      const normalizedSlug = slug?.trim() || null;
+      if (currentTenant?.public_catalog_slug_locked && currentTenant.slug !== normalizedSlug) {
+        return res.status(400).json({ error: 'O endereço deste catálogo já está travado — não pode mais ser alterado, pois pode estar em anúncios ou links já compartilhados.' });
+      }
+      if (normalizedSlug && !TENANT_SLUG_PATTERN.test(normalizedSlug)) {
+        return res.status(400).json({ error: TENANT_SLUG_FORMAT_ERROR });
+      }
+      patch.slug = normalizedSlug;
+    }
+
+    // Fecha o outro lado da trava de server/routes/admin.ts (PATCH
+    // /api/admin/tenants/:id): não dá pra ligar o catálogo sem um slug já
+    // definido (seja o que já estava salvo, seja o enviado agora nesta
+    // mesma chamada) — a única ordem possível vira definir slug → só depois
+    // ativar o catálogo.
+    const effectiveSlug = slug !== undefined ? (patch.slug as string | null) : (currentTenant?.slug || null);
+    if (enabled && !effectiveSlug) {
+      return res.status(400).json({ error: 'Defina um endereço (slug) pra este catálogo antes de ativar.' });
+    }
+
     // Marca o slug como travado pra sempre assim que o catálogo é ativado
-    // pela primeira vez (migration 0062) — nunca voltar a false depois, nem
+    // pela primeira vez (migration 0062) — nunca volta a false depois, nem
     // quando o catálogo é desligado, é o que impede desligar → trocar o
-    // slug → religar como um jeito de burlar a trava em admin.ts.
+    // slug → religar como um jeito de burlar a trava acima.
     if (enabled) patch.public_catalog_slug_locked = true;
+
     const { error } = await getDb()
       .from('tenants')
       .update(patch)
       .eq('id', tenantOf(req));
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return res.status(400).json({ error: friendlyTenantSlugError(error) });
     res.json({ success: true });
   }));
 
