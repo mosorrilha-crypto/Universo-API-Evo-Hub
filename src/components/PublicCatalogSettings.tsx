@@ -47,6 +47,7 @@ interface CatalogClickAnalytics {
 const CATALOG_SOURCE_LABEL: Record<string, string> = {
   legacy: 'Catálogo original',
   novo: 'Segundo catálogo (Beauty Concierge)',
+  direct: 'WhatsApp directo (primera dobra)',
 };
 
 interface PublicCatalogFormState {
@@ -218,8 +219,8 @@ function CatalogPerformanceTab({ onGoToConversation }: { onGoToConversation?: (p
 
       {analytics.bySource.length > 1 && (
         <div>
-          <p className="text-xs font-semibold text-slate-300 mb-2">Catálogo original x segundo catálogo</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <p className="text-xs font-semibold text-slate-300 mb-2">Origem dos cliques de WhatsApp</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {analytics.bySource.map((row) => (
               <div key={row.source} className="p-4 rounded-xl bg-slate-950 border border-slate-800">
                 <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">{CATALOG_SOURCE_LABEL[row.source] || row.source}</p>

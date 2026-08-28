@@ -37,7 +37,8 @@ export function createPublicCatalogRouter(): Router {
     const baseMessage = rawMessage.slice(0, MAX_CLICK_MESSAGE_LENGTH).trim();
     if (!baseMessage) return res.status(400).json({ error: 'Mensagem ausente.' });
     const product = typeof req.query.product === 'string' ? req.query.product.slice(0, 200) : undefined;
-    const source: CatalogClickSource | undefined = req.query.source === 'novo' ? 'novo' : req.query.source === 'legacy' ? 'legacy' : undefined;
+    const source: CatalogClickSource | undefined =
+      req.query.source === 'novo' ? 'novo' : req.query.source === 'legacy' ? 'legacy' : req.query.source === 'direct' ? 'direct' : undefined;
 
     const click = await recordCatalogWhatsappClick(target.tenantId, baseMessage, product, source);
     const digitsOnlyPhone = target.whatsappNumber.replace(/\D/g, '');

@@ -66,8 +66,14 @@ export interface CatalogWhatsappClick {
   message: string;
 }
 
-/** Páginas de catálogo público que já geram clique hoje — ver TASK-0087/0094 (segundo catálogo). */
-export type CatalogClickSource = 'legacy' | 'novo';
+/**
+ * Páginas/CTAs de catálogo público que já geram clique hoje — ver
+ * TASK-0087/0094 (segundo catálogo) e TASK-0125 ('direct': botão "Hablar
+ * directamente por WhatsApp" na primeira dobra do Beauty Concierge, que
+ * pula a triagem inteira — precisa de origem própria pra não ficar
+ * misturado com quem completou a evaluación, já contado como 'novo').
+ */
+export type CatalogClickSource = 'legacy' | 'novo' | 'direct';
 
 /**
  * Grava o clique e devolve a mensagem final (original + code) pra montar a
@@ -223,7 +229,7 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
     if (isMatched) productEntry.matched++;
     productMap.set(productKey, productEntry);
 
-    const sourceKey = row.source === 'novo' ? 'novo' : 'legacy';
+    const sourceKey = row.source === 'novo' ? 'novo' : row.source === 'direct' ? 'direct' : 'legacy';
     const sourceEntry = sourceMap.get(sourceKey) || { clicks: 0, matched: 0 };
     sourceEntry.clicks++;
     if (isMatched) sourceEntry.matched++;

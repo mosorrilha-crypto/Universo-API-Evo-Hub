@@ -183,6 +183,19 @@ describe('GET /api/public/catalog/:slug/whatsapp-click', () => {
     expect(missing.status).toBe(404);
   });
 
+  it('aceita e grava a origem "direct" (botão de WhatsApp direto na primeira dobra do Beauty Concierge, TASK-0125)', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{ id: 'tenant-monique', slug: 'monique', public_catalog_enabled: true, public_whatsapp_phone: '595981436141' }],
+    }));
+
+    const response = await fetch(`${baseUrl}/api/public/catalog/monique/whatsapp-click?msg=${encodeURIComponent('Hola Monique')}&source=direct`, { redirect: 'manual' });
+    expect(response.status).toBe(302);
+
+    const { getDb } = await import('../../services/db');
+    const { data } = await getDb().from('public_catalog_whatsapp_clicks').select('*').eq('tenant_id', 'tenant-monique');
+    expect(data?.[0]?.source).toBe('direct');
+  });
+
   it('400 quando a mensagem (msg) está ausente', async () => {
     ({ server, baseUrl } = await startServer({
       tenants: [{ id: 'tenant-monique', slug: 'monique', public_catalog_enabled: true, public_whatsapp_phone: '595981436141' }],
