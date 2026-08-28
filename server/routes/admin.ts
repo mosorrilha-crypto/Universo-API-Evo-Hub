@@ -16,6 +16,7 @@ import {
   listEntitlementCatalog,
   revokeTenantFeatureOverride,
 } from '../services/featureEntitlementService';
+import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -99,6 +100,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   router.post('/api/admin/tenants', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, slug, currency, locale, secondaryCurrency, secondaryLocale, phoneNumberId, accessToken, wabaId, mode, segment } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
+    if (slug && !TENANT_SLUG_PATTERN.test(slug)) return res.status(400).json({ error: TENANT_SLUG_FORMAT_ERROR });
 
     const { data: tenant, error: tenantError } = await db()
       .from('tenants')
@@ -118,7 +120,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       })
       .select('*')
       .single();
-    if (tenantError || !tenant) return res.status(500).json({ error: tenantError?.message || 'Falha ao criar tenant.' });
+    if (tenantError || !tenant) return res.status(500).json({ error: tenantError ? friendlyTenantSlugError(tenantError) : 'Falha ao criar tenant.' });
 
     try {
       await ensureTenantCompatibilitySubscription(tenant.id, req.user?.id || 'saas_admin:tenant-create');
@@ -157,7 +159,28 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       if (!String(name).trim()) return res.status(400).json({ error: 'Campo "name" não pode ficar vazio.' });
       patch.name = name;
     }
-    if (slug !== undefined) patch.slug = slug || null;
+    if (slug !== undefined) {
+      if (slug && !TENANT_SLUG_PATTERN.test(slug)) return res.status(400).json({ error: TENANT_SLUG_FORMAT_ERROR });
+      const normalizedSlug = slug || null;
+      // Incidente real (27/08/2026): trocar o slug de um tenant com catálogo
+      // público já ligado derruba a URL ativa e os anúncios que apontam pra
+      // ela na hora — mesmo com formato válido. A trava usa
+      // `public_catalog_slug_locked` (migration 0062), não o estado atual de
+      // `public_catalog_enabled`: esse campo vira `true` na primeira vez que
+      // o catálogo é ativado e NUNCA volta a `false` — sem isso, desligar o
+      // catálogo, trocar o slug e religar destravava o mesmo problema de novo,
+      // quebrando qualquer link já compartilhado (anúncios, favoritos).
+      const { data: currentTenant, error: currentTenantError } = await db()
+        .from('tenants')
+        .select('slug, public_catalog_slug_locked')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (currentTenantError) return res.status(500).json({ error: currentTenantError.message });
+      if (currentTenant?.public_catalog_slug_locked && currentTenant.slug !== normalizedSlug) {
+        return res.status(400).json({ error: 'O slug deste tenant está travado — o catálogo público dele já foi ativado alguma vez e o valor pode estar em anúncios ou links já compartilhados. Crie um tenant novo se precisar de um slug diferente.' });
+      }
+      patch.slug = normalizedSlug;
+    }
     if (currency !== undefined) patch.currency = currency;
     if (locale !== undefined) patch.locale = locale;
     if (segment !== undefined) patch.segment = segment;
@@ -168,7 +191,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nenhum campo pra atualizar.' });
 
     const { data: tenant, error } = await db().from('tenants').update(patch).eq('id', req.params.id).select('*').maybeSingle();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return res.status(500).json({ error: friendlyTenantSlugError(error) });
     if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
     res.json({ tenant });
   }));

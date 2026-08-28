@@ -51,6 +51,8 @@ const CATALOG_SOURCE_LABEL: Record<string, string> = {
 
 interface PublicCatalogFormState {
   enabled: boolean;
+  /** Endereço da URL pública (`/catalogo/:slug`) — só editável enquanto `slugLocked` for false; ver PUT /api/public-catalog-settings. */
+  slug: string;
   whatsappPhone: string;
   instagramUrl: string;
   locationMapsUrl: string;
@@ -62,6 +64,7 @@ interface PublicCatalogFormState {
 
 const EMPTY_FORM: PublicCatalogFormState = {
   enabled: false,
+  slug: '',
   whatsappPhone: '',
   instagramUrl: '',
   locationMapsUrl: '',
@@ -70,6 +73,9 @@ const EMPTY_FORM: PublicCatalogFormState = {
   whatsappMessageGeneral: '',
   whatsappMessageProduct: '',
 };
+
+/** Mesmo formato exigido pelo backend (`server/services/tenantSlug.ts`) — validação local só pra dar feedback imediato antes de tentar salvar; o backend segue sendo a fonte da verdade. */
+const SLUG_FORMAT_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
 /**
  * Segundo catálogo (reprodução exata do site "Beauty Concierge" capturado da cliente,
@@ -336,6 +342,8 @@ function CatalogPerformanceTab({ onGoToConversation }: { onGoToConversation?: (p
 export function PublicCatalogSettings({ tenantSlug, tenantName, products, activeProductCount, onGoToKnowledgeBase, onGoToConversation }: PublicCatalogSettingsProps) {
   const [tab, setTab] = useState<'settings' | 'performance'>('settings');
   const [form, setForm] = useState<PublicCatalogFormState>(EMPTY_FORM);
+  /** true assim que o catálogo já foi ativado alguma vez — a partir daí o slug nunca mais pode mudar (nem desligando o catálogo depois). Espelha `tenants.public_catalog_slug_locked`. */
+  const [slugLocked, setSlugLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -351,6 +359,7 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
         if (cancelled || !data) return;
         setForm({
           enabled: !!data.enabled,
+          slug: data.slug || '',
           whatsappPhone: data.whatsappPhone || '',
           instagramUrl: data.instagramUrl || '',
           locationMapsUrl: data.locationMapsUrl || '',
@@ -359,6 +368,7 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
           whatsappMessageGeneral: data.whatsappMessageGeneral || '',
           whatsappMessageProduct: data.whatsappMessageProduct || '',
         });
+        setSlugLocked(!!data.slugLocked);
       })
       .catch(() => {
         if (!cancelled) setError('Não foi possível carregar a configuração do catálogo público.');
@@ -370,6 +380,9 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
       cancelled = true;
     };
   }, [tenantSlug]);
+
+  /** Slug pra exibir nos links/textos de preview: usa o que já foi carregado deste próprio tenant (via `form.slug`), com fallback pro prop `tenantSlug` (App.tsx) enquanto a tela ainda não carregou. */
+  const previewSlug = form.slug || tenantSlug;
 
   const handleDownloadPdf = async () => {
     setDownloadingPdf(true);
@@ -388,17 +401,39 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
   };
 
   const handleSave = async () => {
-    setSaving(true);
     setError(null);
     setSavedAt(null);
+
+    // Só na 1ª ativação (slug ainda não travado) o próprio admin do tenant
+    // define o endereço público — depois de confirmar, o backend trava esse
+    // valor pra sempre (migration 0062: desligar o catálogo e trocar o slug
+    // depois não destrava, evita quebrar link já compartilhado em anúncio).
+    if (form.enabled && !slugLocked) {
+      const trimmedSlug = form.slug.trim();
+      if (!trimmedSlug) {
+        setError('Defina um endereço (slug) pra este catálogo antes de ativar.');
+        return;
+      }
+      if (!SLUG_FORMAT_PATTERN.test(trimmedSlug)) {
+        setError('Endereço inválido: use só letras minúsculas, números e hífen (ex: "minha-empresa"), sem espaço, acento ou maiúscula.');
+        return;
+      }
+      const confirmed = window.confirm(
+        `Depois de confirmar, o endereço /catalogo/${trimmedSlug} não poderá mais ser alterado — ele vai ser usado em anúncios e links já compartilhados.\n\nConfirma a ativação com este endereço?`
+      );
+      if (!confirmed) return;
+    }
+
+    setSaving(true);
     try {
       const res = await apiFetch('/api/public-catalog-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, slug: slugLocked ? undefined : form.slug.trim() }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      if (form.enabled) setSlugLocked(true);
       setSavedAt(Date.now());
     } catch (err: any) {
       setError(err.message || 'Não foi possível salvar. Tente de novo.');
@@ -434,7 +469,7 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
           </button>
           {form.enabled && (
             <a
-              href={`/catalogo/${encodeURIComponent(tenantSlug)}`}
+              href={`/catalogo/${encodeURIComponent(previewSlug)}`}
               target="_blank"
               rel="noreferrer"
               className="px-3 py-2 rounded-xl border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
@@ -447,7 +482,7 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
         </div>
       </div>
 
-      {tenantSlug === MONIQUE_SECOND_CATALOG_TENANT_SLUG && (
+      {previewSlug === MONIQUE_SECOND_CATALOG_TENANT_SLUG && (
         <div className="p-4 rounded-2xl bg-gradient-to-r from-fuchsia-950 via-slate-900 to-slate-900 border border-fuchsia-500/30 shadow-xl flex items-center justify-between gap-3">
           <div className="flex items-center space-x-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/40 flex items-center justify-center text-fuchsia-400 flex-shrink-0">
@@ -506,8 +541,8 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
             <div>
               <p className="text-sm font-semibold text-white">Catálogo público ativo</p>
               <p className="text-xs text-slate-400 mt-1 max-w-md">
-                Quando ativo, <code className="text-slate-300">/catalogo/{tenantSlug}</code>
-                {tenantSlug === MONIQUE_SECOND_CATALOG_TENANT_SLUG && <> e <code className="text-slate-300">{MONIQUE_SECOND_CATALOG_PATH}</code></>} fica{tenantSlug === MONIQUE_SECOND_CATALOG_TENANT_SLUG ? 'm' : ''} acessível pra qualquer pessoa com o link — sem exigir login. Regras do agente e dados internos nunca aparecem ali.
+                Quando ativo, <code className="text-slate-300">/catalogo/{previewSlug}</code>
+                {previewSlug === MONIQUE_SECOND_CATALOG_TENANT_SLUG && <> e <code className="text-slate-300">{MONIQUE_SECOND_CATALOG_PATH}</code></>} fica{previewSlug === MONIQUE_SECOND_CATALOG_TENANT_SLUG ? 'm' : ''} acessível pra qualquer pessoa com o link — sem exigir login. Regras do agente e dados internos nunca aparecem ali.
               </p>
             </div>
             <button
@@ -520,6 +555,28 @@ export function PublicCatalogSettings({ tenantSlug, tenantName, products, active
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
+
+          {slugLocked ? (
+            <div className="px-3 py-2.5 rounded-lg bg-slate-950 border border-slate-800">
+              <p className="text-xs text-slate-400">
+                Endereço público: <code className="text-slate-200">/catalogo/{form.slug}</code>
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1">Travado — não pode mais mudar, pra não quebrar anúncios e links já compartilhados.</p>
+            </div>
+          ) : (
+            <Field
+              label="Endereço do catálogo"
+              hint={`Prévia: /catalogo/${form.slug.trim() || '...'} — só minúsculas, números e hífen. Depois de ativar pela primeira vez, não pode mais ser alterado.`}
+            >
+              <input
+                type="text"
+                value={form.slug}
+                onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value.toLowerCase() }))}
+                placeholder="minha-empresa"
+                className={inputClass}
+              />
+            </Field>
+          )}
 
           <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-slate-950 border border-slate-800">
             <p className="text-xs text-slate-300">

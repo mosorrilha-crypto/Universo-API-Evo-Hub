@@ -40,7 +40,8 @@ export function createPublicCatalogRouter(): Router {
     const source: CatalogClickSource | undefined = req.query.source === 'novo' ? 'novo' : req.query.source === 'legacy' ? 'legacy' : undefined;
 
     const click = await recordCatalogWhatsappClick(target.tenantId, baseMessage, product, source);
-    res.redirect(302, `https://wa.me/${target.whatsappNumber}?text=${encodeURIComponent(click.message)}`);
+    const digitsOnlyPhone = target.whatsappNumber.replace(/\D/g, '');
+    res.redirect(302, `https://wa.me/${digitsOnlyPhone}?text=${encodeURIComponent(click.message)}`);
   }));
 
   return router;

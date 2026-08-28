@@ -72,6 +72,7 @@ describe('GET /api/public-catalog-settings', () => {
     const body = await res.json();
     expect(body).toEqual({
       slug: 'tenant-a-slug',
+      slugLocked: false,
       enabled: false,
       whatsappPhone: '',
       instagramUrl: '',
@@ -180,6 +181,136 @@ describe('PUT /api/public-catalog-settings', () => {
     expect(body.instagramUrl).toBe('https://instagram.com/pestanaspormonique');
     expect(body.whatsappMessageGeneral).toBe('Hola, quiero info general.');
     expect(body.whatsappMessageProduct).toBe('Hola, quiero info sobre {produto}.');
+  });
+
+  it('remove espaços e símbolos do WhatsApp ao salvar (achado de auditoria, 27/08/2026: "595994 798081" salvo com espaço quebrava o link do wa.me)', async () => {
+    const put = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, whatsappPhone: '595994 798081' }),
+    });
+    expect(put.status).toBe(200);
+
+    const get = await fetch(`${baseUrl}/api/public-catalog-settings`);
+    const body = await get.json();
+    expect(body.whatsappPhone).toBe('595994798081');
+  });
+
+  it('marca public_catalog_slug_locked permanentemente ao ativar o catálogo pela primeira vez (fecha o outro lado da trava de slug em admin.ts)', async () => {
+    const put = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, whatsappPhone: '595981436141' }),
+    });
+    expect(put.status).toBe(200);
+    const tenantRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_A);
+    expect(tenantRow.public_catalog_slug_locked).toBe(true);
+
+    // Desligar de novo não desfaz a trava — é o que impede o caminho
+    // "desligar → trocar slug → religar" de burlar a proteção.
+    const putDisable = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false, whatsappPhone: '595981436141' }),
+    });
+    expect(putDisable.status).toBe(200);
+    expect(supabase.__tables.tenants.find((t: any) => t.id === TENANT_A).public_catalog_slug_locked).toBe(true);
+  });
+
+  it('rejeita ativar o catálogo público (enabled: true) num tenant sem slug definido', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: null, public_catalog_enabled: false }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, whatsappPhone: '595981436141' }),
+    });
+    expect(res.status).toBe(400);
+    const tenantRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_A);
+    expect(tenantRow.public_catalog_enabled).toBe(false);
+  });
+
+  it('permite desativar o catálogo (enabled: false) mesmo sem slug — só a ativação exige slug', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: null, public_catalog_enabled: false }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  // Pedido do gestor (27/08/2026): antes da 1ª ativação, o próprio admin do
+  // tenant pode personalizar o slug (tela de preview + confirmação) em vez
+  // de depender de um saas_admin numa tela separada.
+  it('permite o próprio admin do tenant definir o slug ao ativar o catálogo pela primeira vez', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: null, public_catalog_enabled: false, public_catalog_slug_locked: false }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, slug: 'clic-piscinas-2', whatsappPhone: '595981436141' }),
+    });
+    expect(res.status).toBe(200);
+    const tenantRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_A);
+    expect(tenantRow.slug).toBe('clic-piscinas-2');
+    expect(tenantRow.public_catalog_slug_locked).toBe(true);
+  });
+
+  it('rejeita slug em formato inválido mandado pelo admin do tenant', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: null, public_catalog_enabled: false, public_catalog_slug_locked: false }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, slug: 'Clic Piscinas', whatsappPhone: '595981436141' }),
+    });
+    expect(res.status).toBe(400);
+    const tenantRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_A);
+    expect(tenantRow.slug).toBeNull();
+  });
+
+  it('rejeita trocar o slug (mesmo em formato válido) quando o catálogo já está travado', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: 'monique-teste', public_catalog_enabled: true, public_catalog_slug_locked: true }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, slug: 'monique-studio', whatsappPhone: '595981436141' }),
+    });
+    expect(res.status).toBe(400);
+    const tenantRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_A);
+    expect(tenantRow.slug).toBe('monique-teste');
+  });
+
+  it('permite salvar outros campos com o slug travado, desde que o slug enviado seja o mesmo já salvo', async () => {
+    supabase = createFakeSupabase({
+      tenants: [{ id: TENANT_A, slug: 'monique-teste', public_catalog_enabled: true, public_catalog_slug_locked: true }],
+    });
+    initDb(supabase as any);
+
+    const res = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, slug: 'monique-teste', whatsappPhone: '595981436141' }),
+    });
+    expect(res.status).toBe(200);
   });
 
   it('nunca escreve no tenant de outra sessão', async () => {
