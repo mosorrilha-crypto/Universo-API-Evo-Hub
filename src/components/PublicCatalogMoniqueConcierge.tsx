@@ -6,7 +6,7 @@
  * estilos e dados aqui são autocontidos e não leem nem escrevem em `knowledge_base`/tenant —
  * uma alteração aqui nunca pode afetar o catálogo antigo, e vice-versa.
  */
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, ChevronDown, Clock3, Menu, MessageCircle, ShieldCheck, Sparkles, X } from 'lucide-react';
 
 /** lucide-react 1.x removida os ícones de marca (Instagram incluso) — glifo inline equivalente. */
@@ -255,6 +255,23 @@ export function PublicCatalogMoniqueConcierge() {
     window.addEventListener('scrollend', () => { window.clearTimeout(timeoutId); clear(); }, { once: true });
   };
 
+  /**
+   * Achado real (28/08/2026): cada etapa da triagem tem uma altura bem
+   * diferente (Etapa 1 com 4 categorias, Etapa 2 podendo ter até 7 opções de
+   * uma categoria, Etapa 3 mais curta). Ao trocar de etapa a página encolhe
+   * ou cresce, e o navegador mantém a posição de rolagem em pixels — se ela
+   * passar a exceder a nova altura da página, fica "presa" mais embaixo,
+   * revelando por engano a seção seguinte ("Resultados reales"). Rola o
+   * topo do card de volta pra dentro da tela a cada troca de etapa (nunca no
+   * carregamento inicial, antes da pessoa pedir pra ver a triagem).
+   */
+  const triageCardRef = useRef<HTMLDivElement>(null);
+  const isFirstStepRender = useRef(true);
+  useEffect(() => {
+    if (isFirstStepRender.current) { isFirstStepRender.current = false; return; }
+    triageCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [step]);
+
   useEffect(() => {
     const previousTitle = document.title;
     const previousLang = document.documentElement.lang;
@@ -337,9 +354,6 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .section-number.light { color: #9fb5ff; }
         .concierge-scope .section-intro h2, .concierge-scope .section-heading h2, .concierge-scope .contact-section h2 { font-size: clamp(2.8rem, 5vw, 5rem); }
         .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { max-width: 23rem; margin-top: 1.25rem; color: #697586; font-size: .95rem; line-height: 1.7; }
-        .concierge-scope .step-rail { display: grid; gap: .65rem; margin-top: 2.2rem; color: #9aa5b5; font-size: .66rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-        .concierge-scope .step-rail span { border-left: 2px solid #e1e6ee; padding: .35rem 0 .35rem .8rem; }
-        .concierge-scope .step-rail .active { border-color: #3157d5; color: #3157d5; }
         .concierge-scope .triage-card { overflow: hidden; border: 1px solid #dde3ec; border-radius: 1rem; background: #f7f8fa; box-shadow: 0 .8rem 2.3rem rgba(39,55,80,.08); }
         .concierge-scope .triage-top { display: flex; align-items: center; gap: 1rem; padding: 1.1rem 1.35rem; border-bottom: 1px solid #e2e7ef; color: #596575; font-size: .68rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
         .concierge-scope .progress { height: .35rem; flex: 1; overflow: hidden; border-radius: 99px; background: #dce3ed; }
@@ -459,9 +473,6 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .section-number { color: #a46d1d; }
         .concierge-scope .section-number.light { color: #e8b95e; }
         .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { color: #665846; }
-        .concierge-scope .step-rail { color: #a38e70; }
-        .concierge-scope .step-rail span { border-color: #d6c4a7; }
-        .concierge-scope .step-rail .active { border-color: #b77a24; color: #8f5e19; }
         .concierge-scope .triage-card { background: #16120e; border-color: #5e421f; box-shadow: 0 .8rem 2.3rem rgba(47,29,9,.2); color: #f7efe2; }
         .concierge-scope .triage-top { border-bottom-color: rgba(224,174,82,.25); color: #dbc69e; }
         .concierge-scope .progress { background: #3d2b18; }
@@ -597,13 +608,8 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="section-number">01</span>
             <h2>Antes de elegir,<br /><span>entendemos lo que necesitás.</span></h2>
             <p>Tres preguntas breves para que recibas una orientación clara, respetuosa y pensada para vos.</p>
-            <div className="step-rail">
-              <span className={step >= 1 ? 'active' : ''}>01 Objetivo</span>
-              <span className={step >= 2 ? 'active' : ''}>02 Contexto</span>
-              <span className={step >= 3 ? 'active' : ''}>03 Contacto</span>
-            </div>
           </div>
-          <div className="triage-card">
+          <div className="triage-card" ref={triageCardRef}>
             <div className="triage-top">
               <span>Paso {step} de 3</span>
               <div className="progress"><i style={{ width: `${(step / 3) * 100}%` }} /></div>
