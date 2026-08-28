@@ -21,6 +21,8 @@ export interface ParsedIncomingMessage {
   /** Tipo bruto do WhatsApp quando type==='other' (ex: "sticker", "video", "location", "contacts") — usado pra mostrar um rótulo específico no painel em vez de "[other]" genérico. Ver friendlyLabelForOtherType. */
   rawType?: string;
   text?: string;
+  /** Legenda digitada junto da imagem (type === 'image', Meta `image.caption` ou Baileys `imageMessage.caption`) — achado real (28/08/2026): a legenda nunca era extraída do payload, então a mensagem gravada na conversa mostrava só "📷 Imagem recebida", descartando o texto que o cliente escreveu junto da foto. */
+  caption?: string;
   /** Presente quando type === 'audio' via Meta Cloud API. */
   metaAudio?: { mediaId: string; mimeType?: string };
   /** Presente quando type === 'image' via Meta Cloud API. */
@@ -87,7 +89,12 @@ export function parseMetaWebhookPayload(body: any): ParsedIncomingMessage[] {
           // igual, pelo mesmo motivo.
           parsed.push({ ...base, type: 'text', text: msg.button.text });
         } else if (msg.type === 'image' && msg.image?.id) {
-          parsed.push({ ...base, type: 'image', metaImage: { mediaId: msg.image.id, mimeType: msg.image.mime_type } });
+          parsed.push({
+            ...base,
+            type: 'image',
+            metaImage: { mediaId: msg.image.id, mimeType: msg.image.mime_type },
+            ...(typeof msg.image.caption === 'string' && msg.image.caption.trim() ? { caption: msg.image.caption.trim() } : {}),
+          });
         } else {
           parsed.push({ ...base, type: 'other', rawType: msg.type });
         }
@@ -252,7 +259,12 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   }
 
   if (message.imageMessage) {
-    return [{ ...base, type: 'image', evolutionImage: true }];
+    return [{
+      ...base,
+      type: 'image',
+      evolutionImage: true,
+      ...(typeof message.imageMessage.caption === 'string' && message.imageMessage.caption.trim() ? { caption: message.imageMessage.caption.trim() } : {}),
+    }];
   }
 
   const rawType = message.stickerMessage

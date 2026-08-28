@@ -494,7 +494,13 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           }
           if (msg.text) handleIncomingText(msg.from, msg.contactName, msg.text, msg.messageId, resolvedTenant);
         } else if (msg.type === 'image') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
+          // Achado real (28/08/2026): quando o cliente manda a foto já com uma
+          // legenda digitada, o texto era descartado — a conversa mostrava só
+          // "📷 Imagem recebida", sem a legenda de verdade. msg.caption (ver
+          // webhookParsers.ts) preserva o que o cliente escreveu; a UI
+          // (WhatsAppLeadsSim.tsx) já mostra esse texto como legenda abaixo da
+          // foto, então só precisa chegar até aqui.
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
 
           // Uma única promise de download, reaproveitada abaixo (await duas
           // vezes na mesma promise não baixa a imagem de novo) — mantém o
