@@ -27,9 +27,12 @@ import {
   syncMemoryPatternReviewCandidates,
   type MemoryPatternReviewStatus,
 } from '../services/memoryPatternReviewStore';
+import { isQualityModuleEnabledForCurrentTenant } from '../services/qualityModuleAccess';
 
 interface QualityAuditRouterDeps {
   authenticateToken: RequestHandler;
+  /** Injeção de teste; em produção consulta o entitlement do tenant corrente. */
+  isQualityModuleEnabled?: () => Promise<boolean>;
 }
 
 function tenantOf(req: AuthenticatedRequest): string {
@@ -49,10 +52,26 @@ function safeContext(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function createQualityAuditRouter({ authenticateToken }: QualityAuditRouterDeps): Router {
+export function createQualityAuditRouter({ authenticateToken, isQualityModuleEnabled }: QualityAuditRouterDeps): Router {
   const router = Router();
+  const qualityModuleEnabled = isQualityModuleEnabled || isQualityModuleEnabledForCurrentTenant;
 
-  router.get('/api/quality-audit', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  function requireQualityModule() {
+    return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
+      tenantOf(req);
+      // O SaaS Admin administra a liberação e precisa auditar todos os tenants.
+      if (req.user?.role === 'saas_admin') return next();
+      if (!(await qualityModuleEnabled())) {
+        return res.status(403).json({
+          error: 'Qualidade do agente não está habilitada para esta empresa. Solicite a liberação ao administrador da plataforma.',
+          code: 'quality_module_disabled',
+        });
+      }
+      next();
+    });
+  }
+
+  router.get('/api/quality-audit', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const kind = parseKind(req.query.kind);
     const status = parseStatus(req.query.status);
     const tenantId = tenantOf(req);
@@ -89,7 +108,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
    * Cria somente o desenho administrativo do experimento. O objeto resultante
    * não é lido pelo autoReply nem altera prompt, agenda, pagamento ou canal.
    */
-  router.post('/api/quality-audit/controlled-experiments', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/quality-audit/controlled-experiments', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const qualityReviewId = req.body?.qualityReviewId;
     const testingReview = typeof qualityReviewId === 'string'
@@ -126,7 +145,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
     res.status(201).json({ experiment });
   }));
 
-  router.get('/api/quality-audit/controlled-experiments/:id/results', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/quality-audit/controlled-experiments/:id/results', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const experiment = (await listControlledExperiments(tenantId)).find((item) => item.id === req.params.id);
     if (!experiment) return res.status(404).json({ error: 'Experimento não encontrado.' });
@@ -134,7 +153,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
     res.json({ result });
   }));
 
-  router.patch('/api/quality-audit/controlled-experiments/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/quality-audit/controlled-experiments/:id', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const requestedStatus = req.body?.status;
     const allowedStatuses: ControlledExperimentStatus[] = ['ready', 'running', 'paused', 'completed', 'rejected'];
     if (!allowedStatuses.includes(requestedStatus)) return res.status(400).json({ error: 'Transição de experimento inválida.' });
@@ -167,7 +186,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
   }));
 
   /** Materializa na fila apenas candidatos recorrentes; não muda prompt, KB ou agente. */
-  router.post('/api/quality-audit/memory-pattern-reviews/sync', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/quality-audit/memory-pattern-reviews/sync', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const events = await listQualityAuditEvents(tenantId);
     const insights = deriveMemoryCorrectionInsights(events);
@@ -193,7 +212,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
    * knowledge_draft e prompt_test criam um item de Qualidade para continuidade;
    * nenhuma delas publica conteúdo nem altera o agente automaticamente.
    */
-  router.patch('/api/quality-audit/memory-pattern-reviews/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/quality-audit/memory-pattern-reviews/:id', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const requestedStatus = req.body?.status;
     const allowedStatuses: MemoryPatternReviewStatus[] = ['observed', 'knowledge_draft', 'prompt_test', 'dismissed'];
     if (!allowedStatuses.includes(requestedStatus)) return res.status(400).json({ error: 'Decisão de padrão inválida.' });
@@ -252,7 +271,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
 
   // Operadores podem sugerir melhorias e reportar bugs, mas não podem publicar
   // regras nem alterar o status de uma revisão administrativa.
-  router.post('/api/quality-audit/reviews', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/quality-audit/reviews', authenticateToken, requireQualityModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { kind, title, description, context, confidence, originalValue, correctedValue } = req.body || {};
     const requestedKind = parseKind(kind);
     if (!requestedKind || !title || !description) {
@@ -284,7 +303,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
     res.status(201).json({ review });
   }));
 
-  router.patch('/api/quality-audit/reviews/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/quality-audit/reviews/:id', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status, reviewNote, correctedValue } = req.body || {};
     const parsedStatus = status === undefined ? undefined : parseStatus(status);
     if (status !== undefined && !parsedStatus) return res.status(400).json({ error: 'Status de revisão inválido.' });
@@ -309,7 +328,7 @@ export function createQualityAuditRouter({ authenticateToken }: QualityAuditRout
     res.json({ review });
   }));
 
-  router.post('/api/quality-audit/feedback', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/quality-audit/feedback', authenticateToken, requireQualityModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { reviewId, decision, note, originalValue, correctedValue, context } = req.body || {};
     if (!['accepted', 'corrected', 'rejected', 'uncertain'].includes(decision)) {
       return res.status(400).json({ error: 'decision precisa ser accepted, corrected, rejected ou uncertain.' });

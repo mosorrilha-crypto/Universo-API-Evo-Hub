@@ -42,6 +42,7 @@ const ROUTER_DEPS = {
 let server: Server;
 let baseUrl: string;
 let authenticatedRole: 'operator' | 'manager' | 'admin' | 'saas_admin' = 'manager';
+let agendaModuleEnabled = true;
 
 function fakeAuthenticateToken(tenantId: string) {
   return (req: any, _res: any, next: any) => {
@@ -53,7 +54,11 @@ function fakeAuthenticateToken(tenantId: string) {
 function startServer(tenantId: string, deps: typeof ROUTER_DEPS = ROUTER_DEPS) {
   const app = express();
   app.use(express.json());
-  app.use(createGoogleCalendarRouter({ authenticateToken: fakeAuthenticateToken(tenantId) as any, ...deps }));
+  app.use(createGoogleCalendarRouter({
+    authenticateToken: fakeAuthenticateToken(tenantId) as any,
+    isAgendaModuleEnabled: async () => agendaModuleEnabled,
+    ...deps,
+  }));
   return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
     const s = app.listen(0, () => {
       const address = s.address();
@@ -65,6 +70,7 @@ function startServer(tenantId: string, deps: typeof ROUTER_DEPS = ROUTER_DEPS) {
 
 beforeEach(() => {
   authenticatedRole = 'manager';
+  agendaModuleEnabled = true;
   initDb(createFakeSupabase());
 });
 
@@ -97,6 +103,28 @@ describe('GET /api/google-calendar/oauth-callback', () => {
 });
 
 describe('GET /api/google-calendar/upcoming-events', () => {
+  it('recusa acesso direto à Agenda quando o recurso está bloqueado para o tenant', async () => {
+    agendaModuleEnabled = false;
+    ({ server, baseUrl } = await startServer(TENANT_A));
+
+    const res = await fetch(`${baseUrl}/api/google-calendar/upcoming-events`);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'agenda_module_disabled' });
+    expect(listUpcomingEvents).not.toHaveBeenCalled();
+  });
+
+  it('permite ao SaaS Admin auditar a Agenda mesmo se o tenant estiver bloqueado', async () => {
+    authenticatedRole = 'saas_admin';
+    agendaModuleEnabled = false;
+    ({ server, baseUrl } = await startServer(TENANT_A));
+
+    const res = await fetch(`${baseUrl}/api/google-calendar/upcoming-events`);
+
+    expect(res.status).toBe(200);
+    expect(listUpcomingEvents).toHaveBeenCalledWith(TENANT_A, expect.anything(), expect.any(String), expect.any(String));
+  });
+
   it('retorna os eventos reais quando o tenant está conectado', async () => {
     ({ server, baseUrl } = await startServer(TENANT_A));
 

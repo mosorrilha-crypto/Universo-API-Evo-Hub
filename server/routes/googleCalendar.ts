@@ -27,6 +27,8 @@ import {
   type PaymentStatus,
 } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
+import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
+import { googleCalendarConnectRateLimiter } from '../middleware/rateLimit';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -42,6 +44,8 @@ function sourceRefForEvent(eventId: string): string {
 
 interface GoogleCalendarRouterDeps {
   authenticateToken: RequestHandler;
+  /** Injeção de teste; em produção consulta o entitlement do tenant corrente. */
+  isAgendaModuleEnabled?: () => Promise<boolean>;
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
@@ -68,15 +72,30 @@ function tenantOf(req: AuthenticatedRequest): string {
   return resolveTenantId(req);
 }
 
-export function createGoogleCalendarRouter({ authenticateToken, googleClientId, googleClientSecret, googleRedirectUri, jwtSecret }: GoogleCalendarRouterDeps): Router {
+export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEnabled, googleClientId, googleClientSecret, googleRedirectUri, jwtSecret }: GoogleCalendarRouterDeps): Router {
   const router = Router();
+  const agendaModuleEnabled = isAgendaModuleEnabled || isAgendaModuleEnabledForCurrentTenant;
 
-  router.get('/api/google-calendar/status', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  function requireAgendaModule() {
+    return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
+      tenantOf(req);
+      if (req.user?.role === 'saas_admin') return next();
+      if (!(await agendaModuleEnabled())) {
+        return res.status(403).json({
+          error: 'Agenda não está habilitada para esta empresa. Solicite a liberação ao administrador da plataforma.',
+          code: 'agenda_module_disabled',
+        });
+      }
+      next();
+    });
+  }
+
+  router.get('/api/google-calendar/status', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     res.json({ connected: await isGoogleCalendarConnected(tenantId) });
   }));
 
-  router.get('/api/google-calendar/connect', authenticateToken, requireRole('admin'), (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/connect', authenticateToken, googleCalendarConnectRateLimiter, requireAgendaModule(), requireRole('admin'), (req: AuthenticatedRequest, res) => {
     if (!googleClientId || !googleClientSecret) {
       return res.status(500).json({ error: 'GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET não configurados no servidor.' });
     }
@@ -113,7 +132,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
     }
   }));
 
-  router.post('/api/google-calendar/disconnect', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/google-calendar/disconnect', authenticateToken, requireAgendaModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     await disconnectGoogleCalendar(tenantId);
     res.json({ success: true });
@@ -131,7 +150,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // fora da janela de N dias). `?year=YYYY&month=1-12` (opcional, os dois
   // juntos) troca a janela pra esse mês inteiro; sem eles, mantém o
   // comportamento antigo (compatibilidade com quem já chamava sem parâmetro).
-  router.get('/api/google-calendar/upcoming-events', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/upcoming-events', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!(await isGoogleCalendarConnected(tenantId))) {
       return res.status(503).json({ error: 'Google Calendar não conectado pra este tenant.' });
@@ -186,7 +205,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // conversations.ts) — não sobrescreve nada no Google Calendar. Só cria uma
   // vez por evento (a constraint única de source_ref barra duplicata); editar
   // um pagamento já lançado fica pra uma etapa seguinte.
-  router.post('/api/google-calendar/events/:eventId/payment', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/google-calendar/events/:eventId/payment', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!(await isFinancialModuleEnabledForCurrentTenant())) {
       return res.status(403).json({ error: 'O módulo Financeiro não está habilitado para esta empresa.', code: 'financial_module_disabled' });
@@ -235,7 +254,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // pedido real 20/08/2026 — a etapa 1, criar o lançamento, é a rota POST
   // acima). Nunca cria: se ainda não existe transação com esse `sourceRef`,
   // 404 (o operador usa "Registrar pagamento" pra criar a primeira vez).
-  router.patch('/api/google-calendar/events/:eventId/payment', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/google-calendar/events/:eventId/payment', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!(await isFinancialModuleEnabledForCurrentTenant())) {
       return res.status(403).json({ error: 'O módulo Financeiro não está habilitado para esta empresa.', code: 'financial_module_disabled' });
@@ -261,7 +280,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // opções reais em vez do operador digitar hora "no escuro" (pedido real,
   // 20/08/2026: "consigo até auditar os horários que a IA tem disponível
   // visualmente"). `durationMinutes` vem do serviço escolhido no modal.
-  router.get('/api/google-calendar/free-slots', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/free-slots', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!(await isGoogleCalendarConnected(tenantId))) {
       return res.status(503).json({ error: 'Google Calendar não conectado pra este tenant.' });
@@ -291,7 +310,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // do evento original, só desloca o início) em vez de recalculado aqui —
   // evita duplicar a lógica de duração por serviço, que já mora no catálogo
   // e é resolvida no cliente a partir do evento atual.
-  router.patch('/api/google-calendar/events/:eventId/reschedule', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/google-calendar/events/:eventId/reschedule', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { newStartIso, newEndIso } = req.body || {};
     if (typeof newStartIso !== 'string' || typeof newEndIso !== 'string' || !newStartIso || !newEndIso) {
@@ -329,7 +348,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // ativo" pro resto do sistema — bloquearia um novo agendamento pro mesmo
   // contato e o job de lembretes tentaria avisar de um evento que não existe
   // mais).
-  router.delete('/api/google-calendar/events/:eventId', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/google-calendar/events/:eventId', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     if (!googleRedirectUri) {
       return res.status(500).json({ error: 'Google Calendar não configurado neste servidor.' });
@@ -349,7 +368,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // Marca/desmarca um evento como concluído (checkbox da Agenda) — só a
   // marca em si, nunca mexe no evento real do Google Calendar (ver
   // calendarEventCompletionStore.ts).
-  router.post('/api/google-calendar/events/:eventId/complete', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/google-calendar/events/:eventId/complete', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { completed } = req.body || {};
     if (typeof completed !== 'boolean') {
@@ -365,7 +384,7 @@ export function createGoogleCalendarRouter({ authenticateToken, googleClientId, 
   // Atualiza o evento real no Google Calendar e, melhor esforço, a linha
   // espelhada em `appointments` (se o eventId bater com uma) pra não ficar
   // com o nome errado grudado no painel mesmo depois da correção real.
-  router.patch('/api/google-calendar/events/:eventId', authenticateToken, requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/google-calendar/events/:eventId', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { summary } = req.body || {};
     if (typeof summary !== 'string' || !summary.trim()) {

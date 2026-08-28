@@ -24,9 +24,11 @@ const CALENDAR_DEPS = { googleClientId: 'id', googleClientSecret: 'secret', goog
 let server: Server;
 let baseUrl: string;
 let supabase: ReturnType<typeof createFakeSupabase>;
+let authenticatedRole: 'operator' | 'saas_admin' = 'operator';
+let agendaModuleEnabled = true;
 
 function fakeAuthenticateToken(req: any, _res: any, next: any) {
-  req.user = { id: 'op-1', tenantId: TENANT_ID, role: 'operator' };
+  req.user = { id: 'op-1', tenantId: TENANT_ID, role: authenticatedRole };
   next();
 }
 
@@ -39,6 +41,7 @@ function startServer(deps: Record<string, any> = CALENDAR_DEPS) {
       jwtSecret: 'test-secret',
       metaAccessToken: 'tok',
       metaPhoneNumberId: 'pn',
+      isAgendaModuleEnabled: async () => agendaModuleEnabled,
       ...deps,
     })
   );
@@ -52,6 +55,8 @@ function startServer(deps: Record<string, any> = CALENDAR_DEPS) {
 }
 
 beforeEach(() => {
+  authenticatedRole = 'operator';
+  agendaModuleEnabled = true;
   vi.clearAllMocks();
   checkFreeBusy.mockResolvedValue(true);
   createCalendarEvent.mockResolvedValue('evt-manual-123');
@@ -64,6 +69,35 @@ afterEach(async () => {
 });
 
 describe('POST /api/conversations/:phone/manual-appointment', () => {
+  it('recusa agendamento manual quando Agenda está desabilitada para o tenant', async () => {
+    agendaModuleEnabled = false;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'agenda_module_disabled' });
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+  });
+
+  it('permite ao SaaS Admin cadastrar na Agenda bloqueada para o tenant', async () => {
+    authenticatedRole = 'saas_admin';
+    agendaModuleEnabled = false;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/manual-appointment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serviceName: 'Microlips', startIso: '2026-08-15T10:00:00', endIso: '2026-08-15T11:30:00' }),
+    });
+
+    expect(res.status).toBe(201);
+  });
+
   it('cria o evento real no Calendar e a linha em appointments com source=manual', async () => {
     ({ server, baseUrl } = await startServer());
 
