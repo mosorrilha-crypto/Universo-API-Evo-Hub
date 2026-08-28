@@ -1028,6 +1028,25 @@ export const App: React.FC = () => {
     }
   };
 
+  // Restrito a saas_admin (checado de novo no backend, ver requireRole na
+  // rota) — apaga o caso e o histórico de auditoria de vez, sem passar pela
+  // aba Arquivados. Pedido do gestor (28/08/2026): testes do próprio time
+  // (ex: número pessoal usado pra testar o agente) contaminavam a fila real
+  // de escalonamentos e o "Arquivar" normal não tirava o caso de circulação
+  // de verdade.
+  const handlePermanentlyDeleteEscalation = async (id: string, contactLabel: string) => {
+    if (!window.confirm(`Excluir definitivamente o escalonamento de "${contactLabel}"? Essa ação não pode ser desfeita e não fica na aba Arquivados.`)) return;
+    try {
+      const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/permanent`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setEscalations((prev) => prev.filter((e) => e.id !== id));
+      showToast('Escalonamento excluído definitivamente.');
+    } catch (err) {
+      console.error('Falha ao excluir escalonamento definitivamente:', err);
+      showToast('Não foi possível excluir esse escalonamento. Tente de novo.');
+    }
+  };
+
   const handleRestoreEscalation = async (id: string) => {
     try {
       const res = await apiFetch(`/api/escalations/${encodeURIComponent(id)}/restore`, { method: 'POST' });
@@ -1526,6 +1545,7 @@ export const App: React.FC = () => {
             onResolvePayment={handleResolvePaymentEscalation}
             onApproveAndSend={handleApproveAndSendEscalation}
             onRestore={handleRestoreEscalation}
+            onPermanentDelete={currentUser?.role === 'saas_admin' ? handlePermanentlyDeleteEscalation : undefined}
             onGoToConversation={(phone) => {
               setWhatsAppOpenLead({ phone, requestId: Date.now() });
               handleSetActiveTab('whatsapp');
