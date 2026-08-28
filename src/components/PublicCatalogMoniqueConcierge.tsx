@@ -136,12 +136,72 @@ function fillWhatsappTemplate(template: string | undefined, name: string, fallba
   return template ? template.split('{produto}').join(name) : `Hola Monique, me interesa ${fallbackName}. Quiero saber si es para mí.`;
 }
 
-const objectives = [
-  { id: 'natural', title: 'Quiero verme arreglada sin maquillarme', text: 'Un resultado suave para sentirte linda sin verte producida.', recommendation: 'Lash Lift o Diseño con Hilo' },
-  { id: 'practical', title: 'Quiero sentirme lista cada mañana', text: 'Menos tiempo frente al espejo y más tiempo para vos.', recommendation: 'Lash Lift, Browlamination o Combo' },
-  { id: 'brows', title: 'Quiero volver a reconocer mi mirada', text: 'Una mirada más equilibrada, sin perder tu expresión.', recommendation: 'Diseño, Henna o Microshading' },
-  { id: 'lips', title: 'Quiero recuperar color y definición', text: 'Labios más definidos, con evaluación previa y expectativas reales.', recommendation: 'Microlips o Neutralización' },
+/**
+ * Achado da revisão de UX (28/08/2026): o "objetivo" original misturava
+ * serviços de categorias diferentes numa mesma recomendação (ex.: "Lash
+ * Lift, Browlamination o Combo" mistura Pestañas + Cejas + Combos), sem
+ * preço nenhum — quem respondia não sabia quanto ia custar até falar com a
+ * Monique. A Etapa 1 agora pergunta o serviço pai — as mesmas categorias
+ * reais dos produtos da Base de Conhecimento (campo `category` do catálogo
+ * público) — pra Etapa 2 mostrar só as opções daquela categoria, já com
+ * preço real (`optionsForCategory`). "Retoque" fica de fora de propósito:
+ * não é um primeiro serviço (`bookable: false` na Base de Conhecimento —
+ * só indicado depois de avaliação da Monique sobre um procedimento que ela
+ * mesma já fez, nunca automático).
+ */
+const serviceCategories = [
+  { id: 'Cejas', title: 'Cejas', text: 'Diseño, laminado, henna o microshading — desde definir la forma hasta un efecto más duradero.' },
+  { id: 'Pestañas', title: 'Pestañas', text: 'Lash lift o extensiones con distintos efectos, para una mirada más abierta todos los días.' },
+  { id: 'Labios', title: 'Labios', text: 'Microlips o neutralización, con evaluación previa y expectativas reales.' },
+  { id: 'Combos', title: 'Combos', text: 'Combiná cejas, labios y pestañas en una sola sesión, con un ahorro sobre el precio individual.' },
 ];
+
+interface CategoryOption {
+  key: string;
+  label: string;
+  description?: string;
+  price: string;
+  durationMinutes?: number;
+  productName: string;
+  variantCode?: string;
+}
+
+/**
+ * Achata os produtos da categoria escolhida em opções individuais: cada
+ * variante vira uma opção própria com seu preço (Cejas e Pestañas têm
+ * variantes), e um produto sem variantes (Labios, Combos, ou o segundo
+ * produto de Cejas que também não tem) vira uma opção única.
+ */
+function optionsForCategory(catalog: PublicCatalogResponse | null, category: string): CategoryOption[] {
+  if (!catalog || !category) return [];
+  const options: CategoryOption[] = [];
+  for (const product of catalog.products) {
+    if (product.category !== category) continue;
+    if (product.variants?.length) {
+      for (const variant of product.variants) {
+        options.push({
+          key: `${product.name}__${variant.code}`,
+          label: variant.code,
+          description: variant.description,
+          price: variant.price,
+          durationMinutes: variant.durationMinutes,
+          productName: product.name,
+          variantCode: variant.code,
+        });
+      }
+    } else {
+      options.push({
+        key: product.name,
+        label: product.name,
+        description: product.description,
+        price: product.price,
+        durationMinutes: product.durationMinutes,
+        productName: product.name,
+      });
+    }
+  }
+  return options;
+}
 
 /**
  * Achado da revisão de conversão (27/08/2026): a lista completa de serviços
@@ -164,7 +224,8 @@ const resultImages = [
 
 export function PublicCatalogMoniqueConcierge() {
   const [step, setStep] = useState(1);
-  const [objective, setObjective] = useState('');
+  const [category, setCategory] = useState('');
+  const [selectedItem, setSelectedItem] = useState<CategoryOption | null>(null);
   const [previousWork, setPreviousWork] = useState('No');
   const [sensitive, setSensitive] = useState('No');
   const [name, setName] = useState('');
@@ -174,15 +235,15 @@ export function PublicCatalogMoniqueConcierge() {
   const [sent, setSent] = useState(false);
   const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
   const [productsError, setProductsError] = useState(false);
-  const selectedObjective = useMemo(() => objectives.find((item) => item.id === objective), [objective]);
+  const categoryOptions = useMemo(() => optionsForCategory(catalog, category), [catalog, category]);
   const instagramUrl = catalog?.contact.instagramUrl || FALLBACK_INSTAGRAM;
 
   /**
    * Achado real (26/08/2026): um clique em "Encontrar mi servicio" rola a página
    * suavemente até a triagem (`scroll-behavior: smooth`); se a pessoa toca de novo
    * antes da rolagem terminar, o toque cai em qualquer card que estiver embaixo do
-   * dedo naquele instante — normalmente o primeiro da Etapa 1 — selecionando um
-   * objetivo sem intenção. Trava os cards por um instante depois de qualquer link
+   * dedo naquele instante — normalmente o primeiro da Etapa 1 — selecionando uma
+   * categoria sem intenção. Trava os cards por um instante depois de qualquer link
    * pra `#triagem`, liberando assim que o `scrollend` disparar (ou por timeout, pra
    * navegadores sem suporte a `scrollend`).
    */
@@ -228,9 +289,11 @@ export function PublicCatalogMoniqueConcierge() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const summary = selectedObjective?.recommendation || 'orientación sobre servicios';
+    const summary = selectedItem
+      ? `${selectedItem.productName}${selectedItem.variantCode ? ` (${selectedItem.variantCode})` : ''} — ${selectedItem.price}`
+      : 'orientación sobre servicios';
     const text = `Hola Monique, soy ${name}. Me interesa: ${summary}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
-    window.open(whatsappClickUrl(text), '_blank', 'noopener,noreferrer');
+    window.open(whatsappClickUrl(text, selectedItem?.productName), '_blank', 'noopener,noreferrer');
     trackWhatsAppContact();
     setSent(true);
   }
@@ -548,22 +611,62 @@ export function PublicCatalogMoniqueConcierge() {
             {step === 1 && (
               <div className="triage-body">
                 <h3>¿Qué querés regalarte hoy?</h3>
-                <p className="helper">Pensá en cómo querés salir del estudio y elegí la opción que más se acerca a vos.</p>
+                <p className="helper">Elegí el servicio y en la próxima pantalla vas a ver las opciones con precio real.</p>
                 <div className="option-grid">
-                  {objectives.map((item) => (
-                    <button key={item.id} onClick={() => { if (!suppressObjectiveClicks) setObjective(item.id); }} className={objective === item.id ? 'option selected' : 'option'}>
-                      <span className="option-icon">{objective === item.id ? <Check size={17} /> : item.id === 'natural' ? 'N' : item.id === 'practical' ? 'T' : item.id === 'brows' ? 'C' : 'L'}</span>
-                      <span><b>{item.title}</b><small>{item.text}</small><em className="option-service">Te recomendamos: {item.recommendation}</em></span>
+                  {serviceCategories.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        if (suppressObjectiveClicks) return;
+                        setCategory(item.id);
+                        setSelectedItem(null);
+                        window.setTimeout(() => setStep(2), 220);
+                      }}
+                      className={category === item.id ? 'option selected' : 'option'}
+                    >
+                      <span className="option-icon">{category === item.id ? <Check size={17} /> : item.id === 'Cejas' ? 'CJ' : item.id === 'Pestañas' ? 'PS' : item.id === 'Labios' ? 'LB' : 'CB'}</span>
+                      <span><b>{item.title}</b><small>{item.text}</small></span>
                     </button>
                   ))}
                 </div>
-                <button disabled={!objective} onClick={() => setStep(2)} className="next-cta">Continuar <ArrowRight size={16} /></button>
               </div>
             )}
             {step === 2 && (
               <div className="triage-body">
-                <h3>Dos respuestas para orientarte mejor.</h3>
-                <p className="helper">Estas preguntas ayudan a evitar recomendaciones inadecuadas.</p>
+                <h3>{category}: elegí tu opción.</h3>
+                <p className="helper">Precios reales, así ya sabés qué esperar antes de escribirnos.</p>
+                {!catalog && !productsError && <p className="helper">Cargando precios…</p>}
+                {productsError && <p className="helper">No pudimos cargar los precios ahora. Volvé y probá de nuevo en unos minutos, o escribinos directo por WhatsApp.</p>}
+                {catalog && (
+                  <div className="option-grid">
+                    {categoryOptions.map((option) => (
+                      <button
+                        key={option.key}
+                        onClick={() => {
+                          setSelectedItem(option);
+                          window.setTimeout(() => setStep(3), 220);
+                        }}
+                        className={selectedItem?.key === option.key ? 'option selected' : 'option'}
+                      >
+                        <span className="option-icon">{selectedItem?.key === option.key ? <Check size={17} /> : <Sparkles size={15} />}</span>
+                        <span>
+                          <b>{option.label}</b>
+                          {option.description && <small>{option.description}</small>}
+                          <em className="option-service">{option.price}{formatDuration(option.durationMinutes) ? ` · ${formatDuration(option.durationMinutes)}` : ''}</em>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="triage-actions">
+                  <button onClick={() => setStep(1)} className="back-cta">Volver</button>
+                </div>
+              </div>
+            )}
+            {step === 3 && (
+              <form onSubmit={submit} className="triage-body">
+                <h3>Listo. Conversemos con contexto.</h3>
+                <p className="helper">Dos preguntas rápidas y tu nombre — te enviaremos todo junto con tu mensaje.</p>
                 <label className="field">
                   <span>¿Tenés una micropigmentación previa?</span>
                   <select value={previousWork} onChange={(event) => setPreviousWork(event.target.value)}>
@@ -581,16 +684,6 @@ export function PublicCatalogMoniqueConcierge() {
                     <option>No estoy segura</option>
                   </select>
                 </label>
-                <div className="triage-actions">
-                  <button onClick={() => setStep(1)} className="back-cta">Volver</button>
-                  <button onClick={() => setStep(3)} className="next-cta">Continuar <ArrowRight size={16} /></button>
-                </div>
-              </div>
-            )}
-            {step === 3 && (
-              <form onSubmit={submit} className="triage-body">
-                <h3>Listo. Conversemos con contexto.</h3>
-                <p className="helper">Te enviaremos la información de tu evaluación junto con tu mensaje.</p>
                 <label className="field">
                   <span>Tu nombre</span>
                   <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="¿Cómo te llamamos?" />
