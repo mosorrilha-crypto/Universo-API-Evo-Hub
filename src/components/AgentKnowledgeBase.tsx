@@ -538,8 +538,25 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
   // Recurso separado (tabela `tenants`, não a base de conhecimento) — save
   // próprio, não passa pelo handleSave/onSaveKnowledgeBase de cima.
+  //
+  // Bug real (28/08/2026): o inicializador de useState só roda uma vez, na
+  // primeira renderização — se este componente monta antes do GET
+  // /api/business-hours em App.tsx resolver (busca assíncrona, sem relação
+  // com o carregamento da própria Base de Conhecimento), esse valor inicial
+  // fica vazio {} PARA SEMPRE, mesmo depois da prop `businessHours` chegar
+  // com o horário real salvo — tanto o editor em modal quanto a seção
+  // inline (tenants ainda sem KB publicada, `!usesPublishedKnowledgeBase`
+  // abaixo) mostravam sempre "sem atendimento" em todo dia, dando a
+  // impressão de que o horário nunca persistiu, mesmo tendo sido salvo com
+  // sucesso no backend. O efeito abaixo resincroniza sempre que a prop
+  // muda — cobre a chegada tardia do fetch inicial e é inofensivo depois de
+  // um save (a prop só muda de novo pra devolver o mesmo valor que acabou
+  // de ser salvo).
   const [hoursForm, setHoursForm] = useState<BusinessHours>(() => businessHours);
   const [isSavingHours, setIsSavingHours] = useState(false);
+  useEffect(() => {
+    setHoursForm(businessHours);
+  }, [businessHours]);
 
   const handleToggleDay = (day: string, enabled: boolean) => {
     setHoursForm((prev) => {
