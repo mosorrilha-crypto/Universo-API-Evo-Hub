@@ -328,33 +328,37 @@ declare global {
 }
 
 /**
- * Base code padrão do Meta Pixel, injetada só uma vez (idempotente — várias
- * chamadas com o mesmo pixelId, ex: StrictMode rodando o effect 2x, não
- * duplicam o <script> nem re-inicializam). Fecha o funil desde o clique no
- * anúncio: sem isso, uma campanha que manda tráfego pra este catálogo em vez
- * de Clique-para-WhatsApp direto não tinha nenhum sinal de conversão real
- * pra Meta otimizar, só visualização de página (ver publicCatalogStore.ts).
+ * Base code padrão do Meta Pixel, injetada e com o PageView disparado só uma
+ * vez por pixelId (idempotente — StrictMode rodando o effect 2x, e agora
+ * também os dois caminhos que chamam isso: o fetch rápido de
+ * `/pixel-id` e o fetch completo do catálogo, que podem resolver em
+ * qualquer ordem). Fecha o funil desde o clique no anúncio: sem isso, uma
+ * campanha que manda tráfego pra este catálogo em vez de Clique-para-WhatsApp
+ * direto não tinha nenhum sinal de conversão real pra Meta otimizar, só
+ * visualização de página (ver publicCatalogStore.ts).
  */
+let pixelPageViewTrackedFor: string | null = null;
+
 function loadMetaPixel(pixelId: string): void {
-  if (window.fbq) {
-    window.fbq('init', pixelId);
-    window.fbq('track', 'PageView');
-    return;
+  if (pixelPageViewTrackedFor === pixelId) return;
+  pixelPageViewTrackedFor = pixelId;
+
+  if (!window.fbq) {
+    const fbq: Window['fbq'] = function (...args: unknown[]) {
+      (fbq.queue ??= []).push(args);
+    } as Window['fbq'];
+    fbq!.queue = [];
+    fbq!.loaded = true;
+    fbq!.version = '2.0';
+    window.fbq = fbq;
+    window._fbq = fbq;
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+    document.head.appendChild(script);
   }
-  const fbq: Window['fbq'] = function (...args: unknown[]) {
-    (fbq.queue ??= []).push(args);
-  } as Window['fbq'];
-  fbq!.queue = [];
-  fbq!.loaded = true;
-  fbq!.version = '2.0';
-  window.fbq = fbq;
-  window._fbq = fbq;
-  const script = document.createElement('script');
-  script.async = true;
-  script.src = 'https://connect.facebook.net/en_US/fbevents.js';
-  document.head.appendChild(script);
-  window.fbq('init', pixelId);
-  window.fbq('track', 'PageView');
+  window.fbq!('init', pixelId);
+  window.fbq!('track', 'PageView');
 }
 
 /** Clique num botão de WhatsApp do catálogo = intenção real de contato — evento padrão do Meta, não custom, pra poder ser usado direto como meta de otimização numa campanha. No-op silencioso se o tenant não tem pixel configurado. */
@@ -393,6 +397,23 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     return () => { document.title = previousTitle; };
   }, [catalog, copy.documentTitle]);
 
+  // Caminho rápido: só o Pixel ID, sem esperar o catálogo completo (que
+  // comprime imagem de cada produto antes de responder — pode levar
+  // segundos numa conexão ruim). Reduz o intervalo entre o clique no
+  // anúncio e o evento PageView do Pixel, então menos gente que chegou de
+  // verdade na página é perdida como "visualização" na Meta.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/public/catalog/${encodeURIComponent(slug)}/pixel-id`, { headers: { Accept: 'application/json' } })
+      .then((response) => (response.ok ? response.json() : null) as Promise<{ pixelId?: string } | null>)
+      .then((payload) => { if (!cancelled && payload?.pixelId) loadMetaPixel(payload.pixelId); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  // Fallback: se o fetch rápido acima falhar por algum motivo mas o
+  // catálogo completo trouxer o pixelId mesmo assim, ainda dispara (loadMetaPixel
+  // já é seguro contra disparo duplo do PageView).
   useEffect(() => {
     if (catalog?.pixelId) loadMetaPixel(catalog.pixelId);
   }, [catalog?.pixelId]);
