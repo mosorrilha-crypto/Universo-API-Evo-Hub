@@ -28,6 +28,7 @@ import {
 } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
+import { googleCalendarConnectRateLimiter } from '../middleware/rateLimit';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -94,7 +95,7 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
     res.json({ connected: await isGoogleCalendarConnected(tenantId) });
   }));
 
-  router.get('/api/google-calendar/connect', authenticateToken, requireAgendaModule(), requireRole('admin'), (req: AuthenticatedRequest, res) => {
+  router.get('/api/google-calendar/connect', authenticateToken, googleCalendarConnectRateLimiter, requireAgendaModule(), requireRole('admin'), (req: AuthenticatedRequest, res) => {
     if (!googleClientId || !googleClientSecret) {
       return res.status(500).json({ error: 'GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET não configurados no servidor.' });
     }

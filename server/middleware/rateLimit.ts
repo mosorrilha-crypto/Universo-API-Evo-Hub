@@ -51,3 +51,16 @@ export const authSessionRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Muitas verificações de sessão. Aguarde um minuto e tente novamente.' },
 });
+
+// Achado do CodeQL (js/missing-rate-limiting, PR #496): /connect faz
+// autorização (checagem de entitlement + role admin) sem limite de
+// requisições. É uma ação administrativa rara (iniciar o consentimento
+// OAuth do Google Calendar); limite baixo por IP evita esgotar a rota sem
+// afetar o uso legítimo.
+export const googleCalendarConnectRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de conexão com o Google Calendar. Aguarde um minuto e tente novamente.' },
+});
