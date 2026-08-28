@@ -111,12 +111,21 @@ function formatDuration(minutes?: number): string | null {
   return `${hours} h ${rest} min`;
 }
 
-/** Aponta pro backend (`/api/public/catalog/:slug/whatsapp-click`), igual ao catálogo existente: clique é contado de verdade e a mensagem sai com um código de rastreio embutido. */
-function whatsappClickUrl(message: string, productName?: string): string {
-  const params = new URLSearchParams({ msg: message, source: 'novo' });
+/**
+ * Aponta pro backend (`/api/public/catalog/:slug/whatsapp-click`), igual ao
+ * catálogo existente: clique é contado de verdade e a mensagem sai com um
+ * código de rastreio embutido. `source` default 'novo' (fluxo de triagem
+ * completo) — o botão direto da primeira dobra passa 'direct' explicitamente
+ * (TASK-0125), pra não ficar misturado com quem completou a evaluación.
+ */
+function whatsappClickUrl(message: string, productName?: string, source: 'novo' | 'direct' = 'novo'): string {
+  const params = new URLSearchParams({ msg: message, source });
   if (productName) params.set('product', productName);
   return `/api/public/catalog/${encodeURIComponent(CATALOG_SLUG)}/whatsapp-click?${params.toString()}`;
 }
+
+/** Mensagem padrão do botão "Hablar directamente por WhatsApp" — pedido real (TASK-0125): pula a triagem pra quem já sabe que quer falar direto. */
+const DIRECT_WHATSAPP_MESSAGE = 'Hola Monique, vi tu catálogo y me gustaría consultar por tus servicios. ¿Podés orientarme?';
 
 const objectives = [
   { id: 'natural', title: 'Quiero verme arreglada sin maquillarme', text: 'Un resultado suave para sentirte linda sin verte producida.', recommendation: 'Lash Lift o Diseño con Hilo' },
@@ -239,6 +248,10 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .kicker { display: inline-flex; align-items: center; gap: .45rem; color: #3157d5; font-size: .67rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
         .concierge-scope .hero-copy > p { max-width: 30rem; margin-top: 1.65rem; color: #596575; font-size: 1rem; line-height: 1.7; }
         .concierge-scope .primary-cta { display: inline-flex; margin-top: 2rem; padding: .95rem 1.15rem; background: #3157d5; color: #fff; }
+        .concierge-scope .hero-cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
+        .concierge-scope .hero-cta-row .primary-cta, .concierge-scope .hero-cta-row .secondary-cta { margin-top: 0; }
+        .concierge-scope .secondary-cta { display: inline-flex; align-items: center; justify-content: center; gap: .6rem; padding: .95rem 1.15rem; border: 1px solid #3157d5; border-radius: .45rem; color: #3157d5; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
+        .concierge-scope .secondary-cta:hover { background: rgba(49,87,213,.08); transform: translateY(-2px); }
         .concierge-scope .trust-row { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1.4rem; color: #7b8796; font-size: .66rem; font-weight: 700; }
         .concierge-scope .trust-row span { display: inline-flex; align-items: center; gap: .4rem; }
         .concierge-scope .trust-row svg { color: #e88972; }
@@ -363,6 +376,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .kicker { color: #e7b35b; }
         .concierge-scope .trust-row { color: #bda982; }
         .concierge-scope .trust-row svg { color: #e7b35b; }
+        .concierge-scope .secondary-cta { border-color: #e0ae52; color: #e8b95e; }
+        .concierge-scope .secondary-cta:hover { background: rgba(224,174,82,.1); }
         .concierge-scope .hero-image-wrap { box-shadow: 1rem 1rem 0 #3b2814; border: 1px solid rgba(231,179,91,.4); }
         .concierge-scope .hero-note { background: #f7efe2; border-color: #c69947; color: #392816; }
         .concierge-scope .hero-note b { color: #b77a24; }
@@ -469,7 +484,10 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="kicker"><Sparkles size={14} /> Beauty Concierge para vos · Luque</span>
             <h1>Un momento para vos, <span>un resultado que te acompaña.</span></h1>
             <p>Entre trabajo, compromisos y mil pendientes, también merecés sentirte lista sin pasar horas frente al espejo. Encontrá tu servicio en menos de un minuto.</p>
-            <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Encontrar mi servicio <ArrowRight size={16} /></a>
+            <div className="hero-cta-row">
+              <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Encontrar mi servicio <ArrowRight size={16} /></a>
+              <a href={whatsappClickUrl(DIRECT_WHATSAPP_MESSAGE, undefined, 'direct')} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact} className="secondary-cta">Hablar directamente por WhatsApp <MessageCircle size={15} /></a>
+            </div>
             <div className="trust-row">
               <span><ShieldCheck size={15} /> Cuidado y evaluación</span>
               <span><Clock3 size={15} /> Más tiempo para vos</span>
