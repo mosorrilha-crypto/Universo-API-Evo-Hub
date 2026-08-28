@@ -166,7 +166,14 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     return eventDate.getFullYear() === today.getFullYear() && eventDate.getMonth() === today.getMonth() && eventDate.getDate() === today.getDate() && !event.completed;
   });
   const nextAppointments = events.filter((event) => new Date(event.startIso).getTime() >= Date.now() && !event.completed).sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso)).slice(0, 5);
-  const pendingAppointments = events.filter((event) => !event.completed && (!financialModuleEnabled || !event.payment || event.payment.status !== 'pago')).sort((a, b) => {
+  const pendingAppointments = events.filter((event) => (
+    // Compromisso ainda não concluído: pendência normal de confirmação/pagamento.
+    // Compromisso já concluído: só volta pra fila se sobrou cobrança em aberto
+    // (revisão pós-atendimento — documento da Agenda, prioridade 5).
+    event.completed
+      ? financialModuleEnabled && event.payment != null && event.payment.status !== 'pago'
+      : !financialModuleEnabled || !event.payment || event.payment.status !== 'pago'
+  )).sort((a, b) => {
     const aPendingPayment = a.payment?.status === 'atrasado' ? 0 : a.payment?.status === 'pendente' ? 1 : 2;
     const bPendingPayment = b.payment?.status === 'atrasado' ? 0 : b.payment?.status === 'pendente' ? 1 : 2;
     return aPendingPayment - bPendingPayment || Date.parse(a.startIso) - Date.parse(b.startIso);
