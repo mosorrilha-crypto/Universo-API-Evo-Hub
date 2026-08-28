@@ -45,6 +45,8 @@ interface OperatorCRMProps {
   transactions?: FinancialTransaction[];
   /** A moldura móvel escolhe o contexto visível sem alterar os dados do CRM. */
   mobileSection?: 'leads' | 'insights' | 'board';
+  /** Estado do último ciclo de persistência enviado pelo App. */
+  syncState?: 'synced' | 'saving' | 'error';
 }
 
 const STAGES_BASE: { id: CRMStage; label: string; color: string; badge: string }[] = [
@@ -68,6 +70,7 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
   escalations = [],
   transactions = [],
   mobileSection = 'leads',
+  syncState = 'synced',
 }) => {
   const { language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -209,6 +212,8 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     context: string;
     priority: number;
     actionLabel: string;
+    sourceLabel: string;
+    ownerLabel?: string;
     lead?: LeadInfo;
     escalation?: EscalationInfo;
   };
@@ -218,20 +223,27 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
     const leadById = new Map(leads.map((lead) => [lead.id, lead]));
     transactions.filter((transaction) => transaction.status === 'pendente' || transaction.status === 'atrasado').forEach((transaction) => {
       const lead = leadById.get(transaction.leadId) || leads.find((item) => item.phone === transaction.leadPhone);
-      if (lead) items.push({ id: `payment-${transaction.id}`, kind: 'payment', title: lead.name, context: `${isSpanish ? 'Cobro' : 'Cobrança'} · ${formatAmount(transaction.amount)} · ${transaction.status}`, priority: transaction.status === 'atrasado' ? 1 : 2, actionLabel: isSpanish ? 'Revisar cobro' : 'Revisar cobrança', lead });
+      if (lead) items.push({ id: `payment-${transaction.id}`, kind: 'payment', title: lead.name, context: `${isSpanish ? 'Cobro' : 'Cobrança'} · ${formatAmount(transaction.amount)} · ${transaction.status}`, priority: transaction.status === 'atrasado' ? 1 : 2, actionLabel: isSpanish ? 'Revisar cobro' : 'Revisar cobrança', sourceLabel: isSpanish ? 'Finanzas' : 'Financeiro', lead });
     });
     escalations.filter((item) => !item.resolved && item.status !== 'archived').forEach((escalation) => {
       const lead = leads.find((item) => item.phone === escalation.phone);
-      items.push({ id: `escalation-${escalation.id}`, kind: 'escalation', title: escalation.contactName || escalation.phone, context: `${isSpanish ? 'Escalamiento' : 'Escalonamento'} · ${escalation.reason}`, priority: escalation.priority === 'critical' ? 1 : escalation.priority === 'high' ? 2 : 3, actionLabel: isSpanish ? 'Abrir y decidir' : 'Abrir e decidir', lead, escalation });
+      items.push({ id: `escalation-${escalation.id}`, kind: 'escalation', title: escalation.contactName || escalation.phone, context: `${isSpanish ? 'Escalamiento' : 'Escalonamento'} · ${escalation.reason}`, priority: escalation.priority === 'critical' ? 1 : escalation.priority === 'high' ? 2 : 3, actionLabel: isSpanish ? 'Abrir y decidir' : 'Abrir e decidir', sourceLabel: isSpanish ? 'Escalamiento' : 'Escalonamento', lead, escalation });
     });
     leads.forEach((lead) => {
       const stage = getLeadStage(lead);
       const openTasks = (lead.crmTasks || []).filter((task) => !task.completed);
-      openTasks.forEach((task) => items.push({ id: `task-${lead.id}-${task.id}`, kind: 'task', title: lead.name, context: `${isSpanish ? 'Tarea' : 'Tarefa'} · ${task.title} · ${task.dueDate}`, priority: 3, actionLabel: isSpanish ? 'Abrir tarea' : 'Abrir tarefa', lead }));
-      if (!openTasks.length && (stage === 'proposta' || stage === 'negociacao')) items.push({ id: `negotiation-${lead.id}`, kind: 'negotiation', title: lead.name, context: `${isSpanish ? 'Negociación sin tarea abierta' : 'Negociação sem tarefa aberta'} · ${lead.attribution?.channelLabel || (isSpanish ? 'Origen no informado' : 'Origem não informada')}`, priority: 4, actionLabel: isSpanish ? 'Retomar' : 'Retomar', lead });
-      if (!openTasks.length && lead.hasConversation && (stage === 'novo' || stage === 'contato')) items.push({ id: `conversation-${lead.id}`, kind: 'conversation', title: lead.name, context: `${isSpanish ? 'Conversación para responder' : 'Conversa para responder'} · ${lead.fullAnalysis?.conversationSummary || lead.phone}`, priority: 3, actionLabel: isSpanish ? 'Responder' : 'Responder', lead });
+      openTasks.forEach((task) => items.push({ id: `task-${lead.id}-${task.id}`, kind: 'task', title: lead.name, context: `${isSpanish ? 'Tarea' : 'Tarefa'} · ${task.title} · ${task.dueDate}`, priority: 3, actionLabel: isSpanish ? 'Abrir tarea' : 'Abrir tarefa', sourceLabel: isSpanish ? 'Tareas' : 'Tarefas', ownerLabel: task.assignedOperator, lead }));
+      if (!openTasks.length && (stage === 'proposta' || stage === 'negociacao')) items.push({ id: `negotiation-${lead.id}`, kind: 'negotiation', title: lead.name, context: `${isSpanish ? 'Negociación sin tarea abierta' : 'Negociação sem tarefa aberta'} · ${lead.attribution?.channelLabel || (isSpanish ? 'Origen no informado' : 'Origem não informada')}`, priority: 4, actionLabel: isSpanish ? 'Retomar' : 'Retomar', sourceLabel: isSpanish ? 'Pipeline' : 'Pipeline', lead });
+      if (!openTasks.length && lead.hasConversation && (stage === 'novo' || stage === 'contato')) items.push({ id: `conversation-${lead.id}`, kind: 'conversation', title: lead.name, context: `${isSpanish ? 'Conversación para responder' : 'Conversa para responder'} · ${lead.fullAnalysis?.conversationSummary || lead.phone}`, priority: 3, actionLabel: isSpanish ? 'Responder' : 'Responder', sourceLabel: isSpanish ? 'Conversaciones' : 'Conversas', lead });
     });
-    return items.sort((a, b) => a.priority - b.priority).slice(0, 12);
+    const ordered = items.sort((a, b) => a.priority - b.priority);
+    const deduplicated = new Map<string, TodayItem>();
+    ordered.forEach((item) => {
+      const key = item.lead?.id ? `lead-${item.lead.id}` : item.id;
+      const current = deduplicated.get(key);
+      if (!current || item.priority < current.priority) deduplicated.set(key, item);
+    });
+    return Array.from(deduplicated.values()).slice(0, 12);
   }, [escalations, isSpanish, leads, transactions]);
 
   const activityItems = useMemo(() => leads.flatMap((lead) => (lead.crmTasks || []).filter((task) => !task.completed).map((task) => ({ lead, task }))).slice(0, 12), [leads]);
@@ -399,9 +411,9 @@ export const OperatorCRM: React.FC<OperatorCRMProps> = ({
       <section className="crm-workspace__today rounded-2xl border border-emerald-500/20 bg-slate-900/75 p-3 sm:p-4" aria-labelledby="crm-today-title">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-300">{isSpanish ? 'Próxima acción' : 'Próxima ação'}</p><h2 id="crm-today-title" className="mt-1 text-base font-bold text-white">{isSpanish ? 'CRM Hoy' : 'CRM Hoje'}</h2></div>
-          <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300">{todayItems.length} {isSpanish ? 'pendientes' : 'pendências'}</span>
+          <div className="flex items-center gap-2"><span className={`text-[10px] font-bold ${syncState === 'saving' ? 'text-amber-300' : syncState === 'error' ? 'text-rose-300' : 'text-slate-500'}`}>{syncState === 'saving' ? (isSpanish ? 'Guardando…' : 'Salvando…') : syncState === 'error' ? (isSpanish ? 'No confirmado' : 'Não confirmado') : (isSpanish ? 'Sincronizado' : 'Sincronizado')}</span><span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300">{todayItems.length} {isSpanish ? 'pendientes' : 'pendências'}</span></div>
         </div>
-        {todayItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 px-3 py-6 text-center text-xs text-slate-400">{isSpanish ? 'No hay próximas acciones pendientes.' : 'Nenhuma próxima ação pendente.'}</div> : <div className="space-y-2">{todayItems.map((item) => <article key={item.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3"><div className={`h-2 w-2 shrink-0 rounded-full ${item.priority === 1 ? 'bg-rose-400' : item.priority === 2 ? 'bg-amber-300' : 'bg-emerald-400'}`} aria-hidden="true" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-white">{item.title}</p><p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{item.context}</p></div><button type="button" onClick={() => handleTodayItem(item)} className="shrink-0 rounded-lg bg-emerald-400 px-2.5 py-1.5 text-[10px] font-black text-slate-950 hover:bg-emerald-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">{item.actionLabel}</button></article>)}</div>}
+        {todayItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700 px-3 py-6 text-center text-xs text-slate-400">{isSpanish ? 'No hay próximas acciones pendientes.' : 'Nenhuma próxima ação pendente.'}</div> : <div className="space-y-2">{todayItems.map((item) => <article key={item.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3"><div className={`h-2 w-2 shrink-0 rounded-full ${item.priority === 1 ? 'bg-rose-400' : item.priority === 2 ? 'bg-amber-300' : 'bg-emerald-400'}`} aria-hidden="true" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-white">{item.title}</p><p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{item.context}</p><p className="mt-1 text-[10px] font-semibold text-slate-500">{item.sourceLabel}{item.ownerLabel ? ` · ${item.ownerLabel}` : ''}</p></div><button type="button" onClick={() => handleTodayItem(item)} className="shrink-0 rounded-lg bg-emerald-400 px-2.5 py-1.5 text-[10px] font-black text-slate-950 hover:bg-emerald-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300">{item.actionLabel}</button></article>)}</div>}
       </section>
 
       <section className="crm-workspace__activities rounded-2xl border border-slate-800 bg-slate-900/75 p-3 sm:p-4" aria-labelledby="crm-activities-title">
