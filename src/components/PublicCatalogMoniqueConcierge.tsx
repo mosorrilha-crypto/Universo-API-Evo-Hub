@@ -220,7 +220,7 @@ export function PublicCatalogMoniqueConcierge() {
   function submit(event: FormEvent) {
     event.preventDefault();
     const summary = selectedObjective?.recommendation || 'orientación sobre servicios';
-    const text = `Hola Monique, soy ${name}. Mi objetivo es: ${selectedObjective?.title || 'todavía no estoy segura'}. Me interesa: ${summary}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
+    const text = `Hola Monique, soy ${name}. Me interesa: ${summary}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
     window.open(whatsappClickUrl(text), '_blank', 'noopener,noreferrer');
     trackWhatsAppContact();
     setSent(true);
