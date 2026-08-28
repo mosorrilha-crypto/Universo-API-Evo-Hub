@@ -108,7 +108,7 @@ describe('PATCH /api/admin/tenants/:id', () => {
   });
 
   it('rejeita trocar o slug (mesmo em formato válido) de um tenant com catálogo público ativo', async () => {
-    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste', public_catalog_enabled: true }] });
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste', public_catalog_enabled: true, public_catalog_slug_locked: true }] });
     ({ server, baseUrl } = await startServer('saas_admin'));
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
@@ -120,8 +120,26 @@ describe('PATCH /api/admin/tenants/:id', () => {
     expect(supabase.__tables.tenants.find((t: any) => t.id === 'tenant-a')?.slug).toBe('monique-teste');
   });
 
-  it('permite salvar outros campos (ex: nome) num tenant com catálogo ativo, desde que o slug enviado seja o mesmo que já está salvo', async () => {
-    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste', public_catalog_enabled: true }] });
+  // Achado do próprio gestor (27/08/2026): a trava original só olhava o
+  // estado ATUAL de public_catalog_enabled — então desligar o catálogo,
+  // trocar o slug e religar burlava a proteção. public_catalog_slug_locked
+  // (migration 0062) nunca volta a false, então o slug fica travado mesmo
+  // com o catálogo desligado, se ele já foi ativado alguma vez.
+  it('rejeita trocar o slug mesmo com o catálogo DESLIGADO no momento, se ele já foi ativado alguma vez (impede desligar → trocar → religar)', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste', public_catalog_enabled: false, public_catalog_slug_locked: true }] });
+    ({ server, baseUrl } = await startServer('saas_admin'));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: 'monique-studio' }),
+    });
+    expect(res.status).toBe(400);
+    expect(supabase.__tables.tenants.find((t: any) => t.id === 'tenant-a')?.slug).toBe('monique-teste');
+  });
+
+  it('permite salvar outros campos (ex: nome) num tenant com slug travado, desde que o slug enviado seja o mesmo que já está salvo', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'monique-teste', public_catalog_enabled: true, public_catalog_slug_locked: true }] });
     ({ server, baseUrl } = await startServer('saas_admin'));
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {
@@ -134,8 +152,8 @@ describe('PATCH /api/admin/tenants/:id', () => {
     expect(body.tenant).toMatchObject({ name: 'Monique - Evolution', slug: 'monique-teste' });
   });
 
-  it('permite trocar o slug livremente quando o catálogo público está desligado', async () => {
-    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'antigo-slug', public_catalog_enabled: false }] });
+  it('permite trocar o slug livremente enquanto o catálogo nunca foi ativado (public_catalog_slug_locked: false)', async () => {
+    supabase = createFakeSupabase({ tenants: [{ id: 'tenant-a', name: 'X', slug: 'antigo-slug', public_catalog_enabled: false, public_catalog_slug_locked: false }] });
     ({ server, baseUrl } = await startServer('saas_admin'));
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/tenant-a`, {

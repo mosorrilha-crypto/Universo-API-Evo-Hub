@@ -195,6 +195,27 @@ describe('PUT /api/public-catalog-settings', () => {
     expect(body.whatsappPhone).toBe('595994798081');
   });
 
+  it('marca public_catalog_slug_locked permanentemente ao ativar o catálogo pela primeira vez (fecha o outro lado da trava de slug em admin.ts)', async () => {
+    const put = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, whatsappPhone: '595981436141' }),
+    });
+    expect(put.status).toBe(200);
+    const tenantRow = supabase.__tables.tenants.find((t: any) => t.id === TENANT_A);
+    expect(tenantRow.public_catalog_slug_locked).toBe(true);
+
+    // Desligar de novo não desfaz a trava — é o que impede o caminho
+    // "desligar → trocar slug → religar" de burlar a proteção.
+    const putDisable = await fetch(`${baseUrl}/api/public-catalog-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false, whatsappPhone: '595981436141' }),
+    });
+    expect(putDisable.status).toBe(200);
+    expect(supabase.__tables.tenants.find((t: any) => t.id === TENANT_A).public_catalog_slug_locked).toBe(true);
+  });
+
   it('rejeita ativar o catálogo público (enabled: true) num tenant sem slug definido', async () => {
     supabase = createFakeSupabase({
       tenants: [{ id: TENANT_A, slug: null, public_catalog_enabled: false }],

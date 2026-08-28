@@ -1444,18 +1444,24 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         return res.status(400).json({ error: 'Defina um slug pra este tenant (fala com um saas_admin) antes de ativar o catálogo público.' });
       }
     }
+    const patch: Record<string, unknown> = {
+      public_catalog_enabled: enabled,
+      public_whatsapp_phone: whatsappPhone?.replace(/\D/g, '') || null,
+      public_instagram_url: instagramUrl?.trim() || null,
+      public_location_maps_url: locationMapsUrl?.trim() || null,
+      public_address: address?.trim() || null,
+      public_hours_label: hoursLabel?.trim() || null,
+      public_whatsapp_message_general: whatsappMessageGeneral?.trim() || null,
+      public_whatsapp_message_product: whatsappMessageProduct?.trim() || null,
+    };
+    // Marca o slug como travado pra sempre assim que o catálogo é ativado
+    // pela primeira vez (migration 0062) — nunca voltar a false depois, nem
+    // quando o catálogo é desligado, é o que impede desligar → trocar o
+    // slug → religar como um jeito de burlar a trava em admin.ts.
+    if (enabled) patch.public_catalog_slug_locked = true;
     const { error } = await getDb()
       .from('tenants')
-      .update({
-        public_catalog_enabled: enabled,
-        public_whatsapp_phone: whatsappPhone?.replace(/\D/g, '') || null,
-        public_instagram_url: instagramUrl?.trim() || null,
-        public_location_maps_url: locationMapsUrl?.trim() || null,
-        public_address: address?.trim() || null,
-        public_hours_label: hoursLabel?.trim() || null,
-        public_whatsapp_message_general: whatsappMessageGeneral?.trim() || null,
-        public_whatsapp_message_product: whatsappMessageProduct?.trim() || null,
-      })
+      .update(patch)
       .eq('id', tenantOf(req));
     if (error) return res.status(500).json({ error: error.message });
     res.json({ success: true });

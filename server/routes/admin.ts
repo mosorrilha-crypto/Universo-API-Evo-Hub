@@ -179,16 +179,20 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       const normalizedSlug = slug || null;
       // Incidente real (27/08/2026): trocar o slug de um tenant com catálogo
       // público já ligado derruba a URL ativa e os anúncios que apontam pra
-      // ela na hora — mesmo com formato válido. Só permite mudar o slug
-      // enquanto o catálogo está desligado (ou se o valor nem mudou de fato).
+      // ela na hora — mesmo com formato válido. A trava usa
+      // `public_catalog_slug_locked` (migration 0062), não o estado atual de
+      // `public_catalog_enabled`: esse campo vira `true` na primeira vez que
+      // o catálogo é ativado e NUNCA volta a `false` — sem isso, desligar o
+      // catálogo, trocar o slug e religar destravava o mesmo problema de novo,
+      // quebrando qualquer link já compartilhado (anúncios, favoritos).
       const { data: currentTenant, error: currentTenantError } = await db()
         .from('tenants')
-        .select('slug, public_catalog_enabled')
+        .select('slug, public_catalog_slug_locked')
         .eq('id', req.params.id)
         .maybeSingle();
       if (currentTenantError) return res.status(500).json({ error: currentTenantError.message });
-      if (currentTenant?.public_catalog_enabled && currentTenant.slug !== normalizedSlug) {
-        return res.status(400).json({ error: 'Desative o catálogo público antes de mudar o slug deste tenant — ele está em uso pelos anúncios e pela URL pública ativa.' });
+      if (currentTenant?.public_catalog_slug_locked && currentTenant.slug !== normalizedSlug) {
+        return res.status(400).json({ error: 'O slug deste tenant está travado — o catálogo público dele já foi ativado alguma vez e o valor pode estar em anúncios ou links já compartilhados. Crie um tenant novo se precisar de um slug diferente.' });
       }
       patch.slug = normalizedSlug;
     }
