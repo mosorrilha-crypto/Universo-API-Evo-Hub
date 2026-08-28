@@ -10,7 +10,7 @@ export async function isAgendaModuleEnabledForCurrentTenant(): Promise<boolean> 
       entitlement.key === AGENDA_MODULE_FEATURE_KEY && entitlement.enabled
     ));
   } catch (error) {
-    console.warn('⚠️ [Agenda] Não foi possível resolver o entitlement do tenant; módulo mantido desabilitado.', (error as Error)?.message || error);
+    console.warn('⚠️ [Agenda] Não foi possível resolver o entitlement do tenant; módulo mantido desabilitado.', error instanceof Error ? error.message : String(error));
     return false;
   }
 }

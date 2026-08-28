@@ -10,7 +10,7 @@ export async function isQualityModuleEnabledForCurrentTenant(): Promise<boolean>
       entitlement.key === QUALITY_MODULE_FEATURE_KEY && entitlement.enabled
     ));
   } catch (error) {
-    console.warn('⚠️ [Qualidade] Não foi possível resolver o entitlement do tenant; módulo mantido desabilitado.', (error as Error)?.message || error);
+    console.warn('⚠️ [Qualidade] Não foi possível resolver o entitlement do tenant; módulo mantido desabilitado.', error instanceof Error ? error.message : String(error));
     return false;
   }
 }
