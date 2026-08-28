@@ -44,7 +44,7 @@ import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours }
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
-import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
+import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, permanentlyDeleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
 import { listOperationEvents } from '../services/operationEventStore';
 import { archiveSystemIncident, listSystemIncidents, resolveSystemIncident, restoreSystemIncident, reviewSystemIncident } from '../services/systemIncidentStore';
@@ -2124,6 +2124,17 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
   router.delete('/api/escalations/:id', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const deleted = await deleteEscalation(tenantOf(req), req.params.id, { id: req.user?.id });
+    if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
+    res.json({ success: true });
+  }));
+
+  // Exclusão definitiva (não arquiva, apaga a linha e o histórico de auditoria) —
+  // restrita a saas_admin. Pedido do gestor (28/08/2026): escalonamentos de
+  // teste do próprio time contaminam a fila real (inclusive a aba Arquivados,
+  // já que o DELETE normal acima só arquiva) e precisam de um jeito de sumir
+  // de vez, sem valor de auditoria a preservar.
+  router.delete('/api/escalations/:id/permanent', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const deleted = await permanentlyDeleteEscalation(tenantOf(req), req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Escalonamento não encontrado.' });
     res.json({ success: true });
   }));
