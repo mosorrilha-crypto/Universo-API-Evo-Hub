@@ -207,4 +207,32 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
   return catalog;
 }
 
+/**
+ * Só o Pixel ID, sem tocar em produtos/imagens — a busca do catálogo
+ * completo (`getPublicCatalogBySlug`) comprime miniaturas por produto/variante
+ * antes de responder, o que pode levar segundos numa conexão ruim. Nesse
+ * meio-tempo o evento PageView do Pixel ficava esperando o payload inteiro,
+ * então quem clicava no anúncio e saía antes de a página terminar de carregar
+ * nunca era contado como "visualização da página de destino" mesmo tendo
+ * chegado nela — achado real (28/08/2026): 20 cliques no link, só 5
+ * visualizações confirmadas no mesmo dia. Essa consulta é rápida (só
+ * `tenants` + `tenant_meta_credentials`) pra o frontend poder disparar o
+ * Pixel bem mais cedo, em paralelo com o fetch pesado do catálogo completo.
+ */
+export async function getPublicCatalogPixelId(slug: string): Promise<string | null> {
+  const normalizedSlug = normalizeSlug(slug);
+  if (!normalizedSlug) return null;
+
+  const { data: tenant, error } = await getPlatformDb()
+    .from('tenants')
+    .select('id, public_catalog_enabled')
+    .eq('slug', normalizedSlug)
+    .maybeSingle();
+  if (error) throw error;
+  if (!tenant?.id || tenant.public_catalog_enabled !== true) return null;
+
+  const { data: metaCredentials } = await getPlatformDb().from('tenant_meta_credentials').select('capi_dataset_id').eq('tenant_id', tenant.id).maybeSingle();
+  return metaCredentials?.capi_dataset_id || null;
+}
+
 export { normalizeSlug };

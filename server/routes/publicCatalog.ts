@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { publicCatalogRateLimiter } from '../middleware/rateLimit';
-import { getPublicCatalogBySlug } from '../services/publicCatalogStore';
+import { getPublicCatalogBySlug, getPublicCatalogPixelId } from '../services/publicCatalogStore';
 import { resolveCatalogWhatsappTarget, recordCatalogWhatsappClick, type CatalogClickSource } from '../services/publicCatalogClickStore';
 
 /** Limite generoso o bastante pra qualquer mensagem pré-preenchida real, mas evita abuso (payload gigante inflando a tabela de cliques). */
@@ -21,6 +21,17 @@ export function createPublicCatalogRouter(): Router {
 
     res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     res.json({ catalog });
+  }));
+
+  // Igual à rota acima, mas só o Pixel ID (sem produtos/imagens) — pra o
+  // frontend disparar o Meta Pixel bem mais cedo, em paralelo com o fetch
+  // pesado do catálogo completo. Ver getPublicCatalogPixelId.
+  router.get('/api/public/catalog/:slug/pixel-id', publicCatalogRateLimiter, asyncHandler(async (req: Request<{ slug: string }>, res) => {
+    const pixelId = await getPublicCatalogPixelId(req.params.slug);
+    if (!pixelId) return res.status(404).json({ error: 'Catálogo não encontrado ou sem Pixel configurado.' });
+
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json({ pixelId });
   }));
 
   // Contador interno de clique nos botões de WhatsApp do catálogo (pedido
