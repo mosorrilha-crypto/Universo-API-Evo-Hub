@@ -525,6 +525,10 @@ html[data-theme='blue'] .bg-emerald-500\/10,
 html[data-theme='blue'] .bg-emerald-500\/15 { background-color: rgba(14, 165, 233, 0.16) !important; }
 html[data-theme='blue'] .hover\:bg-emerald-500:hover,
 html[data-theme='blue'] .hover\:bg-emerald-600:hover { background-color: #1596d0 !important; }
+/* TASK-0071 (follow-up, 26/08/2026): mesma lacuna do bloco Claro/Escuro/Azul
+   acima (`.bg-emerald-500`/`.bg-emerald-600` já cobertos) — `.border-emerald-500`
+   sólido (sem opacidade) nunca tinha regra pro tema Azul. */
+html[data-theme='blue'] .border-emerald-500 { border-color: #0b78b5 !important; }
 
 /* Shell operacional compartilhado do Atendimento */
 .atendimento-workspace { display: flex; flex-direction: column; gap: .7rem; }
@@ -1170,6 +1174,17 @@ html[data-theme='clean'] .text-emerald-400,
 html[data-theme='dark'] .text-emerald-300,
 html[data-theme='dark'] .text-emerald-400 {
   color: var(--action) !important;
+}
+
+/* TASK-0071 (follow-up, decisão do dono do produto 26/08/2026): os últimos
+   usos de `border-[#00a884]` (verde de marca do WhatsApp) em
+   WhatsAppLeadsSim.tsx passaram a usar `.border-emerald-500`, que nunca
+   tinha cobertura de tema (só as variantes com opacidade, ex: `/25`, já
+   eram cobertas). */
+html[data-theme='light'] .border-emerald-500,
+html[data-theme='dark'] .border-emerald-500,
+html[data-theme='clean'] .border-emerald-500 {
+  border-color: var(--action) !important;
 }
 
 html[data-theme='light'] .bg-amber-500\/20,

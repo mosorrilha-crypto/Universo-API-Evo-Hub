@@ -3846,7 +3846,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         />
                         <button
                           type="submit"
-                          className="p-1.5 bg-[#00a884] hover:bg-emerald-500 text-slate-950 rounded-lg cursor-pointer flex-shrink-0"
+                          className="p-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 rounded-lg cursor-pointer flex-shrink-0"
                           title={isSpanish ? 'Agregar' : 'Adicionar'}
                         >
                           <Plus className="w-3.5 h-3.5" />
@@ -4172,7 +4172,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <div className="flex items-center gap-2">
                                 <button
                                   onClick={() => ((selectedLead as any)?.isReal ? handlePlayRealAudioMessage(msg.id) : handlePlayAudioMessage(msg.id, msg.text || ''))}
-                                  className="w-7 h-7 rounded-full bg-[#00a884] hover:bg-emerald-400 text-slate-950 flex items-center justify-center flex-shrink-0 transition-transform cursor-pointer"
+                                  className="w-7 h-7 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center flex-shrink-0 transition-transform cursor-pointer"
                                 >
                                   {playingAudioId === msg.id ? (
                                     <Volume2 className="w-3.5 h-3.5 animate-bounce" />
@@ -4181,7 +4181,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   )}
                                 </button>
                                 <div className="flex-1 min-w-0 bg-slate-700/60 h-1 rounded-full overflow-hidden">
-                                  <div className={`h-full bg-[#00a884] ${playingAudioId === msg.id ? 'animate-pulse w-full' : 'w-1/3'}`} />
+                                  <div className={`h-full bg-emerald-500 ${playingAudioId === msg.id ? 'animate-pulse w-full' : 'w-1/3'}`} />
                                 </div>
                                 <span className="text-[9px] text-slate-400 flex-shrink-0">{msg.audioDuration || 15}s</span>
                               </div>
@@ -4369,7 +4369,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         type="button"
                         onClick={() => setSenderRole('agent')}
                         className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                          senderRole === 'agent' ? 'bg-[#00a884] text-slate-950' : 'text-slate-400 hover:text-white'
+                          senderRole === 'agent' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'
                         }`}
                       >
                         <UserCheck className="w-3 h-3 inline mr-1" />
@@ -4493,9 +4493,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
                 {/* Reply Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido acima do campo de texto */}
                 {replyingTo && (
-                  <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-[#00a884] rounded-lg px-3 py-1.5">
+                  <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-emerald-500 rounded-lg px-3 py-1.5">
                     <div className="min-w-0">
-                      <div className="text-[10px] font-bold text-[#00a884] truncate">
+                      <div className="text-[10px] font-bold text-emerald-400 truncate">
                         {`Respondendo a: ${replyingTo.sender === 'lead' ? selectedLead.name : 'Você'}`}
                       </div>
                       <div className="text-[11px] text-slate-300 truncate">
@@ -4559,13 +4559,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    className="flex-1 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-[#00a884]"
+                    className="flex-1 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
 
                   <button
                     type="submit"
                     disabled={!inputMessage.trim()}
-                    className="w-9 h-9 rounded-full bg-[#00a884] hover:bg-emerald-500 text-slate-950 flex items-center justify-center transition-all disabled:opacity-40 cursor-pointer flex-shrink-0"
+                    className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all disabled:opacity-40 cursor-pointer flex-shrink-0"
                   >
                     <Send className="w-4 h-4 ml-0.5" />
                   </button>
