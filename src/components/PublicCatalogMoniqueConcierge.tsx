@@ -330,6 +330,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .service-bottom { margin-top: 1.1rem; border-top: 1px solid #e0e5ed; padding-top: .75rem; }
         .concierge-scope .service-bottom b { color: #3157d5; font-size: .78rem; }
         .concierge-scope .service-bottom a { display: inline-flex; align-items: center; gap: .25rem; color: #596575; font-size: .6rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+        .concierge-scope .service-price-range { margin-top: .55rem; color: #3157d5; font-size: .78rem; font-weight: 800; }
         .concierge-scope .service-variants { display: flex; flex-direction: column; gap: .55rem; margin-top: 1.1rem; border-top: 1px solid #e0e5ed; padding-top: .75rem; }
         .concierge-scope .service-variants li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem .6rem; }
         .concierge-scope .service-variant-info { display: flex; flex-direction: column; min-width: 0; }
@@ -383,6 +384,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .hero-note b { color: #b77a24; }
         .concierge-scope .triage-section { background: #f3eadc; }
         .concierge-scope .section-number { color: #a46d1d; }
+        .concierge-scope .section-number.light { color: #e8b95e; }
         .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { color: #665846; }
         .concierge-scope .step-rail { color: #a38e70; }
         .concierge-scope .step-rail span { border-color: #d6c4a7; }
@@ -428,6 +430,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .skeleton-line { background: linear-gradient(90deg,#e7dbc2 25%,#f3ead8 37%,#e7dbc2 63%); background-size: 400% 100%; }
         .concierge-scope .service-bottom b { color: #9b6417; }
         .concierge-scope .service-bottom a { color: #684916; }
+        .concierge-scope .service-price-range { color: #9b6417; }
         .concierge-scope .service-variants { border-top-color: #dfcfb6; }
         .concierge-scope .service-variant-info b { color: #24190f; }
         .concierge-scope .service-variant-info small { color: #8c795c; }
@@ -666,7 +669,9 @@ export function PublicCatalogMoniqueConcierge() {
                     <h3>{service.name}</h3>
                     {service.description && <p>{service.description}</p>}
                     {service.variants?.length ? (
-                      <ul className="service-variants">
+                      <>
+                        {service.price && <p className="service-price-range">{service.price}</p>}
+                        <ul className="service-variants">
                         {service.variants.map((variant) => {
                           const variantMessage = variant.whatsappMessage
                             ? variant.whatsappMessage.split('{produto}').join(variant.code)
@@ -686,6 +691,7 @@ export function PublicCatalogMoniqueConcierge() {
                           );
                         })}
                       </ul>
+                      </>
                     ) : (
                       <div className="service-bottom">
                         <b>{service.price}</b>
