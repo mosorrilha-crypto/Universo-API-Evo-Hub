@@ -448,7 +448,14 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
             <p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Eventos reales del calendario, cobro y atención en el mismo flujo.' : 'Eventos reais do calendário, cobrança e atendimento no mesmo fluxo.'}</p>
           </div>
 
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-2 py-1.5">
+          {/* Achado real (28/08/2026, pedido do dono do produto): estética
+              inspirada no Google Agenda — nav plano sem cartão/borda própria,
+              células do dia sem borda individual (só tonalidade sutil), dia
+              de hoje com círculo preenchido e dia selecionado com anel no
+              número (não a célula inteira). Reaproveita as MESMAS classes de
+              cor já cobertas pelos 4 temas (emerald/slate); não introduz
+              nenhuma cor nova. */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
             <div className="flex min-w-0 items-center gap-1">
               <button onClick={() => changeMonth(-1)} className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes anterior' : 'Mês anterior'}><ChevronLeft className="h-4 w-4" /></button>
               {/* Achado real (28/08/2026, pedido do dono do produto com print): com
@@ -463,7 +470,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
             <button type="button" onClick={goToToday} className="shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/15">{isSpanish ? 'Ir a hoy' : 'Ir para hoje'}</button>
           </div>
 
-          {loadingEvents ? <div className="grid grid-cols-7 gap-1.5 animate-pulse sm:gap-2">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-14 rounded-xl bg-slate-800/70 sm:h-16" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : <div className="grid grid-cols-7 gap-1 sm:gap-1.5"><div className="col-span-7 grid grid-cols-7 gap-1 pb-1 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1.5 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-14 sm:min-h-16" />)}{eventDays.map(({ day, appointments }) => {
+          {loadingEvents ? <div className="grid grid-cols-7 gap-1.5 animate-pulse sm:gap-2">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-14 rounded-xl bg-slate-800/70 sm:h-16" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : <div className="grid grid-cols-7 gap-1 sm:gap-1.5"><div className="col-span-7 mb-1 grid grid-cols-7 gap-1 border-b border-slate-800/70 pb-1.5 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1.5 sm:pb-2 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-14 sm:min-h-16" />)}{eventDays.map(({ day, appointments }) => {
                 const dayKey = dateInputValue(day);
                 const isToday = dayKey === dateInputValue(new Date());
                 const isSelected = dayKey === selectedDate;
@@ -485,9 +492,9 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
                     }}
                     aria-label={`${isToday ? (isSpanish ? 'Hoy, ' : 'Hoje, ') : ''}${day.getDate()} ${monthLabel}${appointments.length ? ` · ${appointments.length} ${isSpanish ? 'citas' : 'compromissos'}` : ''}`}
                     aria-pressed={isSelected}
-                    className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg border p-1 transition-colors sm:min-h-16 sm:rounded-xl sm:p-1.5 ${isSelected ? 'border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-400/45' : appointments.length ? 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'}`}
+                    className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg p-1 transition-colors sm:min-h-16 sm:rounded-xl sm:p-1.5 ${isSelected ? 'bg-emerald-500/10 hover:bg-emerald-500/15' : appointments.length ? 'bg-emerald-500/5 hover:bg-emerald-500/10' : 'hover:bg-slate-800/50'}`}
                   >
-                    <span className={`flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold ${isToday ? 'bg-emerald-400 px-1 text-slate-950' : isSelected ? 'bg-emerald-500/15 px-1 text-emerald-200' : 'text-slate-300'}`}>{day.getDate()}</span>
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${isToday ? 'bg-emerald-400 text-slate-950' : isSelected ? 'text-emerald-200 ring-2 ring-emerald-400' : 'text-slate-300'}`}>{day.getDate()}</span>
                     {appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[8px] font-black text-slate-950">{appointments.length}</span>}
                   </button>
                 );

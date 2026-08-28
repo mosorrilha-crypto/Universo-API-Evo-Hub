@@ -507,6 +507,12 @@ html[data-theme='blue'] .custom-scrollbar { scrollbar-color: #1688c7 #0b2b47; }
 html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-track { background: #0b2b47; border-color: #215276; }
 html[data-theme='blue'] .custom-scrollbar::-webkit-scrollbar-thumb { background: #1688c7; box-shadow: none; }
 html[data-theme='blue'] .bg-emerald-500 { background-color: #0b78b5 !important; }
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): `.bg-emerald-400` — usado em 46 lugares por 16
+   componentes (ex: o círculo de "hoje" e o selo de contagem do dia na
+   Agenda) — nunca teve nenhuma regra de tema, ao contrário de `.bg-emerald-
+   500`/`.bg-emerald-600` já cobertos. Mesmo padrão de correção. */
+html[data-theme='blue'] .bg-emerald-400 { background-color: #0b78b5 !important; }
 /* Achado real (mesmo da TASK-0061, tema Limpo): `.bg-emerald-600` (usado por
    vários botões primários no app, ex: LoginModal) nunca teve regra aqui —
    só `.bg-emerald-500` tinha. Botão de login ficava verde-Tailwind padrão
@@ -516,7 +522,8 @@ html[data-theme='blue'] .bg-emerald-600 { background-color: #0b78b5 !important; 
    `bg-emerald-600`, pensado pro verde-Tailwind claro padrão — sem isso o
    texto ficaria ilegível sobre o azul #0b78b5 (bem mais escuro). */
 html[data-theme='blue'] .bg-emerald-500.text-slate-950,
-html[data-theme='blue'] .bg-emerald-600.text-slate-950 { color: #FFFFFF !important; }
+html[data-theme='blue'] .bg-emerald-600.text-slate-950,
+html[data-theme='blue'] .bg-emerald-400.text-slate-950 { color: #FFFFFF !important; }
 html[data-theme='blue'] .text-emerald-400,
 html[data-theme='blue'] .text-emerald-300 { color: #69d0ff !important; }
 html[data-theme='blue'] .border-emerald-500\/25,
@@ -529,6 +536,10 @@ html[data-theme='blue'] .hover\:bg-emerald-600:hover { background-color: #1596d0
    acima (`.bg-emerald-500`/`.bg-emerald-600` já cobertos) — `.border-emerald-500`
    sólido (sem opacidade) nunca tinha regra pro tema Azul. */
 html[data-theme='blue'] .border-emerald-500 { border-color: #0b78b5 !important; }
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): mesma lacuna acima, mas pra cor de anel (--tw-ring-color),
+   que é uma custom property própria e nunca herda de border-color. */
+html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important; }
 
 /* Shell operacional compartilhado do Atendimento */
 .atendimento-workspace { display: flex; flex-direction: column; gap: .7rem; }
@@ -1128,6 +1139,16 @@ html[data-theme='dark'] .bg-emerald-500 {
   background-color: var(--action) !important;
 }
 
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): mesma lacuna do `.bg-emerald-600` abaixo, mas pro
+   `.bg-emerald-400` — usado em 46 lugares por 16 componentes (círculo de
+   "hoje"/selo de contagem da Agenda incluídos) e nunca coberto antes. */
+html[data-theme='light'] .bg-emerald-400,
+html[data-theme='dark'] .bg-emerald-400,
+html[data-theme='clean'] .bg-emerald-400 {
+  background-color: var(--action) !important;
+}
+
 /* Normalização dos 4 temas (pedido do dono do produto, 25/08/2026): achado
    real ao trocar o acento do tema Limpo de verde pra azul (TASK-0061) — só
    `.bg-emerald-500` tinha essa regra. `.bg-emerald-600` é usado por DEZENAS
@@ -1155,7 +1176,8 @@ html[data-theme='dark'] .bg-emerald-500.text-white {
   color: var(--action-contrast) !important;
 }
 
-html[data-theme='clean'] .bg-emerald-600.text-slate-950 {
+html[data-theme='clean'] .bg-emerald-600.text-slate-950,
+html[data-theme='clean'] .bg-emerald-400.text-slate-950 {
   color: var(--action-contrast) !important;
 }
 
@@ -1166,7 +1188,8 @@ html[data-theme='clean'] .bg-emerald-600.text-slate-950 {
    pastel claro (#5EBF92), que já contrasta bem com texto quase-preto sem
    nenhuma mudança — mesma razão pela qual esse gap nunca foi notado lá. */
 html[data-theme='light'] .bg-emerald-500.text-slate-950,
-html[data-theme='light'] .bg-emerald-600.text-slate-950 {
+html[data-theme='light'] .bg-emerald-600.text-slate-950,
+html[data-theme='light'] .bg-emerald-400.text-slate-950 {
   color: var(--action-contrast) !important;
 }
 
@@ -1193,6 +1216,18 @@ html[data-theme='light'] .border-emerald-500,
 html[data-theme='dark'] .border-emerald-500,
 html[data-theme='clean'] .border-emerald-500 {
   border-color: var(--action) !important;
+}
+
+/* Achado real (28/08/2026, estética do calendário da Agenda inspirada no
+   Google Agenda): o anel do dia selecionado usa `.ring-emerald-400` (sem
+   opacidade) — cor de anel é uma custom property própria (--tw-ring-color),
+   nunca herda de uma regra de `border-color`, então nunca tinha cobertura de
+   tema nenhuma (nem a variante com opacidade que já existia antes desta
+   mudança). */
+html[data-theme='light'] .ring-emerald-400,
+html[data-theme='dark'] .ring-emerald-400,
+html[data-theme='clean'] .ring-emerald-400 {
+  --tw-ring-color: var(--action) !important;
 }
 
 html[data-theme='light'] .bg-amber-500\/20,
