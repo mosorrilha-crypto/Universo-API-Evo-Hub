@@ -156,6 +156,20 @@ const serviceCategories = [
   { id: 'Combos', title: 'Combos', text: 'Combiná cejas, labios y pestañas en una sola sesión, con un ahorro sobre el precio individual.' },
 ];
 
+/**
+ * Pedido do dono do produto (28/08/2026): a micropigmentación é o
+ * procedimento de maior valor do Studio (Gs 550.000 — Cejas Microshading/
+ * Microblading e Microlips Labios) e deve aparecer em destaque antes dos
+ * demais procedimentos da mesma categoria. Todo produto/variante de
+ * micropigmentación já tem "Micro" no próprio nome na Base de Conhecimento
+ * (confirmado via Supabase: "Cejas Microshading o Microblading",
+ * "Microlips Labios", e os 4 combos "Combo ... Micro ..."), então detectar
+ * por essa palavra evita cadastrar uma lista de nomes exatos à parte.
+ */
+function isMicropigmentacion(label: string): boolean {
+  return /micro/i.test(label);
+}
+
 interface CategoryOption {
   key: string;
   label: string;
@@ -164,13 +178,16 @@ interface CategoryOption {
   durationMinutes?: number;
   productName: string;
   variantCode?: string;
+  isMicro: boolean;
 }
 
 /**
  * Achata os produtos da categoria escolhida em opções individuais: cada
  * variante vira uma opção própria com seu preço (Cejas e Pestañas têm
  * variantes), e um produto sem variantes (Labios, Combos, ou o segundo
- * produto de Cejas que também não tem) vira uma opção única.
+ * produto de Cejas que também não tem) vira uma opção única. As opções de
+ * micropigmentación vêm primeiro (ordenação estável — dentro de cada grupo
+ * a ordem original da Base de Conhecimento é preservada).
  */
 function optionsForCategory(catalog: PublicCatalogResponse | null, category: string): CategoryOption[] {
   if (!catalog || !category) return [];
@@ -187,6 +204,7 @@ function optionsForCategory(catalog: PublicCatalogResponse | null, category: str
           durationMinutes: variant.durationMinutes,
           productName: product.name,
           variantCode: variant.code,
+          isMicro: isMicropigmentacion(variant.code),
         });
       }
     } else {
@@ -197,10 +215,11 @@ function optionsForCategory(catalog: PublicCatalogResponse | null, category: str
         price: product.price,
         durationMinutes: product.durationMinutes,
         productName: product.name,
+        isMicro: isMicropigmentacion(product.name),
       });
     }
   }
-  return options;
+  return options.sort((a, b) => Number(b.isMicro) - Number(a.isMicro));
 }
 
 /**
@@ -371,6 +390,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option b { color: #263345; font-size: .86rem; }
         .concierge-scope .option small { margin-top: .3rem; color: #7a8797; font-size: .73rem; line-height: 1.35; }
         .concierge-scope .option-service { display: block; margin-top: .45rem; color: #3157d5; font-size: .66rem; font-weight: 800; font-style: normal; }
+        .concierge-scope .option-badge { display: inline-block; margin-bottom: .4rem; padding: .2rem .55rem; border-radius: 999px; background: rgba(49,87,213,.1); color: #3157d5; font-size: .58rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
         .concierge-scope .next-cta { display: inline-flex; margin-top: 1.35rem; padding: .9rem 1rem; border: 0; background: #3157d5; color: #fff; }
         .concierge-scope .next-cta:disabled { cursor: not-allowed; opacity: .45; transform: none; }
         .concierge-scope .triage-actions { display: flex; gap: .7rem; margin-top: 1.4rem; }
@@ -487,6 +507,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option b { color: #fff7e9; }
         .concierge-scope .option small { color: #cdbfae; }
         .concierge-scope .option-service { color: #e8b95e; }
+        .concierge-scope .option-badge { background: rgba(224,174,82,.16); color: #e8b95e; }
         .concierge-scope .back-cta { border-color: #6b4c27; color: #d4bd98; }
         .concierge-scope .field span { color: #d7c29d; }
         .concierge-scope .field input, .concierge-scope .field select, .concierge-scope .field textarea { border-color: #6b4c27; background: #211a13; color: #fff7e9; }
@@ -656,6 +677,7 @@ export function PublicCatalogMoniqueConcierge() {
                       >
                         <span className="option-icon">{selectedItem?.key === option.key ? <Check size={17} /> : <Sparkles size={15} />}</span>
                         <span>
+                          {option.isMicro && <span className="option-badge">Micropigmentación</span>}
                           <b>{option.label}</b>
                           {option.description && <small>{option.description}</small>}
                           <em className="option-service">{option.price}{formatDuration(option.durationMinutes) ? ` · ${formatDuration(option.durationMinutes)}` : ''}</em>
