@@ -59,6 +59,7 @@ import {
   documentPayloadsMatch,
   splitVisualKnowledgeBaseIntoDocuments,
 } from '../lib/knowledgeBaseVisualDocuments';
+import { describeKnowledgeBaseDocumentDiff } from '../lib/knowledgeBaseDocumentDiff';
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
@@ -485,6 +486,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [typedDocumentStates, setTypedDocumentStates] = useState<KnowledgeBaseDocumentState[]>([]);
   const [isLoadingTypedDocuments, setIsLoadingTypedDocuments] = useState(false);
   const [isPublishingTypedDocuments, setIsPublishingTypedDocuments] = useState(false);
+  // Achado real (26/08/2026, pedido do dono do produto): via "Rascunho
+  // pendente" no card mas não tinha como saber O QUE tinha mudado antes de
+  // publicar — o formulário só mostra uma versão por vez (rascunho OU
+  // publicado, nunca os dois). `diffOpenDocumentType` controla qual card tem
+  // o comparativo "Publicado vs. Rascunho" aberto; fecha sozinho depois de
+  // publicar (o rascunho deixa de existir, então não sobra nada pra comparar
+  // — não precisa de botão de "excluir versão anterior": a versão publicada
+  // antiga já vira status 'archived' no banco e nunca aparece nesta lista,
+  // que só busca status IN ('published','draft') — ver knowledgeBaseStore.ts).
+  const [diffOpenDocumentType, setDiffOpenDocumentType] = useState<string | null>(null);
 
   // Gavetas (accordion) das 6 seções da aba — pedido real (20/08/2026): a
   // aba tinha ficado extensa demais com tudo sempre visível de uma vez
@@ -716,6 +727,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       const refreshedStates = await listKnowledgeBaseDocumentStates();
       setTypedDocumentStates(refreshedStates);
       hydrateVisualFormFromTypedDocuments(refreshedStates);
+      setDiffOpenDocumentType(null);
       setIsSavedToast(true);
       setTimeout(() => setIsSavedToast(false), 4000);
     } catch (error) {
@@ -1810,14 +1822,64 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                 const state = typedDocumentStates.find((documentState) => documentState.documentType === item.documentType);
                 const Icon = item.icon;
                 const status = state?.draft ? 'Rascunho pendente' : state?.published ? `Publicado v${state.published.version}` : 'Ainda não publicado';
+                // Só dá pra comparar quando existem as DUAS versões — um documento
+                // "Ainda não publicado" não tem base de comparação (tudo é novo).
+                const canShowDiff = Boolean(state?.draft && state?.published);
+                const isDiffOpen = diffOpenDocumentType === item.documentType;
                 return (
-                  <button key={item.documentType} type="button" onClick={() => handleOpenTypedDocument(item.documentType)} className="group flex min-h-20 items-start gap-2.5 rounded-xl border border-slate-800 bg-slate-950/65 p-3 text-left transition-colors hover:border-cyan-400/35 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-300/60">
-                    <span className="mt-0.5 rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-1.5 text-cyan-200"><Icon className="h-3.5 w-3.5" /></span>
-                    <span className="min-w-0"><span className="block text-[11px] font-bold text-slate-200 group-hover:text-cyan-100">{item.label}</span><span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{item.detail}</span><span className={`mt-1.5 block text-[10px] font-semibold ${state?.draft ? 'text-amber-200' : state?.published ? 'text-emerald-200' : 'text-slate-500'}`}>{status}</span></span>
-                  </button>
+                  <div key={item.documentType} className={`group flex min-h-20 flex-col gap-1.5 rounded-xl border p-3 transition-colors ${isDiffOpen ? 'border-cyan-400/50 bg-slate-900' : 'border-slate-800 bg-slate-950/65 hover:border-cyan-400/35 hover:bg-slate-900'}`}>
+                    <button type="button" onClick={() => handleOpenTypedDocument(item.documentType)} className="flex items-start gap-2.5 text-left focus:outline-none">
+                      <span className="mt-0.5 rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-1.5 text-cyan-200"><Icon className="h-3.5 w-3.5" /></span>
+                      <span className="min-w-0"><span className="block text-[11px] font-bold text-slate-200 group-hover:text-cyan-100">{item.label}</span><span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{item.detail}</span><span className={`mt-1.5 block text-[10px] font-semibold ${state?.draft ? 'text-amber-200' : state?.published ? 'text-emerald-200' : 'text-slate-500'}`}>{status}</span></span>
+                    </button>
+                    {canShowDiff && (
+                      <button
+                        type="button"
+                        onClick={() => setDiffOpenDocumentType((previous) => (previous === item.documentType ? null : item.documentType))}
+                        className="self-start text-[10px] font-semibold text-cyan-300 underline decoration-cyan-400/40 underline-offset-2 hover:text-cyan-100"
+                      >
+                        {isDiffOpen ? 'Ocultar alterações' : 'Ver o que mudou'}
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>
+            {diffOpenDocumentType && (() => {
+              const state = typedDocumentStates.find((documentState) => documentState.documentType === diffOpenDocumentType);
+              const item = TYPED_DOCUMENT_NAVIGATION.find((navItem) => navItem.documentType === diffOpenDocumentType);
+              if (!state?.draft || !state?.published) return null;
+              const diffEntries = describeKnowledgeBaseDocumentDiff(state.documentType, state.published.data, state.draft.data);
+              return (
+                <div className="mt-3 rounded-xl border border-cyan-400/25 bg-slate-950/70 p-3">
+                  <p className="text-[11px] font-bold text-cyan-100">O que vai mudar em "{item?.label}" ao publicar</p>
+                  {diffEntries.length === 0 ? (
+                    <p className="mt-2 text-[11px] text-slate-500">Nenhuma diferença de conteúdo detectada entre a versão publicada e o rascunho.</p>
+                  ) : (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full min-w-[420px] border-collapse text-[11px]">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-left text-slate-500">
+                            <th className="py-1.5 pr-2 font-semibold">Campo</th>
+                            <th className="py-1.5 pr-2 font-semibold">Publicado</th>
+                            <th className="py-1.5 font-semibold">Rascunho</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diffEntries.map((entry, index) => (
+                            <tr key={`${entry.label}-${index}`} className="border-b border-slate-900 align-top">
+                              <td className="py-1.5 pr-2 font-semibold text-slate-300">{entry.label}</td>
+                              <td className="py-1.5 pr-2 text-rose-300/90">{entry.before}</td>
+                              <td className="py-1.5 text-emerald-300/90">{entry.after}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </section>
       )}
