@@ -6,7 +6,7 @@
  * estilos e dados aqui são autocontidos e não leem nem escrevem em `knowledge_base`/tenant —
  * uma alteração aqui nunca pode afetar o catálogo antigo, e vice-versa.
  */
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, ChevronDown, Clock3, Menu, MessageCircle, ShieldCheck, Sparkles, X } from 'lucide-react';
 
 /** lucide-react 1.x removida os ícones de marca (Instagram incluso) — glifo inline equivalente. */
@@ -127,12 +127,100 @@ function whatsappClickUrl(message: string, productName?: string, source: 'novo' 
 /** Mensagem padrão do botão "Hablar directamente por WhatsApp" — pedido real (TASK-0125): pula a triagem pra quem já sabe que quer falar direto. */
 const DIRECT_WHATSAPP_MESSAGE = 'Hola Monique, vi tu catálogo y me gustaría consultar por tus servicios. ¿Podés orientarme?';
 
-const objectives = [
-  { id: 'natural', title: 'Quiero verme arreglada sin maquillarme', text: 'Un resultado suave para sentirte linda sin verte producida.', recommendation: 'Lash Lift o Diseño con Hilo' },
-  { id: 'practical', title: 'Quiero sentirme lista cada mañana', text: 'Menos tiempo frente al espejo y más tiempo para vos.', recommendation: 'Lash Lift, Browlamination o Combo' },
-  { id: 'brows', title: 'Quiero volver a reconocer mi mirada', text: 'Una mirada más equilibrada, sin perder tu expresión.', recommendation: 'Diseño, Henna o Microshading' },
-  { id: 'lips', title: 'Quiero recuperar color y definición', text: 'Labios más definidos, con evaluación previa y expectativas reales.', recommendation: 'Microlips o Neutralización' },
+/**
+ * Achado da revisão de redundância (28/08/2026): o preenchimento do template
+ * de mensagem ("{produto}" → nome real) estava duplicado entre o card de
+ * produto e o card de variante, com a mesma lógica de fallback repetida.
+ */
+function fillWhatsappTemplate(template: string | undefined, name: string, fallbackName: string): string {
+  return template ? template.split('{produto}').join(name) : `Hola Monique, me interesa ${fallbackName}. Quiero saber si es para mí.`;
+}
+
+/**
+ * Achado da revisão de UX (28/08/2026): o "objetivo" original misturava
+ * serviços de categorias diferentes numa mesma recomendação (ex.: "Lash
+ * Lift, Browlamination o Combo" mistura Pestañas + Cejas + Combos), sem
+ * preço nenhum — quem respondia não sabia quanto ia custar até falar com a
+ * Monique. A Etapa 1 agora pergunta o serviço pai — as mesmas categorias
+ * reais dos produtos da Base de Conhecimento (campo `category` do catálogo
+ * público) — pra Etapa 2 mostrar só as opções daquela categoria, já com
+ * preço real (`optionsForCategory`). "Retoque" fica de fora de propósito:
+ * não é um primeiro serviço (`bookable: false` na Base de Conhecimento —
+ * só indicado depois de avaliação da Monique sobre um procedimento que ela
+ * mesma já fez, nunca automático).
+ */
+const serviceCategories = [
+  { id: 'Cejas', title: 'Cejas', text: 'Diseño, laminado, henna o microshading — desde definir la forma hasta un efecto más duradero.' },
+  { id: 'Pestañas', title: 'Pestañas', text: 'Lash lift o extensiones con distintos efectos, para una mirada más abierta todos los días.' },
+  { id: 'Labios', title: 'Labios', text: 'Microlips o neutralización, con evaluación previa y expectativas reales.' },
+  { id: 'Combos', title: 'Combos', text: 'Combiná cejas, labios y pestañas en una sola sesión, con un ahorro sobre el precio individual.' },
 ];
+
+/**
+ * Pedido do dono do produto (28/08/2026): a micropigmentación é o
+ * procedimento de maior valor do Studio (Gs 550.000 — Cejas Microshading/
+ * Microblading e Microlips Labios) e deve aparecer em destaque antes dos
+ * demais procedimentos da mesma categoria. Todo produto/variante de
+ * micropigmentación já tem "Micro" no próprio nome na Base de Conhecimento
+ * (confirmado via Supabase: "Cejas Microshading o Microblading",
+ * "Microlips Labios", e os 4 combos "Combo ... Micro ..."), então detectar
+ * por essa palavra evita cadastrar uma lista de nomes exatos à parte.
+ */
+function isMicropigmentacion(label: string): boolean {
+  return /micro/i.test(label);
+}
+
+interface CategoryOption {
+  key: string;
+  label: string;
+  description?: string;
+  price: string;
+  durationMinutes?: number;
+  productName: string;
+  variantCode?: string;
+  isMicro: boolean;
+}
+
+/**
+ * Achata os produtos da categoria escolhida em opções individuais: cada
+ * variante vira uma opção própria com seu preço (Cejas e Pestañas têm
+ * variantes), e um produto sem variantes (Labios, Combos, ou o segundo
+ * produto de Cejas que também não tem) vira uma opção única. As opções de
+ * micropigmentación vêm primeiro (ordenação estável — dentro de cada grupo
+ * a ordem original da Base de Conhecimento é preservada).
+ */
+function optionsForCategory(catalog: PublicCatalogResponse | null, category: string): CategoryOption[] {
+  if (!catalog || !category) return [];
+  const options: CategoryOption[] = [];
+  for (const product of catalog.products) {
+    if (product.category !== category) continue;
+    if (product.variants?.length) {
+      for (const variant of product.variants) {
+        options.push({
+          key: `${product.name}__${variant.code}`,
+          label: variant.code,
+          description: variant.description,
+          price: variant.price,
+          durationMinutes: variant.durationMinutes,
+          productName: product.name,
+          variantCode: variant.code,
+          isMicro: isMicropigmentacion(variant.code),
+        });
+      }
+    } else {
+      options.push({
+        key: product.name,
+        label: product.name,
+        description: product.description,
+        price: product.price,
+        durationMinutes: product.durationMinutes,
+        productName: product.name,
+        isMicro: isMicropigmentacion(product.name),
+      });
+    }
+  }
+  return options.sort((a, b) => Number(b.isMicro) - Number(a.isMicro));
+}
 
 /**
  * Achado da revisão de conversão (27/08/2026): a lista completa de serviços
@@ -155,7 +243,8 @@ const resultImages = [
 
 export function PublicCatalogMoniqueConcierge() {
   const [step, setStep] = useState(1);
-  const [objective, setObjective] = useState('');
+  const [category, setCategory] = useState('');
+  const [selectedItem, setSelectedItem] = useState<CategoryOption | null>(null);
   const [previousWork, setPreviousWork] = useState('No');
   const [sensitive, setSensitive] = useState('No');
   const [name, setName] = useState('');
@@ -165,15 +254,15 @@ export function PublicCatalogMoniqueConcierge() {
   const [sent, setSent] = useState(false);
   const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
   const [productsError, setProductsError] = useState(false);
-  const selectedObjective = useMemo(() => objectives.find((item) => item.id === objective), [objective]);
+  const categoryOptions = useMemo(() => optionsForCategory(catalog, category), [catalog, category]);
   const instagramUrl = catalog?.contact.instagramUrl || FALLBACK_INSTAGRAM;
 
   /**
    * Achado real (26/08/2026): um clique em "Encontrar mi servicio" rola a página
    * suavemente até a triagem (`scroll-behavior: smooth`); se a pessoa toca de novo
    * antes da rolagem terminar, o toque cai em qualquer card que estiver embaixo do
-   * dedo naquele instante — normalmente o primeiro da Etapa 1 — selecionando um
-   * objetivo sem intenção. Trava os cards por um instante depois de qualquer link
+   * dedo naquele instante — normalmente o primeiro da Etapa 1 — selecionando uma
+   * categoria sem intenção. Trava os cards por um instante depois de qualquer link
    * pra `#triagem`, liberando assim que o `scrollend` disparar (ou por timeout, pra
    * navegadores sem suporte a `scrollend`).
    */
@@ -184,6 +273,23 @@ export function PublicCatalogMoniqueConcierge() {
     const timeoutId = window.setTimeout(clear, 900);
     window.addEventListener('scrollend', () => { window.clearTimeout(timeoutId); clear(); }, { once: true });
   };
+
+  /**
+   * Achado real (28/08/2026): cada etapa da triagem tem uma altura bem
+   * diferente (Etapa 1 com 4 categorias, Etapa 2 podendo ter até 7 opções de
+   * uma categoria, Etapa 3 mais curta). Ao trocar de etapa a página encolhe
+   * ou cresce, e o navegador mantém a posição de rolagem em pixels — se ela
+   * passar a exceder a nova altura da página, fica "presa" mais embaixo,
+   * revelando por engano a seção seguinte ("Resultados reales"). Rola o
+   * topo do card de volta pra dentro da tela a cada troca de etapa (nunca no
+   * carregamento inicial, antes da pessoa pedir pra ver a triagem).
+   */
+  const triageCardRef = useRef<HTMLDivElement>(null);
+  const isFirstStepRender = useRef(true);
+  useEffect(() => {
+    if (isFirstStepRender.current) { isFirstStepRender.current = false; return; }
+    triageCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [step]);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -219,9 +325,11 @@ export function PublicCatalogMoniqueConcierge() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const summary = selectedObjective?.recommendation || 'orientación sobre servicios';
+    const summary = selectedItem
+      ? `${selectedItem.productName}${selectedItem.variantCode ? ` (${selectedItem.variantCode})` : ''} — ${selectedItem.price}`
+      : 'orientación sobre servicios';
     const text = `Hola Monique, soy ${name}. Me interesa: ${summary}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
-    window.open(whatsappClickUrl(text), '_blank', 'noopener,noreferrer');
+    window.open(whatsappClickUrl(text, selectedItem?.productName), '_blank', 'noopener,noreferrer');
     trackWhatsAppContact();
     setSent(true);
   }
@@ -238,9 +346,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .brand-mark { display: grid; width: 2.15rem; height: 2.15rem; place-items: center; border: 1px solid #3157d5; border-radius: 50%; color: #3157d5; font-family: 'Cormorant Garamond', Georgia, serif; font-size: .95rem; font-style: italic; }
         .concierge-scope .site-header nav a, .concierge-scope .mobile-menu a { transition: color 160ms var(--ease-out); }
         .concierge-scope .site-header nav a:hover, .concierge-scope .mobile-menu a:hover { color: #3157d5; }
-        .concierge-scope .header-cta, .concierge-scope .primary-cta, .concierge-scope .next-cta, .concierge-scope .light-cta { align-items: center; justify-content: center; gap: .6rem; border-radius: .45rem; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
-        .concierge-scope .header-cta { padding: .75rem 1rem; background: #3157d5; color: #fff; }
-        .concierge-scope .header-cta:hover, .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: #2444b6; transform: translateY(-2px); }
+        .concierge-scope .primary-cta, .concierge-scope .next-cta, .concierge-scope .light-cta { align-items: center; justify-content: center; gap: .6rem; border-radius: .45rem; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; transition: transform 160ms var(--ease-out), background-color 160ms var(--ease-out); }
+        .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: #2444b6; transform: translateY(-2px); }
         .concierge-scope .mobile-menu { display: flex; flex-direction: column; gap: 1rem; padding: 1rem 0 1.25rem; color: #596575; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
         .concierge-scope .hero { overflow: hidden; background: #f7f8fa; padding: 4rem 0 5rem; }
         .concierge-scope .hero-copy h1, .concierge-scope .section-intro h2, .concierge-scope .section-heading h2, .concierge-scope .contact-section h2 { margin-top: 1.2rem; font-family: 'Cormorant Garamond', Georgia, serif; font-size: clamp(3.4rem, 7vw, 6.8rem); font-weight: 600; letter-spacing: -.055em; line-height: .86; }
@@ -266,9 +373,6 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .section-number.light { color: #9fb5ff; }
         .concierge-scope .section-intro h2, .concierge-scope .section-heading h2, .concierge-scope .contact-section h2 { font-size: clamp(2.8rem, 5vw, 5rem); }
         .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { max-width: 23rem; margin-top: 1.25rem; color: #697586; font-size: .95rem; line-height: 1.7; }
-        .concierge-scope .step-rail { display: grid; gap: .65rem; margin-top: 2.2rem; color: #9aa5b5; font-size: .66rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-        .concierge-scope .step-rail span { border-left: 2px solid #e1e6ee; padding: .35rem 0 .35rem .8rem; }
-        .concierge-scope .step-rail .active { border-color: #3157d5; color: #3157d5; }
         .concierge-scope .triage-card { overflow: hidden; border: 1px solid #dde3ec; border-radius: 1rem; background: #f7f8fa; box-shadow: 0 .8rem 2.3rem rgba(39,55,80,.08); }
         .concierge-scope .triage-top { display: flex; align-items: center; gap: 1rem; padding: 1.1rem 1.35rem; border-bottom: 1px solid #e2e7ef; color: #596575; font-size: .68rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
         .concierge-scope .progress { height: .35rem; flex: 1; overflow: hidden; border-radius: 99px; background: #dce3ed; }
@@ -286,6 +390,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option b { color: #263345; font-size: .86rem; }
         .concierge-scope .option small { margin-top: .3rem; color: #7a8797; font-size: .73rem; line-height: 1.35; }
         .concierge-scope .option-service { display: block; margin-top: .45rem; color: #3157d5; font-size: .66rem; font-weight: 800; font-style: normal; }
+        .concierge-scope .option-badge { display: inline-block; margin-bottom: .4rem; padding: .2rem .55rem; border-radius: 999px; background: rgba(49,87,213,.1); color: #3157d5; font-size: .58rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
         .concierge-scope .next-cta { display: inline-flex; margin-top: 1.35rem; padding: .9rem 1rem; border: 0; background: #3157d5; color: #fff; }
         .concierge-scope .next-cta:disabled { cursor: not-allowed; opacity: .45; transform: none; }
         .concierge-scope .triage-actions { display: flex; gap: .7rem; margin-top: 1.4rem; }
@@ -369,8 +474,8 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .brand, .concierge-scope .brand strong { color: #f7efe2; }
         .concierge-scope .brand small { color: #bda982; }
         .concierge-scope .brand-mark { border-color: #d8a64b; color: #e8b95e; }
-        .concierge-scope .header-cta, .concierge-scope .primary-cta, .concierge-scope .next-cta { background: linear-gradient(135deg,#e5b454,#b97922); color: #130f0b; box-shadow: 0 .45rem 1rem rgba(216,166,75,.2); }
-        .concierge-scope .header-cta:hover, .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: linear-gradient(135deg,#f1c86c,#c88a2d); }
+        .concierge-scope .primary-cta, .concierge-scope .next-cta { background: linear-gradient(135deg,#e5b454,#b97922); color: #130f0b; box-shadow: 0 .45rem 1rem rgba(216,166,75,.2); }
+        .concierge-scope .primary-cta:hover, .concierge-scope .next-cta:hover { background: linear-gradient(135deg,#f1c86c,#c88a2d); }
         .concierge-scope .mobile-menu { background: #0a0908; border-top-color: rgba(214,166,75,.2); }
         .concierge-scope .hero { background: #0a0908; color: #f7efe2; }
         .concierge-scope .hero-copy h1 { color: #f7efe2; }
@@ -388,9 +493,6 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .section-number { color: #a46d1d; }
         .concierge-scope .section-number.light { color: #e8b95e; }
         .concierge-scope .section-intro > p, .concierge-scope .section-heading > p { color: #665846; }
-        .concierge-scope .step-rail { color: #a38e70; }
-        .concierge-scope .step-rail span { border-color: #d6c4a7; }
-        .concierge-scope .step-rail .active { border-color: #b77a24; color: #8f5e19; }
         .concierge-scope .triage-card { background: #16120e; border-color: #5e421f; box-shadow: 0 .8rem 2.3rem rgba(47,29,9,.2); color: #f7efe2; }
         .concierge-scope .triage-top { border-bottom-color: rgba(224,174,82,.25); color: #dbc69e; }
         .concierge-scope .progress { background: #3d2b18; }
@@ -405,6 +507,7 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .option b { color: #fff7e9; }
         .concierge-scope .option small { color: #cdbfae; }
         .concierge-scope .option-service { color: #e8b95e; }
+        .concierge-scope .option-badge { background: rgba(224,174,82,.16); color: #e8b95e; }
         .concierge-scope .back-cta { border-color: #6b4c27; color: #d4bd98; }
         .concierge-scope .field span { color: #d7c29d; }
         .concierge-scope .field input, .concierge-scope .field select, .concierge-scope .field textarea { border-color: #6b4c27; background: #211a13; color: #fff7e9; }
@@ -471,7 +574,6 @@ export function PublicCatalogMoniqueConcierge() {
             <a href="#servicios">Servicios</a>
             <a href="#resultados">Resultados</a>
           </nav>
-          <a href="#triagem" onClick={handleTriageAnchorClick} className="header-cta hidden md:inline-flex">Encontrar mi servicio <ArrowRight size={14} /></a>
           <button onClick={() => setMenuOpen(!menuOpen)} className="md:hidden" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}>
             {menuOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
@@ -527,13 +629,8 @@ export function PublicCatalogMoniqueConcierge() {
             <span className="section-number">01</span>
             <h2>Antes de elegir,<br /><span>entendemos lo que necesitás.</span></h2>
             <p>Tres preguntas breves para que recibas una orientación clara, respetuosa y pensada para vos.</p>
-            <div className="step-rail">
-              <span className={step >= 1 ? 'active' : ''}>01 Objetivo</span>
-              <span className={step >= 2 ? 'active' : ''}>02 Contexto</span>
-              <span className={step >= 3 ? 'active' : ''}>03 Contacto</span>
-            </div>
           </div>
-          <div className="triage-card">
+          <div className="triage-card" ref={triageCardRef}>
             <div className="triage-top">
               <span>Paso {step} de 3</span>
               <div className="progress"><i style={{ width: `${(step / 3) * 100}%` }} /></div>
@@ -541,22 +638,63 @@ export function PublicCatalogMoniqueConcierge() {
             {step === 1 && (
               <div className="triage-body">
                 <h3>¿Qué querés regalarte hoy?</h3>
-                <p className="helper">Pensá en cómo querés salir del estudio y elegí la opción que más se acerca a vos.</p>
+                <p className="helper">Elegí el servicio y en la próxima pantalla vas a ver las opciones con precio real.</p>
                 <div className="option-grid">
-                  {objectives.map((item) => (
-                    <button key={item.id} onClick={() => { if (!suppressObjectiveClicks) setObjective(item.id); }} className={objective === item.id ? 'option selected' : 'option'}>
-                      <span className="option-icon">{objective === item.id ? <Check size={17} /> : item.id === 'natural' ? 'N' : item.id === 'practical' ? 'T' : item.id === 'brows' ? 'C' : 'L'}</span>
-                      <span><b>{item.title}</b><small>{item.text}</small><em className="option-service">Te recomendamos: {item.recommendation}</em></span>
+                  {serviceCategories.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        if (suppressObjectiveClicks) return;
+                        setCategory(item.id);
+                        setSelectedItem(null);
+                        window.setTimeout(() => setStep(2), 220);
+                      }}
+                      className={category === item.id ? 'option selected' : 'option'}
+                    >
+                      <span className="option-icon">{category === item.id ? <Check size={17} /> : item.id === 'Cejas' ? 'CJ' : item.id === 'Pestañas' ? 'PS' : item.id === 'Labios' ? 'LB' : 'CB'}</span>
+                      <span><b>{item.title}</b><small>{item.text}</small></span>
                     </button>
                   ))}
                 </div>
-                <button disabled={!objective} onClick={() => setStep(2)} className="next-cta">Continuar <ArrowRight size={16} /></button>
               </div>
             )}
             {step === 2 && (
               <div className="triage-body">
-                <h3>Dos respuestas para orientarte mejor.</h3>
-                <p className="helper">Estas preguntas ayudan a evitar recomendaciones inadecuadas.</p>
+                <h3>{category}: elegí tu opción.</h3>
+                <p className="helper">Precios reales, así ya sabés qué esperar antes de escribirnos.</p>
+                {!catalog && !productsError && <p className="helper">Cargando precios…</p>}
+                {productsError && <p className="helper">No pudimos cargar los precios ahora. Volvé y probá de nuevo en unos minutos, o escribinos directo por WhatsApp.</p>}
+                {catalog && (
+                  <div className="option-grid">
+                    {categoryOptions.map((option) => (
+                      <button
+                        key={option.key}
+                        onClick={() => {
+                          setSelectedItem(option);
+                          window.setTimeout(() => setStep(3), 220);
+                        }}
+                        className={selectedItem?.key === option.key ? 'option selected' : 'option'}
+                      >
+                        <span className="option-icon">{selectedItem?.key === option.key ? <Check size={17} /> : <Sparkles size={15} />}</span>
+                        <span>
+                          {option.isMicro && <span className="option-badge">Micropigmentación</span>}
+                          <b>{option.label}</b>
+                          {option.description && <small>{option.description}</small>}
+                          <em className="option-service">{option.price}{formatDuration(option.durationMinutes) ? ` · ${formatDuration(option.durationMinutes)}` : ''}</em>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="triage-actions">
+                  <button onClick={() => setStep(1)} className="back-cta">Volver</button>
+                </div>
+              </div>
+            )}
+            {step === 3 && (
+              <form onSubmit={submit} className="triage-body">
+                <h3>Listo. Conversemos con contexto.</h3>
+                <p className="helper">Dos preguntas rápidas y tu nombre — te enviaremos todo junto con tu mensaje.</p>
                 <label className="field">
                   <span>¿Tenés una micropigmentación previa?</span>
                   <select value={previousWork} onChange={(event) => setPreviousWork(event.target.value)}>
@@ -574,16 +712,6 @@ export function PublicCatalogMoniqueConcierge() {
                     <option>No estoy segura</option>
                   </select>
                 </label>
-                <div className="triage-actions">
-                  <button onClick={() => setStep(1)} className="back-cta">Volver</button>
-                  <button onClick={() => setStep(3)} className="next-cta">Continuar <ArrowRight size={16} /></button>
-                </div>
-              </div>
-            )}
-            {step === 3 && (
-              <form onSubmit={submit} className="triage-body">
-                <h3>Listo. Conversemos con contexto.</h3>
-                <p className="helper">Te enviaremos la información de tu evaluación junto con tu mensaje.</p>
                 <label className="field">
                   <span>Tu nombre</span>
                   <input required value={name} onChange={(event) => setName(event.target.value)} placeholder="¿Cómo te llamamos?" />
@@ -660,9 +788,7 @@ export function PublicCatalogMoniqueConcierge() {
           {catalog && (
             <div className="catalog-grid">
               {catalog.products.map((service) => {
-                const consultMessage = catalog.contact.whatsappMessageProduct
-                  ? catalog.contact.whatsappMessageProduct.split('{produto}').join(service.name)
-                  : `Hola Monique, me interesa ${service.name}. Quiero saber si es para mí.`;
+                const consultMessage = fillWhatsappTemplate(catalog.contact.whatsappMessageProduct, service.name, service.name);
                 const cardImage = service.imageUrl || PROMO_IMAGE_BY_PRODUCT_NAME[service.name];
                 return (
                   <article className="service-card" key={service.name}>
@@ -678,9 +804,7 @@ export function PublicCatalogMoniqueConcierge() {
                         {service.price && <p className="service-price-range">{service.price}</p>}
                         <ul className="service-variants">
                         {service.variants.map((variant) => {
-                          const variantMessage = variant.whatsappMessage
-                            ? variant.whatsappMessage.split('{produto}').join(variant.code)
-                            : `Hola Monique, me interesa ${service.name} (${variant.code}). Quiero saber si es para mí.`;
+                          const variantMessage = fillWhatsappTemplate(variant.whatsappMessage, variant.code, `${service.name} (${variant.code})`);
                           return (
                             <li key={variant.code}>
                               <div className="service-variant-info">
@@ -708,6 +832,17 @@ export function PublicCatalogMoniqueConcierge() {
               })}
             </div>
           )}
+          {/*
+            Achado da revisão de redundância (28/08/2026): este resumo e a
+            Knowledge Base do tenant (campo `pricingAndPolicies`, usado pela
+            IA na conversa privada do WhatsApp) descrevem a mesma política —
+            valores como a seña de Gs 50.000, os 24h de cancelamento e os 15
+            min de tolerância precisam ficar em sincronia manual se algum dia
+            mudarem. Essa duplicação é intencional, não um bug: a KB completa
+            inclui dado bancário (alias/cédula, titular da conta) que não
+            pode ir num JSON público sem autenticação (`/api/public/catalog`)
+            — só este resumo, sem dado sensível, é seguro pra expor aqui.
+          */}
           <details className="policy-box">
             <summary>Información importante antes de confirmar <ChevronDown size={16} /></summary>
             <div>

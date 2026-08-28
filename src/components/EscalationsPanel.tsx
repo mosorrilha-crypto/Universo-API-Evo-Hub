@@ -19,6 +19,7 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  Trash2,
   TimerReset,
   UserRoundCheck,
   XCircle,
@@ -40,6 +41,8 @@ interface EscalationsPanelProps {
   onApproveAndSend?: (id: string, phone: string, text: string) => Promise<boolean>;
   /** Traz um caso arquivado de volta pra fila de pendentes. */
   onRestore?: (id: string) => void;
+  /** Apaga o caso e seu histórico de auditoria de vez (irreversível) — só passado quando o usuário logado é saas_admin, pra tirar teste do próprio time da fila real sem deixar rastro nem na aba Arquivados. */
+  onPermanentDelete?: (id: string, contactLabel: string) => void;
 }
 
 function toWaMeLink(phone: string): string {
@@ -88,6 +91,7 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
   onResolvePayment,
   onApproveAndSend,
   onRestore,
+  onPermanentDelete,
 }) => {
   const [filter, setFilter] = useState<'pending' | 'resolved' | 'archived'>('pending');
   const [replyDraftById, setReplyDraftById] = useState<Record<string, string>>({});
@@ -231,6 +235,9 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                     ) : !isArchived ? (
                       <button onClick={() => onDelete(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500 hover:text-white"><Archive className="h-3.5 w-3.5" /> Arquivar</button>
                     ) : null}
+                    {onPermanentDelete && (
+                      <button onClick={() => onPermanentDelete(e.id, e.contactName || e.phone)} title="Apaga o caso e o histórico de auditoria de vez — não passa pela aba Arquivados. Use só pra teste do próprio time." className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/20"><Trash2 className="h-3.5 w-3.5" /> Excluir</button>
+                    )}
                   </div>
                 </div>
               </article>

@@ -132,6 +132,47 @@ describe('GET /api/public/catalog/:slug', () => {
   });
 });
 
+describe('GET /api/public/catalog/:slug/pixel-id', () => {
+  it('retorna só o pixelId, sem produtos nem contato (TASK-0137 — caminho rápido do Pixel)', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{
+        id: 'tenant-monique',
+        slug: 'monique',
+        public_catalog_enabled: true,
+        public_whatsapp_phone: '595981436141',
+      }],
+      tenant_meta_credentials: [{ tenant_id: 'tenant-monique', capi_dataset_id: '1234567890' }],
+      knowledge_base: [{ tenant_id: 'tenant-monique', data: { products: [{ name: 'Microlips', price: 'Gs 1' }] } }],
+    }));
+
+    const response = await fetch(`${baseUrl}/api/public/catalog/monique/pixel-id`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ pixelId: '1234567890' });
+  });
+
+  it('404 quando o tenant não tem Pixel configurado', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{ id: 'tenant-monique', slug: 'monique', public_catalog_enabled: true }],
+    }));
+
+    const response = await fetch(`${baseUrl}/api/public/catalog/monique/pixel-id`);
+    expect(response.status).toBe(404);
+  });
+
+  it('404 pra slug sem catálogo habilitado ou inexistente', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{ id: 'tenant-privado', slug: 'privado', public_catalog_enabled: false }],
+      tenant_meta_credentials: [{ tenant_id: 'tenant-privado', capi_dataset_id: 'xyz' }],
+    }));
+
+    const privateResponse = await fetch(`${baseUrl}/api/public/catalog/privado/pixel-id`);
+    const missingResponse = await fetch(`${baseUrl}/api/public/catalog/desconhecido/pixel-id`);
+    expect(privateResponse.status).toBe(404);
+    expect(missingResponse.status).toBe(404);
+  });
+});
+
 describe('GET /api/public/catalog/:slug/whatsapp-click', () => {
   it('registra o clique, redireciona (302) pro WhatsApp com o code de emojis embutido na mensagem', async () => {
     const seed = {

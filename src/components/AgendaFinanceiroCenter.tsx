@@ -112,6 +112,12 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   const view = scope;
   const [calendarDate, setCalendarDate] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => dateInputValue(new Date()));
+  // Pedido direto do dono do produto (28/08/2026, referência de outro app de
+  // agendamentos): seletor Semana/Mês dentro do card do calendário — Semana
+  // ganha uma grade nova por horário (linhas finas, dias em colunas), Mês
+  // continua a grade existente. "Dia"/"3 dias"/"Atendimentos" ficaram fora
+  // do escopo desta entrega, por decisão explícita do dono do produto.
+  const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week'>('month');
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -190,6 +196,22 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
       setSelectedDate(nextSelection);
       return nextMonth;
     });
+  };
+
+  // Navega a semana pelo `selectedDate` (não pelo `calendarDate`, que é
+  // "mês exibido"). Quando a semana muda de mês, atualiza `calendarDate`
+  // também — é o que dispara o refetch de `refreshEvents` (por mês). Uma
+  // semana que fica dividida entre dois meses (ex: 31/ago–06/set) só mostra
+  // os compromissos do mês atualmente carregado — limitação conhecida,
+  // aceitável pro escopo desta entrega (a maioria das semanas cai inteira
+  // dentro de um mês só).
+  const changeWeek = (offset: number) => {
+    const next = new Date(`${selectedDate}T12:00:00`);
+    next.setDate(next.getDate() + offset * 7);
+    setSelectedDate(dateInputValue(next));
+    if (next.getFullYear() !== calendarDate.getFullYear() || next.getMonth() !== calendarDate.getMonth()) {
+      setCalendarDate(new Date(next.getFullYear(), next.getMonth(), 1));
+    }
   };
 
   const callEventAction = async (url: string, method: string, body?: object) => {
@@ -378,14 +400,46 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     });
   }, [calendarDate, events]);
 
-  const selectedDateLabel = useMemo(() => new Intl.DateTimeFormat(displayLocale, {
-    weekday: 'long', day: 'numeric', month: 'long',
-  }).format(new Date(`${selectedDate}T12:00:00`)), [displayLocale, selectedDate]);
+  /** Segunda a domingo da semana que contém `selectedDate`, com os compromissos de cada dia já filtrados e ordenados por horário. */
+  const weekDays = useMemo(() => {
+    const base = new Date(`${selectedDate}T12:00:00`);
+    const monday = new Date(base);
+    monday.setDate(base.getDate() - ((base.getDay() + 6) % 7));
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index);
+      const appointments = events
+        .filter((calendarEvent) => {
+          const eventDate = new Date(calendarEvent.startIso);
+          return eventDate.getFullYear() === day.getFullYear() && eventDate.getMonth() === day.getMonth() && eventDate.getDate() === day.getDate();
+        })
+        .sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso));
+      return { day, appointments };
+    });
+  }, [selectedDate, events]);
 
-  const selectedDateEvents = useMemo(
-    () => eventDays.find(({ day }) => dateInputValue(day) == selectedDate)?.appointments || [],
-    [eventDays, selectedDate],
-  );
+  const weekRangeLabel = useMemo(() => {
+    const start = weekDays[0].day;
+    const end = weekDays[6].day;
+    const sameMonth = start.getMonth() === end.getMonth();
+    const startLabel = start.toLocaleDateString(displayLocale, sameMonth ? { day: 'numeric' } : { day: 'numeric', month: 'short' });
+    const endLabel = end.toLocaleDateString(displayLocale, { day: 'numeric', month: 'short' });
+    return `${startLabel} – ${endLabel}`;
+  }, [weekDays, displayLocale]);
+
+  /** Faixa de horário da grade da semana — dinâmica, com folga de 1h antes/depois do primeiro/último compromisso (padrão 8h–19h sem nenhum compromisso na semana), pra não desperdiçar tela mostrando 24h de grade quando o expediente real é bem mais curto. */
+  const weekHourRange = useMemo(() => {
+    let startHour = 8;
+    let endHour = 19;
+    weekDays.forEach(({ appointments }) => {
+      appointments.forEach((calendarEvent) => {
+        const start = new Date(calendarEvent.startIso);
+        const end = calendarEvent.endIso ? new Date(calendarEvent.endIso) : new Date(start.getTime() + 60 * 60000);
+        startHour = Math.min(startHour, start.getHours());
+        endHour = Math.max(endHour, end.getMinutes() > 0 ? end.getHours() + 1 : end.getHours());
+      });
+    });
+    return { startHour: Math.max(0, startHour), endHour: Math.min(24, Math.max(endHour, startHour + 1)) };
+  }, [weekDays]);
 
   const goToToday = () => {
     const today = new Date();
@@ -421,6 +475,85 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     </article>
   );
 
+  /**
+   * Grade da semana por horário (pedido direto do dono do produto,
+   * 28/08/2026, referência de outro app de agendamentos): eixo de horas à
+   * esquerda (fixo — `sticky left-0` — enquanto os dias rolam horizontalmente
+   * num celular estreito), 7 colunas de dia, linhas finas de hora em hora,
+   * compromissos posicionados por horário real (não só listados). Reaproveita
+   * as mesmas classes de cor já usadas/cobertas pelos 4 temas no resto do
+   * arquivo — nenhuma cor nova.
+   */
+  const renderWeekGrid = () => {
+    const { startHour, endHour } = weekHourRange;
+    const totalHours = endHour - startHour;
+    const ROW_HEIGHT_PX = 48;
+    const gridHeight = totalHours * ROW_HEIGHT_PX;
+    const hourMarks = Array.from({ length: totalHours }, (_, index) => startHour + index);
+    const todayKey = dateInputValue(new Date());
+
+    return (
+      <div className="overflow-x-auto">
+        <div className="flex" style={{ minWidth: '36rem' }}>
+          <div className="sticky left-0 z-10 flex-none bg-slate-900" style={{ width: '2.75rem' }}>
+            <div style={{ height: '2.75rem' }} />
+            <div className="relative" style={{ height: `${gridHeight}px` }}>
+              {hourMarks.map((hour) => (
+                <span key={hour} className="absolute right-1.5 -translate-y-1/2 text-[9px] font-medium text-slate-500" style={{ top: `${(hour - startHour) * ROW_HEIGHT_PX}px` }}>{`${hour}h`}</span>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-1">
+            {weekDays.map(({ day, appointments }) => {
+              const dayKey = dateInputValue(day);
+              const isToday = dayKey === todayKey;
+              const isSelected = dayKey === selectedDate;
+              return (
+                <div key={day.toISOString()} className="flex-1 border-l border-slate-800/60 first:border-l-0" style={{ minWidth: '4.75rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(dayKey)}
+                    className="flex w-full flex-col items-center justify-center gap-0.5 border-b border-slate-800/70 pb-1.5"
+                    style={{ height: '2.75rem' }}
+                  >
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{day.toLocaleDateString(displayLocale, { weekday: 'short' }).replace('.', '')}</span>
+                    <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold transition-colors ${isToday ? 'bg-emerald-400 text-slate-950' : isSelected ? 'text-emerald-200 ring-2 ring-emerald-400' : 'text-slate-300'}`}>{day.getDate()}</span>
+                  </button>
+                  <div className="relative" style={{ height: `${gridHeight}px` }}>
+                    {hourMarks.map((hour) => (
+                      <div key={hour} className="absolute inset-x-0 border-t border-slate-800/40" style={{ top: `${(hour - startHour) * ROW_HEIGHT_PX}px` }} />
+                    ))}
+                    {appointments.map((calendarEvent) => {
+                      const start = new Date(calendarEvent.startIso);
+                      const end = calendarEvent.endIso ? new Date(calendarEvent.endIso) : new Date(start.getTime() + 60 * 60000);
+                      const rangeMinutes = totalHours * 60;
+                      const startMinutes = Math.min(rangeMinutes, Math.max(0, (start.getHours() - startHour) * 60 + start.getMinutes()));
+                      const endMinutes = Math.min(rangeMinutes, Math.max(startMinutes, (end.getHours() - startHour) * 60 + end.getMinutes()));
+                      const top = (startMinutes / rangeMinutes) * 100;
+                      const height = Math.max(4, ((endMinutes - startMinutes) / rangeMinutes) * 100);
+                      return (
+                        <button
+                          type="button"
+                          key={calendarEvent.id}
+                          onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })}
+                          className="absolute inset-x-0.5 overflow-hidden rounded-md border border-emerald-500/30 bg-emerald-500/15 px-1 py-0.5 text-left transition-colors hover:bg-emerald-500/25"
+                          style={{ top: `${top}%`, height: `${height}%` }}
+                        >
+                          <span className="block truncate text-[8px] font-bold text-emerald-300 sm:text-[9px]">{calendarEvent.summary.replace(/^\[[^\]]+\]\s*/, '')}</span>
+                          <span className="block truncate text-[7px] text-slate-400 sm:text-[8px]">{start.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className={`agenda-financeiro-workspace agenda-financeiro-workspace--${view} agenda-financeiro-workspace--financial-detail-${mobileDetail || 'closed'} agenda-financeiro-workspace--agenda-mobile-${mobileAgendaView} space-y-5 animate-page-enter`}>
       <section className="agenda-financeiro-workspace__hero operations-hero overflow-hidden rounded-3xl border p-6 sm:p-8">
@@ -443,30 +576,79 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
 
       {view === 'agenda' && <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg sm:p-5">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-            <div>
+          {/* Achado real (26/08/2026 e 28/08/2026, pedidos do dono do produto
+              com print): o nav de mês e o banner "Dia selecionado" mostravam
+              a mesma informação duas vezes, em dois blocos empilhados —
+              fundidos num único cartão (26/08). No celular real, ainda assim
+              quebrava em 3 linhas por causa do texto do dia selecionado por
+              extenso; removido (28/08) — a mesma informação já aparece no
+              anel de destaque e no selo de contagem do dia na grade logo
+              abaixo, então o cabeçalho agora é só: nav de mês + "Ir para
+              hoje", garantido numa linha só mesmo em tela estreita. */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
               <h2 className="font-bold text-white">{isSpanish ? 'Agenda operativa' : 'Agenda operacional'}</h2>
               <p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Eventos reales del calendario, cobro y atención en el mismo flujo.' : 'Eventos reais do calendário, cobrança e atendimento no mesmo fluxo.'}</p>
             </div>
-            <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1">
-              <button onClick={() => changeMonth(-1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes anterior' : 'Mês anterior'}><ChevronLeft className="h-4 w-4" /></button>
-              <div className="min-w-36 px-1 text-center">
-                <p className="text-xs font-bold capitalize text-slate-200">{monthLabel}</p>
-                <p className="mt-0.5 truncate text-[10px] font-medium text-emerald-300">{selectedDateLabel}</p>
-              </div>
-              <button onClick={() => changeMonth(1)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={isSpanish ? 'Mes siguiente' : 'Próximo mês'}><ChevronRight className="h-4 w-4" /></button>
+            {/* Pedido direto do dono do produto (28/08/2026): seletor Semana/Mês,
+                encaixado ao lado do título pra não abrir mais uma linha na tela. */}
+            <div className="inline-flex shrink-0 rounded-lg border border-slate-800 bg-slate-950 p-0.5">
+              <button type="button" onClick={() => setCalendarViewMode('week')} className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${calendarViewMode === 'week' ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-400 hover:text-white'}`}>{isSpanish ? 'Semana' : 'Semana'}</button>
+              <button type="button" onClick={() => setCalendarViewMode('month')} className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${calendarViewMode === 'month' ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-400 hover:text-white'}`}>{isSpanish ? 'Mes' : 'Mês'}</button>
             </div>
           </div>
 
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300">{isSpanish ? 'Día seleccionado' : 'Dia selecionado'}</p>
-              <p className="truncate text-xs font-semibold text-slate-200">{selectedDateLabel} · {selectedDateEvents.length === 1 ? (isSpanish ? '1 cita' : '1 compromisso') : `${selectedDateEvents.length} ${isSpanish ? 'citas' : 'compromissos'}`}{selectedDate === dateInputValue(new Date()) ? ` · ${isSpanish ? 'hoy' : 'hoje'}` : ''}</p>
+          {/* Achado real (28/08/2026, pedido do dono do produto): estética
+              inspirada no Google Agenda — nav plano sem cartão/borda própria,
+              células do dia sem borda individual (só tonalidade sutil), dia
+              de hoje com círculo preenchido e dia selecionado com anel no
+              número (não a célula inteira). Reaproveita as MESMAS classes de
+              cor já cobertas pelos 4 temas (emerald/slate); não introduz
+              nenhuma cor nova. */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+            <div className="flex min-w-0 items-center gap-1">
+              <button onClick={() => (calendarViewMode === 'week' ? changeWeek(-1) : changeMonth(-1))} className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={calendarViewMode === 'week' ? (isSpanish ? 'Semana anterior' : 'Semana anterior') : (isSpanish ? 'Mes anterior' : 'Mês anterior')}><ChevronLeft className="h-4 w-4" /></button>
+              {/* Achado real (28/08/2026, pedido do dono do produto com print): com
+                  o dia selecionado + contagem de compromissos aqui, o cabeçalho
+                  quebrava em 3 linhas num celular real (mês, dia por extenso,
+                  botão) — a mesma informação já aparece no anel de destaque e no
+                  selo de contagem da célula do dia logo abaixo, então tirar daqui
+                  não perde nada e deixa a linha inteira num só nível. */}
+              <p className="min-w-0 truncate px-1 text-xs font-bold capitalize text-slate-200">{calendarViewMode === 'week' ? weekRangeLabel : monthLabel}</p>
+              <button onClick={() => (calendarViewMode === 'week' ? changeWeek(1) : changeMonth(1))} className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label={calendarViewMode === 'week' ? (isSpanish ? 'Próxima semana' : 'Próxima semana') : (isSpanish ? 'Mes siguiente' : 'Próximo mês')}><ChevronRight className="h-4 w-4" /></button>
             </div>
-            <button type="button" onClick={goToToday} className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/15">{isSpanish ? 'Ir a hoy' : 'Ir para hoje'}</button>
+            <button type="button" onClick={goToToday} className="shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/15">{isSpanish ? 'Ir a hoy' : 'Ir para hoje'}</button>
           </div>
 
-          {loadingEvents ? <div className="grid grid-cols-7 gap-1.5 animate-pulse sm:gap-2">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-14 rounded-xl bg-slate-800/70 sm:h-16" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : <div className="grid grid-cols-7 gap-1 sm:gap-1.5"><div className="col-span-7 grid grid-cols-7 gap-1 pb-1 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1.5 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} />)}{eventDays.map(({ day, appointments }) => { const dayKey = dateInputValue(day); const isToday = dayKey === dateInputValue(new Date()); const isSelected = dayKey === selectedDate; return                   <button type="button" key={day.toISOString()} onClick={() => { setSelectedDate(dayKey); setAppointmentDialog({ mode: 'new', initialDate: dayKey }); }} aria-label={`${isToday ? (isSpanish ? 'Hoy, ' : 'Hoje, ') : ''}${day.getDate()} ${monthLabel}`} aria-pressed={isSelected} className={`min-h-14 rounded-lg border p-1 text-left transition-colors sm:min-h-16 sm:rounded-xl sm:p-1.5 ${isSelected ? 'border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-400/45' : appointments.length ? 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'}`}><div className="flex items-center justify-between gap-1"><span className={`flex h-5 min-w-5 items-center justify-center rounded-full text-[10px] font-bold ${isToday ? 'bg-emerald-400 px-1 text-slate-950' : isSelected ? 'bg-emerald-500/15 px-1 text-emerald-200' : 'text-slate-300'}`}>{day.getDate()}</span>{appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[8px] font-black text-slate-950">{appointments.length}</span>}</div><div className="mt-1 space-y-0.5">{appointments.slice(0, 1).map((event) => <span key={event.id} className="block truncate rounded bg-slate-900 px-1 py-0.5 text-[8px] font-medium text-slate-300 sm:text-[9px]">{new Date(event.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })} {event.summary.replace(/^\[[^\]]+\]\s*/, '')}</span>)}{appointments.length > 1 && <span className="block text-[8px] font-semibold text-emerald-300">+{appointments.length - 1}</span>}</div></button>; })}</div>}
+          {loadingEvents ? <div className="grid grid-cols-7 gap-1.5 animate-pulse sm:gap-2">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-14 rounded-xl bg-slate-800/70 sm:h-16" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : calendarViewMode === 'week' ? renderWeekGrid() : <div className="grid grid-cols-7 gap-1 sm:gap-1.5"><div className="col-span-7 mb-1 grid grid-cols-7 gap-1 border-b border-slate-800/70 pb-1.5 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1.5 sm:pb-2 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-14 sm:min-h-16" />)}{eventDays.map(({ day, appointments }) => {
+                const dayKey = dateInputValue(day);
+                const isToday = dayKey === dateInputValue(new Date());
+                const isSelected = dayKey === selectedDate;
+                return (
+                  <button
+                    type="button"
+                    key={day.toISOString()}
+                    onClick={() => {
+                      setSelectedDate(dayKey);
+                      // Achado real (28/08/2026, pedido do dono do produto com print):
+                      // antes, tocar em QUALQUER dia sempre abria "Novo agendamento" —
+                      // até num dia que já tinha compromisso, o preview de horário
+                      // dentro da célula não levava a lugar nenhum de útil. Agora: dia
+                      // vazio abre criação (comportamento de sempre); dia com só 1
+                      // compromisso abre a edição DELE; dia com 2+ só seleciona (evita
+                      // abrir o compromisso errado sem o operador escolher qual).
+                      if (appointments.length === 0) setAppointmentDialog({ mode: 'new', initialDate: dayKey });
+                      else if (appointments.length === 1) setAppointmentDialog({ mode: 'edit', event: appointments[0] });
+                    }}
+                    aria-label={`${isToday ? (isSpanish ? 'Hoy, ' : 'Hoje, ') : ''}${day.getDate()} ${monthLabel}${appointments.length ? ` · ${appointments.length} ${isSpanish ? 'citas' : 'compromissos'}` : ''}`}
+                    aria-pressed={isSelected}
+                    className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg p-1 transition-colors sm:min-h-16 sm:rounded-xl sm:p-1.5 ${isSelected ? 'bg-emerald-500/10 hover:bg-emerald-500/15' : appointments.length ? 'bg-emerald-500/5 hover:bg-emerald-500/10' : 'hover:bg-slate-800/50'}`}
+                  >
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${isToday ? 'bg-emerald-400 text-slate-950' : isSelected ? 'text-emerald-200 ring-2 ring-emerald-400' : 'text-slate-300'}`}>{day.getDate()}</span>
+                    {appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[8px] font-black text-slate-950">{appointments.length}</span>}
+                  </button>
+                );
+              })}</div>}
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-white">{isSpanish ? 'Próximos compromisos' : 'Próximos compromissos'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Acciones que requieren atención a continuación.' : 'Ações que exigem atenção na sequência.'}</p></div><button type="button" onClick={refreshEvents} className="text-xs font-bold text-emerald-300 hover:text-emerald-200">{isSpanish ? 'Actualizar' : 'Atualizar'}</button></div><div className="space-y-3">{nextAppointments.length ? nextAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'No se encontraron compromisos futuros este mes.' : 'Nenhum compromisso futuro encontrado neste mês.'}</p>}</div></div>
       </section>}
