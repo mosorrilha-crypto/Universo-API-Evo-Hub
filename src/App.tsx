@@ -1336,7 +1336,18 @@ export const App: React.FC = () => {
             perdendo temporariamente mensagens reais recém-chegadas do
             polling até o próximo ciclo de 8s. Bug real relatado em
             produção: mensagem aparecia e sumia da conversa. */}
-        {canSeeConversations && <div style={{ display: activeTab === 'whatsapp' ? 'block' : 'none' }}>
+        {/* flex flex-col + altura explícita no mobile (< lg): sem isso, o
+            .atendimento-chat-shell interno (WhatsAppLeadsSim) não tem uma
+            altura real de referência pra se basear e sobrava/faltava
+            espaço em telas reais — achado real em produção, 29/08/2026,
+            depois de três rodadas anteriores tentando acertar com valores
+            fixos de dvh (TASK-0150/0153/0157). h-[calc(100dvh-1.5rem)] e
+            sm:h-[calc(100dvh-3rem)] cancelam exatamente o padding vertical
+            de .app-main (p-3/sm:p-6) nesses breakpoints; em lg (desktop) a
+            aba volta ao fluxo normal (lg:block lg:h-auto), como sempre foi
+            — o cálculo interno lg:h-[calc(100dvh-154px)] do chat-shell já
+            resolve isso sozinho lá. */}
+        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-1.5rem)] sm:h-[calc(100dvh-3rem)] lg:block lg:h-auto' : 'hidden'}>
           <AtendimentoWorkspaceFrame
             activeTenantName={activeTenant.name}
             activeTenant={activeTenant}

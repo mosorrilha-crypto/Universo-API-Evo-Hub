@@ -546,7 +546,7 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
    visível na própria lista de conversas e ocupava tela útil que o WhatsApp
    real não gasta com isso). Sem gradiente verde — a marca do app (theme-color)
    também deixou de usar o verde do WhatsApp, ver index.html/manifest.json. */
-.atendimento-workspace { display: flex; flex-direction: column; gap: .5rem; }
+.atendimento-workspace { display: flex; flex-direction: column; gap: .5rem; height: 100%; min-height: 0; }
 .atendimento-workspace__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.1rem; border: 1px solid rgba(148,163,184,.18); border-radius: 1.1rem; background: var(--surface-panel); box-shadow: var(--shadow-premium); }
 .atendimento-workspace__header--compact { padding: .55rem .85rem; }
 .atendimento-workspace__identity { display: flex; align-items: center; gap: .65rem; min-width: 0; }
@@ -564,7 +564,7 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
 .atendimento-workspace__tenant-option > span { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .atendimento-workspace__tenant-option:hover, .atendimento-workspace__tenant-option:focus-visible { color:var(--text-primary); background:color-mix(in srgb, var(--action) 12%, transparent); outline:none; }
 .atendimento-workspace__tenant-option.is-active { color:var(--text-primary); background:color-mix(in srgb, var(--action) 16%, transparent); }
-.atendimento-workspace__content { min-width: 0; }
+.atendimento-workspace__content { min-width: 0; flex: 1 1 auto; min-height: 0; }
 @media (max-width: 640px) { .atendimento-workspace__header--compact { padding:.5rem .7rem; } .atendimento-workspace__tenant { max-width:8.5rem; } }
 
 /* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
