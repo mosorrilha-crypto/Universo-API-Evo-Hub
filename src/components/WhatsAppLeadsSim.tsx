@@ -1179,19 +1179,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Gravação de voz real do operador — mesmo microfone do AudioRecorder.tsx,
   // mas enviando o áudio de verdade pro WhatsApp em vez de só transcrever.
   const [isRecordingReal, setIsRecordingReal] = useState(false);
-  // Nome do lead pra quem a gravação em andamento vai — separado de
-  // `selectedLead` de propósito: se o operador trocar de conversa no meio da
-  // gravação, o áudio ainda vai pro lead onde ela começou (correto), mas sem
-  // isso não havia nenhum aviso visual de qual conversa vai receber o áudio.
+  // Nome do lead pra quem a gravação em andamento (ou pendente de revisão) vai
+  // — separado de `selectedLead` de propósito: se o operador trocar de
+  // conversa no meio da gravação/revisão, o áudio ainda vai pro lead onde ela
+  // começou (correto), mas sem isso não havia nenhum aviso visual de qual
+  // conversa vai receber o áudio.
   const [recordingForLeadName, setRecordingForLeadName] = useState<string | null>(null);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
+  // Alvo real (id/telefone/nome) capturado no início da gravação — usado só
+  // no momento de enviar/descartar, pra não depender de `selectedLead` já
+  // ter mudado durante a pausa de revisão do áudio (ver pendingAudioPreview).
+  const recordingTargetLeadRef = React.useRef<{ id: string; phone: string; name: string } | null>(null);
+  // Achado real de produção (29/08/2026): a gravação saía pro cliente assim
+  // que o operador parava de gravar, sem nenhuma chance de ouvir de volta e
+  // corrigir/descartar — um áudio gravado sem querer (silêncio, corte, mic
+  // não pegou a fala) já saiu de verdade pra uma cliente real antes de
+  // qualquer revisão. Agora o "parar" só monta uma prévia local (player +
+  // descartar/enviar); nada sai pro WhatsApp até o operador confirmar.
+  const [pendingAudioPreview, setPendingAudioPreview] = useState<{ blob: Blob; url: string; mimeType: string } | null>(null);
+  const [isSendingRecordedAudio, setIsSendingRecordedAudio] = useState(false);
 
   const handleToggleRealRecording = async () => {
     if (isRecordingReal) {
       mediaRecorderRef.current?.stop();
       setIsRecordingReal(false);
-      setRecordingForLeadName(null);
       return;
     }
 
@@ -1220,44 +1232,67 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       mediaRecorderRef.current = recorder;
 
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      recorder.onstop = async () => {
+      recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
-        const base64 = await blobToBase64(blob);
-
-        const newMsg: ChatMessage = {
-          id: `msg-audio-real-${Date.now()}`,
-          sender: 'agent',
-          type: 'audio',
-          text: '🎤 Áudio enviado',
-          audioDuration: Math.round(blob.size / 4000),
-          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        };
-        setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
-
-        try {
-          const extension = mimeType.startsWith('audio/mp4') ? 'mp4' : mimeType.startsWith('audio/ogg') ? 'ogg' : 'webm';
-          const res = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/send-media`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64, mimeType, filename: `audio.${extension}` }),
-          });
-          if (!res.ok) {
-            const errBody = await res.json().catch(() => ({}));
-            throw new Error(errBody.error || `HTTP ${res.status}`);
-          }
-        } catch (err: any) {
-          console.error('Falha ao enviar áudio real via WhatsApp:', err);
-          markMessageFailed(selectedLead.id, newMsg.id, err?.message || `Falha ao enviar o áudio pro cliente ${selectedLead.name} — ele NÃO recebeu. Tente reenviar.`);
-        }
+        setPendingAudioPreview({ blob, url: URL.createObjectURL(blob), mimeType });
       };
 
       recorder.start();
       setIsRecordingReal(true);
       setRecordingForLeadName(selectedLead.name);
+      recordingTargetLeadRef.current = { id: selectedLead.id, phone: selectedLead.phone, name: selectedLead.name };
     } catch (err) {
       console.error('Erro ao acessar microfone:', err);
       alert('Não foi possível acessar o microfone. Verifique as permissões do navegador.');
+    }
+  };
+
+  const handleDiscardRecordedAudio = () => {
+    if (pendingAudioPreview) URL.revokeObjectURL(pendingAudioPreview.url);
+    setPendingAudioPreview(null);
+    setRecordingForLeadName(null);
+    recordingTargetLeadRef.current = null;
+  };
+
+  const handleSendRecordedAudio = async () => {
+    const target = recordingTargetLeadRef.current;
+    if (!pendingAudioPreview || !target || isSendingRecordedAudio) return;
+    const { blob, mimeType, url } = pendingAudioPreview;
+    setIsSendingRecordedAudio(true);
+    try {
+      const base64 = await blobToBase64(blob);
+      const newMsg: ChatMessage = {
+        id: `msg-audio-real-${Date.now()}`,
+        sender: 'agent',
+        type: 'audio',
+        text: '🎤 Áudio enviado',
+        audioDuration: Math.round(blob.size / 4000),
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      };
+      setLeads((prev) => prev.map((l) => (l.id === target.id ? { ...l, messages: [...(l.messages || []), newMsg] } : l)));
+
+      try {
+        const extension = mimeType.startsWith('audio/mp4') ? 'mp4' : mimeType.startsWith('audio/ogg') ? 'ogg' : 'webm';
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(target.phone)}/send-media`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64, mimeType, filename: `audio.${extension}` }),
+        });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || `HTTP ${res.status}`);
+        }
+      } catch (err: any) {
+        console.error('Falha ao enviar áudio real via WhatsApp:', err);
+        markMessageFailed(target.id, newMsg.id, err?.message || `Falha ao enviar o áudio pro cliente ${target.name} — ele NÃO recebeu. Tente reenviar.`);
+      }
+    } finally {
+      URL.revokeObjectURL(url);
+      setPendingAudioPreview(null);
+      setRecordingForLeadName(null);
+      recordingTargetLeadRef.current = null;
+      setIsSendingRecordedAudio(false);
     }
   };
 
@@ -4536,6 +4571,32 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     29/08/2026, print mostrando os ícones sumidos à
                     direita. Cada ícone fixo leva `flex-shrink-0` pra só o
                     campo de texto encolher. */}
+                {pendingAudioPreview ? (
+                  // Prévia da gravação (achado real, 29/08/2026): o áudio só
+                  // sai pro WhatsApp quando o operador confirma aqui — nada
+                  // de envio automático ao parar de gravar.
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDiscardRecordedAudio}
+                      disabled={isSendingRecordedAudio}
+                      className="p-2 text-red-400 hover:text-red-300 rounded-full transition-colors cursor-pointer flex-shrink-0 disabled:opacity-50"
+                      title="Descartar gravação"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                    <audio controls src={pendingAudioPreview.url} className="flex-1 min-w-0 h-9" />
+                    <button
+                      type="button"
+                      onClick={handleSendRecordedAudio}
+                      disabled={isSendingRecordedAudio}
+                      className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all cursor-pointer flex-shrink-0 disabled:opacity-50"
+                      title={`Enviar áudio pra ${recordingForLeadName}`}
+                    >
+                      {isSendingRecordedAudio ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 ml-0.5" />}
+                    </button>
+                  </div>
+                ) : (
                 <form onSubmit={handleSendTextMessage} className="flex items-center space-x-1">
                   <div className="relative flex-shrink-0">
                     <button
@@ -4653,7 +4714,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       }`}
                       title={
                         isRecordingReal
-                          ? `Gravando pra ${recordingForLeadName} — clique aqui (em qualquer conversa) pra parar e enviar`
+                          ? `Gravando pra ${recordingForLeadName} — clique aqui (em qualquer conversa) pra parar`
                           : (selectedLead as any)?.isReal ? 'Gravar áudio real' : 'Simular Envio de Áudio'
                       }
                     >
@@ -4661,6 +4722,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   )}
                 </form>
+                )}
               </div>
             </>
           ) : (
