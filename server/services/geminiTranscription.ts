@@ -22,6 +22,21 @@ export interface TranscribeAudioOutcome {
  * caso o Gemini não esteja configurado ou a chamada falhe. Compartilhado
  * entre a rota HTTP /api/transcribe e o worker da fila de webhooks (server/services/transcriptionQueue.ts),
  * pra não duplicar o prompt em dois lugares.
+ *
+ * Achado real de auditoria (29/08/2026): um áudio enviado deliberadamente
+ * sem nenhuma fala (silêncio) voltou do Gemini com `source: 'gemini'`
+ * (chamada teve sucesso técnico) e uma transcrição completa e plausível de
+ * uma cliente perguntando preço/disponibilidade — 100% inventada, já que
+ * não havia fala nenhuma no áudio. Isso alimentou `generateAutoReplyForText`
+ * como se fosse a mensagem real da cliente (ver transcriptionQueue.ts), e
+ * só não chegou a enviar porque o revisor pré-envio bloqueou o rascunho
+ * gerado em cima dela. O guard de "sem fallback inventado" logo abaixo só
+ * cobre o caminho de FALHA da chamada (erro de rede/timeout) — nunca
+ * cobria o caso do Gemini "ter sucesso" alucinando conteúdo pra preencher
+ * um JSON obrigatório sem fala real por trás. Corrigido com regra explícita
+ * no prompt (retornar `transcription: ""` sem fala real) + gate em
+ * transcriptionQueue.ts que nunca dispara resposta automática nem some a
+ * mensagem — escala pra humano do mesmo jeito que uma falha técnica.
  */
 export async function transcribeAudioWithGemini(
   ai: GoogleGenAI | null,
@@ -43,6 +58,8 @@ Processe o áudio fornecido e responda estritamente em formato JSON com a seguin
   "suggestedReply": "sugestão de resposta amigável, no mesmo idioma da transcrição",
   "urgencyScore": número de 1 a 5
 }
+
+REGRA CRÍTICA: se o áudio estiver em silêncio, só tiver ruído de fundo, música, ou qualquer trecho de fala for curto/abafado demais pra captar conteúdo real e específico, responda com "transcription": "" (string vazia) — nunca invente uma fala plausível que a pessoa não disse, mesmo que o áudio tenha duração normal (duração não é garantia de fala real dentro dele). Nesse caso preencha também "summary": "Áudio sem fala inteligível detectada.", "intent": "Desconhecido", "sentiment": "Neutro", "keyPoints": [], "suggestedReply": "", "urgencyScore": 1 — nunca alucine intenção, sentimento ou sugestão de resposta a partir de um áudio sem fala real.
 ${opts.customInstructions || ''}`;
 
       const cleanBase64 = audioBase64.replace(/^data:audio\/\w+;base64,/, '');
