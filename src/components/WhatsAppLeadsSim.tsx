@@ -37,6 +37,7 @@ import {
   Paperclip,
   CheckCheck,
   Bot,
+  IdCard,
   UserCheck,
   Search,
   Smile,
@@ -3016,8 +3017,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           ela ainda). Removidas — poluíam a tela com informação falsa sobre
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
-          Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className="relative p-3 rounded-card bg-[var(--surface-panel)] border border-[var(--line-subtle)] shadow-xl shadow-slate-950/25 space-y-2.5">
+          Testes" era o único botão real desse trecho — preservado abaixo.
+
+          Achado real, 29/08/2026 (pedido do dono do produto com print,
+          "ficou um espaço no top" comparando com o WhatsApp real): todo
+          botão desta fileira já é `hidden sm:flex`/`hidden lg:flex` ou fica
+          dentro do `hidden sm:contents` logo abaixo — no mobile, com o
+          painel de Ferramentas fechado (estado padrão), este cartão inteiro
+          renderizava vazio (só padding/borda/sombra), empurrando a conversa
+          pra baixo à toa. Escondido no mobile especificamente quando não há
+          nada pra mostrar; continua visível quando o painel de Ferramentas
+          está aberto (mobileThreadOpen usa a mesma `isToolbarSettingsOpen`
+          — é o destino real da aba inferior "Ferramentas", TASK-0147) e
+          sempre visível a partir de `sm` (tablet/desktop), onde a fileira
+          já tem conteúdo de verdade. */}
+      <div className={`relative p-3 rounded-card bg-[var(--surface-panel)] border border-[var(--line-subtle)] shadow-xl shadow-slate-950/25 space-y-2.5${isToolbarSettingsOpen ? '' : ' hidden sm:block'}`}>
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -3637,7 +3651,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               title={selectedLead ? undefined : 'Selecione uma conversa pra ver a ficha'}
               className="atendimento-bottom-nav__item"
             >
-              <Bot className="w-[18px] h-[18px]" />
+              {/* Achado real, 29/08/2026 (pedido do dono do produto): ícone
+                  de robô genérico não combinava com "Ficha" (registro/
+                  perfil do contato) — IdCard representa melhor uma ficha de
+                  verdade; o texto do rótulo já deixa claro que é IA. */}
+              <IdCard className="w-[18px] h-[18px]" />
               <span>Ficha IA</span>
             </button>
             <button
@@ -4239,7 +4257,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         )}
 
                         <div
-                          className={`max-w-[85%] rounded-xl shadow-sm text-xs relative overflow-hidden ${isLead ? 'rounded-tl-none' : 'rounded-tr-none'} ${
+                          className={`max-w-[85%] rounded-xl shadow-sm text-sm relative overflow-hidden ${isLead ? 'rounded-tl-none' : 'rounded-tr-none'} ${
                             isLead || isMediaBubble
                               ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'
@@ -4582,6 +4600,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
 
                 {/* WhatsApp Style Text Input Form */}
+                {/* Achado real, 29/08/2026 (pedido do dono do produto,
+                    comparação lado a lado com o app real): a caixa de texto
+                    e os ícones estavam menores que o WhatsApp de verdade.
+                    Ícones 20px -> 24px (w-5 -> w-6), campo de texto
+                    text-xs/py-2.5 -> text-sm/py-3 (fonte e altura mais
+                    perto do real), botão de enviar/mic 36px -> 44px
+                    (w-9 -> w-11, ícone w-4 -> w-5) — mesma proporção do
+                    círculo verde do WhatsApp. */}
                 {/* space-x-1 (não -2) e min-w-0 na caixa de texto: sem
                     isso o <input> segura sua largura mínima padrão do
                     navegador e empurra tudo que vem depois (respostas
@@ -4624,7 +4650,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                       title="Emoji"
                     >
-                      <Smile className="w-5 h-5" />
+                      <Smile className="w-6 h-6" />
                     </button>
                     {showComposerEmojiPicker && (
                       <>
@@ -4680,7 +4706,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
                     className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer flex-shrink-0"
                   >
-                    <Paperclip className="w-5 h-5" />
+                    <Paperclip className="w-6 h-6" />
                   </button>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
@@ -4693,7 +4719,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    className="flex-1 min-w-0 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="flex-1 min-w-0 bg-[#2a3942] text-sm text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-3 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
 
                   {/* Respostas rápidas — ícone discreto à direita da caixa de
@@ -4720,15 +4746,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   {inputMessage.trim() ? (
                     <button
                       type="submit"
-                      className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all cursor-pointer flex-shrink-0"
+                      className="w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all cursor-pointer flex-shrink-0"
                     >
-                      <Send className="w-4 h-4 ml-0.5" />
+                      <Send className="w-5 h-5 ml-0.5" />
                     </button>
                   ) : (
                     <button
                       type="button"
                       onClick={() => (selectedLead as any)?.isReal ? handleToggleRealRecording() : handleSendAudioNote()}
-                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
+                      className={`w-11 h-11 rounded-full flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
                         isRecordingReal ? 'bg-red-500/20 text-red-300 animate-pulse' : 'bg-emerald-500 hover:bg-emerald-600 text-slate-950'
                       }`}
                       title={
@@ -4737,7 +4763,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           : (selectedLead as any)?.isReal ? 'Gravar áudio real' : 'Simular Envio de Áudio'
                       }
                     >
-                      <Mic className="w-4 h-4" />
+                      <Mic className="w-5 h-5" />
                     </button>
                   )}
                 </form>
