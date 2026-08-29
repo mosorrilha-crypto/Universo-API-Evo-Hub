@@ -127,6 +127,13 @@ interface WhatsAppLeadsSimProps {
   openLeadRequestId?: number;
   /** hasRoleAtLeast(currentUser?.role, 'admin') calculado em App.tsx — libera o botão "Reconectar WhatsApp (QR Code)" (ver ReconectarWhatsAppQrCode abaixo) pra admin comum do tenant, não só saas_admin. */
   canManageWhatsAppConnection?: boolean;
+  /** Avisa App.tsx sempre que mobileThreadOpen mudar — usado pra esconder o
+   * cabeçalho global (Header.tsx: marca "Universo", seletor de idioma/tema)
+   * e o cabeçalho fino do Atendimento enquanto uma conversa está aberta no
+   * mobile (pedido direto, 29/08/2026, com print comparando ao app real do
+   * WhatsApp: "esse menu e cabeçalho não precisa em cima"). No desktop as
+   * três colunas ficam sempre visíveis, então isso não afeta nada lá. */
+  onThreadOpenChange?: (open: boolean) => void;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -394,6 +401,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   knowledgeBase,
   activeTenant,
   canManageWhatsAppConnection,
+  onThreadOpenChange,
   onAddNewLead,
   onDeleteLead,
   escalationsPendingCount = 0,
@@ -429,6 +437,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // coluna) qual das duas aparece no mobile, igual ao WhatsApp mobile real;
   // no desktop (lg:flex fixo) as duas colunas continuam sempre visíveis.
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
+  useEffect(() => {
+    onThreadOpenChange?.(mobileThreadOpen);
+  }, [mobileThreadOpen, onThreadOpenChange]);
   // Achado real em produção: a coluna 3 (Ficha IA) ficou hidden no mobile
   // (PR #70, evitava sobrepor a lista) mas o botão "Ver Ficha IA" continuou
   // visível e clicável lá, sem fazer nada — parecia quebrado. Este estado é
@@ -3615,14 +3626,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   >
                     {getInitials(selectedLead.name || selectedLead.phone)}
                   </div>
+                  {/* Telefone saiu daqui (pedido direto, 29/08/2026: "já
+                      temos o Nome") — some do cabeçalho pra dar mais espaço
+                      pro nome e pra fileira de etiquetas subir logo abaixo.
+                      Continua visível no menu ⋮ (link "Abrir no WhatsApp") e
+                      na lista de conversas pra quem precisar do número. */}
                   <div className="min-w-0">
                     <h3 className="text-xs font-bold text-[#e9edef] flex items-center gap-2">
                       <span className="truncate">{selectedLead.name}</span>
+                      <span className="text-[10px] font-normal text-emerald-400 flex-shrink-0">• online</span>
                     </h3>
-                    <p className="text-[10px] text-slate-400 flex items-center gap-2">
-                      <span className="truncate">{selectedLead.phone}</span>
-                      <span className="text-emerald-400 flex-shrink-0">• online</span>
-                    </p>
                   </div>
                 </div>
 
@@ -4435,26 +4448,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <div />
                   )}
 
-                  {/* Attachment Quick Actions */}
-                  <div className="flex items-center space-x-1">
-                    <button
-                      type="button"
-                      onClick={() => (selectedLead as any)?.isReal ? handleToggleRealRecording() : handleSendAudioNote()}
-                      className={`px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 cursor-pointer ${
-                        isRecordingReal
-                          ? 'bg-red-500/20 border-red-500/50 text-red-300 animate-pulse'
-                          : 'bg-[#111b21] hover:bg-slate-800 border-slate-800 text-emerald-400'
-                      }`}
-                      title={
-                        isRecordingReal
-                          ? `Gravando pra ${recordingForLeadName} — clique aqui (em qualquer conversa) pra parar e enviar`
-                          : (selectedLead as any)?.isReal ? 'Gravar áudio real' : 'Simular Envio de Áudio'
-                      }
-                    >
-                      <Mic className="w-3 h-3" />
-                      <span>{isRecordingReal ? `Gravando p/ ${recordingForLeadName}...` : 'Áudio'}</span>
-                    </button>
-
+                  {/* Attachment Quick Actions — fileira discreta só de ícones
+                      (pedido direto, 29/08/2026, com print comparando com o
+                      app real do WhatsApp: "podem ficar em um menu de três
+                      pontinho ou ícone"). Gravar áudio saiu daqui — virou o
+                      próprio botão de enviar no rodapé quando o campo está
+                      vazio, igual o mic/send do WhatsApp real. */}
+                  <div className="flex items-center space-x-0.5">
                     <QuickRepliesMenu
                       quickReplies={quickReplies}
                       isSpanish={isSpanish}
@@ -4463,16 +4463,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       onCreate={handleCreateQuickReply}
                       onUpdate={handleUpdateQuickReply}
                       onDelete={handleDeleteQuickReply}
+                      compact
                     />
 
                     {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
                       <select
                         onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
                         defaultValue=""
-                        className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-blue-400 text-[10px] font-semibold cursor-pointer"
+                        className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
                         title={isSpanish ? 'Enviar foto de ejemplo de un servicio' : 'Enviar foto de exemplo de um serviço'}
                       >
-                        <option value="" disabled>📷 Foto do serviço...</option>
+                        <option value="" disabled>📷</option>
                         {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
                           <option key={p.id} value={p.name}>{p.name}</option>
                         ))}
@@ -4483,10 +4484,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       <select
                         onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
                         defaultValue=""
-                        className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-emerald-400 text-[10px] font-semibold cursor-pointer"
+                        className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
                         title={isSpanish ? 'Enviar video de ejemplo de un servicio' : 'Enviar vídeo de exemplo de um serviço'}
                       >
-                        <option value="" disabled>🎥 Vídeo do serviço...</option>
+                        <option value="" disabled>🎥</option>
                         {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
                           <option key={p.id} value={p.name}>{p.name}</option>
                         ))}
@@ -4501,21 +4502,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         <button
                           type="button"
                           onClick={handleSendSampleImage}
-                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-blue-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
                           title="Simular Envio de Imagem (conversa de teste)"
                         >
-                          <ImageIcon className="w-3 h-3" />
-                          <span>Foto</span>
+                          <ImageIcon className="w-5 h-5" />
                         </button>
 
                         <button
                           type="button"
                           onClick={handleSendSampleFile}
-                          className="px-2 py-1 rounded-lg bg-[#111b21] hover:bg-slate-800 border border-slate-800 text-sky-400 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
                           title="Simular Envio de PDF (conversa de teste)"
                         >
-                          <Paperclip className="w-3 h-3" />
-                          <span>PDF</span>
+                          <Paperclip className="w-5 h-5" />
                         </button>
                       </>
                     )}
@@ -4617,13 +4616,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="flex-1 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
 
-                  <button
-                    type="submit"
-                    disabled={!inputMessage.trim()}
-                    className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all disabled:opacity-40 cursor-pointer flex-shrink-0"
-                  >
-                    <Send className="w-4 h-4 ml-0.5" />
-                  </button>
+                  {/* Mic/Enviar — mesmo padrão do WhatsApp real: sem texto
+                      digitado, o botão do rodapé grava áudio; com texto,
+                      vira o botão de enviar (pedido direto, 29/08/2026:
+                      "áudio pode virar um ícone discreto igual o do
+                      WhatsApp"). */}
+                  {inputMessage.trim() ? (
+                    <button
+                      type="submit"
+                      className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all cursor-pointer flex-shrink-0"
+                    >
+                      <Send className="w-4 h-4 ml-0.5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => (selectedLead as any)?.isReal ? handleToggleRealRecording() : handleSendAudioNote()}
+                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
+                        isRecordingReal ? 'bg-red-500/20 text-red-300 animate-pulse' : 'bg-emerald-500 hover:bg-emerald-600 text-slate-950'
+                      }`}
+                      title={
+                        isRecordingReal
+                          ? `Gravando pra ${recordingForLeadName} — clique aqui (em qualquer conversa) pra parar e enviar`
+                          : (selectedLead as any)?.isReal ? 'Gravar áudio real' : 'Simular Envio de Áudio'
+                      }
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
+                  )}
                 </form>
               </div>
             </>
