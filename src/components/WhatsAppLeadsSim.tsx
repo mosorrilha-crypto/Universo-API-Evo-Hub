@@ -3333,20 +3333,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           MÁXIMA, a coluna visível cresce livremente com o conteúdo (todos os
           leads ou todas as mensagens) em vez de rolar por dentro, e o campo
           de digitar mensagem (fixo no fim da coluna) acaba empurrado pra
-          baixo de tudo, exigindo rolar a página inteira até ele. `dvh` (não
-          `vh`) porque no mobile a barra de endereço do navegador
-          recolhe/expande — `vh` mediria a altura errada (com a barra
-          expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      {/* Altura no mobile depende de quanto "chrome" está visível acima/
-          abaixo deste frame: com uma conversa aberta (mobileThreadOpen), o
-          cabeçalho global, o cabeçalho fino do Atendimento E a barra
-          inferior de navegação somem todos (ver App.tsx/TASK-0150 e a
-          barra dentro da coluna 1, escondida junto por estar aninhada nela)
-          — sem isso, sobrava uma faixa em branco enorme no fim da tela
-          reivindicando espaço que ninguém mais usava (achado real,
-          29/08/2026). Com a lista de conversas visível, aquele chrome
-          volta e o frame precisa do respiro de 82dvh de antes. */}
-      <div className={`atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 ${mobileThreadOpen ? 'h-[100dvh]' : 'h-[82dvh]'} lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg`}>
+          baixo de tudo, exigindo rolar a página inteira até ele.
+          No mobile a altura vem de `h-full` (100% de `.atendimento-workspace__content`,
+          que por sua vez é `flex:1` dentro de `.atendimento-workspace`, que é
+          `height:100%` dentro do wrapper com altura real calculada em
+          App.tsx) — depois de três rodadas tentando acertar isso com
+          valores fixos de `dvh`/`%` chutados (TASK-0150/0153/0157, cada um
+          sobrando ou faltando espaço em telas reais diferentes), `h-full`
+          elimina o chute: o frame sempre ocupa exatamente o que sobrar do
+          chrome que estiver visível (cabeçalhos + barra inferior, quando
+          aparecem, ou nada, quando estão escondidos), sem precisar saber
+          de antemão quanto esse chrome mede. Em `lg` (desktop) mantém o
+          cálculo fixo original, que já funcionava. */}
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-full lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
