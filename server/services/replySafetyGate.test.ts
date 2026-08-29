@@ -108,6 +108,51 @@ describe('revisor pré-envio de respostas automáticas', () => {
     }));
   });
 
+  it('bloqueia repetição parafraseada de uma mensagem recente do próprio agente (achado real 29/08/2026: "que incluye cejas" vs "que incluye las cejas", mesmo preço repetido 2x em menos de 2min)', async () => {
+    const verdict = await reviewAutoReplyBeforeSend({
+      customerMessage: 'Y eso qué incluye?',
+      draftBubbles: ['El Combo Full Face, que incluye las cejas, labios y pestañas, está Gs 1.200.000, Teresa.'],
+      history: [{ sender: 'agent', text: 'El Combo Full Face, que incluye cejas, labios y pestañas, está Gs 1.200.000, Teresa.' }],
+    }, { ai: null });
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.source).toBe('rules');
+    expect(verdict.reason).toContain('reformulado');
+  });
+
+  it('bloqueia a mesma pergunta repetida com palavras diferentes (achado real: "así ya te anoto" vs "así ya te agendo")', async () => {
+    const verdict = await reviewAutoReplyBeforeSend({
+      customerMessage: 'Hola',
+      draftBubbles: ['¿Cómo es tu nombre? Así ya te agendo por acá 😊'],
+      history: [{ sender: 'agent', text: '¿Cómo es tu nombre? Así ya te anoto por acá.' }],
+    }, { ai: null });
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toContain('reformulado');
+  });
+
+  it('não bloqueia bolhas curtas de confirmação mesmo quando parecidas entre si (evita falso positivo em "¡Dale!"/"Listo")', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ approved: true, severity: 'low', reason: 'Confirmação curta e coerente.' }) });
+    const verdict = await reviewAutoReplyBeforeSend({
+      customerMessage: 'Dale, gracias',
+      draftBubbles: ['¡Listo!'],
+      history: [{ sender: 'agent', text: '¡Dale!' }],
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(verdict.approved).toBe(true);
+  });
+
+  it('não bloqueia quando a resposta traz informação nova, mesmo com histórico recente de agente', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ approved: true, severity: 'low', reason: 'Resposta nova e coerente.' }) });
+    const verdict = await reviewAutoReplyBeforeSend({
+      customerMessage: 'Y las pestañas cuánto cuestan?',
+      draftBubbles: ['El Lash Lift está Gs 140.000 y realza tus pestañas naturales sin extensiones.'],
+      history: [{ sender: 'agent', text: 'El Combo Full Face, que incluye cejas, labios y pestañas, está Gs 1.200.000, Teresa.' }],
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(verdict.approved).toBe(true);
+  });
+
   it('aceita a aprovação estruturada do segundo agente', async () => {
     const ai: any = {
       models: {
