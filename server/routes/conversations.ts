@@ -419,8 +419,43 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: true });
   }));
 
+  /**
+   * Achado real de auditoria (continuação da TASK-0151, 29/08/2026): quando
+   * um operador responde manualmente pelo painel — ignorando o rascunho
+   * bloqueado e conduzindo a conversa por conta própria, como aconteceu de
+   * verdade com uma cliente real (tenant Monique) — nenhum escalonamento
+   * aberto pra esse telefone fechava sozinho, ficava "aberto" no painel
+   * indefinidamente mesmo já resolvido na prática pelo humano. `payment_proof`
+   * fica de fora: aquele exige a decisão explícita de aprovar/rejeitar o
+   * comprovante nos botões próprios, nunca só "o operador mandou uma
+   * mensagem". `skipEscalationId` existe pro fluxo "Aprovar e enviar"
+   * (TASK-0093): o painel manda o texto por este mesmo endpoint e, em
+   * seguida, chama /approve-and-resolve pra fechar aquele escalonamento
+   * específico com o código e o exemplo aprovado corretos — sem pular aqui,
+   * essa segunda chamada encontraria o caso já resolvido e devolveria 409.
+   */
+  async function resolveOpenEscalationsAfterManualReply(
+    tenantId: string,
+    phone: string,
+    actor: { id?: string },
+    skipEscalationId?: string
+  ): Promise<void> {
+    try {
+      const openOnes = (await listEscalations(tenantId)).filter(
+        (e) => e.phone === phone && e.kind !== 'payment_proof' && !e.resolved && e.status !== 'archived' && e.id !== skipEscalationId
+      );
+      await Promise.all(openOnes.map((e) => resolveEscalation(tenantId, e.id, {
+        actor,
+        resolutionCode: 'operator_manual_reply',
+        resolutionNote: 'Resolvido automaticamente: operador respondeu manualmente pelo painel.',
+      })));
+    } catch (err: any) {
+      console.warn(`⚠️ [Conversas] Falha ao auto-resolver escalonamentos após resposta manual (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+    }
+  }
+
   router.post('/api/conversations/:phone/send', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { text, replyToMessageId } = req.body || {};
+    const { text, replyToMessageId, escalationId } = req.body || {};
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ error: 'Campo "text" é obrigatório.' });
     }
@@ -482,6 +517,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
         undefined,
         realMessageId
+      );
+      await resolveOpenEscalationsAfterManualReply(
+        tenantId,
+        req.params.phone,
+        { id: req.user?.id },
+        typeof escalationId === 'string' ? escalationId : undefined
       );
       res.json({ success: true, conversation: conv });
     } catch (err: any) {

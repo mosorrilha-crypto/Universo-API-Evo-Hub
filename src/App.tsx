@@ -1076,7 +1076,11 @@ export const App: React.FC = () => {
       const sendRes = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        // escalationId: evita que o envio já auto-resolva este caso (achado
+        // real, 29/08/2026 — ver resolveOpenEscalationsAfterManualReply em
+        // conversations.ts) — a chamada seguinte fecha com o código e o
+        // exemplo aprovado corretos.
+        body: JSON.stringify({ text, escalationId: id }),
       });
       const sendData = await sendRes.json().catch(() => null);
       if (!sendRes.ok) throw new Error(sendData?.error || `HTTP ${sendRes.status}`);
