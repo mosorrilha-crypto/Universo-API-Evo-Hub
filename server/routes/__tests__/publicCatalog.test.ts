@@ -237,6 +237,21 @@ describe('GET /api/public/catalog/:slug/whatsapp-click', () => {
     expect(data?.[0]?.source).toBe('direct');
   });
 
+  it('captura e grava o utm_source da querystring, pra separar clique de anúncio de clique orgânico/direto (TASK-0149)', async () => {
+    ({ server, baseUrl } = await startServer({
+      tenants: [{ id: 'tenant-monique', slug: 'monique', public_catalog_enabled: true, public_whatsapp_phone: '595981436141' }],
+    }));
+
+    const withUtm = await fetch(`${baseUrl}/api/public/catalog/monique/whatsapp-click?msg=${encodeURIComponent('Hola')}&utm_source=meta_ads`, { redirect: 'manual' });
+    const withoutUtm = await fetch(`${baseUrl}/api/public/catalog/monique/whatsapp-click?msg=${encodeURIComponent('Hola')}`, { redirect: 'manual' });
+    expect(withUtm.status).toBe(302);
+    expect(withoutUtm.status).toBe(302);
+
+    const { getDb } = await import('../../services/db');
+    const { data } = await getDb().from('public_catalog_whatsapp_clicks').select('*').eq('tenant_id', 'tenant-monique').order('created_at');
+    expect(data?.map((row: any) => row.utm_source)).toEqual(['meta_ads', null]);
+  });
+
   it('400 quando a mensagem (msg) está ausente', async () => {
     ({ server, baseUrl } = await startServer({
       tenants: [{ id: 'tenant-monique', slug: 'monique', public_catalog_enabled: true, public_whatsapp_phone: '595981436141' }],
