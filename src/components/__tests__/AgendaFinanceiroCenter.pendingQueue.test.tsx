@@ -10,6 +10,10 @@
  * a seção "Pendências da agenda" aparece de verdade, e um atendimento já
  * concluído com pagamento pendente aparece nela quando o Financeiro está
  * habilitado.
+ *
+ * Atualizado em 28/08/2026 (pedido do dono do produto com print): a aba
+ * "Pendências" separada foi removida por redundância — a mesma seção
+ * agora vive dentro da aba "Hoje" (`mobileAgendaView: 'today'`).
  */
 import React from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -41,7 +45,7 @@ function baseProps() {
     onDeleteTransaction: vi.fn(),
     onToast: vi.fn(),
     financialModuleEnabled: true,
-    mobileAgendaView: 'pending' as const,
+    mobileAgendaView: 'today' as const,
   };
 }
 

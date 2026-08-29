@@ -64,7 +64,7 @@ interface AgendaFinanceiroCenterProps {
   /** No celular, fluxo e recorrências abrem como detalhe em vez de alongar a página inicial. */
   mobileDetail?: 'flow' | 'recurring' | null;
   /** A Agenda abre em compromissos de hoje; calendário e pendências entram sob demanda no celular. */
-  mobileAgendaView?: 'today' | 'calendar' | 'pending';
+  mobileAgendaView?: 'today' | 'calendar';
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
@@ -620,7 +620,12 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
             <button type="button" onClick={goToToday} className="shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/15">{isSpanish ? 'Ir a hoy' : 'Ir para hoje'}</button>
           </div>
 
-          {loadingEvents ? <div className="grid grid-cols-7 gap-1.5 animate-pulse sm:gap-2">{Array.from({ length: 28 }, (_, index) => <div key={index} className="h-14 rounded-xl bg-slate-800/70 sm:h-16" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : calendarViewMode === 'week' ? renderWeekGrid() : <div className="grid grid-cols-7 gap-1 sm:gap-1.5"><div className="col-span-7 mb-1 grid grid-cols-7 gap-1 border-b border-slate-800/70 pb-1.5 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1.5 sm:pb-2 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-14 sm:min-h-16" />)}{eventDays.map(({ day, appointments }) => {
+          {loadingEvents ? <div className="grid grid-cols-7 gap-0.5 animate-pulse sm:gap-1">{Array.from({ length: 35 }, (_, index) => <div key={index} className="h-11 rounded-lg bg-slate-800/70 sm:h-12 sm:rounded-xl" />)}</div> : eventsError ? <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200"><p>{eventsError}</p><button onClick={refreshEvents} className="mt-2 text-xs font-bold underline">{isSpanish ? 'Intentar nuevamente' : 'Tentar novamente'}</button></div> : calendarViewMode === 'week' ? renderWeekGrid() : <div className="grid grid-cols-7 gap-0.5 sm:gap-1"><div className="col-span-7 mb-1 grid grid-cols-7 gap-0.5 border-b border-slate-800/70 pb-1.5 text-center text-[9px] font-bold uppercase tracking-wider text-slate-500 sm:gap-1 sm:pb-2 sm:text-[10px]">{(isSpanish ? ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] : ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']).map((day) => <span key={day}>{day}</span>)}</div>{/* Achado real (28/08/2026, pedido do dono do produto com print): a grade
+                de mês tinha ficado sem NENHUMA linha divisória (removidas na estética
+                Google Agenda, TASK-0144) — no celular real isso lia como "espaço
+                desperdiçado" em vez de "limpo". Célula vazia (início do mês) agora
+                completa a grade com uma borda fina, igual às células com dia. */}
+              {Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-11 rounded-lg border border-slate-800/40 sm:min-h-12 sm:rounded-xl" />)}{eventDays.map(({ day, appointments }) => {
                 const dayKey = dateInputValue(day);
                 const isToday = dayKey === dateInputValue(new Date());
                 const isSelected = dayKey === selectedDate;
@@ -642,7 +647,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
                     }}
                     aria-label={`${isToday ? (isSpanish ? 'Hoy, ' : 'Hoje, ') : ''}${day.getDate()} ${monthLabel}${appointments.length ? ` · ${appointments.length} ${isSpanish ? 'citas' : 'compromissos'}` : ''}`}
                     aria-pressed={isSelected}
-                    className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg p-1 transition-colors sm:min-h-16 sm:rounded-xl sm:p-1.5 ${isSelected ? 'bg-emerald-500/10 hover:bg-emerald-500/15' : appointments.length ? 'bg-emerald-500/5 hover:bg-emerald-500/10' : 'hover:bg-slate-800/50'}`}
+                    className={`flex min-h-11 flex-col items-center justify-center gap-1 rounded-lg border p-1 transition-colors sm:min-h-12 sm:rounded-xl sm:p-1.5 ${isSelected ? 'border-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15' : appointments.length ? 'border-slate-800/70 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-800/40 hover:bg-slate-800/50'}`}
                   >
                     <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${isToday ? 'bg-emerald-400 text-slate-950' : isSelected ? 'text-emerald-200 ring-2 ring-emerald-400' : 'text-slate-300'}`}>{day.getDate()}</span>
                     {appointments.length > 0 && <span className="rounded-full bg-emerald-400 px-1.5 text-[8px] font-black text-slate-950">{appointments.length}</span>}
