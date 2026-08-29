@@ -4410,17 +4410,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               )}
               </div>
 
-              {/* WhatsApp Web Bottom Simulation Control & Input Bar */}
-              <div className="p-2.5 bg-[#202c33] border-t border-slate-800/50 space-y-2">
-                
-                {/* Sender Role Switcher & Attachments Toolbar */}
-                <div className="flex items-center justify-between text-xs px-1">
-                  {/* Numa conversa real não existe "enviar como Cliente" — o
-                      toggle só faz sentido em conversas de teste/demo, onde
-                      dá pra simular os dois lados. Escondido em conversas
-                      reais pra não sobrar vestígio de modo demo na tela que
-                      a operadora usa todo dia. */}
-                  {!(selectedLead as any)?.isReal ? (
+              {/* WhatsApp Web Bottom Simulation Control & Input Bar —
+                  rodapé sem caixa escura própria (pedido direto,
+                  29/08/2026: "tira o fundo escuro do rodapé, ajusta a
+                  posição da caixa de texto está alta"): antes existia uma
+                  fileira inteira separada (fundo `#202c33`) só pra
+                  respostas rápidas/foto/vídeo/simular, empurrando a caixa
+                  de texto pra baixo. Essa fileira só sobrevive pra
+                  conversas de teste/demo (troca "enviar como" + simular
+                  imagem/PDF); numa conversa real ela some e os ícones que
+                  sobram entram direto na linha de composição abaixo. */}
+              <div className="p-2 space-y-1.5">
+
+                {!(selectedLead as any)?.isReal && (
+                  <div className="flex items-center justify-between text-xs px-1">
                     <div className="flex items-center space-x-1 bg-[#111b21]/80 p-1 rounded-lg">
                       <span className="text-[10px] text-slate-400 font-bold px-1">{isSpanish ? 'Enviar como:' : 'Enviar como:'}</span>
                       <button
@@ -4444,82 +4447,32 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         Atendente
                       </button>
                     </div>
-                  ) : (
-                    <div />
-                  )}
 
-                  {/* Attachment Quick Actions — fileira discreta só de ícones
-                      (pedido direto, 29/08/2026, com print comparando com o
-                      app real do WhatsApp: "podem ficar em um menu de três
-                      pontinho ou ícone"). Gravar áudio saiu daqui — virou o
-                      próprio botão de enviar no rodapé quando o campo está
-                      vazio, igual o mic/send do WhatsApp real. */}
-                  <div className="flex items-center space-x-0.5">
-                    <QuickRepliesMenu
-                      quickReplies={quickReplies}
-                      isSpanish={isSpanish}
-                      saving={quickRepliesSaving}
-                      onSelect={setInputMessage}
-                      onCreate={handleCreateQuickReply}
-                      onUpdate={handleUpdateQuickReply}
-                      onDelete={handleDeleteQuickReply}
-                      compact
-                    />
-
-                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                      <select
-                        onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
-                        defaultValue=""
-                        className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
-                        title={isSpanish ? 'Enviar foto de ejemplo de un servicio' : 'Enviar foto de exemplo de um serviço'}
+                    {/* Botões de SIMULAÇÃO (lead/agente fake) — só existem em
+                        conversas de teste/demo; numa conversa real o clipe de
+                        anexo da linha de composição já cobre o envio de
+                        verdade via Meta Cloud API. */}
+                    <div className="flex items-center space-x-0.5">
+                      <button
+                        type="button"
+                        onClick={handleSendSampleImage}
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                        title="Simular Envio de Imagem (conversa de teste)"
                       >
-                        <option value="" disabled>📷</option>
-                        {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
-                          <option key={p.id} value={p.name}>{p.name}</option>
-                        ))}
-                      </select>
-                    )}
+                        <ImageIcon className="w-5 h-5" />
+                      </button>
 
-                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                      <select
-                        onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
-                        defaultValue=""
-                        className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
-                        title={isSpanish ? 'Enviar video de ejemplo de un servicio' : 'Enviar vídeo de exemplo de um serviço'}
+                      <button
+                        type="button"
+                        onClick={handleSendSampleFile}
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                        title="Simular Envio de PDF (conversa de teste)"
                       >
-                        <option value="" disabled>🎥</option>
-                        {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
-                          <option key={p.id} value={p.name}>{p.name}</option>
-                        ))}
-                      </select>
-                    )}
-
-                    {/* Botões de SIMULAÇÃO (lead/agente fake) — escondidos numa conversa
-                        real pra não confundir com o clipe de anexo real logo abaixo, que
-                        de fato envia pro cliente via Meta Cloud API. */}
-                    {!(selectedLead as any)?.isReal && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={handleSendSampleImage}
-                          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-                          title="Simular Envio de Imagem (conversa de teste)"
-                        >
-                          <ImageIcon className="w-5 h-5" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleSendSampleFile}
-                          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-                          title="Simular Envio de PDF (conversa de teste)"
-                        >
-                          <Paperclip className="w-5 h-5" />
-                        </button>
-                      </>
-                    )}
+                        <Paperclip className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Aviso de resposta automática em andamento (pedido real, 20/08/2026):
                     o "digitando..." do header só aparece pro lead no WhatsApp — aqui é o
@@ -4595,6 +4548,37 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       </>
                     )}
                   </div>
+                  {/* Foto/vídeo de exemplo — ícones discretos à esquerda da
+                      caixa de texto, junto do clipe de anexo (pedido
+                      direto, 29/08/2026: "foto para lado esquerdo"). */}
+                  {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                    <select
+                      onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
+                      defaultValue=""
+                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
+                      title={isSpanish ? 'Enviar foto de ejemplo de un servicio' : 'Enviar foto de exemplo de um serviço'}
+                    >
+                      <option value="" disabled>📷</option>
+                      {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                    <select
+                      onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
+                      defaultValue=""
+                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
+                      title={isSpanish ? 'Enviar video de ejemplo de un servicio' : 'Enviar vídeo de exemplo de um serviço'}
+                    >
+                      <option value="" disabled>🎥</option>
+                      {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
@@ -4614,6 +4598,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     className="flex-1 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+
+                  {/* Respostas rápidas — ícone discreto à direita da caixa de
+                      texto (pedido direto, 29/08/2026: "msg rápida para
+                      Caixa de texto lado direito discreto"). */}
+                  <QuickRepliesMenu
+                    quickReplies={quickReplies}
+                    isSpanish={isSpanish}
+                    saving={quickRepliesSaving}
+                    onSelect={setInputMessage}
+                    onCreate={handleCreateQuickReply}
+                    onUpdate={handleUpdateQuickReply}
+                    onDelete={handleDeleteQuickReply}
+                    compact
                   />
 
                   {/* Mic/Enviar — mesmo padrão do WhatsApp real: sem texto
