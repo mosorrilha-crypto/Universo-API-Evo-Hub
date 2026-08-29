@@ -262,6 +262,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('responda a dúvida real da cliente já na mesma bolha ou na seguinte');
   });
 
+  it('proíbe abrir quase toda mensagem com uma interjeição de entusiasmo (achado real de auditoria, 29/08/2026: conversas reais da Monique mostraram o agente abrindo praticamente toda mensagem consecutiva com "¡Dale!"/"¡Genial!"/"¡Buenísimo!"/"¡Súper!" etc., inclusive em trocas puramente transacionais)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('Não abra quase toda mensagem com uma interjeição de entusiasmo');
+    expect(systemInstruction).toContain('nunca como reflexo automático em toda resposta');
+  });
+
   it('instrui a nunca repetir frase de exemplo do contexto do negócio palavra por palavra (pesquisa de mercado: repetir a mesma frase pronta é um dos sinais mais claros de bot)', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
