@@ -2959,7 +2959,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   return (
-    <div className="atendimento-conversations space-y-4 max-w-7xl mx-auto animate-page-enter">
+    // flex flex-col min-h-0 — achado real, 29/08/2026: sem isso, este div
+    // (pai direto do .atendimento-chat-shell) tinha altura `auto`
+    // (conteúdo), então `h-full`/`flex-1` no chat-shell não tinha nada de
+    // concreto pra herdar e caía de volta pro `min-h-[560px]` — a causa
+    // raiz real por trás de TODAS as tentativas anteriores (TASK-0150/
+    // 0153/0155/0157/0158) de acertar a altura no mobile. Com este div
+    // sendo flex-col, o chat-shell (último filho, `flex-1 min-h-0`) passa
+    // a ocupar de verdade o espaço que sobra depois da barra de controles
+    // acima dele.
+    <div className="atendimento-conversations space-y-4 max-w-7xl mx-auto animate-page-enter flex flex-col flex-1 min-h-0">
       {/* Controls Bar — achado real em produção: as duas barras acima disso
           (seletor "Ambiente" produção/sandbox e o card "Instância Online" /
           "Motor: Z-API Managed" / "Failover Ativo" / botões "Número Real &
@@ -3334,18 +3343,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           leads ou todas as mensagens) em vez de rolar por dentro, e o campo
           de digitar mensagem (fixo no fim da coluna) acaba empurrado pra
           baixo de tudo, exigindo rolar a página inteira até ele.
-          No mobile a altura vem de `h-full` (100% de `.atendimento-workspace__content`,
-          que por sua vez é `flex:1` dentro de `.atendimento-workspace`, que é
-          `height:100%` dentro do wrapper com altura real calculada em
-          App.tsx) — depois de três rodadas tentando acertar isso com
-          valores fixos de `dvh`/`%` chutados (TASK-0150/0153/0157, cada um
-          sobrando ou faltando espaço em telas reais diferentes), `h-full`
-          elimina o chute: o frame sempre ocupa exatamente o que sobrar do
-          chrome que estiver visível (cabeçalhos + barra inferior, quando
-          aparecem, ou nada, quando estão escondidos), sem precisar saber
-          de antemão quanto esse chrome mede. Em `lg` (desktop) mantém o
-          cálculo fixo original, que já funcionava. */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-full lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
+          No mobile a altura vem de `flex-1 min-h-0` — este div é o último
+          filho do `.atendimento-conversations` pai (agora `flex flex-col`),
+          que por sua vez é filho de `.atendimento-workspace__content`
+          (`flex:1` dentro de `.atendimento-workspace`, `height:100%` dentro
+          do wrapper com altura real calculada em App.tsx). Depois de QUATRO
+          rodadas tentando acertar isso com valores fixos de `dvh`/`%`
+          chutados (TASK-0150/0153/0157/0158, cada um sobrando ou faltando
+          espaço em telas reais diferentes — a raiz real só foi encontrada
+          na TASK-0159: o `.atendimento-conversations` pai não tinha altura
+          nem era flex, então nenhum valor de altura no chat-shell tinha o
+          que herdar, incluindo o `h-full` da TASK-0158), essa cadeia de
+          flexbox elimina o chute de vez: o frame sempre ocupa exatamente o
+          que sobrar do chrome visível, sem precisar saber de antemão quanto
+          esse chrome mede. Em `lg` (desktop) mantém o cálculo fixo
+          original, que já funcionava (`lg:flex-none` evita que o
+          `flex-1` do mobile dispute espaço com a altura fixa). */}
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 lg:flex-none lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}

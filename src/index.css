@@ -564,7 +564,7 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
 .atendimento-workspace__tenant-option > span { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .atendimento-workspace__tenant-option:hover, .atendimento-workspace__tenant-option:focus-visible { color:var(--text-primary); background:color-mix(in srgb, var(--action) 12%, transparent); outline:none; }
 .atendimento-workspace__tenant-option.is-active { color:var(--text-primary); background:color-mix(in srgb, var(--action) 16%, transparent); }
-.atendimento-workspace__content { min-width: 0; flex: 1 1 auto; min-height: 0; }
+.atendimento-workspace__content { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; min-height: 0; }
 @media (max-width: 640px) { .atendimento-workspace__header--compact { padding:.5rem .7rem; } .atendimento-workspace__tenant { max-width:8.5rem; } }
 
 /* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
@@ -1594,7 +1594,16 @@ html[data-theme='clean'] .operations-module-frame__header {
   .atendimento-conversations > .relative.p-3 { padding: .55rem; border-radius: .85rem; }
   .atendimento-conversations > .relative.p-3 > div:first-child { gap: .4rem; }
   .atendimento-conversations > .relative.p-3 button { min-height: 2.15rem; }
-  .atendimento-conversations [class~='h-[82dvh]'] { min-height: 28rem; height: 70dvh; }
+  /* Regra antiga que mirava a classe literal `h-[82dvh]` removida do
+     .atendimento-chat-shell na TASK-0158 — achado real, 29/08/2026: essa
+     regra (seletor de 2 classes, mais específico que uma utilitária
+     isolada) forçava `height:70dvh` no chat-shell independente de qual
+     valor de altura o componente tentasse aplicar via className, e ficou
+     ativa durante as quatro tentativas anteriores (TASK-0150/0153/0155/
+     0157) sem que ninguém percebesse — provável causa raiz de todas elas
+     nunca terem "pegado" de verdade no mobile. Removida; o chat-shell
+     agora só precisa de `flex-1 min-h-0` (ver .atendimento-conversations
+     abaixo), sem precisar de altura fixa/chutada em nenhum breakpoint. */
 }
 
 
