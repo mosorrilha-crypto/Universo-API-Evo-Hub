@@ -692,8 +692,7 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article { min-height: 0; padding: .55rem .65rem; border-radius: .9rem; box-shadow: none; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:nth-child(2) { margin-top: .25rem; font-size: 1.35rem; line-height: 1; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:last-child { margin-top: .25rem; font-size: .62rem; line-height: 1.2; }
-  .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child,
-  .agenda-financeiro-workspace--agenda-mobile-today .agenda-financeiro-workspace__pending { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
   .agenda-financeiro-workspace--agenda-mobile-calendar .agenda-financeiro-workspace__pending { display: none; }
@@ -702,7 +701,12 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
      informação já coberta pela aba "Hoje" — redundante especificamente na
      aba Calendário. */
   .agenda-financeiro-workspace--agenda-mobile-calendar .agenda-financeiro-workspace__metrics { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-pending > section:has(.grid-cols-7) { display: none; }
+  /* Achado real (28/08/2026, pedido do dono do produto com print): a aba
+     "Pendências" separada ficou redundante — a mesma informação (Decisão
+     necessária/Pendências da agenda) cabe direto na aba "Hoje", junto do
+     resto da rotina diária. Aba removida (AgendaWorkspace.tsx); a seção
+     de pendências agora só fica escondida na aba Calendário (redundante
+     com "Hoje", mesmo critério do bloco de métricas acima). */
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div { border-radius: 1rem; padding: .75rem; box-shadow: none; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child p { display: none; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child { margin-bottom: .55rem; }

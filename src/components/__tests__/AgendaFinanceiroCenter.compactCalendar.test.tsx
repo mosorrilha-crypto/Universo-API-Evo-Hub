@@ -60,7 +60,7 @@ describe('AgendaFinanceiroCenter — topo compacto e grade organizada', () => {
     const { container } = render(<AgendaFinanceiroCenter {...baseProps()} />);
     await waitFor(() => expect(api.apiFetch).toHaveBeenCalled());
 
-    const blanks = container.querySelectorAll('[aria-hidden="true"].min-h-14');
+    const blanks = container.querySelectorAll('[aria-hidden="true"].min-h-11');
     expect(blanks.length).toBeGreaterThan(0);
   });
 });
