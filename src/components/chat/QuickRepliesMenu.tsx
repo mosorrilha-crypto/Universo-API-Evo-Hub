@@ -9,6 +9,10 @@ interface QuickRepliesMenuProps {
   onCreate: (reply: string) => Promise<void>;
   onUpdate: (index: number, reply: string) => Promise<void>;
   onDelete: (index: number) => Promise<void>;
+  /** Gatilho só com ícone, sem rótulo/borda/fundo — pra caber junto de emoji/clipe
+   * numa fileira discreta estilo WhatsApp em vez de um botão-pílula com texto
+   * (pedido direto, 29/08/2026: "podem ficar em um menu de três pontinho ou ícone"). */
+  compact?: boolean;
 }
 
 type EditorMode = { type: 'create' } | { type: 'edit'; index: number } | null;
@@ -21,6 +25,7 @@ export function QuickRepliesMenu({
   onCreate,
   onUpdate,
   onDelete,
+  compact = false,
 }: QuickRepliesMenuProps) {
   const [open, setOpen] = useState(false);
   const [editor, setEditor] = useState<EditorMode>(null);
@@ -119,14 +124,18 @@ export function QuickRepliesMenu({
         aria-expanded={open}
         aria-haspopup="dialog"
         title={isSpanish ? 'Respuestas rápidas' : 'Respostas rápidas'}
-        className={`px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors ${
-          open
-            ? 'bg-amber-500 text-slate-950 border-amber-400'
-            : 'bg-[#111b21] hover:bg-slate-800 border-slate-800 text-amber-400'
-        }`}
+        className={
+          compact
+            ? `p-2 rounded-lg cursor-pointer transition-colors ${open ? 'text-amber-400 bg-slate-800' : 'text-slate-400 hover:text-white'}`
+            : `px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors ${
+                open
+                  ? 'bg-amber-500 text-slate-950 border-amber-400'
+                  : 'bg-[#111b21] hover:bg-slate-800 border-slate-800 text-amber-400'
+              }`
+        }
       >
-        <Zap className="w-3 h-3" />
-        <span>{isSpanish ? 'Respuestas' : 'Respostas'}</span>
+        <Zap className={compact ? 'w-5 h-5' : 'w-3 h-3'} />
+        {!compact && <span>{isSpanish ? 'Respuestas' : 'Respostas'}</span>}
       </button>
 
       {open && (

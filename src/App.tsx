@@ -477,6 +477,13 @@ export const App: React.FC = () => {
   // sem nenhuma tela pro operador ver ou editar.
   const [businessHours, setBusinessHours] = useState<BusinessHours>({});
 
+  // true quando uma conversa está aberta no mobile (WhatsAppLeadsSim avisa
+  // via onThreadOpenChange) — usado pra esconder o cabeçalho global
+  // (Header.tsx: marca, seletor de idioma/tema) e o cabeçalho fino do
+  // Atendimento enquanto o operador está numa conversa, igual ao app real
+  // do WhatsApp (pedido direto, 29/08/2026). Sem efeito no desktop.
+  const [isMobileWhatsAppThreadOpen, setIsMobileWhatsAppThreadOpen] = useState(false);
+
   // Transcripts
   const [savedTranscripts, setSavedTranscripts] = useState<SavedTranscriptItem[]>([]);
 
@@ -1237,7 +1244,14 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
       
-      {/* Header Navigation */}
+      {/* Header Navigation — escondido no mobile enquanto uma conversa está
+          aberta no Atendimento (pedido direto, 29/08/2026: "esse menu e
+          cabeçalho não precisa em cima"; o seletor de idioma/tema também
+          sai daqui, junto do resto do Header). No desktop continua sempre
+          visível — as três colunas do Atendimento já ficam lado a lado lá,
+          então não existe o "modo conversa em tela cheia" que faz sentido
+          só no mobile. */}
+      <div className={isMobileWhatsAppThreadOpen ? 'hidden lg:block' : ''}>
       <Header
         activeTab={activeTab}
         setActiveTab={handleSetActiveTab}
@@ -1259,6 +1273,7 @@ export const App: React.FC = () => {
                 capabilities={tenantCapabilities}
         canAccessSaasAdmin={canSeeSaasMaster}
       />
+      </div>
       {activeTab !== 'whatsapp' && canSeeConversations && (
         <FloatingAttendanceButton
           storageKey={`floating_attendance_position:${currentUser?.id || 'guest'}`}
@@ -1328,6 +1343,7 @@ export const App: React.FC = () => {
             tenants={tenants}
             canSwitchTenant={canSeeSaasMaster}
             onSelectTenant={handleSelectTenant}
+            hideHeaderOnMobile={isMobileWhatsAppThreadOpen}
           >
           <WhatsAppLeadsSim
             key={activeTenant.id}
@@ -1347,6 +1363,7 @@ export const App: React.FC = () => {
             onGoToEscalations={() => handleSetActiveTab('escalations')}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
+            onThreadOpenChange={setIsMobileWhatsAppThreadOpen}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}

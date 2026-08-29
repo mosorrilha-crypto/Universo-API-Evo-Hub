@@ -162,12 +162,20 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
   const hasEscalation = decision?.selectedFacts?.hasOpenEscalation === true;
 
   if (variant === 'compact') {
+    // Achado real de UI (pedido direto, 29/08/2026: "não sei se é necessário
+    // aparecer tão grande assim") — toda conversa nova (sem memória nem
+    // decisão registrada ainda) mostrava essa faixa mesmo assim, só pra dizer
+    // "ainda não há nada aqui". Isso é ruído puro: some enquanto não houver
+    // dado real; volta a aparecer sozinha assim que a IA gerar a primeira
+    // memória/decisão pra esse contato. O estado de erro/indisponível acima
+    // (isUnavailable) nunca é escondido — só o "vazio de verdade" é.
+    if (!hasData) return null;
     return (
       <div className="atendimento-context-strip border-sky-500/20 bg-sky-950/15">
         <div className="atendimento-context-strip__copy min-w-0">
           <span className="atendimento-context-strip__label text-sky-300">{isSpanish ? 'CONTEXTO SUPERVISADO' : 'CONTEXTO SUPERVISIONADO'}</span>
           <p className="truncate text-slate-100">
-            {primaryAction || (isSpanish ? 'Aún no hay memoria ni decisión registrada para este contacto.' : 'Ainda não há memória nem decisão registrada para este contato.')}
+            {primaryAction || (isSpanish ? 'Sin acción sugerida por ahora.' : 'Sem ação sugerida no momento.')}
           </p>
           {(needsHuman || memory?.openLoops?.length) && (
             <span className={`mt-1 inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-bold ${needsHuman ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>

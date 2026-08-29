@@ -9,6 +9,10 @@ type AtendimentoWorkspaceFrameProps = {
   activeTenant?: Tenant;
   canSwitchTenant?: boolean;
   onSelectTenant?: (tenant: Tenant) => void;
+  /** Esconde este cabeçalho fino no mobile enquanto uma conversa está aberta
+   * (App.tsx repassa o mesmo `isMobileWhatsAppThreadOpen` que já esconde o
+   * Header global) — no desktop continua sempre visível. */
+  hideHeaderOnMobile?: boolean;
 };
 
 /**
@@ -28,6 +32,7 @@ export default function AtendimentoWorkspaceFrame({
   activeTenant,
   canSwitchTenant = false,
   onSelectTenant,
+  hideHeaderOnMobile = false,
 }: AtendimentoWorkspaceFrameProps) {
   const tenantMenuRef = useRef<HTMLDivElement>(null);
   const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
@@ -60,7 +65,7 @@ export default function AtendimentoWorkspaceFrame({
 
   return (
     <section className="atendimento-workspace" aria-label="Central de atendimento">
-      <header className="atendimento-workspace__header atendimento-workspace__header--compact">
+      <header className={`atendimento-workspace__header atendimento-workspace__header--compact${hideHeaderOnMobile ? ' hidden lg:flex' : ''}`}>
         <div className="atendimento-workspace__identity">
           <div className="atendimento-workspace__icon" aria-hidden="true"><MessageSquareText size={16} /></div>
           <h1>Atendimento</h1>
