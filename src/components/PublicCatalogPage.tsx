@@ -257,7 +257,7 @@ function localizeCatalogText(value: string | undefined, language: CatalogLanguag
  * curto de emojis embutido, que o agente reconhece na mensagem recebida
  * pra ligar a conversa a este clique específico com certeza.
  */
-function whatsappUrl(slug: string, phone: string | undefined, productName: string | undefined, template: string | undefined, language: CatalogLanguage): string | null {
+function whatsappUrl(slug: string, phone: string | undefined, productName: string | undefined, template: string | undefined, language: CatalogLanguage, utmSource: string | undefined): string | null {
   if (!phone) return null;
   const copy = COPY[language];
   const defaultMessage = productName ? copy.whatsappWithProduct(productName) : copy.whatsappGeneral;
@@ -266,6 +266,7 @@ function whatsappUrl(slug: string, phone: string | undefined, productName: strin
     : defaultMessage;
   const params = new URLSearchParams({ msg: message, source: 'legacy' });
   if (productName) params.set('product', productName);
+  if (utmSource) params.set('utm_source', utmSource);
   return `/api/public/catalog/${encodeURIComponent(slug)}/whatsapp-click?${params.toString()}`;
 }
 
@@ -376,6 +377,14 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     return window.localStorage.getItem(LANGUAGE_STORAGE_KEY) === 'pt' ? 'pt' : 'es';
   });
   const copy = COPY[language];
+  // Captura uma vez, no primeiro carregamento — o link do anúncio pode
+  // incluir "?utm_source=meta_ads" (TASK-0149); sem isso não dava pra saber
+  // se um clique pro WhatsApp veio de anúncio pago ou de tráfego
+  // orgânico/direto, só o total. `undefined` = chegou sem esse parâmetro.
+  const [utmSource] = useState<string | undefined>(() => {
+    if (typeof window === 'undefined') return undefined;
+    return new URLSearchParams(window.location.search).get('utm_source') || undefined;
+  });
 
   useLayoutEffect(() => {
     const meta = document.createElement('meta');
@@ -461,7 +470,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
     );
   }
 
-  const generalWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral, language);
+  const generalWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, undefined, catalog.contact.whatsappMessageGeneral, language, utmSource);
   const faqs = FAQS[language];
 
   return (
@@ -503,7 +512,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                   <div className="product-grid">
                     {products.map((product) => {
                       const localizedName = localizeCatalogText(product.name, language);
-                      const productWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language);
+                      const productWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, localizedName, catalog.contact.whatsappMessageProduct, language, utmSource);
                       return (
                         <article className={`product-card${product.imageUrl ? ' has-image' : ''}`} key={`${category}-${product.name}`}>
                           {product.imageUrl && <img className="product-card-image" src={product.imageUrl} alt={localizedName} loading="lazy" />}
@@ -520,7 +529,7 @@ export function PublicCatalogPage({ slug }: PublicCatalogPageProps) {
                               <div className="variants" aria-label={`${copy.variantsOf} ${localizedName}`}>
                                 {product.variants.map((variant) => {
                                   const localizedVariantName = localizeCatalogText(variant.code, language);
-                                  const variantWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, `${localizedName} — ${localizedVariantName}`, variant.whatsappMessage || catalog.contact.whatsappMessageProduct, language);
+                                  const variantWhatsapp = whatsappUrl(slug, catalog.contact.whatsappNumber, `${localizedName} — ${localizedVariantName}`, variant.whatsappMessage || catalog.contact.whatsappMessageProduct, language, utmSource);
                                   return (
                                   <div className="variant-row" key={variant.code}>
                                     <div>

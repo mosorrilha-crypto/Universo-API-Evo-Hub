@@ -82,7 +82,7 @@ export type CatalogClickSource = 'legacy' | 'novo' | 'direct';
  * mesmo code por coincidência; com 12^3 combinações e volume real baixo,
  * normalmente acerta de primeira).
  */
-export async function recordCatalogWhatsappClick(tenantId: string, baseMessage: string, product?: string, source?: CatalogClickSource): Promise<CatalogWhatsappClick> {
+export async function recordCatalogWhatsappClick(tenantId: string, baseMessage: string, product?: string, source?: CatalogClickSource, utmSource?: string): Promise<CatalogWhatsappClick> {
   const db = getPlatformDb();
   let code = generateCuteCode();
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -99,6 +99,7 @@ export async function recordCatalogWhatsappClick(tenantId: string, baseMessage: 
     product: product || null,
     message,
     source: source || null,
+    utm_source: utmSource || null,
     created_at: new Date().toISOString(),
     matched_at: null,
     matched_phone: null,
@@ -155,6 +156,7 @@ export interface CatalogClickRecentEntry {
   id: string;
   product?: string;
   source?: string;
+  utmSource?: string;
   createdAt: string;
   matchedAt?: string;
   matchedPhone?: string;
@@ -165,7 +167,13 @@ export interface CatalogClickLead {
   phone: string;
   product?: string;
   source?: string;
+  utmSource?: string;
   matchedAt: string;
+}
+
+/** `origin` = `utm_source` como veio na querystring, ou "sem utm_source" quando a visita chegou sem esse parâmetro (orgânico, direto, link sem UTM). */
+export interface CatalogClickOriginStats extends CatalogClickWindowStats {
+  origin: string;
 }
 
 export interface CatalogClickAnalytics {
@@ -176,6 +184,8 @@ export interface CatalogClickAnalytics {
   byProduct: CatalogClickProductStats[];
   /** Comparação entre páginas de catálogo (TASK-0087/0094) — "Catálogo original" quando `source` vem null/"legacy". */
   bySource: CatalogClickSourceStats[];
+  /** Comparação entre origem de tráfego (TASK-0149) — anúncio pago vs orgânico/direto, via `utm_source` capturado na página. */
+  byOrigin: CatalogClickOriginStats[];
   /** Últimos 20 cliques, mais recente primeiro — visão rápida de "o que está acontecendo agora" na aba de Desempenho. */
   recent: CatalogClickRecentEntry[];
   /**
@@ -209,6 +219,7 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
   const last30d: CatalogClickWindowStats = { clicks: 0, matched: 0 };
   const productMap = new Map<string, CatalogClickWindowStats>();
   const sourceMap = new Map<string, CatalogClickWindowStats>();
+  const originMap = new Map<string, CatalogClickWindowStats>();
   let totalMatched = 0;
 
   for (const row of rows) {
@@ -234,6 +245,12 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
     sourceEntry.clicks++;
     if (isMatched) sourceEntry.matched++;
     sourceMap.set(sourceKey, sourceEntry);
+
+    const originKey = row.utm_source || 'sem utm_source';
+    const originEntry = originMap.get(originKey) || { clicks: 0, matched: 0 };
+    originEntry.clicks++;
+    if (isMatched) originEntry.matched++;
+    originMap.set(originKey, originEntry);
   }
 
   const byProduct = Array.from(productMap.entries())
@@ -244,6 +261,10 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
     .map(([source, stats]) => ({ source, ...stats }))
     .sort((a, b) => b.clicks - a.clicks);
 
+  const byOrigin = Array.from(originMap.entries())
+    .map(([origin, stats]) => ({ origin, ...stats }))
+    .sort((a, b) => b.clicks - a.clicks);
+
   const recent: CatalogClickRecentEntry[] = [...rows]
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
     .slice(0, 20)
@@ -251,6 +272,7 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
       id: row.id,
       product: row.product || undefined,
       source: row.source || undefined,
+      utmSource: row.utm_source || undefined,
       createdAt: row.created_at,
       matchedAt: row.matched_at || undefined,
       matchedPhone: row.matched_phone || undefined,
@@ -265,10 +287,11 @@ export async function getCatalogClickAnalytics(tenantId: string): Promise<Catalo
       phone: row.matched_phone,
       product: row.product || undefined,
       source: row.source || undefined,
+      utmSource: row.utm_source || undefined,
       matchedAt: row.matched_at,
     });
   }
   const leads = Array.from(leadByPhone.values()).sort((a, b) => b.matchedAt.localeCompare(a.matchedAt));
 
-  return { totalClicks: rows.length, totalMatched, last7d, last30d, byProduct, bySource, recent, leads };
+  return { totalClicks: rows.length, totalMatched, last7d, last30d, byProduct, bySource, byOrigin, recent, leads };
 }

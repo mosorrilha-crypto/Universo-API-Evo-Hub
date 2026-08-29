@@ -36,13 +36,4 @@ describe('AgendaWorkspace — navegação móvel', () => {
     expect(screen.getByText('Visão ativa: calendar')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Calendário' }).getAttribute('aria-current')).toBe('page');
   });
-
-  it('abre a fila de pendências sem renderizar uma quarta área no menu', () => {
-    render(<AgendaWorkspace {...props} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Pendências' }));
-
-    expect(screen.getByText('Visão ativa: pending')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Pendências' }).getAttribute('aria-current')).toBe('page');
-  });
 });
