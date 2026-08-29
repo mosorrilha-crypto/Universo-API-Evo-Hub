@@ -119,12 +119,15 @@ function tenantOf(req: AuthenticatedRequest): string {
  * formato antes deste ponto — embutir esse valor cru dentro do próprio
  * template de log (1º argumento do console.warn) deixa o "formato" do log
  * controlável externamente, e caracteres de controle (quebra de linha) nele
- * permitiriam forjar linhas de log falsas. Remove só o que sustenta esses
- * dois ataques (quebra de linha/controle); nunca usado pra validar dado de
- * negócio, só pra higienizar o que vai pro log.
+ * permitiriam forjar linhas de log falsas. `encodeURIComponent` percent-
+ * codifica qualquer quebra de linha/caractere de controle — usado em vez de
+ * um `.replace()` próprio porque o CodeQL não reconhece uma função regex
+ * caseira como sanitizador de taint (o alerta de log injection continuou
+ * aparecendo até trocar pra essa função nativa reconhecida); nunca usado pra
+ * validar dado de negócio, só pra higienizar o que vai pro log.
  */
 function sanitizeForLog(value: string): string {
-  return value.replace(/[\r\n]/g, ' ');
+  return encodeURIComponent(value);
 }
 
 /** Traduz erros esperados da API tipada em respostas estáveis, sem expor stack ou detalhes do banco. */
