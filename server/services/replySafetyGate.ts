@@ -37,7 +37,24 @@ export interface ReplySuggestion {
   source: 'groq-suggestion' | 'gemini-suggestion';
 }
 
-const MAX_CONTEXT_CHARS = 7_000;
+/**
+ * Bug real encontrado em auditoria (29/08/2026, tenant Monique): o gerador
+ * principal (`autoReply.ts`) recebe a Base de Conhecimento inteira sem
+ * corte, mas o revisor pré-envio e a sugestão corrigida cortavam em 7.000
+ * caracteres — bem antes do catálogo de produtos, que vem depois de
+ * objetivo/tom de voz/políticas/regras de negócio no texto formatado
+ * (`formatKnowledgeBaseForPrompt`). Resultado: o revisor bloqueava como
+ * "informação não sustentada pelo contexto/base" uma resposta que citava
+ * "Lash Lift a Gs 140.000, sem extensões" — dado que estava correto e
+ * batia exatamente com o catálogo publicado, só que fora da fatia que o
+ * revisor via. Ambos os modelos usados aqui (Groq openai/gpt-oss-20b,
+ * Gemini flash-lite) têm janela de contexto de dezenas/centenas de
+ * milhares de tokens, então 7.000 caracteres (~1.750 tokens) nunca foi
+ * limitação real de modelo — era só um corte arbitrário. Ampliado pra
+ * cobrir o contexto real de um tenant com catálogo grande (~13.400
+ * caracteres pro caso investigado) com folga.
+ */
+const MAX_CONTEXT_CHARS = 30_000;
 
 function normalize(text: string): string {
   return String(text || '')
