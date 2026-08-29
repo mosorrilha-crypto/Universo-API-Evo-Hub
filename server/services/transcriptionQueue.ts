@@ -145,13 +145,27 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
       customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
     });
 
+    // Achado real de auditoria (29/08/2026): um áudio sem fala nenhuma
+    // (silêncio) voltava com source: 'gemini' (chamada teve sucesso técnico)
+    // e uma transcrição inventada e plausível — o guard de "sem fallback
+    // inventado" em geminiTranscription.ts só cobria falha da CHAMADA, nunca
+    // o caso de sucesso técnico com conteúdo alucinado. O prompt agora pede
+    // transcription: "" quando não há fala real; aqui tratamos esse caso
+    // exatamente como uma falha técnica — nunca dispara resposta automática,
+    // sempre escala pra humano, e grava um texto legível (nunca vazio) no
+    // histórico da conversa.
+    const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+    const messageTextForRecord = hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription;
+
     totalProcessed += 1;
     recordResult({ job, status: 'completed', outcome, finishedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt });
-    await updateMessageText(tenantId, message.from, message.messageId, outcome.result.transcription);
-    console.log(`✅ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): ${redactMessageForLog(outcome.result.transcription)}`);
+    await updateMessageText(tenantId, message.from, message.messageId, messageTextForRecord);
+    console.log(`✅ [Fila de Transcrição] tenant=${tenantId} ${message.provider} ${message.messageId} concluído (source: ${outcome.source}): ${redactMessageForLog(messageTextForRecord)}`);
 
     if (outcome.source === 'fallback') {
       await logEscalation(tenantId, message.from, message.contactName, 'Falha ao transcrever áudio automaticamente — operador precisa ouvir manualmente', outcome.result.transcription);
+    } else if (hasNoDetectedSpeech) {
+      await logEscalation(tenantId, message.from, message.contactName, 'Áudio sem fala detectável (silêncio/ruído) — operador precisa ouvir manualmente antes de responder', messageTextForRecord);
     } else if (isPaymentRelated(outcome.result.transcription)) {
       await logEscalation(tenantId, message.from, message.contactName, 'Áudio sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', outcome.result.transcription);
     } else if (looksLikeHarassment(outcome.result.transcription)) {
@@ -159,11 +173,12 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
     }
 
     // Resposta automática (Epic 1.3): só quando a análise veio do Gemini de
-    // verdade (não do fallback simulado), pra não responder algo genérico.
+    // verdade (não do fallback simulado) E detectou fala real, pra não
+    // responder algo genérico nem alucinado em cima de silêncio.
     // Reaproveita o mesmo motor de bolhas/humanização do caminho de texto
     // (generateAutoReplyForText), passando a transcrição como se fosse a
     // mensagem recebida — evita duplicar a lógica de estilo em dois lugares.
-    if (outcome.source === 'gemini' && !(await isAgentPaused(tenantId))) {
+    if (outcome.source === 'gemini' && !hasNoDetectedSpeech && !(await isAgentPaused(tenantId))) {
       runExclusive(message.from, async () => {
         const conversation = await getConversation(tenantId, message.from);
         // Mesmo bloqueio por lead individual do caminho de texto (ver
