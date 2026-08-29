@@ -231,6 +231,18 @@ export const App: React.FC = () => {
     // Durante o carregamento/login não redireciona a preferência restaurada.
     // A permissão é verificada assim que o usuário real estiver disponível.
     if (!currentUser) return;
+    // Achado real, 29/08/2026 (pedido do dono do produto: "quando recarrego
+    // a página ela volta pra página inicial, não permanece onde está"):
+    // `canSeeConversations`/`canSeeCrm`/etc. dependem de `tenantCapabilities`,
+    // que só chega depois de um fetch assíncrono (/api/me/entitlements) —
+    // antes dele resolver, `tenantCapabilitiesState.tenantId` ainda não bate
+    // com `activeTenant.id` e todas as capacidades ficam `false` por padrão
+    // (EMPTY_TENANT_NAVIGATION_CAPABILITIES), mesmo pra quem tem permissão de
+    // verdade. Como este efeito rodava mesmo nessa janela, ele confundia
+    // "ainda carregando" com "sem permissão" e chamava handleSetActiveTab
+    // ('home') — que também GRAVA 'home' no localStorage, apagando de vez a
+    // aba salva (ex: Atendimento) a cada recarregamento de página.
+    if (tenantCapabilitiesState.tenantId !== activeTenant.id) return;
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (activeTab === 'whatsapp' && !canSeeConversations) ||
@@ -244,7 +256,7 @@ export const App: React.FC = () => {
       (activeTab === 'system_logs' && !canSeeSystemLogs);
     if (blocked) handleSetActiveTab('home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, currentUser?.role]);
+  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
 
   // A decisão vem do contrato self-scoped do tenant e falha fechada. O estado
   // carrega o tenant de origem, evitando que uma troca de empresa mostre por
@@ -1312,17 +1324,22 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Content Area */}
-      {/* app-main--atendimento-thread — achado real, 29/08/2026: o
+      {/* app-main--atendimento — achado real, 29/08/2026: o
           .atendimento-chat-shell já é desenhado pra ir de ponta a ponta na
           tela (border-0 rounded-none, fundo #111b21 igual ao WhatsApp real),
           mas o padding horizontal do .app-main (herdado por TODAS as abas)
-          nunca era zerado especificamente pra esse estado — sobrava uma
-          faixa da cor de fundo do app nas duas laterais, exatamente onde o
-          WhatsApp real não deixa nenhuma. Só as bordas laterais são
-          zeradas (ver regra no index.css) — o vertical continua igual, pra
-          não desalinhar o cálculo de altura da TASK-0162 (que cancela
-          exatamente 1.5rem de padding vertical). */}
-      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' && isMobileWhatsAppThreadOpen ? ' app-main--atendimento-thread' : ''}`}>
+          nunca era zerado — sobrava uma faixa da cor de fundo do app
+          (--surface-deep, quase preto) nas duas laterais, exatamente onde o
+          WhatsApp real não deixa nenhuma. Escopo ampliado (TASK-0163
+          cobria só a conversa aberta): o dono do produto apontou que a
+          MESMA faixa lateral aparece na lista de conversas também, ao redor
+          da barra de abas inferior (.atendimento-bottom-nav, que tem seu
+          próprio fundo --surface-panel) — por isso a condição não depende
+          mais de `isMobileWhatsAppThreadOpen`, só da aba ativa. Só as
+          bordas laterais são zeradas (ver regra no index.css) — o vertical
+          continua igual, pra não desalinhar o cálculo de altura da
+          TASK-0162 (que cancela exatamente 1.5rem de padding vertical). */}
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' ? ' app-main--atendimento' : ''}`}>
         
         {/* Toast Alert */}
         {toastMsg && (

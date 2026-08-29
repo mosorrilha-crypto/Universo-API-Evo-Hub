@@ -2994,6 +2994,113 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     );
   };
 
+  // Achado real, 29/08/2026 (pedido do dono do produto): no mobile, abrir
+  // "Ferramentas" (aba inferior) empurrava a lista de conversas inteira pra
+  // baixo — o painel entrava no fluxo normal do documento, dentro do
+  // Controls Bar. Conteúdo extraído numa variável pra ser reaproveitado sem
+  // duplicar JSX à mão: no desktop continua inline (ver `hidden sm:flex`
+  // logo abaixo, mesmo lugar de sempre); no mobile vira uma gaveta que sobe
+  // por cima da tela, mesmo padrão já usado pela Ficha IA
+  // (`atendimento-analysis-drawer`, mais abaixo).
+  const toolbarSettingsBody = (
+    <>
+      {/* Ações diárias preservadas dentro do menu no mobile; no desktop,
+          permanecem na barra principal para acesso imediato. */}
+      <div className="flex w-full flex-wrap items-center gap-2 sm:hidden">
+        <button
+          onClick={handleToggleAdsOnly}
+          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+            adsOnly
+              ? 'bg-[var(--action)] border-[var(--action)] text-[var(--action-contrast)]'
+              : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <Filter className="w-3.5 h-3.5" />
+          <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
+        </button>
+        <button
+          onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
+          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+            googleCalendarConnected
+              ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
+              : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <CalendarIcon className="w-3.5 h-3.5" />
+          <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
+        </button>
+        {adsOnly && (
+          <button
+            type="button"
+            onClick={openAdTriggersModal}
+            className="px-2.5 py-1.5 rounded-xl border border-slate-800 bg-slate-950/80 text-[11px] font-semibold text-slate-300 hover:text-white"
+          >
+            Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}
+          </button>
+        )}
+      </div>
+
+      {/* Reconectar WhatsApp via QR Code — só faz sentido pra tenant
+          conectado via Evolution API (statusAvailable) e só aparece
+          pra quem tem permissão de admin+ (canManageWhatsAppConnection,
+          calculado em App.tsx a partir do papel do usuário logado). */}
+      {canManageWhatsAppConnection && statusAvailable && activeTenant?.id && (
+        <ReconectarWhatsAppQrCode tenantId={activeTenant.id} />
+      )}
+
+      {/* Desconectar Google Calendar (pra trocar de conta) — ação rara,
+          o botão principal (conectar/ver agenda) já é sempre visível
+          fora de Configurações agora. */}
+      {googleCalendarConnected && (
+        <button
+          onClick={handleDisconnectGoogleCalendar}
+          title="Desconectar Google Calendar (pra trocar de conta)"
+          className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
+        >
+          <X className="w-3.5 h-3.5" />
+          <span>Desconectar Calendar</span>
+        </button>
+      )}
+
+      {/* Auto-analyze Toggle Switch — deixado discreto de propósito
+          (sem fundo/borda, texto pequeno e apagado): cada análise
+          automática é uma chamada real ao Gemini (custo de token), e a
+          maioria dos operadores deve preferir o botão "Analisar
+          Conversa Completa" (sob demanda) em vez de deixar isso ligado.
+          Começa desligado por padrão (ver useState acima). */}
+      <label
+        className="inline-flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
+        title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
+      >
+        <input
+          type="checkbox"
+          checked={autoAnalyze}
+          onChange={(e) => setAutoAnalyze(e.target.checked)}
+          className="sr-only peer"
+        />
+        <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
+        <span className="text-[10px]">Auto IA</span>
+      </label>
+
+      {/* Push notification do PWA do atendente (issue #159) — pra não
+          depender só de estar olhando o painel pra perceber escalação
+          nova ou agente pausado com lead sem resposta. */}
+      <button
+        onClick={handleTogglePush}
+        disabled={pushBusy}
+        title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
+        className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+          pushEnabled
+            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
+            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
+        }`}
+      >
+        {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+        <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
+      </button>
+    </>
+  );
+
   return (
     // flex flex-col min-h-0 — achado real, 29/08/2026: sem isso, este div
     // (pai direto do .atendimento-chat-shell) tinha altura `auto`
@@ -3168,102 +3275,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </button>
         </div>
 
+        {/* Achado real, 29/08/2026 (pedido do dono do produto): esse painel
+            empurrava a lista inteira pra baixo no mobile ao abrir
+            "Ferramentas" — inline só faz sentido no desktop (onde o botão
+            que abre isso, logo acima, também só existe a partir de sm). No
+            mobile o mesmo conteúdo (toolbarSettingsBody, extraído antes do
+            "return" deste componente) vira uma gaveta, ver mais abaixo perto
+            do drawer da Ficha IA. */}
         {isToolbarSettingsOpen && (
-          <div className="w-full flex flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
-            {/* Ações diárias preservadas dentro do menu no mobile; no desktop,
-                permanecem na barra principal para acesso imediato. */}
-            <div className="flex w-full flex-wrap items-center gap-2 sm:hidden">
-              <button
-                onClick={handleToggleAdsOnly}
-                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-                  adsOnly
-                    ? 'bg-[var(--action)] border-[var(--action)] text-[var(--action-contrast)]'
-                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <Filter className="w-3.5 h-3.5" />
-                <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
-              </button>
-              <button
-                onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
-                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-                  googleCalendarConnected
-                    ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
-                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <CalendarIcon className="w-3.5 h-3.5" />
-                <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
-              </button>
-              {adsOnly && (
-                <button
-                  type="button"
-                  onClick={openAdTriggersModal}
-                  className="px-2.5 py-1.5 rounded-xl border border-slate-800 bg-slate-950/80 text-[11px] font-semibold text-slate-300 hover:text-white"
-                >
-                  Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}
-                </button>
-              )}
-            </div>
-
-            {/* Reconectar WhatsApp via QR Code — só faz sentido pra tenant
-                conectado via Evolution API (statusAvailable) e só aparece
-                pra quem tem permissão de admin+ (canManageWhatsAppConnection,
-                calculado em App.tsx a partir do papel do usuário logado). */}
-            {canManageWhatsAppConnection && statusAvailable && activeTenant?.id && (
-              <ReconectarWhatsAppQrCode tenantId={activeTenant.id} />
-            )}
-
-            {/* Desconectar Google Calendar (pra trocar de conta) — ação rara,
-                o botão principal (conectar/ver agenda) já é sempre visível
-                fora de Configurações agora. */}
-            {googleCalendarConnected && (
-              <button
-                onClick={handleDisconnectGoogleCalendar}
-                title="Desconectar Google Calendar (pra trocar de conta)"
-                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Desconectar Calendar</span>
-              </button>
-            )}
-
-            {/* Auto-analyze Toggle Switch — deixado discreto de propósito
-                (sem fundo/borda, texto pequeno e apagado): cada análise
-                automática é uma chamada real ao Gemini (custo de token), e a
-                maioria dos operadores deve preferir o botão "Analisar
-                Conversa Completa" (sob demanda) em vez de deixar isso ligado.
-                Começa desligado por padrão (ver useState acima). */}
-            <label
-              className="inline-flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
-              title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
-            >
-              <input
-                type="checkbox"
-                checked={autoAnalyze}
-                onChange={(e) => setAutoAnalyze(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
-              <span className="text-[10px]">Auto IA</span>
-            </label>
-
-            {/* Push notification do PWA do atendente (issue #159) — pra não
-                depender só de estar olhando o painel pra perceber escalação
-                nova ou agente pausado com lead sem resposta. */}
-            <button
-              onClick={handleTogglePush}
-              disabled={pushBusy}
-              title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
-                pushEnabled
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
-                  : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
-              }`}
-            >
-              {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-              <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-            </button>
+          <div className="hidden sm:flex w-full flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
+            {toolbarSettingsBody}
           </div>
         )}
       </div>
@@ -4844,6 +4865,37 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onRefreshContactContext={() => void refreshContactContext()}
                 onSaveContactMemory={handleSaveContactMemory}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ferramentas no mobile — mesma gaveta deslizante da Ficha IA (ver
+          acima), aberta pela aba inferior "Ferramentas" (ícone de
+          engrenagem) em vez de empurrar a lista de conversas pra baixo
+          (achado real, 29/08/2026, pedido do dono do produto). Conteúdo
+          idêntico ao painel de desktop — reaproveita `toolbarSettingsBody`,
+          definido antes do "return" deste componente, sem duplicar JSX. */}
+      {isToolbarSettingsOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          onClick={() => setIsToolbarSettingsOpen(false)}
+        >
+          <div
+            className="bg-[#111b21] w-full max-h-[85vh] rounded-t-2xl border-t border-slate-800 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b border-slate-800 flex-shrink-0">
+              <h3 className="text-sm font-bold text-white">Ferramentas</h3>
+              <button
+                onClick={() => setIsToolbarSettingsOpen(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-3 flex flex-wrap items-center gap-2.5 overflow-y-auto">
+              {toolbarSettingsBody}
             </div>
           </div>
         </div>
