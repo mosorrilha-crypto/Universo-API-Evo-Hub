@@ -3333,11 +3333,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           MÁXIMA, a coluna visível cresce livremente com o conteúdo (todos os
           leads ou todas as mensagens) em vez de rolar por dentro, e o campo
           de digitar mensagem (fixo no fim da coluna) acaba empurrado pra
-          baixo de tudo, exigindo rolar a página inteira até ele. `dvh` (não
-          `vh`) porque no mobile a barra de endereço do navegador
-          recolhe/expande — `vh` mediria a altura errada (com a barra
-          expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
+          baixo de tudo, exigindo rolar a página inteira até ele.
+          No mobile a altura vem de `h-full` (100% de `.atendimento-workspace__content`,
+          que por sua vez é `flex:1` dentro de `.atendimento-workspace`, que é
+          `height:100%` dentro do wrapper com altura real calculada em
+          App.tsx) — depois de três rodadas tentando acertar isso com
+          valores fixos de `dvh`/`%` chutados (TASK-0150/0153/0157, cada um
+          sobrando ou faltando espaço em telas reais diferentes), `h-full`
+          elimina o chute: o frame sempre ocupa exatamente o que sobrar do
+          chrome que estiver visível (cabeçalhos + barra inferior, quando
+          aparecem, ou nada, quando estão escondidos), sem precisar saber
+          de antemão quanto esse chrome mede. Em `lg` (desktop) mantém o
+          cálculo fixo original, que já funcionava. */}
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-full lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
@@ -4520,8 +4528,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
 
                 {/* WhatsApp Style Text Input Form */}
-                <form onSubmit={handleSendTextMessage} className="flex items-center space-x-2">
-                  <div className="relative">
+                {/* space-x-1 (não -2) e min-w-0 na caixa de texto: sem
+                    isso o <input> segura sua largura mínima padrão do
+                    navegador e empurra tudo que vem depois (respostas
+                    rápidas, mic/enviar) pra fora da tela em telas
+                    estreitas — bug real reportado pelo dono do produto,
+                    29/08/2026, print mostrando os ícones sumidos à
+                    direita. Cada ícone fixo leva `flex-shrink-0` pra só o
+                    campo de texto encolher. */}
+                <form onSubmit={handleSendTextMessage} className="flex items-center space-x-1">
+                  <div className="relative flex-shrink-0">
                     <button
                       type="button"
                       onClick={() => setShowComposerEmojiPicker((v) => !v)}
@@ -4555,7 +4571,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <select
                       onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
                       defaultValue=""
-                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
+                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center flex-shrink-0"
                       title={isSpanish ? 'Enviar foto de ejemplo de un servicio' : 'Enviar foto de exemplo de um serviço'}
                     >
                       <option value="" disabled>📷</option>
@@ -4569,7 +4585,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <select
                       onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
                       defaultValue=""
-                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center"
+                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center flex-shrink-0"
                       title={isSpanish ? 'Enviar video de ejemplo de un servicio' : 'Enviar vídeo de exemplo de um serviço'}
                     >
                       <option value="" disabled>🎥</option>
@@ -4582,7 +4598,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <button
                     type="button"
                     onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
-                    className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                    className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer flex-shrink-0"
                   >
                     <Paperclip className="w-5 h-5" />
                   </button>
@@ -4597,22 +4613,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    className="flex-1 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="flex-1 min-w-0 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
 
                   {/* Respostas rápidas — ícone discreto à direita da caixa de
                       texto (pedido direto, 29/08/2026: "msg rápida para
                       Caixa de texto lado direito discreto"). */}
-                  <QuickRepliesMenu
-                    quickReplies={quickReplies}
-                    isSpanish={isSpanish}
-                    saving={quickRepliesSaving}
-                    onSelect={setInputMessage}
-                    onCreate={handleCreateQuickReply}
-                    onUpdate={handleUpdateQuickReply}
-                    onDelete={handleDeleteQuickReply}
-                    compact
-                  />
+                  <div className="flex-shrink-0">
+                    <QuickRepliesMenu
+                      quickReplies={quickReplies}
+                      isSpanish={isSpanish}
+                      saving={quickRepliesSaving}
+                      onSelect={setInputMessage}
+                      onCreate={handleCreateQuickReply}
+                      onUpdate={handleUpdateQuickReply}
+                      onDelete={handleDeleteQuickReply}
+                      compact
+                    />
+                  </div>
 
                   {/* Mic/Enviar — mesmo padrão do WhatsApp real: sem texto
                       digitado, o botão do rodapé grava áudio; com texto,
