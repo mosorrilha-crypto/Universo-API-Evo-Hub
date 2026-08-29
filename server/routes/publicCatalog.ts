@@ -50,8 +50,9 @@ export function createPublicCatalogRouter(): Router {
     const product = typeof req.query.product === 'string' ? req.query.product.slice(0, 200) : undefined;
     const source: CatalogClickSource | undefined =
       req.query.source === 'novo' ? 'novo' : req.query.source === 'legacy' ? 'legacy' : req.query.source === 'direct' ? 'direct' : undefined;
+    const utmSource = typeof req.query.utm_source === 'string' ? req.query.utm_source.slice(0, 100) : undefined;
 
-    const click = await recordCatalogWhatsappClick(target.tenantId, baseMessage, product, source);
+    const click = await recordCatalogWhatsappClick(target.tenantId, baseMessage, product, source, utmSource);
     const digitsOnlyPhone = target.whatsappNumber.replace(/\D/g, '');
     res.redirect(302, `https://wa.me/${digitsOnlyPhone}?text=${encodeURIComponent(click.message)}`);
   }));

@@ -118,9 +118,10 @@ function formatDuration(minutes?: number): string | null {
  * completo) — o botão direto da primeira dobra passa 'direct' explicitamente
  * (TASK-0125), pra não ficar misturado com quem completou a evaluación.
  */
-function whatsappClickUrl(message: string, productName?: string, source: 'novo' | 'direct' = 'novo'): string {
+function whatsappClickUrl(message: string, productName?: string, source: 'novo' | 'direct' = 'novo', utmSource?: string): string {
   const params = new URLSearchParams({ msg: message, source });
   if (productName) params.set('product', productName);
+  if (utmSource) params.set('utm_source', utmSource);
   return `/api/public/catalog/${encodeURIComponent(CATALOG_SLUG)}/whatsapp-click?${params.toString()}`;
 }
 
@@ -254,6 +255,14 @@ export function PublicCatalogMoniqueConcierge() {
   const [sent, setSent] = useState(false);
   const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
   const [productsError, setProductsError] = useState(false);
+  // Captura uma vez, no primeiro carregamento — o link do anúncio pode
+  // incluir "?utm_source=meta_ads" (TASK-0149): sem isso não dava pra saber
+  // se um clique pro WhatsApp veio de anúncio pago ou de tráfego
+  // orgânico/direto, só o total.
+  const [utmSource] = useState<string | undefined>(() => {
+    if (typeof window === 'undefined') return undefined;
+    return new URLSearchParams(window.location.search).get('utm_source') || undefined;
+  });
   const categoryOptions = useMemo(() => optionsForCategory(catalog, category), [catalog, category]);
   const instagramUrl = catalog?.contact.instagramUrl || FALLBACK_INSTAGRAM;
 
@@ -329,7 +338,7 @@ export function PublicCatalogMoniqueConcierge() {
       ? `${selectedItem.productName}${selectedItem.variantCode ? ` (${selectedItem.variantCode})` : ''} — ${selectedItem.price}`
       : 'orientación sobre servicios';
     const text = `Hola Monique, soy ${name}. Me interesa: ${summary}. ¿Tengo una micropigmentación previa? ${previousWork}. Sensibilidad o alergias: ${sensitive}. Día preferido: ${preferredDay || 'a coordinar'}. ${message}`;
-    window.open(whatsappClickUrl(text, selectedItem?.productName), '_blank', 'noopener,noreferrer');
+    window.open(whatsappClickUrl(text, selectedItem?.productName, 'novo', utmSource), '_blank', 'noopener,noreferrer');
     trackWhatsAppContact();
     setSent(true);
   }
@@ -595,7 +604,7 @@ export function PublicCatalogMoniqueConcierge() {
             <p>Entre trabajo, compromisos y mil pendientes, también merecés sentirte lista sin pasar horas frente al espejo. Encontrá tu servicio en menos de un minuto.</p>
             <div className="hero-cta-row">
               <a href="#triagem" onClick={handleTriageAnchorClick} className="primary-cta">Encontrar mi servicio <ArrowRight size={16} /></a>
-              <a href={whatsappClickUrl(DIRECT_WHATSAPP_MESSAGE, undefined, 'direct')} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact} className="secondary-cta">Hablar directamente por WhatsApp <MessageCircle size={15} /></a>
+              <a href={whatsappClickUrl(DIRECT_WHATSAPP_MESSAGE, undefined, 'direct', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact} className="secondary-cta">Hablar directamente por WhatsApp <MessageCircle size={15} /></a>
             </div>
             <div className="trust-row">
               <span><ShieldCheck size={15} /> Cuidado y evaluación</span>
@@ -760,7 +769,7 @@ export function PublicCatalogMoniqueConcierge() {
           </div>
           <div className="starting-points">
             {startingPoints.map((point) => (
-              <a key={point.title} href={whatsappClickUrl(point.message)} target="_blank" rel="noreferrer" className="starting-point" onClick={trackWhatsAppContact}>
+              <a key={point.title} href={whatsappClickUrl(point.message, undefined, 'novo', utmSource)} target="_blank" rel="noreferrer" className="starting-point" onClick={trackWhatsAppContact}>
                 <b>{point.title}</b>
                 <span>{point.text}</span>
                 <em className="starting-point-service">Te recomendamos: {point.recommendation}</em>
@@ -814,7 +823,7 @@ export function PublicCatalogMoniqueConcierge() {
                               <div className="service-variant-price">
                                 <span>{variant.price}</span>
                                 {formatDuration(variant.durationMinutes) && <span className="service-variant-duration"><Clock3 size={11} /> {formatDuration(variant.durationMinutes)}</span>}
-                                <a href={whatsappClickUrl(variantMessage, `${service.name} - ${variant.code}`)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={12} /></a>
+                                <a href={whatsappClickUrl(variantMessage, `${service.name} - ${variant.code}`, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={12} /></a>
                               </div>
                             </li>
                           );
@@ -824,7 +833,7 @@ export function PublicCatalogMoniqueConcierge() {
                     ) : (
                       <div className="service-bottom">
                         <b>{service.price}</b>
-                        <a href={whatsappClickUrl(consultMessage, service.name)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
+                        <a href={whatsappClickUrl(consultMessage, service.name, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
                       </div>
                     )}
                   </article>
