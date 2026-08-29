@@ -72,7 +72,8 @@ import {
   Video,
   Copy,
   QrCode,
-  Megaphone
+  Megaphone,
+  MessageCircle
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -471,7 +472,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'waiting'>('all');
+  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread'>('all');
   // O painel auxiliar continua disponível pelo cabeçalho, mas não ocupa uma
   // terceira coluna por padrão: a referência canônica coloca a IA no rascunho
   // revisável e deixa o contexto expandível dentro da conversa.
@@ -2006,8 +2007,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return lead.status === 'pending' ? 1 : 0;
   };
   const unreadLeadsCount = leads.filter((lead) => getUnreadCount(lead) > 0).length;
-  const isWaitingForAgent = (lead: LeadInfo): boolean => lead.messages?.[lead.messages.length - 1]?.sender === 'lead';
-  const waitingForAgentCount = leads.filter((lead) => !lead.archivedAt && isWaitingForAgent(lead)).length;
 
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
@@ -2029,9 +2028,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       if (activeTabFilter === 'unread') {
         return getUnreadCount(lead) > 0;
-      }
-      if (activeTabFilter === 'waiting') {
-        return isWaitingForAgent(lead);
       }
       return true;
     })
@@ -2976,11 +2972,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
               direto daqui, sem precisar navegar até a barra de abas do topo
               (Header.tsx já tem a aba "Escalonamentos" com o mesmo contador,
-              esta é só uma segunda entrada mais rápida). */}
+              esta é só uma segunda entrada mais rápida). No mobile esse
+              atalho passou pra barra inferior estilo WhatsApp (ícone
+              "Pendências", 28/08/2026) — some daqui só abaixo de sm. */}
           {onGoToEscalations && (
             <button
               onClick={onGoToEscalations}
-              className="flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-[var(--pending-surface)] hover:brightness-110 text-[var(--pending)] border border-[var(--pending)]/50 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+              className="hidden sm:flex flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-[var(--pending-surface)] hover:brightness-110 text-[var(--pending)] border border-[var(--pending)]/50 items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
               title={t('pending')}
             >
               <AlertTriangle className="w-3.5 h-3.5 text-[var(--pending)]" />
@@ -3081,20 +3079,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
           </div>
 
-          {/* Configurações pontuais e ações secundárias no mobile — a ação de
-              pendências continua como prioridade visível na barra de trabalho. */}
+          {/* Configurações pontuais e ações secundárias — "Ferramentas"
+              (renomeado de "Mais opções", 28/08/2026, pra combinar com o
+              nome real do WhatsApp). No mobile o gatilho passou pra barra
+              inferior (ícone "Ferramentas"); some daqui abaixo de sm, mas o
+              painel que ele abre (isToolbarSettingsOpen) continua o mesmo. */}
           <button
             type="button"
             onClick={() => setIsToolbarSettingsOpen((v) => !v)}
             title="Configurações e ações secundárias"
-            className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
+            className={`hidden sm:flex flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               isToolbarSettingsOpen
                 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                 : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
             }`}
           >
             <Settings className="w-3.5 h-3.5" />
-            <span>{t('moreOptions')}</span>
+            <span>Ferramentas</span>
           </button>
         </div>
 
@@ -3346,70 +3347,74 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Removido o bloco inteiro — o contexto já está estabelecido
               pela aba ativa + barra de controles, sem perda de informação. */}
 
-          {/* WhatsApp Web Search Bar — o status do agente (Ativo/Restrito/
-              Pausado) fica à direita dela (pedido direto), busca em si mais
-              curta (flex-1 dividindo a linha com o status, em vez de w-full
-              sozinha). */}
+          {/* Status do agente (Ativo/Restrito/Pausado) — subiu pro topo da
+              coluna, como um cabeçalho fino (pedido direto, 28/08/2026, com
+              print comparando com o app real do WhatsApp): antes ficava no
+              meio da tela, ao lado da busca; agora é a primeira coisa
+              visível, logo abaixo da faixa fina de "Atendimento". */}
+          <div className="flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
+            <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
+            {/* Achado real em produção (15/08/2026): enquanto agentStatus
+                ainda é null (GET inicial não confirmou nada) ou falhou de
+                vez, nenhum pill acende — antes disso "Ativo" ficava
+                destacado por padrão mesmo com o backend em outro estado,
+                passando confiança falsa pro operador de que a IA estava
+                respondendo. */}
+            <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
+              {(['active', 'restricted', 'paused'] as const).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => handleChangeAgentStatus(status)}
+                  title={
+                    agentStatus === null
+                      ? 'Confirmando o status real do agente...'
+                      : status === 'active' ? 'Agente responde sempre' :
+                        status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                        'Agente pausado — silêncio total'
+                  }
+                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                    agentStatus === status
+                      ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+                </button>
+              ))}
+              {agentStatusLoadFailed && (
+                <button
+                  type="button"
+                  onClick={loadAgentStatus}
+                  title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+                  className="ml-0.5 inline-flex items-center gap-1 rounded-lg border-l border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+                >
+                  <AlertCircle className="h-3 w-3" />
+                  <span>Erro</span>
+                  <span className="sr-only">Status incerto — recarregar</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* WhatsApp Web Search Bar */}
           <div className="p-2 bg-[#111b21] border-b border-slate-800/30">
-            <div className="flex items-center gap-2">
-              <div className="relative flex items-center flex-1 min-w-0">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder={t('searchConversation')}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2 text-slate-400 hover:text-white text-xs"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              {/* Achado real em produção (15/08/2026): enquanto agentStatus
-                  ainda é null (GET inicial não confirmou nada) ou falhou de
-                  vez, nenhum pill acende — antes disso "Ativo" ficava
-                  destacado por padrão mesmo com o backend em outro estado,
-                  passando confiança falsa pro operador de que a IA estava
-                  respondendo. */}
-              <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
-                {(['active', 'restricted', 'paused'] as const).map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => handleChangeAgentStatus(status)}
-                    title={
-                      agentStatus === null
-                        ? 'Confirmando o status real do agente...'
-                        : status === 'active' ? 'Agente responde sempre' :
-                          status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                          'Agente pausado — silêncio total'
-                    }
-                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
-                      agentStatus === status
-                        ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
-                  </button>
-                ))}
-                {agentStatusLoadFailed && (
-                  <button
-                    type="button"
-                    onClick={loadAgentStatus}
-                    title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
-                    className="ml-0.5 inline-flex items-center gap-1 rounded-lg border-l border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
-                  >
-                    <AlertCircle className="h-3 w-3" />
-                    <span>Erro</span>
-                    <span className="sr-only">Status incerto — recarregar</span>
-                  </button>
-                )}
-              </div>
+            <div className="relative flex items-center min-w-0">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
+              <input
+                type="text"
+                placeholder={t('searchConversation')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 text-slate-400 hover:text-white text-xs"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
             {/* WhatsApp Web Filter Tabs — "Quentes"/"Internacional" removidos
@@ -3419,7 +3424,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 está desligada por padrão (ver isToolbarSettingsOpen), quase
                 nenhum lead tem esse campo populado no dia a dia, então os
                 dois filtros davam lista vazia quase sempre. "Tudo"/"Não
-                lidos" não dependem de análise nenhuma, continuam confiáveis. */}
+                lidos" não dependem de análise nenhuma, continuam confiáveis.
+                "Esperando você" removido (pedido direto, 28/08/2026: "eu não
+                sei qual a finalidade dele"). */}
             <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
               <button
                 onClick={() => setActiveTabFilter('all')}
@@ -3440,17 +3447,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 }`}
               >
                 {t('unread')} ({unreadLeadsCount})
-              </button>
-              <button
-                onClick={() => setActiveTabFilter('waiting')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
-                  activeTabFilter === 'waiting'
-                    ? 'bg-amber-400 text-slate-950 font-bold'
-                    : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
-                }`}
-                title="Conversas cuja última mensagem veio do cliente"
-              >
-                {isSpanish ? 'Esperando respuesta' : 'Esperando você'} ({waitingForAgentCount})
               </button>
 
               {/* Status — só aparece pra números conectados via Evolution API
@@ -3526,6 +3522,65 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </div>
             )}
           </div>
+
+          {/* Barra inferior estilo WhatsApp (pedido direto, 28/08/2026, com
+              print comparando lado a lado com o app real): Conversas,
+              Pendências, Agenda, Ficha IA e Ferramentas — substitui os
+              antigos botões soltos "Pendências"/"Mais opções" da barra de
+              controles (que seguem existindo, mas só no desktop). O slot
+              "Atualizações" do WhatsApp real foi propositalmente deixado de
+              fora (pedido direto: "não é funcional da forma em que está") —
+              Agenda e Ficha IA ocupam esse espaço em vez disso. Só no
+              mobile: no desktop as mesmas ações já ficam na barra de
+              controles/coluna 3, sem precisar duplicar aqui. */}
+          <nav className="atendimento-bottom-nav lg:hidden" aria-label="Navegação do Atendimento">
+            <button
+              type="button"
+              onClick={() => { setSearchQuery(''); setActiveTabFilter('all'); }}
+              className="atendimento-bottom-nav__item is-active"
+            >
+              <MessageCircle className="w-[18px] h-[18px]" />
+              <span>Conversas</span>
+            </button>
+            <button
+              type="button"
+              onClick={onGoToEscalations}
+              disabled={!onGoToEscalations}
+              className="atendimento-bottom-nav__item"
+            >
+              <AlertTriangle className="w-[18px] h-[18px]" />
+              <span>Pendências</span>
+              {escalationsPendingCount > 0 && (
+                <span className="atendimento-bottom-nav__badge">{escalationsPendingCount}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
+              className="atendimento-bottom-nav__item"
+            >
+              <CalendarIcon className="w-[18px] h-[18px]" />
+              <span>Agenda</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMobileThreadOpen(true); setMobileAnalysisOpen(true); }}
+              disabled={!selectedLead}
+              title={selectedLead ? undefined : 'Selecione uma conversa pra ver a ficha'}
+              className="atendimento-bottom-nav__item"
+            >
+              <Bot className="w-[18px] h-[18px]" />
+              <span>Ficha IA</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsToolbarSettingsOpen((v) => !v)}
+              className={`atendimento-bottom-nav__item${isToolbarSettingsOpen ? ' is-active' : ''}`}
+            >
+              <Settings className="w-[18px] h-[18px]" />
+              <span>Ferramentas</span>
+            </button>
+          </nav>
         </div>
 
         {/* ========================================== */}
