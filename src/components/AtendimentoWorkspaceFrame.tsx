@@ -65,7 +65,13 @@ export default function AtendimentoWorkspaceFrame({
 
   return (
     <section className="atendimento-workspace" aria-label="Central de atendimento">
-      <header className={`atendimento-workspace__header atendimento-workspace__header--compact${hideHeaderOnMobile ? ' hidden lg:flex' : ''}`}>
+      {/* `!hidden`/`lg:!flex` (com !important) — sem isso, a regra própria
+          de `.atendimento-workspace__header { display: flex }` no
+          index.css tem a mesma especificidade da utilitária `.hidden` do
+          Tailwind e vem depois no bundle, então sempre vencia e o
+          cabeçalho nunca sumia de verdade no mobile (achado real em
+          produção, print do dono do produto, 29/08/2026). */}
+      <header className={`atendimento-workspace__header atendimento-workspace__header--compact${hideHeaderOnMobile ? ' !hidden lg:!flex' : ''}`}>
         <div className="atendimento-workspace__identity">
           <div className="atendimento-workspace__icon" aria-hidden="true"><MessageSquareText size={16} /></div>
           <h1>Atendimento</h1>
