@@ -9,10 +9,6 @@ type AtendimentoWorkspaceFrameProps = {
   activeTenant?: Tenant;
   canSwitchTenant?: boolean;
   onSelectTenant?: (tenant: Tenant) => void;
-  /** Esconde este cabeçalho fino no mobile enquanto uma conversa está aberta
-   * (App.tsx repassa o mesmo `isMobileWhatsAppThreadOpen` que já esconde o
-   * Header global) — no desktop continua sempre visível. */
-  hideHeaderOnMobile?: boolean;
 };
 
 /**
@@ -32,7 +28,6 @@ export default function AtendimentoWorkspaceFrame({
   activeTenant,
   canSwitchTenant = false,
   onSelectTenant,
-  hideHeaderOnMobile = false,
 }: AtendimentoWorkspaceFrameProps) {
   const tenantMenuRef = useRef<HTMLDivElement>(null);
   const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
@@ -65,13 +60,21 @@ export default function AtendimentoWorkspaceFrame({
 
   return (
     <section className="atendimento-workspace" aria-label="Central de atendimento">
-      {/* `!hidden`/`lg:!flex` (com !important) — sem isso, a regra própria
+      {/* Escondido no mobile sempre (não só com conversa aberta) — achado
+          real, 29/08/2026: mesmo na lista de conversas, esta faixa (título
+          "Atendimento" + seletor de empresa) ficou redundante com a barra
+          de abas inferior do mobile (já deixa claro que a tela é a de
+          Conversas) e o seletor de empresa é uma função de admin raramente
+          usada nessa tela — só ocupava espaço vertical que a lista podia
+          usar. No desktop continua sempre visível (há espaço de sobra e o
+          seletor de empresa é mais usado ali).
+          `!hidden`/`lg:!flex` (com !important) — sem isso, a regra própria
           de `.atendimento-workspace__header { display: flex }` no
           index.css tem a mesma especificidade da utilitária `.hidden` do
           Tailwind e vem depois no bundle, então sempre vencia e o
           cabeçalho nunca sumia de verdade no mobile (achado real em
           produção, print do dono do produto, 29/08/2026). */}
-      <header className={`atendimento-workspace__header atendimento-workspace__header--compact${hideHeaderOnMobile ? ' !hidden lg:!flex' : ''}`}>
+      <header className="atendimento-workspace__header atendimento-workspace__header--compact !hidden lg:!flex">
         <div className="atendimento-workspace__identity">
           <div className="atendimento-workspace__icon" aria-hidden="true"><MessageSquareText size={16} /></div>
           <h1>Atendimento</h1>

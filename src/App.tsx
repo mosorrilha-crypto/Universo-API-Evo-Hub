@@ -1312,7 +1312,17 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Content Area */}
-      <main className="app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8">
+      {/* app-main--atendimento-thread — achado real, 29/08/2026: o
+          .atendimento-chat-shell já é desenhado pra ir de ponta a ponta na
+          tela (border-0 rounded-none, fundo #111b21 igual ao WhatsApp real),
+          mas o padding horizontal do .app-main (herdado por TODAS as abas)
+          nunca era zerado especificamente pra esse estado — sobrava uma
+          faixa da cor de fundo do app nas duas laterais, exatamente onde o
+          WhatsApp real não deixa nenhuma. Só as bordas laterais são
+          zeradas (ver regra no index.css) — o vertical continua igual, pra
+          não desalinhar o cálculo de altura da TASK-0162 (que cancela
+          exatamente 1.5rem de padding vertical). */}
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' && isMobileWhatsAppThreadOpen ? ' app-main--atendimento-thread' : ''}`}>
         
         {/* Toast Alert */}
         {toastMsg && (
@@ -1394,7 +1404,6 @@ export const App: React.FC = () => {
             tenants={tenants}
             canSwitchTenant={canSeeSaasMaster}
             onSelectTenant={handleSelectTenant}
-            hideHeaderOnMobile={isMobileWhatsAppThreadOpen}
           >
           <WhatsAppLeadsSim
             key={activeTenant.id}
