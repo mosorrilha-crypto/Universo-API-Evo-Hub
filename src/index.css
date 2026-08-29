@@ -1974,12 +1974,27 @@ html[data-theme='clean'] .quality-workspace__persistence-alert .text-amber-100\/
     line-height: 1.25;
   }
 
+  /* Achado real, 29/08/2026: `height: 70dvh !important` / `max-height: 38rem`
+     aqui (adicionados em 22/08, ANTES da TASK-0158/0159 existirem) sobreviveram
+     a TODAS as cinco tentativas de acertar a altura no mobile (TASK-0150/0153/
+     0155/0157/0158/0159) sem que ninguém percebesse — porque nenhuma das
+     verificações estáticas anteriores (a minha própria incluída) emulava um
+     dispositivo de toque de verdade; sem isso, `(hover: none) and
+     (pointer: coarse)` nunca casa (Chromium sem emulação de device reporta
+     hover:hover/pointer:fine, igual a um mouse), então este bloco inteiro
+     nunca era exercitado nos testes, mesmo rodando contra o CSS real
+     compilado. Num dispositivo de toque real, porém, este `!important`
+     sempre venceu e travava `.atendimento-chat-shell` numa altura fixa —
+     por isso a faixa em branco nunca sumia de verdade, mesmo depois da
+     TASK-0159 corrigir a cadeia de flex corretamente. Removida a
+     altura/min/max fixas; o `flex-1 min-h-0` (className, TASK-0159) resolve
+     a altura de verdade também aqui. Mantido `display:grid`/
+     `grid-template-columns` — isso é comportamento intencional (colapsar
+     fila/conversa numa coluna só em telas de toque, mesmo quando o
+     navegador reporta viewport largo — ver comentário no topo deste bloco). */
   .atendimento-chat-shell {
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    height: 70dvh !important;
-    min-height: 26rem !important;
-    max-height: 38rem;
   }
 
   .atendimento-chat-shell .atendimento-queue,
