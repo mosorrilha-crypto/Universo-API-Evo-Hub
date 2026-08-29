@@ -53,6 +53,23 @@ describe('ContactContextPanel', () => {
 
     expect(html).toContain('As proteções humanas continuam ativas.');
   });
+
+  it('some (não renderiza nada) na variante compacta quando a fonte está disponível mas ainda não há memória nem decisão — achado real, 29/08/2026: mostrava uma faixa só pra dizer "ainda não há nada aqui"', () => {
+    const html = renderToStaticMarkup(
+      <ContactContextPanel context={{ ...context, memory: null, latestDecision: null }} isLoading={false} variant="compact" />,
+    );
+
+    expect(html).toBe('');
+  });
+
+  it('continua mostrando a faixa compacta normalmente quando já existe memória ou decisão', () => {
+    const html = renderToStaticMarkup(
+      <ContactContextPanel context={context} isLoading={false} variant="compact" />,
+    );
+
+    expect(html).toContain('CONTEXTO SUPERVISIONADO');
+    expect(html).toContain('Aguardar a decisão do operador sobre o comprovante.');
+  });
 });
 
 
