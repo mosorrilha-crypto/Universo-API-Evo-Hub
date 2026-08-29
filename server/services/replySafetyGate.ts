@@ -93,6 +93,38 @@ function isPaymentOrSensitive(text: string): boolean {
   return /\b(pago|pague|transferencia|transferir|comprobante|comprovante|deposito|se[a-z]*na|tarjeta|cartao|cedula|documento|contrase[ñn]a|senha)\b/i.test(normalize(text));
 }
 
+/**
+ * Sobreposição de palavras (Jaccard) — pega repetição quase igual
+ * (parafraseada), não só idêntica. Achado real de auditoria (29/08/2026,
+ * continuação da TASK-0154): dois incidentes reais de produção onde o
+ * agente disse a mesma coisa duas vezes em menos de 2 minutos, cada vez
+ * com uma palavra diferente ("que incluye cejas" vs "que incluye las
+ * cejas"; "así ya te anoto" vs "así ya te agendo") — nenhum dos dois batia
+ * a igualdade exata do check acima, porque variar a redação a cada vez é
+ * exatamente o que a regra 12 da Camada 1 pede (evitar soar de script) —
+ * só que aqui teve o efeito colateral de driblar a checagem de repetição.
+ */
+function jaccardSimilarity(a: string, b: string): number {
+  const wordsA = new Set(a.split(' ').filter(Boolean));
+  const wordsB = new Set(b.split(' ').filter(Boolean));
+  if (!wordsA.size || !wordsB.size) return 0;
+  let intersection = 0;
+  for (const word of wordsA) if (wordsB.has(word)) intersection++;
+  const union = wordsA.size + wordsB.size - intersection;
+  return union ? intersection / union : 0;
+}
+
+const NEAR_DUPLICATE_JACCARD_THRESHOLD = 0.75;
+/** Só compara contra as últimas mensagens do próprio agente — repetir uma informação bem mais tarde na conversa (ex: cliente pergunta o mesmo preço de novo depois de um tempo) é legítimo, não um bug. */
+const NEAR_DUPLICATE_RECENT_WINDOW = 6;
+/** Bolhas curtas (ex: "¡Dale!", "Listo") têm poucas palavras — comparação de sobreposição entre elas dá falso positivo fácil sem carregar conteúdo de verdade pra repetir. */
+const NEAR_DUPLICATE_MIN_WORDS = 5;
+
+function repeatsRecentAgentMessage(normalizedBubble: string, recentPriorAgentTexts: string[]): boolean {
+  if (normalizedBubble.split(' ').filter(Boolean).length < NEAR_DUPLICATE_MIN_WORDS) return false;
+  return recentPriorAgentTexts.some((prior) => jaccardSimilarity(normalizedBubble, prior) >= NEAR_DUPLICATE_JACCARD_THRESHOLD);
+}
+
 function ruleVerdict(input: ReplySafetyInput): ReplySafetyVerdict | null {
   const bubbles = input.draftBubbles.map((item) => String(item || '').trim()).filter(Boolean);
   const combinedDraft = bubbles.join('\n');
@@ -106,6 +138,10 @@ function ruleVerdict(input: ReplySafetyInput): ReplySafetyVerdict | null {
   }
   if (bubbles.some((bubble) => priorAgentTexts.includes(normalize(bubble)))) {
     return { approved: false, source: 'rules', severity: 'high', reason: 'A resposta repete literalmente uma mensagem já enviada pelo agente.' };
+  }
+  const recentAgentTexts = priorAgentTexts.slice(-NEAR_DUPLICATE_RECENT_WINDOW);
+  if (bubbles.some((bubble) => repeatsRecentAgentMessage(normalize(bubble), recentAgentTexts))) {
+    return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta repete quase palavra por palavra algo que o agente já disse há pouco nesta conversa, só reformulado.' };
   }
   if (hasSpanishSignal(input.customerMessage) && hasPortugueseSignal(combinedDraft) && !hasSpanishSignal(combinedDraft)) {
     return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta não preserva o idioma espanhol usado pela cliente.' };
