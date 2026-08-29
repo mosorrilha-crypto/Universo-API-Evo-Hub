@@ -541,17 +541,19 @@ html[data-theme='blue'] .border-emerald-500 { border-color: #0b78b5 !important; 
    que é uma custom property própria e nunca herda de border-color. */
 html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important; }
 
-/* Shell operacional compartilhado do Atendimento */
-.atendimento-workspace { display: flex; flex-direction: column; gap: .7rem; }
-.atendimento-workspace__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.1rem; border: 1px solid rgba(148,163,184,.18); border-radius: 1.1rem; background: linear-gradient(135deg, rgba(15,118,110,.18), rgba(15,23,42,.62)); box-shadow: 0 14px 38px -30px rgba(0,0,0,.9); }
-.atendimento-workspace__identity { display: flex; align-items: flex-start; gap: .8rem; min-width: 0; }
-.atendimento-workspace__icon { display: grid; place-items: center; width: 2.35rem; height: 2.35rem; border-radius: .8rem; color: #ecfdf5; background: linear-gradient(135deg,#0f9f88,#087f6d); box-shadow: 0 8px 20px -10px rgba(16,185,129,.75); flex: 0 0 auto; }
-.atendimento-workspace__eyebrow { display: flex; align-items: center; gap: .35rem; color: #6ee7b7; font-size: .67rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.atendimento-workspace h1 { margin: .18rem 0 .15rem; color: #f8fafc; font-size: clamp(1.2rem, 2vw, 1.65rem); font-weight: 800; letter-spacing: -.025em; }
-.atendimento-workspace__header p { margin: 0; color: #94a3b8; font-size: .78rem; line-height: 1.5; }
-.atendimento-workspace__tenant { min-width: 10rem; max-width: 15rem; padding: .45rem .65rem; border-left: 1px solid rgba(148,163,184,.18); text-align: right; }
-.atendimento-workspace__tenant > span { display:block; color:#64748b; font-size:.58rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; }
-.atendimento-workspace__tenant strong { display:block; margin-top:.12rem; overflow:hidden; color:#e2e8f0; font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
+/* Shell operacional compartilhado do Atendimento — faixa fina, sem card de
+   resumo (removido a pedido do dono do produto, 28/08/2026: repetia dado já
+   visível na própria lista de conversas e ocupava tela útil que o WhatsApp
+   real não gasta com isso). Sem gradiente verde — a marca do app (theme-color)
+   também deixou de usar o verde do WhatsApp, ver index.html/manifest.json. */
+.atendimento-workspace { display: flex; flex-direction: column; gap: .5rem; }
+.atendimento-workspace__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.1rem; border: 1px solid rgba(148,163,184,.18); border-radius: 1.1rem; background: var(--surface-panel); box-shadow: var(--shadow-premium); }
+.atendimento-workspace__header--compact { padding: .55rem .85rem; }
+.atendimento-workspace__identity { display: flex; align-items: center; gap: .65rem; min-width: 0; }
+.atendimento-workspace__icon { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: .7rem; color: var(--action-contrast); background: var(--action); flex: 0 0 auto; }
+.atendimento-workspace h1 { margin: 0; color: var(--text-primary); font-size: 1rem; font-weight: 800; letter-spacing: -.01em; }
+.atendimento-workspace__tenant { min-width: 8rem; max-width: 15rem; padding: 0; text-align: right; }
+.atendimento-workspace__tenant strong { display:block; overflow:hidden; color:var(--text-primary); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
 .atendimento-workspace__tenant { position:relative; }
 .atendimento-workspace__tenant-trigger { display:flex; align-items:center; justify-content:flex-end; gap:.25rem; width:100%; min-height:2.5rem; padding:0; border:0; color:inherit; background:transparent; text-align:right; cursor:pointer; }
 .atendimento-workspace__tenant-trigger:focus-visible { outline:2px solid var(--action); outline-offset:3px; border-radius:.25rem; }
@@ -562,54 +564,18 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
 .atendimento-workspace__tenant-option > span { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .atendimento-workspace__tenant-option:hover, .atendimento-workspace__tenant-option:focus-visible { color:var(--text-primary); background:color-mix(in srgb, var(--action) 12%, transparent); outline:none; }
 .atendimento-workspace__tenant-option.is-active { color:var(--text-primary); background:color-mix(in srgb, var(--action) 16%, transparent); }
-.atendimento-workspace__summary-toggle { display:flex; align-items:center; justify-content:space-between; gap:.5rem; width:100%; min-height:2.35rem; padding:.5rem .8rem; border:1px solid rgba(148,163,184,.16); border-radius:.8rem; background:rgba(15,23,42,.4); color:#94a3b8; font-size:.68rem; font-weight:700; text-align:left; cursor:pointer; transition:border-color .18s, color .18s, background .18s; }
-.atendimento-workspace__summary-toggle:hover, .atendimento-workspace__summary-toggle:focus-visible { color:#e2e8f0; border-color:rgba(148,163,184,.32); outline:none; }
-.atendimento-workspace__summary-chevron { flex:0 0 auto; color:var(--action); transition:transform .18s ease; }
-.atendimento-workspace__summary-chevron.is-open { transform:rotate(180deg); }
-.atendimento-workspace__signals { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .65rem; margin-top: .65rem; }
-.atendimento-signal { display: flex; align-items: center; gap: .62rem; min-width: 0; padding: .72rem .8rem; border: 1px solid rgba(148,163,184,.16); border-radius: .9rem; background: rgba(15,23,42,.52); color: #cbd5e1; text-align: left; }
-.atendimento-signal--button { width: 100%; cursor: pointer; transition: border-color .18s, transform .18s, background .18s; }
-.atendimento-signal--button:hover:not(:disabled) { transform: translateY(-1px); border-color: rgba(245,158,11,.45); background: rgba(30,41,59,.8); }
-.atendimento-signal--button:disabled { cursor: default; }
-.atendimento-signal__icon { display:grid; place-items:center; width:1.8rem; height:1.8rem; border-radius:.65rem; flex:0 0 auto; }
-.atendimento-signal__icon--green { color:#6ee7b7; background:rgba(16,185,129,.13); }
-.atendimento-signal__icon--amber { color:#fcd34d; background:rgba(245,158,11,.13); }
-.atendimento-signal__icon--blue { color:#7dd3fc; background:rgba(14,165,233,.13); }
-.atendimento-signal strong { display:block; overflow:hidden; color:#f8fafc; font-size:.78rem; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
-.atendimento-signal span:not(.atendimento-signal__icon) { display:block; margin-top:.12rem; overflow:hidden; color:#94a3b8; font-size:.63rem; text-overflow:ellipsis; white-space:nowrap; }
-.atendimento-workspace__approval { display:flex; align-items:center; justify-content:center; gap:.4rem; padding:.62rem .75rem; border:1px dashed rgba(110,231,183,.28); border-radius:.9rem; color:#a7f3d0; background:rgba(16,185,129,.06); font-size:.65rem; line-height:1.35; text-align:center; }
 .atendimento-workspace__content { min-width: 0; }
-html[data-theme='light'] .atendimento-workspace__header { background: linear-gradient(135deg, rgba(236,253,245,.95), rgba(255,255,255,.98)); border-color: rgba(15,118,110,.16); }
+@media (max-width: 640px) { .atendimento-workspace__header--compact { padding:.5rem .7rem; } .atendimento-workspace__tenant { max-width:8.5rem; } }
 
-html[data-theme='clean'] .atendimento-workspace__header { background: linear-gradient(135deg, rgba(245, 246, 248, 0.95), rgba(255,255,255,.98)); border-color: rgba(15, 23, 42, 0.10); }
-html[data-theme='light'] .atendimento-workspace h1 { color:#0f172a; }
-
-html[data-theme='clean'] .atendimento-workspace h1 { color:#0F172A; }
-html[data-theme='light'] .atendimento-workspace__header p, html[data-theme='light'] .atendimento-signal span:not(.atendimento-signal__icon) { color:#64748b; }
-
-html[data-theme='clean'] .atendimento-workspace__header p, html[data-theme='clean'] .atendimento-signal span:not(.atendimento-signal__icon) { color:#64748B; }
-html[data-theme='light'] .atendimento-workspace__tenant strong, html[data-theme='light'] .atendimento-signal strong { color:#0f172a; }
-
-html[data-theme='clean'] .atendimento-workspace__tenant strong, html[data-theme='clean'] .atendimento-signal strong { color:#0F172A; }
-html[data-theme='light'] .atendimento-signal { background:rgba(255,255,255,.86); border-color:rgba(15,118,110,.12); }
-html[data-theme='light'] .atendimento-workspace__summary-toggle { background:rgba(255,255,255,.7); border-color:rgba(15,118,110,.14); color:#64748b; }
-html[data-theme='light'] .atendimento-workspace__summary-toggle:hover, html[data-theme='light'] .atendimento-workspace__summary-toggle:focus-visible { color:#0f172a; }
-
-html[data-theme='clean'] .atendimento-signal { background:rgba(255,255,255,.86); border-color:rgba(15, 23, 42, 0.08); }
-html[data-theme='clean'] .atendimento-workspace__summary-toggle { background:rgba(255,255,255,.7); border-color:rgba(15, 23, 42, 0.08); color:#64748B; }
-html[data-theme='clean'] .atendimento-workspace__summary-toggle:hover, html[data-theme='clean'] .atendimento-workspace__summary-toggle:focus-visible { color:#0F172A; }
-html[data-theme='light'] .atendimento-workspace__approval { color:#047857; background:rgba(16,185,129,.06); border-color:rgba(5,150,105,.2); }
-
-html[data-theme='clean'] .atendimento-workspace__approval { color:#2563EB; background:rgba(59,130,246,.06); border-color:rgba(37,99,235,.2); }
-html[data-theme='blue'] .atendimento-workspace__header { background: linear-gradient(135deg, rgba(8,47,73,.95), rgba(15,64,100,.82)); border-color: rgba(56,189,248,.28); }
-html[data-theme='blue'] .atendimento-workspace__icon { background:linear-gradient(135deg,#0b78b5,#075985); }
-html[data-theme='blue'] .atendimento-workspace__eyebrow { color:#7dd3fc; }
-html[data-theme='blue'] .atendimento-signal { background:rgba(8,47,73,.72); border-color:rgba(56,189,248,.2); }
-html[data-theme='blue'] .atendimento-workspace__approval { color:#bae6fd; border-color:rgba(56,189,248,.3); background:rgba(14,165,233,.08); }
-html[data-theme='blue'] .atendimento-workspace__summary-toggle { background:rgba(8,47,73,.5); border-color:rgba(56,189,248,.2); color:#9fc1da; }
-html[data-theme='blue'] .atendimento-workspace__summary-toggle:hover, html[data-theme='blue'] .atendimento-workspace__summary-toggle:focus-visible { color:#e8f4ff; }
-@media (max-width: 900px) { .atendimento-workspace__signals { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-@media (max-width: 640px) { .atendimento-workspace__header { align-items:center; padding:.75rem .85rem; } .atendimento-workspace__identity { gap:.6rem; } .atendimento-workspace__icon { width:2.1rem; height:2.1rem; border-radius:.7rem; } .atendimento-workspace__header p { display:none; } .atendimento-workspace__tenant { width:auto; min-width:0; max-width:10rem; border-left:1px solid rgba(148,163,184,.18); border-top:0; padding:.25rem 0 .25rem .65rem; text-align:right; } .atendimento-workspace__tenant > span { font-size:.52rem; } .atendimento-workspace__tenant strong { max-width:9.5rem; font-size:.66rem; } .atendimento-workspace__signals { grid-template-columns: repeat(2, minmax(0,1fr)); gap:.45rem; } .atendimento-workspace__approval { grid-column:1 / -1; } }
+/* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
+   Ferramentas) — só no mobile, onde a tela de Atendimento é a única coisa
+   visível; no desktop as mesmas ações já ficam na barra de controles. */
+.atendimento-bottom-nav { display: flex; align-items: stretch; justify-content: space-around; flex-shrink: 0; border-top: 1px solid var(--line-subtle); background: var(--surface-panel); }
+.atendimento-bottom-nav__item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; flex: 1 1 0; min-width: 0; padding: .45rem .2rem .5rem; border: 0; background: transparent; color: var(--text-secondary); font-size: .58rem; font-weight: 700; cursor: pointer; }
+.atendimento-bottom-nav__item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.atendimento-bottom-nav__item.is-active { color: var(--action); }
+.atendimento-bottom-nav__item:disabled { opacity: .45; cursor: default; }
+.atendimento-bottom-nav__badge { position: absolute; top: .1rem; right: 22%; min-width: 1rem; height: 1rem; padding: 0 .2rem; border-radius: 999px; background: var(--danger, #ef4444); color: #fff; font-size: .55rem; font-weight: 800; line-height: 1rem; text-align: center; }
 
 /* Frame compartilhado para módulos de Agenda e Financeiro */
 .operations-module-frame { display:flex; flex-direction:column; gap:1rem; }
