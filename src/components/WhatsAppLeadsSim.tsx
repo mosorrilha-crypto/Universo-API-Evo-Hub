@@ -3337,7 +3337,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `vh`) porque no mobile a barra de endereço do navegador
           recolhe/expande — `vh` mediria a altura errada (com a barra
           expandida) e sobraria espaço em branco ou cortaria conteúdo. */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-[82dvh] lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
+      {/* Altura no mobile depende de quanto "chrome" está visível acima/
+          abaixo deste frame: com uma conversa aberta (mobileThreadOpen), o
+          cabeçalho global, o cabeçalho fino do Atendimento E a barra
+          inferior de navegação somem todos (ver App.tsx/TASK-0150 e a
+          barra dentro da coluna 1, escondida junto por estar aninhada nela)
+          — sem isso, sobrava uma faixa em branco enorme no fim da tela
+          reivindicando espaço que ninguém mais usava (achado real,
+          29/08/2026). Com a lista de conversas visível, aquele chrome
+          volta e o frame precisa do respiro de 82dvh de antes. */}
+      <div className={`atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 ${mobileThreadOpen ? 'h-[100dvh]' : 'h-[82dvh]'} lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg`}>
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
