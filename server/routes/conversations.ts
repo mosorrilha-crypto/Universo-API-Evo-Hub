@@ -113,6 +113,20 @@ function tenantOf(req: AuthenticatedRequest): string {
   return resolveTenantId(req);
 }
 
+/**
+ * Achado real do CodeQL neste PR (js/tainted-format-string + js/log-injection,
+ * TASK-0152): `phone` vem direto de `req.params.phone`, sem validação de
+ * formato antes deste ponto — embutir esse valor cru dentro do próprio
+ * template de log (1º argumento do console.warn) deixa o "formato" do log
+ * controlável externamente, e caracteres de controle (quebra de linha) nele
+ * permitiriam forjar linhas de log falsas. Remove só o que sustenta esses
+ * dois ataques (quebra de linha/controle); nunca usado pra validar dado de
+ * negócio, só pra higienizar o que vai pro log.
+ */
+function sanitizeForLog(value: string): string {
+  return value.replace(/[\r\n]/g, ' ');
+}
+
 /** Traduz erros esperados da API tipada em respostas estáveis, sem expor stack ou detalhes do banco. */
 function sendKnowledgeBaseDocumentError(res: Response, error: unknown): Response {
   if (error instanceof KnowledgeBaseDocumentValidationError) {
@@ -450,7 +464,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         resolutionNote: 'Resolvido automaticamente: operador respondeu manualmente pelo painel.',
       })));
     } catch (err: any) {
-      console.warn(`⚠️ [Conversas] Falha ao auto-resolver escalonamentos após resposta manual (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+      console.warn(
+        '⚠️ [Conversas] Falha ao auto-resolver escalonamentos após resposta manual (tenant=%s, phone=%s):',
+        sanitizeForLog(tenantId),
+        sanitizeForLog(phone),
+        err?.message || err
+      );
     }
   }
 
