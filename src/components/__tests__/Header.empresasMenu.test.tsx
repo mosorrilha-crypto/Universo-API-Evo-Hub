@@ -80,30 +80,21 @@ afterEach(() => cleanup());
 // Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>.
 describe('grupos de navegação no desktop', () => {
   it('oculta exclusivamente Financeiro sem ocultar Agenda quando o módulo não foi liberado', () => {
-    renderHeader({ ...fullyEnabledCapabilities, financial: false }, { ...saasAdmin, role: 'admin' });
+    renderHeader({ ...fullyEnabledCapabilities, financial: false });
 
     expect(screen.getByRole('button', { name: 'Agenda' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Financeiro' })).toBeNull();
   });
 
-  it('mantém todos os recursos visíveis ao SaaS Admin mesmo antes da liberação para a empresa ativa', async () => {
-    const user = userEvent.setup();
-    renderHeader({
-      conversations: false, crm: false, agenda: false, financial: false,
-      growth: false, agent: false, catalog: false, quality: false, systemLogs: false,
-    });
-
-    expect(screen.getByRole('button', { name: 'Conversas' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Vendas' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Agenda' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Financeiro' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Crescimento' })).not.toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Configurar' }));
-    const menu = screen.getByRole('menu', { name: 'Configurar' });
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'Agente & catálogo', 'Catálogo público', 'Qualidade do agente', 'Logs do sistema',
-    ]);
-  });
+  // Achado real, 30/08/2026 (pedido direto do dono do produto): o teste
+  // acima ("mantém todos os recursos visíveis ao SaaS Admin...") validava
+  // exatamente o bug de um commit anterior ("fix: preserva acesso do saas
+  // admin aos recursos", 27/08/2026) — o SaaS Admin passou a ignorar as
+  // capacidades da empresa ativa e via tudo sempre, quebrando a função de
+  // pré-visualizar uma empresa (ex: Clic Piscinas, só 6 recursos
+  // liberados, aparecia com todos). Removido; ver App.tsx/Header.tsx pro
+  // revert completo. O SaaS Admin continua vendo Logs do Sistema sempre
+  // (comportamento intencional à parte, não afetado por este revert).
 
   it('remove todos os menus correspondentes às capacidades bloqueadas da empresa ativa', async () => {
     const user = userEvent.setup();
