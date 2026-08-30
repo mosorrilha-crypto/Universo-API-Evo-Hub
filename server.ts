@@ -18,6 +18,7 @@ import { createConversationsRouter } from './server/routes/conversations';
 import { createGoogleCalendarRouter } from './server/routes/googleCalendar';
 import { createAdminRouter } from './server/routes/admin';
 import { createRoadmapRouter } from './server/routes/roadmap';
+import { createBroadcastRouter } from './server/routes/broadcast';
 import { createCrmRouter } from './server/routes/crm';
 import { createFinancialRouter } from './server/routes/financial';
 import { createPushSubscriptionsRouter } from './server/routes/pushSubscriptions';
@@ -31,6 +32,7 @@ import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startPendingFollowUpJob } from './server/services/pendingFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
+import { startBroadcastSenderJob } from './server/services/broadcastSenderJob';
 import { startEvolutionConnectionAlertJob } from './server/services/evolutionConnectionAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
@@ -165,6 +167,7 @@ async function startServer() {
   }));
   app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
   app.use(createRoadmapRouter({ authenticateToken }));
+  app.use(createBroadcastRouter({ authenticateToken }));
   app.use(createCrmRouter({ authenticateToken }));
   app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
@@ -231,6 +234,19 @@ async function startServer() {
   // pausado tempo demais com lead sem resposta acumulando (issue #115) —
   // nunca reativa sozinho, só avisa. Ver server/services/agentPausedAlertJob.ts.
   startAgentPausedAlertJob({
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
+  });
+
+  // Job em background que envia as campanhas de disparo em massa
+  // (broadcast/marketing) respeitando a cota de cada número — cadência é o
+  // que evita banimento, não é opcional. Nunca inicia/pausa uma campanha
+  // sozinho, só processa o que já está `running`. Ver
+  // server/services/broadcastSenderJob.ts (TASK-0171).
+  startBroadcastSenderJob({
     metaAccessToken: config.metaAccessToken,
     metaPhoneNumberId: config.metaPhoneNumberId,
     evolutionApiUrl: config.evolutionApiUrl,

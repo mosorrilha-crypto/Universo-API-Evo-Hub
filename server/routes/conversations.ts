@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import {
   listConversations,
   getConversation,
+  getConversationPhoneNumberId,
   updateMessageText,
   recordOutgoingMessage,
   clearConversationHistory,
@@ -19,7 +20,7 @@ import {
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
-import { resolveCredentialsForTenant } from '../services/tenantResolver';
+import { resolveCredentialsForTenant, resolveCredentialsForConversation } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import {
   getKnowledgeBase,
@@ -487,8 +488,14 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     try {
-      const channel = await resolveCredentialsForTenant(
+      // TASK-0171 (disparo em massa): a conversa pode estar num número de
+      // disparo, não no operacional do tenant — resolve pelo phone_number_id
+      // da CONVERSA, não do tenant como um todo, senão a resposta sairia
+      // por um número diferente do que o cliente conhece.
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
@@ -575,8 +582,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       let uploadBase64 = base64;
       let uploadMimeType = mimeType as string;
       let uploadFilename = filename || 'arquivo';
-      const channel = await resolveCredentialsForTenant(
+      // TASK-0171 — mesmo raciocínio do /send: resolve pelo número da
+      // CONVERSA (pode ser um número de disparo), não do tenant como um todo.
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
@@ -944,8 +955,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     try {
       const mimeType = media.exampleImageMimeType || 'image/jpeg';
-      const channel = await resolveCredentialsForTenant(
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
@@ -1012,8 +1025,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     try {
       const mimeType = media.exampleVideoMimeType || video.contentType;
       const filename = media.exampleVideoFileName || `${productName}.mp4`;
-      const channel = await resolveCredentialsForTenant(
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
+      const channel = await resolveCredentialsForConversation(
         tenantId,
+        conversationPhoneNumberId,
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );

@@ -480,12 +480,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           console.warn(`⚠️  [Acompanhamento de funil] Falha ao cancelar pendência de ${msg.from}:`, err.message)
         );
 
+        // TASK-0171 — só relevante se a conversa ainda nem existir (alguém
+        // mandando mensagem direto pra um número de disparo antes de
+        // qualquer campanha) — ver getOrCreateConversationRow.
+        const inboundMetaPhoneNumberId = resolvedTenant.provider === 'meta' ? resolvedTenant.metaPhoneNumberId : undefined;
+
         if (msg.type === 'audio') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
           enqueueTranscriptionJob(msg, resolvedTenant);
           enqueued += 1;
         } else if (msg.type === 'text') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
           if (msg.text && isPaymentRelated(msg.text)) {
             await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
           }
@@ -500,7 +505,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // webhookParsers.ts) preserva o que o cliente escreveu; a UI
           // (WhatsAppLeadsSim.tsx) já mostra esse texto como legenda abaixo da
           // foto, então só precisa chegar até aqui.
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
 
           // Uma única promise de download, reaproveitada abaixo (await duas
           // vezes na mesma promise não baixa a imagem de novo) — mantém o
@@ -599,7 +604,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // vídeo/gif, localização, reação, contato etc.) — grava com um
           // rótulo que descreve o que realmente chegou, em vez do
           // "[sticker]"/"[video]" cru de antes (achado real em produção).
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel });
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
         }
           }
         );
