@@ -64,6 +64,26 @@ export async function resolveTenantByPhoneNumberId(
           metaPhoneNumberId: data.phone_number_id,
         };
       }
+
+      // TASK-0171 — disparo em massa: um número de broadcast_numbers não é
+      // o número operacional do agente (tenant_meta_credentials), mas
+      // também pertence a um tenant. Sem este passo, toda RESPOSTA de um
+      // contato de disparo cairia na regra abaixo ("canal desconhecido") e
+      // seria descartada silenciosamente pra sempre — bug crítico já
+      // identificado no planejamento da feature, corrigido aqui antes de
+      // qualquer disparo real existir.
+      const { data: broadcastNumber } = await db
+        .from('broadcast_numbers')
+        .select('tenant_id, access_token, phone_number_id')
+        .eq('phone_number_id', phoneNumberId)
+        .maybeSingle();
+      if (broadcastNumber) {
+        return {
+          tenantId: broadcastNumber.tenant_id,
+          metaAccessToken: broadcastNumber.access_token || shared.metaAccessToken,
+          metaPhoneNumberId: broadcastNumber.phone_number_id,
+        };
+      }
     } catch (err) {
       console.warn('⚠️  [Tenant] Falha ao resolver tenant por phone_number_id:', (err as Error).message);
       return { tenantId: '', unknownChannel: true };
@@ -242,4 +262,55 @@ export async function resolveCredentialsForTenant(
     metaAccessToken: sharedMeta.metaAccessToken,
     metaPhoneNumberId: sharedMeta.metaPhoneNumberId,
   };
+}
+
+/**
+ * TASK-0171 (disparo em massa) — resolve as credenciais certas pra responder
+ * uma CONVERSA específica, não o tenant como um todo. Necessário porque,
+ * diferente do resto do sistema (que sempre assumia um único número por
+ * tenant), agora um tenant pode ter vários números de disparo além do
+ * número operacional do agente — e uma conversa precisa continuar saindo
+ * pelo mesmo número que o cliente recebeu/mandou mensagem (do ponto de
+ * vista do cliente, números diferentes são contatos diferentes).
+ *
+ * `conversationPhoneNumberId` nulo/indefinido = conversa legada ou criada
+ * antes desta feature existir → usa o número operacional do tenant, igual
+ * sempre foi (`resolveCredentialsForTenant`). Só busca em `broadcast_numbers`
+ * quando o valor não bate com o número operacional do tenant.
+ */
+export async function resolveCredentialsForConversation(
+  tenantId: string,
+  conversationPhoneNumberId: string | null | undefined,
+  sharedMeta: SharedMetaCredentials,
+  sharedEvo: SharedEvolutionCredentials
+): Promise<ResolvedTenant> {
+  const tenantCredentials = await resolveCredentialsForTenant(tenantId, sharedMeta, sharedEvo);
+  if (!conversationPhoneNumberId || conversationPhoneNumberId === tenantCredentials.metaPhoneNumberId) {
+    return tenantCredentials;
+  }
+
+  try {
+    const db = getPlatformDb();
+    const { data } = await db
+      .from('broadcast_numbers')
+      .select('phone_number_id, access_token')
+      .eq('tenant_id', tenantId)
+      .eq('phone_number_id', conversationPhoneNumberId)
+      .maybeSingle();
+    if (data) {
+      return {
+        tenantId,
+        provider: 'meta',
+        metaAccessToken: data.access_token || sharedMeta.metaAccessToken,
+        metaPhoneNumberId: data.phone_number_id,
+      };
+    }
+  } catch (err) {
+    console.warn('⚠️  [Tenant] Falha ao resolver credencial de número de disparo pra conversa, usando número operacional do tenant:', (err as Error).message);
+  }
+
+  // Número da conversa não é nem o operacional nem um broadcast_numbers
+  // conhecido (ex: número de disparo removido depois) — cai no operacional
+  // do tenant em vez de falhar o envio.
+  return tenantCredentials;
 }

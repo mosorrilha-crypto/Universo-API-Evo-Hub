@@ -4,6 +4,7 @@ import { apiFetch } from '../lib/apiClient';
 import { useRealTenants } from '../hooks/useRealTenants';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { TenantEntitlementsModal } from './TenantEntitlementsModal';
+import { BroadcastAdminPanel } from './BroadcastAdminPanel';
 import {
   Building2,
   DollarSign,
@@ -34,7 +35,8 @@ import {
   Lock,
   Unlock,
   CreditCard,
-  KeyRound
+  KeyRound,
+  Radio
 } from 'lucide-react';
 
 /**
@@ -718,10 +720,11 @@ interface SaaSAdminDashboardProps {
 export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
   currentUser,
   onEnterTenant,
+  activeTenant,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [segmentFilter, setSegmentFilter] = useState<string>('all');
-  const [activeAdminTab, setActiveAdminTab] = useState<'tenants' | 'tokens_telemetry' | 'roadmap' | 'global_prompt'>('tenants');
+  const [activeAdminTab, setActiveAdminTab] = useState<'tenants' | 'tokens_telemetry' | 'roadmap' | 'global_prompt' | 'broadcast'>('tenants');
 
   // Camada 1 (Global) do prompt do agente — editável por saas_admin sem
   // PR+deploy (ver server/services/globalPromptStore.ts). content null =
@@ -1517,6 +1520,18 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         >
           <Brain className="w-4 h-4" />
           <span>Prompt Global do Agente</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('broadcast')}
+          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-2 transition-all cursor-pointer ${
+            activeAdminTab === 'broadcast'
+              ? 'bg-violet-600 text-white shadow-md shadow-violet-950/30'
+              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+          }`}
+        >
+          <Radio className="w-4 h-4" />
+          <span>Disparo em Massa</span>
         </button>
       </div>
 
@@ -2341,6 +2356,11 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB CONTENT: DISPARO EM MASSA (broadcast/marketing) — TASK-0171 */}
+      {activeAdminTab === 'broadcast' && (
+        <BroadcastAdminPanel tenantName={activeTenant?.name} />
       )}
 
       {/* Usuários são gerenciados no card da empresa correspondente. */}

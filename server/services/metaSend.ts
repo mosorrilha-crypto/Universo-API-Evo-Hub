@@ -195,13 +195,20 @@ export async function sendWhatsAppTemplateMessage(
   templateName: string,
   languageCode: string,
   bodyParams: string[],
-  buttonPayloads?: string[]
+  buttonPayloads?: string[],
+  headerMediaId?: string
 ): Promise<{ messageId?: string }> {
   if (!phoneNumberId || !accessToken) {
     throw new Error('META_PHONE_NUMBER_ID ou META_ACCESS_TOKEN ausentes — não é possível enviar mensagem via Meta Cloud API.');
   }
 
   const components: Record<string, unknown>[] = [];
+  // Header de imagem (disparo em massa, TASK-0171) — o media_id é enviado
+  // uma única vez por campanha (não por destinatário) e reaproveitado aqui
+  // pra cada envio, ver broadcastSenderJob.ts.
+  if (headerMediaId) {
+    components.push({ type: 'header', parameters: [{ type: 'image', image: { id: headerMediaId } }] });
+  }
   if (bodyParams.length) {
     components.push({ type: 'body', parameters: bodyParams.map((text) => ({ type: 'text', text })) });
   }
