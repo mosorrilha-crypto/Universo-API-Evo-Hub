@@ -35,8 +35,8 @@ export interface StoredMessage {
   /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
   forwardedFromMessageId?: string;
   reactions?: MessageReaction[];
-  /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel (ver issue #126). */
-  sentBy?: 'ai' | 'operator';
+  /** Só presente quando sender='agent' — distingue resposta automática da IA, mensagem digitada manualmente por um operador no painel (ver issue #126), ou envio automático de campanha de disparo em massa (TASK-0171). */
+  sentBy?: 'ai' | 'operator' | 'campaign';
 }
 
 export interface GeoRestriction {
@@ -68,6 +68,8 @@ export interface StoredConversation {
   unreadCount: number;
   /** Só na resposta resumida da lista: identifica mudança sem transportar todo o histórico. */
   lastMessageId?: string;
+  /** Número do tenant que esta conversa usa (nulo = número principal/legado) — ver resolveCredentialsForConversation. */
+  phoneNumberId?: string | null;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -93,6 +95,8 @@ type ConversationRow = {
   ai_blocked_at: string | null;
   ad_greeting_matched_at: string | null;
   last_read_at: string;
+  /** Qual número do tenant esta conversa usa (principal, ou um broadcast_numbers) — ver getOrCreateConversationForBroadcast/resolveCredentialsForConversation. */
+  phone_number_id: string | null;
   messages?: MessageRow[];
 };
 
@@ -118,7 +122,7 @@ type MessageRow = {
   reply_to_message_id: string | null;
   forwarded_from_message_id: string | null;
   reactions: MessageReaction[] | null;
-  sent_by: 'ai' | 'operator' | null;
+  sent_by: 'ai' | 'operator' | 'campaign' | null;
 };
 
 /** Conta mensagens do lead chegadas depois de lastReadAt — extraída à parte pra ser testável sem depender do formato de embed relacional do Supabase. */
@@ -139,6 +143,7 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     adHeadline: row.ad_headline || undefined,
     aiBlockedAt: row.ai_blocked_at || undefined,
     adGreetingMatchedAt: row.ad_greeting_matched_at || undefined,
+    phoneNumberId: row.phone_number_id ?? null,
     unreadCount: countUnreadMessages(row.messages || [], row.last_read_at),
     messages: (row.messages || [])
       .slice()
@@ -220,7 +225,13 @@ export async function markConversationRead(tenantId: string, phone: string): Pro
   emitConversationUpdated(tenantId, phone);
 }
 
-async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string): Promise<{ id: string }> {
+/**
+ * `phoneNumberId` (opcional, TASK-0171) só é usado na CRIAÇÃO — protege o
+ * caso raro de alguém mandar mensagem pra um número de disparo antes de
+ * qualquer campanha ter existido (a conversa ainda não existiria). Uma
+ * conversa já existente nunca tem esse campo alterado aqui.
+ */
+async function getOrCreateConversationRow(tenantId: string, phone: string, name?: string, phoneNumberId?: string): Promise<{ id: string }> {
   const db = getDb();
   const { data: existing } = await db
     .from('conversations')
@@ -238,7 +249,7 @@ async function getOrCreateConversationRow(tenantId: string, phone: string, name?
 
   const { data: created, error } = await db
     .from('conversations')
-    .insert({ tenant_id: tenantId, phone, name: name || null })
+    .insert({ tenant_id: tenantId, phone, name: name || null, phone_number_id: phoneNumberId || null })
     .select('id')
     .single();
   if (error) {
@@ -259,6 +270,58 @@ async function getOrCreateConversationRow(tenantId: string, phone: string, name?
     throw error;
   }
   return created;
+}
+
+/**
+ * TASK-0171 (disparo em massa) — mesmo achar-ou-criar de
+ * `getOrCreateConversationRow`, mas grava `phone_number_id` SÓ na criação.
+ * Uma conversa já existente (contato já conhecido do tenant, ex: já
+ * conversa pelo número operacional do agente) nunca tem seu `phone_number_id`
+ * sobrescrito por um envio de campanha — é exatamente essa reatribuição
+ * silenciosa que quebraria o roteamento de uma relação já em andamento (ver
+ * "Deduplicação e colisão com contato existente" no planejamento da
+ * feature). O chamador usa o `phoneNumberId` retornado (não necessariamente
+ * o do broadcast_number original) para resolver as credenciais de envio via
+ * `resolveCredentialsForConversation`.
+ */
+export async function getOrCreateConversationForBroadcast(
+  tenantId: string,
+  phone: string,
+  name: string | null,
+  broadcastPhoneNumberId: string
+): Promise<{ id: string; phoneNumberId: string | null }> {
+  const db = getDb();
+  const { data: existing } = await db
+    .from('conversations')
+    .select('id, phone_number_id')
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone)
+    .maybeSingle();
+  if (existing) {
+    return { id: existing.id, phoneNumberId: existing.phone_number_id ?? null };
+  }
+
+  const { data: created, error } = await db
+    .from('conversations')
+    .insert({ tenant_id: tenantId, phone, name: name || null, phone_number_id: broadcastPhoneNumberId })
+    .select('id, phone_number_id')
+    .single();
+  if (error) {
+    if (error.code === '23505') {
+      // race: outra chamada concorrente já criou essa conversa entre o
+      // SELECT e o INSERT acima — busca a linha real (com o phone_number_id
+      // que ela ficou tendo de verdade) em vez de propagar o erro.
+      const { data: existingAfterRace } = await db
+        .from('conversations')
+        .select('id, phone_number_id')
+        .eq('tenant_id', tenantId)
+        .eq('phone', phone)
+        .maybeSingle();
+      if (existingAfterRace) return { id: existingAfterRace.id, phoneNumberId: existingAfterRace.phone_number_id ?? null };
+    }
+    throw new Error(`Falha ao criar/buscar conversa pra disparo em massa: ${error.message}`);
+  }
+  return { id: created.id, phoneNumberId: created.phone_number_id ?? null };
 }
 
 export interface AdReferral {
@@ -383,10 +446,12 @@ export async function recordIncomingMessage(
   name: string | undefined,
   message: Omit<StoredMessage, 'id' | 'sender'>,
   customId?: string,
-  replyToMessageId?: string
+  replyToMessageId?: string,
+  /** TASK-0171 — número (Meta) que essa mensagem chegou, só usado se a conversa ainda não existir (ver getOrCreateConversationRow). */
+  phoneNumberId?: string
 ): Promise<StoredConversation> {
   const db = getDb();
-  const conv = await getOrCreateConversationRow(tenantId, phone, name);
+  const conv = await getOrCreateConversationRow(tenantId, phone, name, phoneNumberId);
   const id = customId || `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const { error } = await db
     .from('messages')
@@ -410,8 +475,8 @@ export async function recordOutgoingMessage(
   tenantId: string,
   phone: string,
   message: Omit<StoredMessage, 'id' | 'sender'>,
-  /** Quem gerou esta mensagem de verdade — resposta automática da IA ou digitada manualmente por um operador no painel (ver issue #126). Sempre obrigatório: toda chamada precisa decidir explicitamente qual dos dois é. */
-  sentBy: 'ai' | 'operator',
+  /** Quem gerou esta mensagem de verdade — resposta automática da IA, digitada manualmente por um operador no painel (ver issue #126), ou um envio automático de campanha de disparo em massa (TASK-0171, nunca confundir com 'operator': ninguém digitou isso na hora). Sempre obrigatório: toda chamada precisa decidir explicitamente qual das três é. */
+  sentBy: 'ai' | 'operator' | 'campaign',
   replyToMessageId?: string,
   forwardedFromMessageId?: string,
   /** ID pré-gerado pra essa mensagem — usado quando quem chama precisa saber o id ANTES de gravar (ex: pra salvar a mídia real sob o mesmo id em mediaImageStore, ver /send-media em conversations.ts). Sem isso, o id só existia dentro desta função e ninguém conseguia associar o áudio/imagem enviado à mensagem gravada. */
@@ -582,6 +647,20 @@ export async function listConversations(tenantId: string, opts: { includeArchive
   }));
   const visible = opts.includeArchived ? all : all.filter((c) => !c.archivedAt);
   return visible.sort(sortConversations);
+}
+
+/**
+ * Consulta leve (sem histórico de mensagens) só do `phone_number_id` da
+ * conversa — usado antes de qualquer envio de resposta (manual ou da IA)
+ * pra saber qual número usar (ver `resolveCredentialsForConversation`).
+ * `null` tanto pra conversa legada (nunca setou) quanto pra conversa
+ * inexistente ainda — em ambos os casos o resolvedor cai no número
+ * operacional do tenant, que é o comportamento de sempre.
+ */
+export async function getConversationPhoneNumberId(tenantId: string, phone: string): Promise<string | null> {
+  const db = getDb();
+  const { data } = await db.from('conversations').select('phone_number_id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+  return data?.phone_number_id ?? null;
 }
 
 export async function getConversation(tenantId: string, phone: string): Promise<StoredConversation | undefined> {

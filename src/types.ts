@@ -353,8 +353,8 @@ export interface ChatMessage {
   /** id da mensagem original de onde esta foi encaminhada — metadado só do painel. */
   forwardedFromMessageId?: string;
   reactions?: MessageReaction[];
-  /** Só presente quando sender='agent' — distingue resposta automática da IA de mensagem digitada manualmente por um operador no painel. */
-  sentBy?: 'ai' | 'operator';
+  /** Só presente quando sender='agent' — distingue resposta automática da IA, mensagem digitada manualmente por um operador no painel, ou envio automático de campanha de disparo em massa. */
+  sentBy?: 'ai' | 'operator' | 'campaign';
 }
 
 export interface ExtractedCRMData {
