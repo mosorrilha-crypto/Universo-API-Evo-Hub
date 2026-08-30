@@ -134,7 +134,7 @@ export function QuickRepliesMenu({
               }`
         }
       >
-        <Zap className={compact ? 'w-5 h-5' : 'w-3 h-3'} />
+        <Zap className={compact ? 'w-6 h-6' : 'w-3 h-3'} />
         {!compact && <span>{isSpanish ? 'Respuestas' : 'Respostas'}</span>}
       </button>
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ActiveTab,
   Tenant,
@@ -483,6 +483,32 @@ export const App: React.FC = () => {
   // Atendimento enquanto o operador está numa conversa, igual ao app real
   // do WhatsApp (pedido direto, 29/08/2026). Sem efeito no desktop.
   const [isMobileWhatsAppThreadOpen, setIsMobileWhatsAppThreadOpen] = useState(false);
+
+  // Achado real, 29/08/2026 (TASK-0159 resolveu a cadeia de flex interna do
+  // Atendimento, mas a lista de conversas mobile — cabeçalho global visível —
+  // continuava passando um pouco da tela): o wrapper do Atendimento em
+  // App.tsx usa `h-[calc(100dvh-1.5rem)]`, que só cancela o padding do
+  // próprio `.app-main` — nunca soube quanto o <Header/> acima dele mede de
+  // verdade (varia por breakpoint/conteúdo do seletor de empresa). Em vez de
+  // chutar mais um valor fixo (mesmo erro das seis tentativas anteriores),
+  // mede a altura real do Header via ResizeObserver — inclusive quando ele
+  // vira `display:none` (fica 0 automaticamente) enquanto uma conversa está
+  // aberta — e alimenta uma custom property CSS que o cálculo usa.
+  const atendimentoHeaderRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = atendimentoHeaderRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const applyHeight = (height: number) => {
+      document.documentElement.style.setProperty('--atendimento-header-h', `${height}px`);
+    };
+    applyHeight(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) applyHeight(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Transcripts
   const [savedTranscripts, setSavedTranscripts] = useState<SavedTranscriptItem[]>([]);
@@ -1255,7 +1281,7 @@ export const App: React.FC = () => {
           visível — as três colunas do Atendimento já ficam lado a lado lá,
           então não existe o "modo conversa em tela cheia" que faz sentido
           só no mobile. */}
-      <div className={isMobileWhatsAppThreadOpen ? 'hidden lg:block' : ''}>
+      <div ref={atendimentoHeaderRef} className={isMobileWhatsAppThreadOpen ? 'hidden lg:block' : ''}>
       <Header
         activeTab={activeTab}
         setActiveTab={handleSetActiveTab}
@@ -1286,7 +1312,17 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Content Area */}
-      <main className="app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8">
+      {/* app-main--atendimento-thread — achado real, 29/08/2026: o
+          .atendimento-chat-shell já é desenhado pra ir de ponta a ponta na
+          tela (border-0 rounded-none, fundo #111b21 igual ao WhatsApp real),
+          mas o padding horizontal do .app-main (herdado por TODAS as abas)
+          nunca era zerado especificamente pra esse estado — sobrava uma
+          faixa da cor de fundo do app nas duas laterais, exatamente onde o
+          WhatsApp real não deixa nenhuma. Só as bordas laterais são
+          zeradas (ver regra no index.css) — o vertical continua igual, pra
+          não desalinhar o cálculo de altura da TASK-0162 (que cancela
+          exatamente 1.5rem de padding vertical). */}
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' && isMobileWhatsAppThreadOpen ? ' app-main--atendimento-thread' : ''}`}>
         
         {/* Toast Alert */}
         {toastMsg && (
@@ -1350,15 +1386,24 @@ export const App: React.FC = () => {
             de .app-main (p-3/sm:p-6) nesses breakpoints; em lg (desktop) a
             aba volta ao fluxo normal (lg:block lg:h-auto), como sempre foi
             — o cálculo interno lg:h-[calc(100dvh-154px)] do chat-shell já
-            resolve isso sozinho lá. */}
-        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-1.5rem)] sm:h-[calc(100dvh-3rem)] lg:block lg:h-auto' : 'hidden'}>
+            resolve isso sozinho lá.
+
+            Achado real, 29/08/2026 (TASK-0162): esse cálculo nunca soube
+            quanto o <Header/> global mede quando está visível (lista de
+            conversas, sem conversa aberta) — sobrava exatamente essa altura
+            embaixo da tela, mesmo depois da TASK-0159 corrigir a cadeia de
+            flex interna. var(--atendimento-header-h) é medida de verdade via
+            ResizeObserver (ver useEffect perto de isMobileWhatsAppThreadOpen)
+            — 0px quando o Header está escondido (conversa aberta), altura
+            real caso contrário. Sem isso, mais um valor chutado igual às
+            seis tentativas anteriores. */}
+        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px)-1.5rem)] sm:h-[calc(100dvh-var(--atendimento-header-h,0px)-3rem)] lg:block lg:h-auto' : 'hidden'}>
           <AtendimentoWorkspaceFrame
             activeTenantName={activeTenant.name}
             activeTenant={activeTenant}
             tenants={tenants}
             canSwitchTenant={canSeeSaasMaster}
             onSelectTenant={handleSelectTenant}
-            hideHeaderOnMobile={isMobileWhatsAppThreadOpen}
           >
           <WhatsAppLeadsSim
             key={activeTenant.id}

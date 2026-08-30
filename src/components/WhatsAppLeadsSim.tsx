@@ -37,6 +37,7 @@ import {
   Paperclip,
   CheckCheck,
   Bot,
+  IdCard,
   UserCheck,
   Search,
   Smile,
@@ -2994,7 +2995,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   return (
-    <div className="atendimento-conversations space-y-4 max-w-7xl mx-auto animate-page-enter">
+    // flex flex-col min-h-0 — achado real, 29/08/2026: sem isso, este div
+    // (pai direto do .atendimento-chat-shell) tinha altura `auto`
+    // (conteúdo), então `h-full`/`flex-1` no chat-shell não tinha nada de
+    // concreto pra herdar e caía de volta pro `min-h-[560px]` — a causa
+    // raiz real por trás de TODAS as tentativas anteriores (TASK-0150/
+    // 0153/0155/0157/0158) de acertar a altura no mobile. Com este div
+    // sendo flex-col, o chat-shell (último filho, `flex-1 min-h-0`) passa
+    // a ocupar de verdade o espaço que sobra depois da barra de controles
+    // acima dele.
+    <div className="atendimento-conversations space-y-4 max-w-7xl mx-auto animate-page-enter flex flex-col flex-1 min-h-0">
       {/* Controls Bar — achado real em produção: as duas barras acima disso
           (seletor "Ambiente" produção/sandbox e o card "Instância Online" /
           "Motor: Z-API Managed" / "Failover Ativo" / botões "Número Real &
@@ -3007,8 +3017,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           ela ainda). Removidas — poluíam a tela com informação falsa sobre
           o estado da conexão real (que é sempre a resolvida pelo JWT/
           phone_number_id no backend, nunca essa seleção local). "Limpar
-          Testes" era o único botão real desse trecho — preservado abaixo. */}
-      <div className="relative p-3 rounded-card bg-[var(--surface-panel)] border border-[var(--line-subtle)] shadow-xl shadow-slate-950/25 space-y-2.5">
+          Testes" era o único botão real desse trecho — preservado abaixo.
+
+          Achado real, 29/08/2026 (pedido do dono do produto com print,
+          "ficou um espaço no top" comparando com o WhatsApp real): todo
+          botão desta fileira já é `hidden sm:flex`/`hidden lg:flex` ou fica
+          dentro do `hidden sm:contents` logo abaixo — no mobile, com o
+          painel de Ferramentas fechado (estado padrão), este cartão inteiro
+          renderizava vazio (só padding/borda/sombra), empurrando a conversa
+          pra baixo à toa. Escondido no mobile especificamente quando não há
+          nada pra mostrar; continua visível quando o painel de Ferramentas
+          está aberto (mobileThreadOpen usa a mesma `isToolbarSettingsOpen`
+          — é o destino real da aba inferior "Ferramentas", TASK-0147) e
+          sempre visível a partir de `sm` (tablet/desktop), onde a fileira
+          já tem conteúdo de verdade. */}
+      <div className={`relative p-3 rounded-card bg-[var(--surface-panel)] border border-[var(--line-subtle)] shadow-xl shadow-slate-950/25 space-y-2.5${isToolbarSettingsOpen ? '' : ' hidden sm:block'}`}>
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -3369,18 +3392,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           leads ou todas as mensagens) em vez de rolar por dentro, e o campo
           de digitar mensagem (fixo no fim da coluna) acaba empurrado pra
           baixo de tudo, exigindo rolar a página inteira até ele.
-          No mobile a altura vem de `h-full` (100% de `.atendimento-workspace__content`,
-          que por sua vez é `flex:1` dentro de `.atendimento-workspace`, que é
-          `height:100%` dentro do wrapper com altura real calculada em
-          App.tsx) — depois de três rodadas tentando acertar isso com
-          valores fixos de `dvh`/`%` chutados (TASK-0150/0153/0157, cada um
-          sobrando ou faltando espaço em telas reais diferentes), `h-full`
-          elimina o chute: o frame sempre ocupa exatamente o que sobrar do
-          chrome que estiver visível (cabeçalhos + barra inferior, quando
-          aparecem, ou nada, quando estão escondidos), sem precisar saber
-          de antemão quanto esse chrome mede. Em `lg` (desktop) mantém o
-          cálculo fixo original, que já funcionava. */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 h-full lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
+          No mobile a altura vem de `flex-1 min-h-0` — este div é o último
+          filho do `.atendimento-conversations` pai (agora `flex flex-col`),
+          que por sua vez é filho de `.atendimento-workspace__content`
+          (`flex:1` dentro de `.atendimento-workspace`, `height:100%` dentro
+          do wrapper com altura real calculada em App.tsx). Depois de QUATRO
+          rodadas tentando acertar isso com valores fixos de `dvh`/`%`
+          chutados (TASK-0150/0153/0157/0158, cada um sobrando ou faltando
+          espaço em telas reais diferentes — a raiz real só foi encontrada
+          na TASK-0159: o `.atendimento-conversations` pai não tinha altura
+          nem era flex, então nenhum valor de altura no chat-shell tinha o
+          que herdar, incluindo o `h-full` da TASK-0158), essa cadeia de
+          flexbox elimina o chute de vez: o frame sempre ocupa exatamente o
+          que sobrar do chrome visível, sem precisar saber de antemão quanto
+          esse chrome mede. Em `lg` (desktop) mantém o cálculo fixo
+          original, que já funcionava (`lg:flex-none` evita que o
+          `flex-1` do mobile dispute espaço com a altura fixa). */}
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 lg:flex-none lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
@@ -3623,7 +3651,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               title={selectedLead ? undefined : 'Selecione uma conversa pra ver a ficha'}
               className="atendimento-bottom-nav__item"
             >
-              <Bot className="w-[18px] h-[18px]" />
+              {/* Achado real, 29/08/2026 (pedido do dono do produto): ícone
+                  de robô genérico não combinava com "Ficha" (registro/
+                  perfil do contato) — IdCard representa melhor uma ficha de
+                  verdade; o texto do rótulo já deixa claro que é IA. */}
+              <IdCard className="w-[18px] h-[18px]" />
               <span>Ficha IA</span>
             </button>
             <button
@@ -4036,22 +4068,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     inventar uma bolha enviada pelo agente. `adHeadline` é
                     referral real; `adGreetingMatchedAt` também pode vir de
                     gatilho textual ou marcação manual do operador. */}
+                {/* Achado real, 29/08/2026 (pedido do dono do produto com print):
+                    "banner de lead muito grande" — no celular real, esse aviso
+                    ocupava boa parte da primeira tela do chat. Compactado
+                    (padding/ícone/fonte menores, entrelinha mais justa) sem
+                    tirar nenhuma informação. */}
                 {(selectedLead.adHeadline || selectedLead.adGreetingMatchedAt) && (
-                  <div className="mx-auto w-full max-w-md rounded-xl border border-amber-500/25 bg-amber-950/20 px-3.5 py-3 shadow-sm">
-                    <div className="flex items-start gap-2.5">
-                      <div className="mt-0.5 rounded-lg bg-amber-400/10 p-1.5 text-amber-300">
-                        <Megaphone className="h-4 w-4" />
+                  <div className="mx-auto w-full max-w-md rounded-lg border border-amber-500/25 bg-amber-950/20 px-2.5 py-2 shadow-sm">
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 rounded-md bg-amber-400/10 p-1 text-amber-300">
+                        <Megaphone className="h-3.5 w-3.5" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-amber-300">
                           {selectedLead.adHeadline ? 'Anúncio do Facebook' : 'Lead marcado como anúncio'}
                         </p>
-                        <p className="mt-1 text-xs leading-relaxed text-slate-300">
+                        <p className="mt-0.5 text-[11px] leading-snug text-slate-300">
                           {selectedLead.adHeadline
                             ? <>Esta conversa veio do anúncio <span className="font-semibold text-amber-100">“{selectedLead.adHeadline}”</span>.</>
                             : 'Esta conversa foi identificada como lead de anúncio por um gatilho ou por uma marcação do operador.'}
                         </p>
-                        <p className="mt-1.5 text-[10px] text-slate-500">Origem da conversa · não é uma mensagem enviada pelo agente</p>
+                        <p className="mt-1 text-[9px] text-slate-500">Origem da conversa · não é uma mensagem enviada pelo agente</p>
                       </div>
                     </div>
                   </div>
@@ -4220,7 +4257,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         )}
 
                         <div
-                          className={`max-w-[85%] rounded-xl shadow-sm text-xs relative overflow-hidden ${isLead ? 'rounded-tl-none' : 'rounded-tr-none'} ${
+                          className={`max-w-[85%] rounded-xl shadow-sm text-sm relative overflow-hidden ${isLead ? 'rounded-tl-none' : 'rounded-tr-none'} ${
                             isLead || isMediaBubble
                               ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'
@@ -4563,6 +4600,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
 
                 {/* WhatsApp Style Text Input Form */}
+                {/* Achado real, 29/08/2026 (pedido do dono do produto,
+                    comparação lado a lado com o app real): a caixa de texto
+                    e os ícones estavam menores que o WhatsApp de verdade.
+                    Ícones 20px -> 24px (w-5 -> w-6), campo de texto
+                    text-xs/py-2.5 -> text-sm/py-3 (fonte e altura mais
+                    perto do real), botão de enviar/mic 36px -> 44px
+                    (w-9 -> w-11, ícone w-4 -> w-5) — mesma proporção do
+                    círculo verde do WhatsApp. */}
                 {/* space-x-1 (não -2) e min-w-0 na caixa de texto: sem
                     isso o <input> segura sua largura mínima padrão do
                     navegador e empurra tudo que vem depois (respostas
@@ -4605,7 +4650,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                       title="Emoji"
                     >
-                      <Smile className="w-5 h-5" />
+                      <Smile className="w-6 h-6" />
                     </button>
                     {showComposerEmojiPicker && (
                       <>
@@ -4661,7 +4706,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
                     className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer flex-shrink-0"
                   >
-                    <Paperclip className="w-5 h-5" />
+                    <Paperclip className="w-6 h-6" />
                   </button>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
@@ -4674,7 +4719,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    className="flex-1 min-w-0 bg-[#2a3942] text-xs text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="flex-1 min-w-0 bg-[#2a3942] text-sm text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-3 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
 
                   {/* Respostas rápidas — ícone discreto à direita da caixa de
@@ -4701,15 +4746,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   {inputMessage.trim() ? (
                     <button
                       type="submit"
-                      className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all cursor-pointer flex-shrink-0"
+                      className="w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 flex items-center justify-center transition-all cursor-pointer flex-shrink-0"
                     >
-                      <Send className="w-4 h-4 ml-0.5" />
+                      <Send className="w-5 h-5 ml-0.5" />
                     </button>
                   ) : (
                     <button
                       type="button"
                       onClick={() => (selectedLead as any)?.isReal ? handleToggleRealRecording() : handleSendAudioNote()}
-                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
+                      className={`w-11 h-11 rounded-full flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
                         isRecordingReal ? 'bg-red-500/20 text-red-300 animate-pulse' : 'bg-emerald-500 hover:bg-emerald-600 text-slate-950'
                       }`}
                       title={
@@ -4718,7 +4763,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           : (selectedLead as any)?.isReal ? 'Gravar áudio real' : 'Simular Envio de Áudio'
                       }
                     >
-                      <Mic className="w-4 h-4" />
+                      <Mic className="w-5 h-5" />
                     </button>
                   )}
                 </form>
