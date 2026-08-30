@@ -115,6 +115,17 @@ describe('POST /api/conversations/:phone/send-media — transcreve áudio enviad
     expect(savedMessage.text).not.toBe('🎤 Áudio enviado');
   });
 
+  it('achado real (29/08/2026): grava um texto legível, nunca a string vazia, quando não há fala real detectada (source "gemini" com transcription "")', async () => {
+    transcribeAudioWithGemini.mockResolvedValue({ source: 'gemini', result: { transcription: '' } });
+
+    const res = await sendAudio();
+    expect(res.status).toBe(200);
+
+    const savedMessage = supabase.__tables.messages.find((m: any) => m.type === 'audio');
+    expect(savedMessage.text).toBe('[Áudio sem fala detectável]');
+    expect(savedMessage.text).not.toBe('');
+  });
+
   it('grava o mesmo texto de fallback do lado de entrada quando o Gemini falha/está indisponível', async () => {
     transcribeAudioWithGemini.mockResolvedValue({ source: 'fallback', result: { transcription: '[Não foi possível transcrever o áudio no momento]' } });
 

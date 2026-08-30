@@ -311,7 +311,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
     });
 
-    await updateMessageText(tenantId, phone, messageId, outcome.result.transcription);
+    // Mesmo critério de /send-media acima e de transcriptionQueue.ts: sem
+    // fala real detectada, grava um texto legível em vez da string vazia.
+    const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+    await updateMessageText(tenantId, phone, messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
 
     res.json({ success: outcome.source === 'gemini', source: outcome.source, transcription: outcome.result.transcription });
   }));
@@ -683,7 +686,14 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
             leadName: conv?.name,
             customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
           });
-          await updateMessageText(tenantId, req.params.phone, messageId, outcome.result.transcription);
+          // Achado real (29/08/2026): sem fala real detectada, transcription
+          // vem vazia ("") — gravar isso direto como texto da mensagem
+          // sobrescrevia o placeholder "🎤 Áudio enviado" por uma legenda em
+          // branco, tão confuso quanto a transcrição alucinada que esse
+          // mecanismo existe pra evitar. Mesmo texto/critério já usado em
+          // transcriptionQueue.ts (áudio recebido do cliente).
+          const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+          await updateMessageText(tenantId, req.params.phone, messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
         } catch (transcriptionError) {
           console.warn(`⚠️  [Conversas] Falha ao transcrever áudio enviado (messageId=${messageId}):`, (transcriptionError as Error).message);
         }
