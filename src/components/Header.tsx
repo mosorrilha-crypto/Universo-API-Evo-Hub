@@ -79,18 +79,29 @@ export const Header: React.FC<HeaderProps> = ({
   const [desktopMenuPosition, setDesktopMenuPosition] = useState<DesktopMenuPosition | null>(null);
   const isSpanish = language === 'es';
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'blue' : theme === 'blue' ? 'clean' : 'dark');
-  // O SaaS Admin mantém visão administrativa integral para operar e liberar
-  // recursos por empresa; os administradores internos seguem o entitlement.
+  // A navegação só aparece quando o papel tem permissão E a capacidade está
+  // habilitada para a empresa ativa. O segundo critério impede que o Admin
+  // SaaS veja, no tenant selecionado, recursos bloqueados no card de
+  // controle — revertido em 30/08/2026 (pedido direto do dono do produto)
+  // depois que um commit anterior ("fix: preserva acesso do saas admin aos
+  // recursos", 27/08/2026) fez o SaaS Admin ignorar `capabilities` e ver
+  // tudo sempre "para auditoria": na prática isso quebrou a função de
+  // pré-visualizar uma empresa exatamente como ela é (ex: Clic Piscinas,
+  // que só tem 6 recursos liberados, aparecia com todos). A única coisa
+  // exclusiva do SaaS Admin continua sendo o próprio seletor de empresas
+  // (`canSeeSaasMaster`, usado abaixo em `saasNavigation`/tenant menu) pra
+  // voltar à conta principal — Logs do Sistema é a exceção intencional que
+  // sempre foi assim (o SaaS Admin sempre audita, ver comentário abaixo).
   const canSeeSaasMaster = canAccessSaasAdmin ?? hasRoleAtLeast(currentUser?.role, 'saas_admin');
-  const canSeeConversations = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.conversations);
-  const canSeeCrm = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.crm);
-  const canSeeAgenda = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.agenda);
-  const canSeeFinancial = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.financial);
+  const canSeeConversations = hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.conversations;
+  const canSeeCrm = hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.crm;
+  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.agenda;
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.financial;
   const canSeeSystemLogs = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.systemLogs);
-  const canSeeGrowth = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.growth);
-  const canSeeAgentTools = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.agent);
-  const canSeeCatalog = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.catalog);
-  const canSeeQuality = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.quality);
+  const canSeeGrowth = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.growth;
+  const canSeeAgentTools = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.agent;
+  const canSeeCatalog = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.catalog;
+  const canSeeQuality = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.quality;
 
   const copy = isSpanish ? {
     platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', systemLogs: 'Logs del sistema', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'

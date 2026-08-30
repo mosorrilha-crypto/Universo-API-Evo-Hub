@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LeadInfo } from '../../types';
-import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2, DollarSign } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2, DollarSign, Unlink } from 'lucide-react';
 
 const PAYMENT_METHODS = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'] as const;
 
@@ -162,6 +162,13 @@ interface UpcomingEventsPanelProps {
   onRegisterPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
   /** Edita um pagamento já lançado (etapa 2 do mesmo pedido). */
   onEditPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
+  /** Achado real, 29/08/2026 (pedido do dono do produto): "Desconectar
+   * Calendar" morava num painel genérico de Ferramentas — faz mais sentido
+   * aqui dentro, junto do resto das ações de calendário. `undefined` quando
+   * o chamador ainda não sabe o estado da conexão (mesma convenção do botão
+   * "conectar/ver agenda" no WhatsAppLeadsSim). */
+  googleCalendarConnected: boolean | null;
+  onDisconnectCalendar: () => void;
 }
 
 /** "Hoje" / "Amanhã" / dia da semana curto + data — só pra exibição, não precisa da mesma precisão de fuso do backend (que já resolve tudo antes de mandar o horário). */
@@ -370,6 +377,7 @@ const EventRowControls: React.FC<{
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
   monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary, onReschedule, onDelete, onRegisterPayment, onEditPayment,
+  googleCalendarConnected, onDisconnectCalendar,
 }) => {
   const [isPickingLead, setIsPickingLead] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -481,6 +489,19 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
+            {/* Achado real, 29/08/2026 (pedido do dono do produto): "pode
+                ficar dentro da agenda" — desconectar pra trocar de conta,
+                ação rara mas precisa estar em algum lugar do próprio painel
+                de calendário, não num menu de Ferramentas genérico à parte. */}
+            {googleCalendarConnected && (
+              <button
+                onClick={onDisconnectCalendar}
+                title="Desconectar Google Calendar (pra trocar de conta)"
+                className="p-1.5 text-slate-400 hover:text-rose-300 rounded-lg cursor-pointer"
+              >
+                <Unlink className="w-4 h-4" />
+              </button>
+            )}
             <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer">
               <X className="w-4 h-4" />
             </button>

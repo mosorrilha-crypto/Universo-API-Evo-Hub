@@ -207,19 +207,30 @@ export const App: React.FC = () => {
   const tenantCapabilities = tenantCapabilitiesState.tenantId === activeTenant.id
     ? tenantCapabilitiesState.values
     : EMPTY_TENANT_NAVIGATION_CAPABILITIES;
-  // O SaaS Admin precisa enxergar toda a operação para administrar a plataforma
-  // e liberar recursos por empresa. O bloqueio comercial continua para os
-  // papéis internos de cada tenant e também é reforçado nas rotas protegidas.
+  // Achado real, 30/08/2026 (pedido direto do dono do produto): o SaaS
+  // Admin usa o seletor de empresas pra entrar no contexto de um tenant
+  // específico e ver a operação exatamente como aquela empresa a vê —
+  // inclusive os recursos que ELA não tem liberados. Um commit anterior
+  // ("fix: preserva acesso do saas admin aos recursos", 27/08/2026) tinha
+  // feito o SaaS Admin ignorar `tenantCapabilities` e ver tudo sempre,
+  // achando que isso era necessário "para auditoria" — na prática isso
+  // quebrou exatamente a função de pré-visualizar uma empresa (ex: Clic
+  // Piscinas, que só tem 6 recursos liberados, mostrava todos). Revertido:
+  // a única coisa exclusiva do SaaS Admin continua sendo o próprio seletor
+  // de empresas pra voltar à conta principal (`canSeeSaasMaster`, usado em
+  // `canAccessSaasAdmin`/`canSwitchTenant` abaixo) — cada recurso
+  // operacional individual volta a depender só do papel + do que a empresa
+  // ATIVA tem contratado, igual pra qualquer tenant admin.
   const canSeeSaasMaster = isSaasSessionConfirmed && hasRoleAtLeast(currentUser?.role, 'saas_admin');
-  const canSeeConversations = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.conversations);
-  const canSeeCrm = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.crm);
-  const canSeeAgenda = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.agenda);
-  const canSeeFinancial = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.financial);
+  const canSeeConversations = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.conversations;
+  const canSeeCrm = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.crm;
+  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.agenda;
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.financial;
   const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
-  const canSeeGrowth = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.growth);
-  const canManageAgent = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.agent);
-  const canSeeCatalog = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.catalog);
-  const canSeeQuality = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.quality);
+  const canSeeGrowth = canSeeAdminTools && tenantCapabilities.growth;
+  const canManageAgent = canSeeAdminTools && tenantCapabilities.agent;
+  const canSeeCatalog = canSeeAdminTools && tenantCapabilities.catalog;
+  const canSeeQuality = canSeeAdminTools && tenantCapabilities.quality;
   // Recurso novo: SaaS Admin sempre audita; admins de tenant só acessam após
   // liberação explícita no Centro de Controle para a empresa ativa.
   const canSeeSystemLogs = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.systemLogs);
@@ -231,6 +242,18 @@ export const App: React.FC = () => {
     // Durante o carregamento/login não redireciona a preferência restaurada.
     // A permissão é verificada assim que o usuário real estiver disponível.
     if (!currentUser) return;
+    // Achado real, 29/08/2026 (pedido do dono do produto: "quando recarrego
+    // a página ela volta pra página inicial, não permanece onde está"):
+    // `canSeeConversations`/`canSeeCrm`/etc. dependem de `tenantCapabilities`,
+    // que só chega depois de um fetch assíncrono (/api/me/entitlements) —
+    // antes dele resolver, `tenantCapabilitiesState.tenantId` ainda não bate
+    // com `activeTenant.id` e todas as capacidades ficam `false` por padrão
+    // (EMPTY_TENANT_NAVIGATION_CAPABILITIES), mesmo pra quem tem permissão de
+    // verdade. Como este efeito rodava mesmo nessa janela, ele confundia
+    // "ainda carregando" com "sem permissão" e chamava handleSetActiveTab
+    // ('home') — que também GRAVA 'home' no localStorage, apagando de vez a
+    // aba salva (ex: Atendimento) a cada recarregamento de página.
+    if (tenantCapabilitiesState.tenantId !== activeTenant.id) return;
     const blocked =
       (activeTab === 'saas' && !canSeeSaasMaster) ||
       (activeTab === 'whatsapp' && !canSeeConversations) ||
@@ -244,7 +267,7 @@ export const App: React.FC = () => {
       (activeTab === 'system_logs' && !canSeeSystemLogs);
     if (blocked) handleSetActiveTab('home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, currentUser?.role]);
+  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
 
   // A decisão vem do contrato self-scoped do tenant e falha fechada. O estado
   // carrega o tenant de origem, evitando que uma troca de empresa mostre por
@@ -1312,17 +1335,22 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Content Area */}
-      {/* app-main--atendimento-thread — achado real, 29/08/2026: o
+      {/* app-main--atendimento — achado real, 29/08/2026: o
           .atendimento-chat-shell já é desenhado pra ir de ponta a ponta na
           tela (border-0 rounded-none, fundo #111b21 igual ao WhatsApp real),
           mas o padding horizontal do .app-main (herdado por TODAS as abas)
-          nunca era zerado especificamente pra esse estado — sobrava uma
-          faixa da cor de fundo do app nas duas laterais, exatamente onde o
-          WhatsApp real não deixa nenhuma. Só as bordas laterais são
-          zeradas (ver regra no index.css) — o vertical continua igual, pra
-          não desalinhar o cálculo de altura da TASK-0162 (que cancela
-          exatamente 1.5rem de padding vertical). */}
-      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' && isMobileWhatsAppThreadOpen ? ' app-main--atendimento-thread' : ''}`}>
+          nunca era zerado — sobrava uma faixa da cor de fundo do app
+          (--surface-deep, quase preto) nas duas laterais, exatamente onde o
+          WhatsApp real não deixa nenhuma. Escopo ampliado (TASK-0163
+          cobria só a conversa aberta): o dono do produto apontou que a
+          MESMA faixa lateral aparece na lista de conversas também, ao redor
+          da barra de abas inferior (.atendimento-bottom-nav, que tem seu
+          próprio fundo --surface-panel) — por isso a condição não depende
+          mais de `isMobileWhatsAppThreadOpen`, só da aba ativa. Só as
+          bordas laterais são zeradas (ver regra no index.css) — o vertical
+          continua igual, pra não desalinhar o cálculo de altura da
+          TASK-0162 (que cancela exatamente 1.5rem de padding vertical). */}
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' ? ' app-main--atendimento' : ''}`}>
         
         {/* Toast Alert */}
         {toastMsg && (
@@ -1409,7 +1437,6 @@ export const App: React.FC = () => {
             key={activeTenant.id}
             knowledgeBase={knowledgeBase}
             activeTenant={activeTenant}
-            canManageWhatsAppConnection={canSeeAdminTools}
             onSaveTranscript={(item) => {
               setSavedTranscripts((prev) => [item, ...prev]);
               showToast('Atendimento salvo no histórico');
@@ -1513,6 +1540,7 @@ export const App: React.FC = () => {
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
             activeTenantId={activeTenant.id}
+            canManageWhatsAppConnection={canSeeAdminTools}
             usesPublishedKnowledgeBase
             businessHours={businessHours}
             onSaveBusinessHours={async (updatedHours) => {

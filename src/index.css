@@ -1673,16 +1673,20 @@ html[data-theme='clean'] .operations-module-frame__header {
     padding: .75rem;
   }
 
-  /* Achado real, 29/08/2026: com uma conversa aberta no Atendimento mobile,
-     o chat já é desenhado pra ir de ponta a ponta (.atendimento-chat-shell:
-     border-0, rounded-none, fundo #111b21 igual ao WhatsApp real) — mas o
-     padding horizontal herdado do .app-main (acima) sobrava como uma faixa
-     da cor de fundo do app nas duas laterais. Zera só left/right (dois
-     class no seletor = especificidade maior que a regra `.app-main` isolada
-     acima, então ganha sem precisar de !important); o padding vertical
-     continua igual, porque o cálculo de altura da TASK-0162 em App.tsx
-     (h-[calc(100dvh-...-1.5rem)]) já conta com ele. */
-  .app-main.app-main--atendimento-thread {
+  /* Achado real, 29/08/2026: no Atendimento mobile (lista OU conversa
+     aberta), o padding horizontal herdado do .app-main (acima) sobrava como
+     uma faixa da cor de fundo do app (--surface-deep) nas duas laterais —
+     tanto ao redor do chat (que já é desenhado pra ir de ponta a ponta:
+     .atendimento-chat-shell border-0/rounded-none/#111b21) quanto ao redor
+     da barra de abas inferior (.atendimento-bottom-nav, fundo próprio
+     --surface-panel), que por isso também parecia "com margem" e "com um
+     fundo escuro" ao redor (era o fundo do .app-main aparecendo nos 2
+     cantos laterais, pedido do dono do produto, 29/08/2026). Zera só
+     left/right (dois class no seletor = especificidade maior que a regra
+     `.app-main` isolada acima, então ganha sem precisar de !important); o
+     padding vertical continua igual, porque o cálculo de altura da
+     TASK-0162 em App.tsx (h-[calc(100dvh-...-1.5rem)]) já conta com ele. */
+  .app-main.app-main--atendimento {
     padding-left: 0;
     padding-right: 0;
   }
