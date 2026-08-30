@@ -6,6 +6,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { AgentKnowledgeBase, AgentProduct, ProductVariant, BeforeAfterPair, AgentFAQ, AgentFileDoc, BusinessHours, DayHours, FirstContactBlock, FirstContactBlockType, Tenant } from '../types';
 import { apiFetch } from '../lib/apiClient';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
+import { ReconectarWhatsAppQrCode } from './ReconectarWhatsAppQrCode';
 import {
   Brain,
   Sparkles,
@@ -79,6 +80,13 @@ interface AgentKnowledgeBaseProps {
   activeTenantId?: string;
   /** PR4: publicação tipada já é a fonte do agente; blob legado fica só como rollback. */
   usesPublishedKnowledgeBase?: boolean;
+  /** hasRoleAtLeast(currentUser?.role, 'admin') calculado em App.tsx — libera
+   * o botão "Reconectar WhatsApp (QR Code)" pra admin comum do tenant, não
+   * só saas_admin. Movido de `WhatsAppLeadsSim.tsx` (TASK-0167, 29/08/2026,
+   * pedido do dono do produto: "pode ficar nas configurações do tenant
+   * quando admin") — esta tela já é a de configuração operacional vista por
+   * admins. */
+  canManageWhatsAppConnection?: boolean;
 }
 
 /** "0" domingo .. "6" sábado, mesma convenção de server/services/tenantProfileStore.ts (Date.getUTCDay()). */
@@ -469,6 +477,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   publicCatalogSlug,
   activeTenantId,
   usesPublishedKnowledgeBase = false,
+  canManageWhatsAppConnection = false,
 }) => {
   const [formData, setFormData] = useState<AgentKnowledgeBase>(() => ({
     ...knowledgeBase,
@@ -477,6 +486,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     documents: ensureUniqueIds(knowledgeBase.documents, 'doc'),
     firstContactBlocks: ensureUniqueIds(knowledgeBase.firstContactBlocks, 'fcblock'),
   }));
+  // "Reconectar WhatsApp (QR Code)" só existe pra tenants conectados via
+  // Evolution API (QR Code) — a Meta Cloud API oficial não tem esse fluxo.
+  // Mesma checagem que `WhatsAppLeadsSim.tsx` já fazia antes de mover o
+  // botão pra cá (TASK-0167); só busca quando a permissão de admin já libera
+  // o botão, pra não gastar uma chamada à toa pra quem nunca vai ver isso.
+  const [whatsAppQrAvailable, setWhatsAppQrAvailable] = useState(false);
+  useEffect(() => {
+    if (!canManageWhatsAppConnection) return;
+    apiFetch('/api/status/available')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setWhatsAppQrAvailable(!!data?.available))
+      .catch(() => {});
+  }, [canManageWhatsAppConnection]);
   const [isSavedToast, setIsSavedToast] = useState(false);
   const [isSavingKnowledgeBase, setIsSavingKnowledgeBase] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1799,6 +1821,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               <ExternalLink className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Ver catálogo</span>
             </a>
+          )}
+          {/* Achado real, 29/08/2026 (pedido do dono do produto): morava no
+              painel de Ferramentas do Atendimento — mudou pra cá, a tela de
+              configuração operacional do tenant vista por admins (TASK-0167). */}
+          {canManageWhatsAppConnection && whatsAppQrAvailable && activeTenantId && (
+            <ReconectarWhatsAppQrCode tenantId={activeTenantId} />
           )}
           <button
             onClick={handleResetToDefault}
