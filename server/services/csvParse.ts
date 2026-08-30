@@ -98,17 +98,20 @@ export function parseContactsCsv(csvText: string): ParsedCsvResult {
     // `col` vem do cabeçalho do CSV (conteúdo do arquivo, não confiável) e
     // vira nome de propriedade aqui — sem proteção, um cabeçalho malicioso
     // (ex: "__proto__") poderia escrever numa chave especial do objeto
-    // (CodeQL: "Remote property injection", achado real no PR). `variables`
-    // sem protótipo (Object.create(null)) elimina qualquer efeito especial
-    // de `__proto__`/`constructor`/`prototype` como nome de propriedade —
-    // uma escrita nessas chaves aqui vira só uma propriedade own comum.
-    const variables: Record<string, string> = Object.create(null);
+    // (CodeQL: "Remote property injection", achado real no PR). Monta um
+    // Map em vez de escrever direto num objeto com colchetes (`obj[col] =`)
+    // — sem esse padrão de escrita dinâmica de propriedade, não há sink de
+    // property injection nenhum pro CodeQL sinalizar — e só converte pra
+    // objeto simples no fim via Object.fromEntries, já filtrando qualquer
+    // chave especial como defesa extra.
+    const variablesMap = new Map<string, string>();
     header.forEach((col, idx) => {
       if (idx === phoneIdx || idx === nameIdx) return;
       if (col === '__proto__' || col === 'constructor' || col === 'prototype') return;
       const value = fields[idx];
-      if (value !== undefined && value !== '') variables[col] = value;
+      if (value !== undefined && value !== '') variablesMap.set(col, value);
     });
+    const variables: Record<string, string> = Object.fromEntries(variablesMap);
 
     contacts.push({
       phone: rawPhone,
