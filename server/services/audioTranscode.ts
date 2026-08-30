@@ -162,11 +162,19 @@ export async function isAudioEffectivelySilent(base64: string, mimeType?: string
   }
   if (!inputBuffer.length) return false;
 
-  const tmpDir = os.tmpdir();
-  const id = crypto.randomBytes(8).toString('hex');
-  const inputPath = path.join(tmpDir, `silence-check-${id}`);
+  // Achado do CodeQL neste PR (js/insecure-temporary-file, high +
+  // js/tainted-write-file-path-followed-by-request-forgery-like flow,
+  // medium): `path.join(os.tmpdir(), nome-previsível)` seguido de
+  // `fs.writeFile` não é atômico — em tese um processo concorrente no
+  // mesmo host poderia prever/pré-criar esse caminho antes da escrita
+  // (TOCTOU). `fs.mkdtemp` cria o diretório de forma atômica com sufixo
+  // aleatório garantido pelo próprio Node (falha se já existir), sem essa
+  // janela de corrida — é o padrão reconhecido pra isso.
+  let tmpParentDir: string | undefined;
 
   try {
+    tmpParentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'silence-check-'));
+    const inputPath = path.join(tmpParentDir, 'input');
     await fs.writeFile(inputPath, inputBuffer);
     const stderr = await runFfmpegSilenceDetect(inputPath);
 
@@ -193,6 +201,6 @@ export async function isAudioEffectivelySilent(base64: string, mimeType?: string
     console.warn('⚠️  [audioTranscode] Falha ao checar silêncio do áudio (seguindo sem bloquear):', (err as Error)?.message || err);
     return false;
   } finally {
-    await fs.unlink(inputPath).catch(() => {});
+    if (tmpParentDir) await fs.rm(tmpParentDir, { recursive: true, force: true }).catch(() => {});
   }
 }
