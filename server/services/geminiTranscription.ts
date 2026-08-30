@@ -1,5 +1,6 @@
 import type { GoogleGenAI } from '@google/genai';
 import { withGeminiRetry } from '../gemini';
+import { isAudioEffectivelySilent } from './audioTranscode';
 
 export interface TranscriptionResult {
   transcription: string;
@@ -37,7 +38,30 @@ export interface TranscribeAudioOutcome {
  * no prompt (retornar `transcription: ""` sem fala real) + gate em
  * transcriptionQueue.ts que nunca dispara resposta automática nem some a
  * mensagem — escala pra humano do mesmo jeito que uma falha técnica.
+ *
+ * Achado real seguinte (mesmo dia, áudio de 2s gravado pelo operador sem
+ * nenhuma fala): a regra de prompt acima sozinha NÃO bastou — o Gemini
+ * continuou inventando uma transcrição plausível mesmo com a instrução
+ * explícita. Instrução de prompt nunca é garantia (mesmo princípio de todo
+ * outro gate anti-alucinação deste projeto) — adicionado `isAudioEffectivelySilent`
+ * (audioTranscode.ts, mede silêncio real via ffmpeg) como barreira
+ * determinística ANTES de mandar qualquer áudio pro Gemini: se for
+ * silêncio de verdade, nem chama o modelo, fechando essa via de alucinação
+ * na raiz em vez de só pedir educadamente pra ele não inventar.
  */
+function noSpeechDetectedResult(): TranscriptionResult {
+  return {
+    transcription: '',
+    language: 'Desconhecido',
+    summary: 'Áudio sem fala inteligível detectada.',
+    intent: 'Desconhecido',
+    sentiment: 'Neutro',
+    keyPoints: [],
+    suggestedReply: '',
+    urgencyScore: 1,
+  };
+}
+
 export async function transcribeAudioWithGemini(
   ai: GoogleGenAI | null,
   audioBase64: string | undefined,
@@ -45,6 +69,9 @@ export async function transcribeAudioWithGemini(
   opts: { leadName?: string; customInstructions?: string } = {}
 ): Promise<TranscribeAudioOutcome> {
   if (ai && audioBase64) {
+    if (await isAudioEffectivelySilent(audioBase64, mimeType)) {
+      return { source: 'gemini', result: noSpeechDetectedResult() };
+    }
     try {
       const prompt = `Você é um transcritor e analista de áudios de atendimento para WhatsApp CRM.
 Processe o áudio fornecido e responda estritamente em formato JSON com a seguinte estrutura:

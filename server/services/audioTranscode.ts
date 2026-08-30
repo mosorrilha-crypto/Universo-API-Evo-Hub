@@ -101,3 +101,98 @@ export async function transcodeToWhatsAppVoiceNote(
     await fs.unlink(outputPath).catch(() => {});
   }
 }
+
+/**
+ * Achado real de produção (29/08/2026): mesmo com a regra explícita no
+ * prompt do Gemini pra devolver `transcription: ""` sem fala real (ver
+ * geminiTranscription.ts), um áudio de 2s genuinamente sem fala voltou com
+ * uma transcrição completa e plausível inventada — a instrução de prompt
+ * sozinha não é confiável (o mesmo princípio de todo outro gate anti-
+ * alucinação deste projeto: nunca confiar só no modelo se auto-policiar
+ * quando dá pra checar de forma determinística). Usa o filtro
+ * `silencedetect` do próprio ffmpeg (já uma dependência do projeto) pra
+ * medir quanto do áudio é silêncio de verdade, independente do que o
+ * Gemini disser — se quase tudo for silêncio, a chamada ao Gemini nem
+ * acontece, fechando a via de alucinação pro caso mais comum (áudio vazio
+ * gravado sem querer). Áudio com fala real, mesmo curta, nunca passa aqui:
+ * o teste com um tom de 2s (não-silêncio) não gera nenhuma linha
+ * "silence_*" no stderr do ffmpeg.
+ */
+const SILENCE_NOISE_THRESHOLD_DB = -30;
+const SILENCE_MIN_SEGMENT_SECONDS = 0.2;
+/** Fração do áudio que precisa ser silêncio pra considerar "sem fala real". Folga proposital abaixo de 100% pra tolerar um clique/respiração captada no início/fim de uma gravação vazia. */
+const SILENCE_RATIO_THRESHOLD = 0.92;
+
+async function runFfmpegSilenceDetect(inputPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath as unknown as string, [
+      '-i', inputPath,
+      '-af', `silencedetect=noise=${SILENCE_NOISE_THRESHOLD_DB}dB:d=${SILENCE_MIN_SEGMENT_SECONDS}`,
+      '-f', 'null', '-',
+    ]);
+    let stderr = '';
+    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    proc.on('error', reject);
+    // ffmpeg com -f null sempre sai com código 0 quando consegue decodificar
+    // o áudio até o fim — só o stderr importa aqui, nunca há arquivo de saída.
+    proc.on('close', (code) => {
+      if (code === 0) resolve(stderr);
+      else reject(new Error(`ffmpeg (silencedetect) falhou (código ${code}): ${stderr.slice(-500)}`));
+    });
+  });
+}
+
+/**
+ * `true` quando o áudio é, na prática, silêncio inteiro (sem fala real
+ * detectável) — usado como barreira determinística ANTES de mandar o áudio
+ * pro Gemini transcrever, pra nunca depender só da instrução de prompt.
+ * Fail-open por design: qualquer problema pra decidir (ffmpeg indisponível,
+ * áudio corrompido, formato não reconhecido) devolve `false` — nunca bloqueia
+ * um áudio real por falha da própria checagem.
+ */
+export async function isAudioEffectivelySilent(base64: string, mimeType?: string): Promise<boolean> {
+  if (!ffmpegPath) return false;
+
+  const cleanBase64 = stripDataUrlPrefix(base64);
+  let inputBuffer: Buffer;
+  try {
+    inputBuffer = Buffer.from(cleanBase64, 'base64');
+  } catch {
+    return false;
+  }
+  if (!inputBuffer.length) return false;
+
+  const tmpDir = os.tmpdir();
+  const id = crypto.randomBytes(8).toString('hex');
+  const inputPath = path.join(tmpDir, `silence-check-${id}`);
+
+  try {
+    await fs.writeFile(inputPath, inputBuffer);
+    const stderr = await runFfmpegSilenceDetect(inputPath);
+
+    const durationMatch = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (!durationMatch) return false; // não deu pra medir a duração real — não bloqueia por falta de dado.
+    const totalSeconds = Number(durationMatch[1]) * 3600 + Number(durationMatch[2]) * 60 + Number(durationMatch[3]);
+    if (!(totalSeconds > 0)) return false;
+
+    const silenceDurations = [...stderr.matchAll(/silence_duration:\s*(\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
+    let silentSeconds = silenceDurations.reduce((sum, value) => sum + value, 0);
+
+    // Silêncio que já começou mas nunca fechou (o áudio termina em silêncio,
+    // sem mais nenhum som depois) não gera "silence_duration" nenhuma — soma
+    // o trecho do último "silence_start" sem par até o fim do áudio.
+    const startMatches = [...stderr.matchAll(/silence_start:\s*(\d+(?:\.\d+)?)/g)];
+    const endMatches = [...stderr.matchAll(/silence_end:\s*(\d+(?:\.\d+)?)/g)];
+    if (startMatches.length > endMatches.length) {
+      const lastStart = Number(startMatches[startMatches.length - 1][1]);
+      silentSeconds += Math.max(0, totalSeconds - lastStart);
+    }
+
+    return silentSeconds / totalSeconds >= SILENCE_RATIO_THRESHOLD;
+  } catch (err) {
+    console.warn('⚠️  [audioTranscode] Falha ao checar silêncio do áudio (seguindo sem bloquear):', (err as Error)?.message || err);
+    return false;
+  } finally {
+    await fs.unlink(inputPath).catch(() => {});
+  }
+}
