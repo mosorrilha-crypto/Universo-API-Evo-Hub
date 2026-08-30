@@ -121,6 +121,29 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // qualquer outro. Bloqueio é só desse número, não do tenant inteiro
       // (isAgentPaused acima continua valendo pra todos).
       if (conversation?.aiBlockedAt) return;
+      // Achado real (pedido do dono do produto, 30/08/2026): quando o
+      // operador está respondendo manualmente AO VIVO (contato pessoal que
+      // às vezes também é cliente, mesma pessoa numa conversa mista de
+      // negócio+papo pessoal), a IA continuava disparando resposta
+      // automática pra cada mensagem nova do contato — cruzando com a
+      // resposta do operador na mesma janela de segundos. O cliente via as
+      // duas "vozes" ao mesmo tempo (uma resposta de "canal oficial de
+      // atendimento" logo ao lado de "kkkk vamos sin" do operador),
+      // quebrando a ilusão de atendimento humano contínuo — reproduzido
+      // tanto num teste quanto observado numa conversa real. Se o operador
+      // mandou uma mensagem manual pra este número nos últimos minutos, a
+      // IA cede a vez nesta rodada — nenhuma resposta automática enquanto o
+      // operador estiver visivelmente engajado. Reaproveita o histórico já
+      // carregado, sem tabela nova: sentBy='operator' só existe pra
+      // mensagens digitadas de verdade no painel (nunca resposta da IA nem
+      // disparo de campanha, ver StoredMessage.sentBy).
+      const OPERATOR_ACTIVE_PAUSE_MS = 5 * 60 * 1000;
+      const lastOperatorMessage = [...(conversation?.messages || [])]
+        .reverse()
+        .find((m) => m.sender === 'agent' && m.sentBy === 'operator');
+      if (lastOperatorMessage && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS) {
+        return;
+      }
       // Modo "somente anúncios" (pedido real, 14/08/2026): quando o
       // proprietário conecta um número pessoal além do número dedicado do
       // agente (pra não perder mensagem enquanto valida confiança no
