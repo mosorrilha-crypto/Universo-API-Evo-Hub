@@ -1554,6 +1554,37 @@ function noMidiaActionResult(text: string, hasAnyMediaInCatalog: boolean): { act
   return { actionsSummary: [] };
 }
 
+/**
+ * Achado real em produção (Gladys, 30/08/2026, pós-fix da TASK-0156): a
+ * MESMA foto de exemplo foi enviada 3 vezes seguidas em menos de 2 minutos
+ * — cada reação curta e entusiasmada da cliente ("Me gusta sabes 🥰", "Va
+ * ser la primera vez 🙈", "Así ese diseño me gusta 🥰") chegou fora da
+ * janela de silêncio de 10s do messageBuffer (aqui vieram ~45-50s
+ * separadas uma da outra), então cada mensagem disparou um ciclo INTEIRO e
+ * INDEPENDENTE de autoReply — e cada ciclo decidiu de novo, do zero, se
+ * mandava a foto, sem nenhuma memória de que tinha acabado de mandar a
+ * mesma foto minutos antes. TASK-0156 (replySafetyGate.ts) só cobre
+ * repetição de TEXTO na bolha da resposta final; o envio de mídia por
+ * runMidiaTool nunca passava por ali — é uma ação de ferramenta, não uma
+ * bolha de texto revisada pelo gate. O texto da bolha já enviada ("📷 Foto
+ * de exemplo: X") até aparece no histórico que o próprio prompt lê, mas
+ * nada instruía o modelo a tratar isso como "já mandei, não mande de
+ * novo" — mesmo princípio de todo outro gate anti-alucinação deste
+ * projeto: checagem determinística no código, nunca só confiar que o
+ * modelo vai notar sozinho lendo o histórico.
+ */
+const RECENT_MEDIA_SEND_WINDOW = 8;
+
+function wasMediaRecentlySent(
+  history: { sender: 'lead' | 'agent'; text?: string }[] | undefined,
+  marker: string
+): boolean {
+  return (history || [])
+    .filter((m) => m.sender === 'agent' && m.text)
+    .slice(-RECENT_MEDIA_SEND_WINDOW)
+    .some((m) => m.text === marker);
+}
+
 async function runMidiaTool(
   tenantId: string,
   ai: GoogleGenAI,
@@ -1651,6 +1682,12 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       // helper noMidiaActionResult acima).
       return { actionsSummary: [`Tentou enviar vídeo de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com vídeo cadastrado — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem vídeo de exemplo. Serviços com vídeo real disponível: ${productsWithVideo.map((p) => p.name).join(', ')}.`] };
     }
+
+    const videoMarker = `🎥 Vídeo de exemplo: ${mediaName}`;
+    if (wasMediaRecentlySent(history, videoMarker)) {
+      return { actionsSummary: [`Já enviou o vídeo de exemplo de "${mediaName}" há pouco nesta conversa (veja o histórico) — NÃO reenvie e não diga que vai mandar de novo, a menos que a cliente peça explicitamente outra vez.`] };
+    }
+
     const video = await getKnowledgeBaseVideo(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, tenantId, videoMedia.exampleVideoId);
     if (!video) {
       return { actionsSummary: [`Tentou enviar vídeo de "${mediaName}" mas o arquivo não foi encontrado no Storage.`] };
@@ -1712,6 +1749,11 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     // catálogo; sem a ressalva o especialista generalizava isso em "não
     // tenho NENHUM material", mesmo com foto real de outros serviços.
     return { actionsSummary: [`Tentou enviar foto de "${nomeProduto}" mas esse nome não bate com nenhum produto do catálogo com foto cadastrada — NUNCA diga que não tem material nenhum disponível; pergunte qual serviço específico ela quer ver, ou, se "${nomeProduto}" já é claramente um serviço específico (não uma categoria genérica), diga só que esse em particular ainda não tem foto de exemplo. Serviços com foto real disponível: ${productsWithPhoto.map((p) => p.name).join(', ')}.`] };
+  }
+
+  const photoMarker = `📷 Foto de exemplo: ${photoName}`;
+  if (wasMediaRecentlySent(history, photoMarker)) {
+    return { actionsSummary: [`Já enviou a foto de exemplo de "${photoName}" há pouco nesta conversa (veja o histórico) — NÃO reenvie e não diga que vai mandar de novo, a menos que a cliente peça explicitamente outra vez.`] };
   }
 
   try {

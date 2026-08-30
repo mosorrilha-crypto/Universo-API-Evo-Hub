@@ -721,6 +721,42 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     const mediaToolCall = calls.find((c) => c.config?.tools);
     expect(mediaToolCall.contents[0].parts[0].text).toContain('- Microlips\n');
   });
+
+  // Achado real em produção (Gladys, 30/08/2026, pós-fix TASK-0156): a mesma
+  // foto foi enviada 3 vezes seguidas em <2min — cada reação curta e
+  // entusiasmada da cliente ("Me gusta sabes 🥰") chegou fora da janela de
+  // silêncio do messageBuffer (10s), disparando um ciclo INDEPENDENTE de
+  // autoReply que decidia de novo, do zero, enviar a mesma foto — mesmo ela
+  // já aparecendo no histórico como enviada. Barreira determinística
+  // (TASK-0170): quando a bolha "📷 Foto de exemplo: X" já está no histórico
+  // recente, nunca reenvia, só avisa o especialista.
+  it('NÃO reenvia a mesma foto quando ela já aparece no histórico recente da conversa', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai, calls } = makeFakeAiWithPhotoTool(true);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'Me gusta sabes 🥰', 'Cliente', undefined,
+      [{ sender: 'agent', text: '📷 Foto de exemplo: Microlips' }],
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('Já enviou a foto de exemplo de "Microlips" há pouco');
+  });
+
+  it('envia normalmente quando o histórico não tem nenhum envio recente dessa foto', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai } = makeFakeAiWithPhotoTool(true);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined,
+      [{ sender: 'lead', text: 'oi, vi o anúncio' }],
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+    );
+
+    expect(uploadWhatsAppMedia).toHaveBeenCalled();
+  });
 });
 
 describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade com Epic 4.5.2)', () => {
@@ -826,6 +862,23 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
       'inst-1', 'https://evo.example.com', 'evo-key', '595981234567',
       Buffer.from('fake-video-bytes').toString('base64'), 'video/mp4', 'volumen.mp4', 'Efecto Volumen Brasileño'
     );
+  });
+
+  // Mesma barreira do teste equivalente de foto (TASK-0170) — paridade
+  // foto/vídeo, mesmo achado real (Gladys, 30/08/2026).
+  it('NÃO reenvia o mesmo vídeo quando ele já aparece no histórico recente da conversa', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const { ai, calls } = makeFakeAiWithVideoTool(true);
+
+    await generateAutoReplyForText(
+      'tenant-a', ai, 'me encantó ese resultado 🥰', 'Cliente', undefined,
+      [{ sender: 'agent', text: '🎥 Vídeo de exemplo: Efecto Volumen Brasileño' }],
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('Já enviou o vídeo de exemplo de "Efecto Volumen Brasileño" há pouco');
   });
 });
 
