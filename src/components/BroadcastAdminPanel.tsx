@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/apiClient';
 import {
   Radio, Plus, Loader2, X, Trash2, Pencil, Upload, Send, Play, Pause, Ban,
-  CheckCircle2, AlertCircle, Users as UsersIcon,
+  CheckCircle2, AlertCircle, Users as UsersIcon, BookOpen,
 } from 'lucide-react';
+import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { BroadcastDocumentation } from './BroadcastDocumentation';
 
 /**
  * Painel de Disparo em Massa (broadcast/marketing) via WhatsApp — TASK-0171.
@@ -89,6 +91,8 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantName }) => {
+  const { language } = useAppPreferences();
+  const [showDocumentation, setShowDocumentation] = useState(false);
   const [subTab, setSubTab] = useState<'numbers' | 'templates' | 'lists' | 'campaigns'>('numbers');
 
   // ── Números ──────────────────────────────────────────────────────────
@@ -443,13 +447,29 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
     { id: 'campaigns', label: 'Campanhas' },
   ];
 
+  if (showDocumentation) {
+    return <BroadcastDocumentation language={language} onBack={() => setShowDocumentation(false)} />;
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-slate-400 flex items-center gap-2">
           <Radio className="w-4 h-4 text-violet-400 flex-shrink-0" />
-          Disparo em massa via WhatsApp (Marketing) — gerenciando pra <strong className="text-slate-200">{tenantName || 'o tenant selecionado no topo'}</strong>. Pra trocar de tenant, use o seletor no cabeçalho do painel.
+          {language === 'pt'
+            ? <>Disparo em massa via WhatsApp (Marketing) — gerenciando pra <strong className="text-slate-200">{tenantName || 'o tenant selecionado no topo'}</strong>. Pra trocar de tenant, use o seletor no cabeçalho do painel.</>
+            : <>Envío masivo por WhatsApp (Marketing) — gestionando para <strong className="text-slate-200">{tenantName || 'el tenant seleccionado arriba'}</strong>. Para cambiar de tenant, use el selector en el encabezado del panel.</>}
         </p>
+        <button
+          type="button"
+          onClick={() => setShowDocumentation(true)}
+          className="flex items-center gap-1.5 rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 transition-all hover:bg-violet-500/20 cursor-pointer flex-shrink-0"
+          title={language === 'pt' ? 'Abrir documentação de como funciona e como usar o Disparo em Massa' : 'Abrir documentación de cómo funciona y cómo usar el Envío Masivo'}
+          aria-label={language === 'pt' ? 'Abrir documentação do Disparo em Massa' : 'Abrir documentación del Envío Masivo'}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">{language === 'pt' ? 'Documentação' : 'Documentación'}</span>
+        </button>
       </div>
 
       <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
