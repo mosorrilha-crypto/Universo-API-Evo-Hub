@@ -43,6 +43,14 @@ describe('parseContactsCsv', () => {
     expect(result.contacts[0].name).toBe('Com Telefone');
   });
 
+  it('nunca deixa um cabeçalho malicioso (__proto__/constructor/prototype) virar propriedade especial de "variables" (CodeQL: remote property injection)', () => {
+    const result = parseContactsCsv('phone,name,__proto__,constructor,prototype\n595981111111,Maria,poluido,poluido,poluido');
+    const variables = result.contacts[0].variables;
+    expect(Object.keys(variables)).toHaveLength(0);
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype); // objeto normal não foi afetado
+    expect(({} as any).poluido).toBeUndefined();
+  });
+
   it('lança erro quando o CSV ultrapassa MAX_CSV_ROWS', () => {
     const header = 'phone,name';
     const rows = Array.from({ length: MAX_CSV_ROWS + 1 }, (_, i) => `59598${String(i).padStart(7, '0')},Contato ${i}`);

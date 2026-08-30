@@ -95,9 +95,17 @@ export function parseContactsCsv(csvText: string): ParsedCsvResult {
     }
     seen.add(dedupeKey);
 
-    const variables: Record<string, string> = {};
+    // `col` vem do cabeçalho do CSV (conteúdo do arquivo, não confiável) e
+    // vira nome de propriedade aqui — sem proteção, um cabeçalho malicioso
+    // (ex: "__proto__") poderia escrever numa chave especial do objeto
+    // (CodeQL: "Remote property injection", achado real no PR). `variables`
+    // sem protótipo (Object.create(null)) elimina qualquer efeito especial
+    // de `__proto__`/`constructor`/`prototype` como nome de propriedade —
+    // uma escrita nessas chaves aqui vira só uma propriedade own comum.
+    const variables: Record<string, string> = Object.create(null);
     header.forEach((col, idx) => {
       if (idx === phoneIdx || idx === nameIdx) return;
+      if (col === '__proto__' || col === 'constructor' || col === 'prototype') return;
       const value = fields[idx];
       if (value !== undefined && value !== '') variables[col] = value;
     });
