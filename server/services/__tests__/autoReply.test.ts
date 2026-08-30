@@ -270,6 +270,15 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('nunca como reflexo automático em toda resposta');
   });
 
+  it('proíbe recorrer sempre à mesma fórmula pronta de "evaluación presencial analiza tus rasgos" pra justificar personalização de técnica (achado real de auditoria, 30/08/2026: a mesma ideia apareceu em 3 conversas reais distintas de clientes diferentes na mesma janela de poucas horas)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('Não recorra sempre à mesma fórmula pronta');
+    expect(systemInstruction).toContain('tus rasgos');
+    expect(systemInstruction).toContain('nunca deixe "tus rasgos"/"evaluación presencial analiza" virar um reflexo automático');
+  });
+
   it('instrui a nunca repetir frase de exemplo do contexto do negócio palavra por palavra (pesquisa de mercado: repetir a mesma frase pronta é um dos sinais mais claros de bot)', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
