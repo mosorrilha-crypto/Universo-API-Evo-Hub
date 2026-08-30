@@ -28,12 +28,27 @@ const SILENCE_MS = 10_000;
 /** Intervalo do sweeper de recuperação — bem mais espaçado que a janela de silêncio (10s), só existe pra cobrir o caso raro de restart no meio dela. */
 const SWEEP_INTERVAL_MS = 15_000;
 
-type FlushCallback = (combinedText: string, contactName: string | undefined, lastMessageId: string, messageCount: number, resolvedTenant: ResolvedTenant) => void;
+type FlushCallback = (combinedText: string, contactName: string | undefined, lastMessageId: string, messageCount: number, resolvedTenant: ResolvedTenant, firstMessageId: string) => void;
 
 interface PendingBuffer {
   texts: string[];
   contactName: string | undefined;
   lastMessageId: string;
+  /**
+   * ID da PRIMEIRA mensagem deste lote — nunca sobrescrito enquanto o
+   * mesmo buffer segue acumulando mensagens de rajada. Achado real
+   * (Gladys, tenant Monique, 30/08/2026): runExclusive (perPhoneQueue.ts)
+   * serializa os ciclos de resposta por telefone, mas um ciclo pode ficar
+   * PRESO na fila enquanto o cliente manda mais mensagens — que já são
+   * gravadas na hora (recordIncomingMessage roda antes de qualquer
+   * buffer/fila). Cortar o histórico pela CONTAGEM de mensagens deste lote
+   * (`slice(0, -messageCount)`) supõe que nada mais foi gravado nesse
+   * meio-tempo — premissa que essa fila pode violar. Guardar o ID da
+   * primeira mensagem do lote permite cortar por IDENTIDADE (tudo antes
+   * dela) em vez de por contagem, correto mesmo com mensagens novas
+   * chegando enquanto o ciclo espera a vez.
+   */
+  firstMessageId: string;
   /** Tenant resolvido (Bloco 2.B) da mensagem mais recente do lote — usado ao disparar a resposta automática pro grupo inteiro. */
   resolvedTenant: ResolvedTenant;
   timer: ReturnType<typeof setTimeout>;
@@ -62,7 +77,7 @@ async function doFlush(key: string, phone: string, buffer: PendingBuffer, onFlus
   } catch (err: any) {
     console.warn(`⚠️  [Buffer de rajada] Falha ao remover marca persistida pra ${phone}:`, err.message);
   }
-  onFlush(buffer.texts.join('\n'), buffer.contactName, buffer.lastMessageId, buffer.texts.length, buffer.resolvedTenant);
+  onFlush(buffer.texts.join('\n'), buffer.contactName, buffer.lastMessageId, buffer.texts.length, buffer.resolvedTenant, buffer.firstMessageId);
 }
 
 export function bufferIncomingText(
@@ -82,6 +97,7 @@ export function bufferIncomingText(
     texts,
     contactName: contactName || existing?.contactName,
     lastMessageId: messageId,
+    firstMessageId: existing?.firstMessageId || messageId,
     resolvedTenant,
     timer: setTimeout(() => void doFlush(key, phone, buffer, onFlush), SILENCE_MS),
   };
@@ -102,6 +118,7 @@ async function persistBuffer(phone: string, buffer: PendingBuffer): Promise<void
       texts: buffer.texts,
       contact_name: buffer.contactName ?? null,
       last_message_id: buffer.lastMessageId,
+      first_message_id: buffer.firstMessageId,
       resolved_tenant: buffer.resolvedTenant,
       flush_at: flushAt,
     },
@@ -138,7 +155,11 @@ export function startBufferRecoverySweeper(onFlush: (phone: string) => FlushCall
           const texts: string[] = Array.isArray(row.texts) ? row.texts : [];
           if (!texts.length) return;
           console.warn(`⚠️  [Buffer de rajada] Recuperando marca presa de um restart anterior pra ${row.phone} (tenant=${row.tenant_id}).`);
-          onFlush(row.phone)(texts.join('\n'), row.contact_name ?? undefined, row.last_message_id, texts.length, row.resolved_tenant as ResolvedTenant);
+          // first_message_id pode não existir em marcas persistidas antes
+          // dessa coluna (TASK-0172) — cair pro last_message_id nesse caso
+          // raro (só acontece pra uma marca presa desde ANTES do deploy
+          // desta correção) é mais próximo do correto do que nada.
+          onFlush(row.phone)(texts.join('\n'), row.contact_name ?? undefined, row.last_message_id, texts.length, row.resolved_tenant as ResolvedTenant, row.first_message_id || row.last_message_id);
         });
       }
     } catch (err: any) {

@@ -7,7 +7,7 @@
  */
 import express from 'express';
 import type { Server } from 'http';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createConversationsRouter } from '../conversations';
 import { initDb } from '../../services/db';
 import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
@@ -198,5 +198,81 @@ describe('POST /api/conversations/:phone/send — auto-resolve de escalonamentos
       body: JSON.stringify({ approvedReply: '¿Agendamos tu turno?' }),
     });
     expect(approveRes.status).toBe(200);
+  });
+});
+
+/**
+ * TASK-0173 — achado real do dono do produto (30/08/2026): "Aprovar e
+ * enviar" um rascunho bloqueado mandava tudo como UMA mensagem só, com o
+ * separador " / " literal visível pro cliente — o rascunho é montado em
+ * webhooks.ts como `bubbles.join(' / ')` só pra exibição no card do
+ * escalonamento, nunca desfeito de volta em bolhas separadas na hora de
+ * enviar de verdade, diferente de toda resposta automática normal.
+ */
+describe('POST /api/conversations/:phone/send — desfaz o join(" / ") em bolhas separadas ao aprovar um escalonamento', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('manda cada parte do rascunho aprovado como mensagem própria (não uma só com "/" literal)', async () => {
+    seed();
+    stubMetaSendSuccess();
+
+    const resPromise = fetch(`${baseUrl}/api/conversations/${PHONE}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'Sí, hacemos la técnica de microblading pelo a pelo. / ¿Querés que revise la agenda para ver qué días tenemos disponibles?',
+        escalationId: 'esc-blocked',
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    const res = await resPromise;
+    expect(res.status).toBe(200);
+
+    const rows = supabase.__tables.messages.filter((m: any) => m.conversation_id === 'conv-1' && m.sender === 'agent');
+    expect(rows.map((m: any) => m.text)).toEqual([
+      'Sí, hacemos la técnica de microblading pelo a pelo.',
+      '¿Querés que revise la agenda para ver qué días tenemos disponibles?',
+    ]);
+    // Nenhuma das mensagens reais guarda o separador " / " que só existia
+    // pra exibição no card do escalonamento.
+    expect(rows.every((m: any) => !m.text.includes(' / '))).toBe(true);
+  });
+
+  it('nunca parte uma mensagem manual comum (sem escalationId), mesmo com "/" no meio', async () => {
+    seed();
+    stubMetaSendSuccess();
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Rua Brasil / Loma Merlo, referência do mercado' }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = supabase.__tables.messages.filter((m: any) => m.conversation_id === 'conv-1' && m.sender === 'agent');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text).toBe('Rua Brasil / Loma Merlo, referência do mercado');
+  });
+
+  it('manda como mensagem única quando o rascunho aprovado não tem separador (caso comum)', async () => {
+    seed();
+    stubMetaSendSuccess();
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '¿Agendamos tu turno?', escalationId: 'esc-blocked' }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = supabase.__tables.messages.filter((m: any) => m.conversation_id === 'conv-1' && m.sender === 'agent');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text).toBe('¿Agendamos tu turno?');
   });
 });
