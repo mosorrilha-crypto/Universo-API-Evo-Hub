@@ -1735,11 +1735,20 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, photoName);
     }
 
+    // Mesmo achado do vídeo acima (15/08/2026, Clic Piscinas) — achado real
+    // aqui, 29/08/2026 (tenant Monique): a foto abria normalmente no
+    // WhatsApp real do lead, mas o painel mostrava "Imagem indisponível"
+    // pra sempre, porque só a mensagem de texto era gravada — o binário
+    // nunca era salvo em mediaImageStore sob o id da mensagem. O envio
+    // MANUAL (POST /send-example-photo em conversations.ts) já fazia isso
+    // certo; só o envio automático da própria IA (aqui) ficou pra trás.
+    const photoMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, photoMessageId, photoMedia.exampleImageBase64, mimeType);
     await recordOutgoingMessage(tenantId, phone, {
       type: 'image',
       text: `📷 Foto de exemplo: ${photoName}`,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    }, 'ai');
+    }, 'ai', undefined, undefined, photoMessageId);
     return { actionsSummary: [`Enviou a foto de exemplo real de "${photoName}" pro cliente agora.`] };
   } catch (err: any) {
     // Mesmo achado do catch de vídeo acima — nunca logava nada, então uma
