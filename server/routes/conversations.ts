@@ -20,6 +20,7 @@ import {
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
 import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
+import { sendBubbles, type OutboundChannel } from '../services/sendBubbles';
 import { resolveCredentialsForTenant, resolveCredentialsForConversation } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import {
@@ -516,40 +517,80 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       }
       const hasRealProviderId = !!replyTarget && !replyTarget.id.startsWith('wa-');
 
-      let realMessageId: string | undefined;
-      if (channel.provider === 'evolution') {
-        realMessageId = await sendEvolutionTextMessage(
-          channel.evolutionInstanceName,
-          channel.evolutionApiUrl,
-          channel.evolutionApiKey,
-          req.params.phone,
-          text.trim(),
-          hasRealProviderId
-            ? { id: replyTarget!.id, remoteJid: `${req.params.phone}@s.whatsapp.net`, fromMe: replyTarget!.sender === 'agent', text: replyTarget!.text }
-            : undefined
-        );
+      // Achado real (30/08/2026): "Aprovar e enviar" um rascunho bloqueado
+      // mandava o texto inteiro como UMA mensagem só, com o separador " / "
+      // literal visível pro cliente — o rascunho é montado em webhooks.ts
+      // como `bubbles.join(' / ')` só pra exibição no card do escalonamento
+      // (ver logEscalation em webhooks.ts/transcriptionQueue.ts), mas nunca
+      // era desfeito de volta em bolhas separadas na hora de enviar de
+      // verdade, diferente de toda resposta automática normal (sendBubbles.ts
+      // manda cada bolha como mensagem própria, com pausa de digitação entre
+      // elas, exatamente como o cliente veria se fosse a IA respondendo). Só
+      // desfaz o join quando o envio vem de um escalonamento (`escalationId`
+      // presente) — uma mensagem digitada manualmente pelo operador com "/"
+      // no meio (endereço, data) nunca deve ser partida.
+      const bubbles: string[] = typeof escalationId === 'string' && escalationId
+        ? text.trim().split(' / ').map((b: string) => b.trim()).filter(Boolean)
+        : [text.trim()];
+
+      let conv: Awaited<ReturnType<typeof recordOutgoingMessage>> | undefined;
+      if (bubbles.length > 1) {
+        const outboundChannel: OutboundChannel = channel.provider === 'evolution'
+          ? { provider: 'evolution', evolutionInstanceName: channel.evolutionInstanceName, evolutionApiUrl: channel.evolutionApiUrl, evolutionApiKey: channel.evolutionApiKey }
+          : { provider: 'meta', phoneNumberId: channel.metaPhoneNumberId, accessToken: channel.metaAccessToken };
+        // A citação nativa do WhatsApp ("em resposta a X") só é suportada
+        // pelo envio de bolha única abaixo — sendBubbles não aceita um alvo
+        // de citação. replyToMessageId continua salvo internamente (painel
+        // mostra "em resposta a" mesmo assim), só a citação real na API não
+        // sai nesse caminho — combinação rara (aprovar um rascunho bloqueado
+        // E citar uma mensagem específica ao mesmo tempo).
+        let isFirstBubble = true;
+        await sendBubbles(outboundChannel, req.params.phone, bubbles, async (bubbleText) => {
+          conv = await recordOutgoingMessage(
+            tenantId,
+            req.params.phone,
+            { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
+            'operator',
+            isFirstBubble && typeof replyToMessageId === 'string' ? replyToMessageId : undefined
+          );
+          isFirstBubble = false;
+        });
       } else {
-        realMessageId = await sendWhatsAppTextMessage(
-          channel.metaPhoneNumberId,
-          channel.metaAccessToken,
+        let realMessageId: string | undefined;
+        if (channel.provider === 'evolution') {
+          realMessageId = await sendEvolutionTextMessage(
+            channel.evolutionInstanceName,
+            channel.evolutionApiUrl,
+            channel.evolutionApiKey,
+            req.params.phone,
+            text.trim(),
+            hasRealProviderId
+              ? { id: replyTarget!.id, remoteJid: `${req.params.phone}@s.whatsapp.net`, fromMe: replyTarget!.sender === 'agent', text: replyTarget!.text }
+              : undefined
+          );
+        } else {
+          realMessageId = await sendWhatsAppTextMessage(
+            channel.metaPhoneNumberId,
+            channel.metaAccessToken,
+            req.params.phone,
+            text.trim(),
+            hasRealProviderId ? replyTarget!.id : undefined
+          );
+        }
+        conv = await recordOutgoingMessage(
+          tenantId,
           req.params.phone,
-          text.trim(),
-          hasRealProviderId ? replyTarget!.id : undefined
+          {
+            type: 'text',
+            text: text.trim(),
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          },
+          'operator',
+          typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
+          undefined,
+          realMessageId
         );
       }
-      const conv = await recordOutgoingMessage(
-        tenantId,
-        req.params.phone,
-        {
-          type: 'text',
-          text: text.trim(),
-          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        },
-        'operator',
-        typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
-        undefined,
-        realMessageId
-      );
       await resolveOpenEscalationsAfterManualReply(
         tenantId,
         req.params.phone,
