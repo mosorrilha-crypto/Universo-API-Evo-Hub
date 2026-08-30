@@ -47,7 +47,6 @@ import {
   PanelRightClose,
   X,
   CircleDashed,
-  Info,
   Trash2,
   Reply,
   Forward,
@@ -72,7 +71,6 @@ import {
   Settings,
   Video,
   Copy,
-  QrCode,
   Megaphone,
   MessageCircle
 } from 'lucide-react';
@@ -126,8 +124,6 @@ interface WhatsAppLeadsSimProps {
   openLeadPhone?: string;
   /** Muda a cada clique em "Voltar pra conversa", mesmo pro mesmo telefone — garante que clicar de novo no mesmo lead depois de já ter navegado manualmente reabra a conversa mesmo assim. */
   openLeadRequestId?: number;
-  /** hasRoleAtLeast(currentUser?.role, 'admin') calculado em App.tsx — libera o botão "Reconectar WhatsApp (QR Code)" (ver ReconectarWhatsAppQrCode abaixo) pra admin comum do tenant, não só saas_admin. */
-  canManageWhatsAppConnection?: boolean;
   /** Avisa App.tsx sempre que mobileThreadOpen mudar — usado pra esconder o
    * cabeçalho global (Header.tsx: marca "Universo", seletor de idioma/tema)
    * e o cabeçalho fino do Atendimento enquanto uma conversa está aberta no
@@ -212,196 +208,10 @@ const RealClientVideo: React.FC<{ messageId: string }> = ({ messageId }) => {
   return <video src={url} controls preload="metadata" className="w-full max-h-64 rounded-lg bg-black" />;
 };
 
-// Reconectar WhatsApp (Evolution API) direto do tenant, sem precisar de
-// saas_admin — pedido real (15/08/2026, incidente Clic Piscinas): o WhatsApp
-// deslogou sozinho do lado do WhatsApp (ver LOGOUT nos logs do Evolution
-// API) e só quem tinha saas_admin conseguia gerar QR Code novo pra
-// reconectar, deixando o tenant sem responder até alguém com esse acesso
-// aparecer. Mesmo fluxo do `ConectarEvolutionQrCode` do Painel SaaS Master
-// (SaaSAdminDashboard.tsx), mas sem seletor de tenant nem opção de criar
-// tenant novo — sempre o tenant logado. O backend (server/routes/admin.ts,
-// resolveEvolutionTenantId) ignora qualquer id que não venha de saas_admin e
-// resolve pelo tenantId do JWT, então isso nunca abre a conexão de outro
-// tenant mesmo que o `tenantId` passado aqui esteja errado/desatualizado.
-const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
-  const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
-  const [connectionState, setConnectionState] = useState<'idle' | 'waiting' | 'connected'>('idle');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isRecreating, setIsRecreating] = useState(false);
-
-  useEffect(() => {
-    if (connectionState !== 'waiting') return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/status`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.connected) setConnectionState('connected');
-      } catch {
-        // Falha transitória de rede durante o polling — tenta de novo no próximo tick.
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [connectionState, tenantId]);
-
-  const handleRefreshQr = async () => {
-    setIsGeneratingQr(true);
-    setErrorMsg(null);
-    try {
-      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/qrcode`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      if (data.warning) setErrorMsg(data.warning);
-      setQrCodeBase64(data.qrCodeBase64 || null);
-      setConnectionState('waiting');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Falha ao buscar o QR Code.');
-    } finally {
-      setIsGeneratingQr(false);
-    }
-  };
-
-  const handleGenerateQr = async () => {
-    setIsGeneratingQr(true);
-    setErrorMsg(null);
-    setQrCodeBase64(null);
-    try {
-      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      if (data.warning) setErrorMsg(data.warning);
-      if (data.qrCodeBase64) {
-        setQrCodeBase64(data.qrCodeBase64);
-        setConnectionState('waiting');
-      } else {
-        await handleRefreshQr();
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Falha ao gerar o QR Code.');
-    } finally {
-      setIsGeneratingQr(false);
-    }
-  };
-
-  const openModal = () => {
-    setIsModalOpen(true);
-    setErrorMsg(null);
-    setQrCodeBase64(null);
-    setConnectionState('idle');
-  };
-
-  // Recria a instância do zero na Evolution API (delete + create) — achado
-  // real (15/08/2026, Clic Piscinas): diferente de "Gerar novo QR Code" (só
-  // renova o pareamento de uma instância já saudável), isso limpa estado
-  // interno do Baileys que reconectar sozinho não resolve (ex: mapeamento
-  // @lid degradado pra um contato específico — issue #262). Sempre exige
-  // escanear o QR de novo depois — por isso pede confirmação explícita.
-  const handleRecreateInstance = async () => {
-    if (!window.confirm('Isso vai apagar e recriar a instância do WhatsApp desse tenant do zero. A conexão atual cai e vai ser preciso escanear o QR Code de novo. Continuar?')) return;
-    setIsRecreating(true);
-    setErrorMsg(null);
-    setQrCodeBase64(null);
-    try {
-      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/recreate`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      if (data.warning) setErrorMsg(data.warning);
-      if (data.qrCodeBase64) {
-        setQrCodeBase64(data.qrCodeBase64);
-        setConnectionState('waiting');
-      } else {
-        await handleRefreshQr();
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Falha ao recriar a instância.');
-    } finally {
-      setIsRecreating(false);
-    }
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={openModal}
-        title="Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)"
-        className="px-3 py-1.5 rounded-xl text-xs font-medium bg-sky-950/60 hover:bg-sky-900/80 text-sky-300 border border-sky-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
-      >
-        <QrCode className="w-3.5 h-3.5" />
-        <span>Reconectar WhatsApp (QR Code)</span>
-      </button>
-
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsModalOpen(false)}>
-          <div
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-white font-bold text-sm flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-sky-400" /> Reconectar WhatsApp (Evolution API)
-              </h3>
-              <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {errorMsg && (
-              <div className="bg-red-950/60 border border-red-800 rounded-lg p-2.5 text-xs text-red-300">{errorMsg}</div>
-            )}
-
-            {connectionState === 'connected' ? (
-              <div className="text-center py-6 space-y-3">
-                <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
-                <p className="text-sm text-white font-semibold">WhatsApp conectado!</p>
-                <p className="text-xs text-slate-400">O número já pode receber e enviar mensagens de novo.</p>
-                <button
-                  type="button"
-                  onClick={handleRecreateInstance}
-                  disabled={isRecreating}
-                  className="text-xs text-red-300 hover:text-red-200 flex items-center gap-1.5 mx-auto disabled:opacity-50 pt-2"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isRecreating ? 'animate-spin' : ''}`} /> {isRecreating ? 'Recriando...' : 'Mensagens não chegam mesmo conectado? Recriar instância do zero'}
-                </button>
-              </div>
-            ) : qrCodeBase64 ? (
-              <div className="text-center space-y-3">
-                <img src={qrCodeBase64} alt="QR Code de conexão" className="mx-auto rounded-lg border border-slate-700 w-56 h-56 object-contain bg-white" />
-                <p className="text-xs text-slate-400">Abra o WhatsApp no celular deste número → Aparelhos conectados → Conectar um aparelho → escaneie este código.</p>
-                <button
-                  type="button"
-                  onClick={handleRefreshQr}
-                  disabled={isGeneratingQr}
-                  className="text-xs text-sky-300 hover:text-sky-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isGeneratingQr ? 'animate-spin' : ''}`} /> QR expirou? Gerar novo
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleGenerateQr}
-                disabled={isGeneratingQr}
-                className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-              >
-                {isGeneratingQr ? <span className="animate-spin">⏳</span> : <QrCode className="w-3.5 h-3.5" />}
-                {isGeneratingQr ? 'Gerando...' : 'Gerar QR Code'}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
 export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onSaveTranscript,
   knowledgeBase,
   activeTenant,
-  canManageWhatsAppConnection,
   onThreadOpenChange,
   onAddNewLead,
   onDeleteLead,
@@ -2994,6 +2804,64 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     );
   };
 
+  // Achado real, 29/08/2026 (pedido do dono do produto): no mobile, abrir
+  // "Ferramentas" (aba inferior) empurrava a lista de conversas inteira pra
+  // baixo — o painel entrava no fluxo normal do documento, dentro do
+  // Controls Bar. Conteúdo extraído numa variável pra ser reaproveitado sem
+  // duplicar JSX à mão: no desktop continua inline (ver `hidden sm:flex`
+  // logo abaixo, mesmo lugar de sempre); no mobile vira uma gaveta que sobe
+  // por cima da tela, mesmo padrão já usado pela Ficha IA
+  // (`atendimento-analysis-drawer`, mais abaixo).
+  // Achado real, 29/08/2026 (pedido do dono do produto, print com o painel
+  // de Ferramentas aberto): "Apenas Anúncios"/"Gatilhos" e o botão "Agenda"
+  // (que já existe como ícone próprio na barra inferior) só ocupavam espaço
+  // aqui repetindo controles que já existem em outro lugar mais óbvio —
+  // movidos pra dentro da faixa "Status do agente" (os dois primeiros) e
+  // removida a duplicata do botão Agenda (o ícone da barra inferior já cobre
+  // exatamente a mesma ação em qualquer largura de tela).
+  const toolbarSettingsBody = (
+    <>
+      {/* Reconectar WhatsApp mudou de lugar (pedido real, 29/08/2026):
+          "pode ficar nas configurações do tenant quando admin" — morava
+          aqui, dentro de Ferramentas; agora vive na Base de Conhecimento
+          (`AgentKnowledgeBase.tsx`), que já é a tela de configuração
+          operacional do tenant vista por admins. Componente extraído pra
+          `ReconectarWhatsAppQrCode.tsx` (arquivo próprio) pra ser
+          reaproveitado lá sem duplicar a lógica de QR Code/polling. */}
+
+      {/* Desconectar Calendar mudou de lugar (pedido real, 29/08/2026):
+          "pode ficar dentro da agenda" — some botão fazia sentido perto de
+          "conectar/ver agenda" só que num painel genérico de Ferramentas.
+          Agora vive dentro do próprio painel "Agenda" (UpcomingEventsPanel),
+          junto do resto das ações de calendário — ver `googleCalendarConnected`/
+          `onDisconnectCalendar` passados a ele mais abaixo. */}
+
+      {/* Auto IA mudou de lugar (pedido real, 29/08/2026): "pode ir para
+          ficha de ia" — é uma configuração de análise automática da
+          conversa, faz mais sentido perto da Ficha IA (ConversationAnalysisPanel)
+          do que dentro de um painel genérico de Ferramentas. Ver o toggle
+          dentro do componente, tanto na coluna de desktop quanto na gaveta
+          mobile. */}
+
+      {/* Push notification do PWA do atendente (issue #159) — pra não
+          depender só de estar olhando o painel pra perceber escalação
+          nova ou agente pausado com lead sem resposta. */}
+      <button
+        onClick={handleTogglePush}
+        disabled={pushBusy}
+        title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
+        className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
+          pushEnabled
+            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
+            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
+        }`}
+      >
+        {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+        <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
+      </button>
+    </>
+  );
+
   return (
     // flex flex-col min-h-0 — achado real, 29/08/2026: sem isso, este div
     // (pai direto do .atendimento-chat-shell) tinha altura `auto`
@@ -3084,59 +2952,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               de filtros ao lado de "Tudo"/"Não lidos" — mais perto de onde
               afetam (a lista de conversas), sem duplicar espaço aqui. */}
 
-          {/* No mobile, agenda e filtro de contatos ficam no menu contextual para
-              a barra priorizar pendências sem remover recursos recorrentes. */}
-          <div className="hidden sm:contents">
-          {/* Modo "somente anúncios" (pedido real, 14/08/2026): a Monique tem
-              dois números ligados hoje — o pessoal dela (conectado
-              temporariamente pra não perder mensagem) e o dedicado do agente.
-              Ativando isso, o agente só responde automaticamente contatos
-              identificados como vindos de anúncio (ctwa_clid gravado na
-              conversa); contatos pessoais continuam sendo gravados no painel,
-              só não recebem resposta automática. Ortogonal ao status
-              active/restricted/paused acima — combina com qualquer um deles. */}
-          <button
-            onClick={handleToggleAdsOnly}
-            title={
-              adsOnly
-                ? 'Somente anúncios ATIVO — agente só responde contatos vindos de anúncio, silêncio pra contatos pessoais'
-                : 'Ativar modo somente anúncios — agente para de responder contatos pessoais automaticamente'
-            }
-            className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
-              adsOnly
-                ? 'bg-[var(--action)] border-[var(--action)] text-[var(--action-contrast)]'
-                : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
-          </button>
-
-          {/* Gatilhos de texto pro modo "somente anúncios" (achado real,
-              15/08/2026): só faz sentido configurar isso com o modo ligado —
-              ctwa_clid quase nunca vem preenchido de verdade, então esse é o
-              jeito prático de identificar lead de anúncio (ver
-              matchesAdTriggerMessage no backend). */}
-          {adsOnly && isToolbarSettingsOpen && (
-            <button
-              type="button"
-              onClick={openAdTriggersModal}
-              title="Configurar os textos do 'ice breaker' do anúncio que identificam um lead como vindo de anúncio, mesmo sem ctwa_clid"
-              className="flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              <span>Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}</span>
-            </button>
-          )}
-
-          {/* Agenda (Google Calendar) — achado real de uso: fica atrás de
-              "Configurações" era difícil de achar pra um item usado o tempo
-              todo (ver comentário sem seu lugar antigo abaixo). Fica sempre
-              visível aqui, ao lado de "Configurações". */}
+          {/* Modo "somente anúncios" e Gatilhos saíram desta fileira
+              (29/08/2026, pedido do dono do produto) — viraram ícones na
+              faixa "Status do agente", acima da lista (ver mais abaixo).
+              Agenda continua aqui só a partir de sm — no mobile o mesmo
+              atalho já existe como ícone próprio na barra inferior. */}
           <button
             onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
             title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-            className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
+            className={`hidden sm:flex flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
               googleCalendarConnected
                 ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
                 : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -3145,8 +2969,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             <CalendarIcon className="w-3.5 h-3.5" />
             <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
           </button>
-
-          </div>
 
           {/* Configurações pontuais e ações secundárias — "Ferramentas"
               (renomeado de "Mais opções", 28/08/2026, pra combinar com o
@@ -3168,102 +2990,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </button>
         </div>
 
+        {/* Achado real, 29/08/2026 (pedido do dono do produto): esse painel
+            empurrava a lista inteira pra baixo no mobile ao abrir
+            "Ferramentas" — inline só faz sentido no desktop (onde o botão
+            que abre isso, logo acima, também só existe a partir de sm). No
+            mobile o mesmo conteúdo (toolbarSettingsBody, extraído antes do
+            "return" deste componente) vira uma gaveta, ver mais abaixo perto
+            do drawer da Ficha IA. */}
         {isToolbarSettingsOpen && (
-          <div className="w-full flex flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
-            {/* Ações diárias preservadas dentro do menu no mobile; no desktop,
-                permanecem na barra principal para acesso imediato. */}
-            <div className="flex w-full flex-wrap items-center gap-2 sm:hidden">
-              <button
-                onClick={handleToggleAdsOnly}
-                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-                  adsOnly
-                    ? 'bg-[var(--action)] border-[var(--action)] text-[var(--action-contrast)]'
-                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <Filter className="w-3.5 h-3.5" />
-                <span>{adsOnly ? t('adsOnly') : t('allContacts')}</span>
-              </button>
-              <button
-                onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
-                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
-                  googleCalendarConnected
-                    ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
-                    : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <CalendarIcon className="w-3.5 h-3.5" />
-                <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
-              </button>
-              {adsOnly && (
-                <button
-                  type="button"
-                  onClick={openAdTriggersModal}
-                  className="px-2.5 py-1.5 rounded-xl border border-slate-800 bg-slate-950/80 text-[11px] font-semibold text-slate-300 hover:text-white"
-                >
-                  Gatilhos{adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}
-                </button>
-              )}
-            </div>
-
-            {/* Reconectar WhatsApp via QR Code — só faz sentido pra tenant
-                conectado via Evolution API (statusAvailable) e só aparece
-                pra quem tem permissão de admin+ (canManageWhatsAppConnection,
-                calculado em App.tsx a partir do papel do usuário logado). */}
-            {canManageWhatsAppConnection && statusAvailable && activeTenant?.id && (
-              <ReconectarWhatsAppQrCode tenantId={activeTenant.id} />
-            )}
-
-            {/* Desconectar Google Calendar (pra trocar de conta) — ação rara,
-                o botão principal (conectar/ver agenda) já é sempre visível
-                fora de Configurações agora. */}
-            {googleCalendarConnected && (
-              <button
-                onClick={handleDisconnectGoogleCalendar}
-                title="Desconectar Google Calendar (pra trocar de conta)"
-                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-800/60 flex items-center gap-1.5 transition-all cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Desconectar Calendar</span>
-              </button>
-            )}
-
-            {/* Auto-analyze Toggle Switch — deixado discreto de propósito
-                (sem fundo/borda, texto pequeno e apagado): cada análise
-                automática é uma chamada real ao Gemini (custo de token), e a
-                maioria dos operadores deve preferir o botão "Analisar
-                Conversa Completa" (sob demanda) em vez de deixar isso ligado.
-                Começa desligado por padrão (ver useState acima). */}
-            <label
-              className="inline-flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
-              title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
-            >
-              <input
-                type="checkbox"
-                checked={autoAnalyze}
-                onChange={(e) => setAutoAnalyze(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
-              <span className="text-[10px]">Auto IA</span>
-            </label>
-
-            {/* Push notification do PWA do atendente (issue #159) — pra não
-                depender só de estar olhando o painel pra perceber escalação
-                nova ou agente pausado com lead sem resposta. */}
-            <button
-              onClick={handleTogglePush}
-              disabled={pushBusy}
-              title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
-                pushEnabled
-                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
-                  : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
-              }`}
-            >
-              {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-              <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-            </button>
+          <div className="hidden sm:flex w-full flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
+            {toolbarSettingsBody}
           </div>
         )}
       </div>
@@ -3436,45 +3172,78 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               visível, logo abaixo da faixa fina de "Atendimento". */}
           <div className="flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
             <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
-            {/* Achado real em produção (15/08/2026): enquanto agentStatus
-                ainda é null (GET inicial não confirmou nada) ou falhou de
-                vez, nenhum pill acende — antes disso "Ativo" ficava
-                destacado por padrão mesmo com o backend em outro estado,
-                passando confiança falsa pro operador de que a IA estava
-                respondendo. */}
-            <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
-              {(['active', 'restricted', 'paused'] as const).map((status) => (
-                <button
-                  key={status}
-                  onClick={() => handleChangeAgentStatus(status)}
-                  title={
-                    agentStatus === null
-                      ? 'Confirmando o status real do agente...'
-                      : status === 'active' ? 'Agente responde sempre' :
-                        status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                        'Agente pausado — silêncio total'
-                  }
-                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
-                    agentStatus === status
-                      ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
-                </button>
-              ))}
-              {agentStatusLoadFailed && (
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {/* Modo "somente anúncios" + Gatilhos — achado real, 29/08/2026
+                  (pedido do dono do produto com print): esses dois botões
+                  viviam na barra de Ferramentas/Controles, ocupando espaço
+                  de sobra numa fileira só de texto. Viraram ícones aqui, na
+                  mesma faixa fina de "Status do agente" — mesma família de
+                  configuração ("o agente responde a quem?"), sem precisar
+                  abrir um painel à parte pra alternar. */}
+              <button
+                type="button"
+                onClick={handleToggleAdsOnly}
+                title={
+                  adsOnly
+                    ? 'Somente anúncios ATIVO — agente só responde contatos vindos de anúncio, silêncio pra contatos pessoais'
+                    : 'Ativar modo somente anúncios — agente para de responder contatos pessoais automaticamente'
+                }
+                className={`rounded-lg p-1.5 transition-all cursor-pointer ${
+                  adsOnly ? 'bg-[var(--action)] text-[var(--action-contrast)]' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <Filter className="h-3.5 w-3.5" />
+              </button>
+              {adsOnly && (
                 <button
                   type="button"
-                  onClick={loadAgentStatus}
-                  title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
-                  className="ml-0.5 inline-flex items-center gap-1 rounded-lg border-l border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+                  onClick={openAdTriggersModal}
+                  title={`Configurar gatilhos de texto do modo "somente anúncios"${adTriggerMessages.length > 0 ? ` (${adTriggerMessages.length})` : ''}`}
+                  className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-slate-800 hover:text-white cursor-pointer"
                 >
-                  <AlertCircle className="h-3 w-3" />
-                  <span>Erro</span>
-                  <span className="sr-only">Status incerto — recarregar</span>
+                  <Settings className="h-3.5 w-3.5" />
                 </button>
               )}
+              {/* Achado real em produção (15/08/2026): enquanto agentStatus
+                  ainda é null (GET inicial não confirmou nada) ou falhou de
+                  vez, nenhum pill acende — antes disso "Ativo" ficava
+                  destacado por padrão mesmo com o backend em outro estado,
+                  passando confiança falsa pro operador de que a IA estava
+                  respondendo. */}
+              <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
+                {(['active', 'restricted', 'paused'] as const).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => handleChangeAgentStatus(status)}
+                    title={
+                      agentStatus === null
+                        ? 'Confirmando o status real do agente...'
+                        : status === 'active' ? 'Agente responde sempre' :
+                          status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                          'Agente pausado — silêncio total'
+                    }
+                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                      agentStatus === status
+                        ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+                  </button>
+                ))}
+                {agentStatusLoadFailed && (
+                  <button
+                    type="button"
+                    onClick={loadAgentStatus}
+                    title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+                    className="ml-0.5 inline-flex items-center gap-1 rounded-lg border-l border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+                  >
+                    <AlertCircle className="h-3 w-3" />
+                    <span>Erro</span>
+                    <span className="sr-only">Status incerto — recarregar</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -3607,14 +3376,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
           {/* Barra inferior estilo WhatsApp (pedido direto, 28/08/2026, com
               print comparando lado a lado com o app real): Conversas,
-              Pendências, Agenda, Ficha IA e Ferramentas — substitui os
-              antigos botões soltos "Pendências"/"Mais opções" da barra de
-              controles (que seguem existindo, mas só no desktop). O slot
-              "Atualizações" do WhatsApp real foi propositalmente deixado de
-              fora (pedido direto: "não é funcional da forma em que está") —
-              Agenda e Ficha IA ocupam esse espaço em vez disso. Só no
-              mobile: no desktop as mesmas ações já ficam na barra de
-              controles/coluna 3, sem precisar duplicar aqui. */}
+              Pendências, Agenda e Ferramentas — substitui os antigos botões
+              soltos "Pendências"/"Mais opções" da barra de controles (que
+              seguem existindo, mas só no desktop). O slot "Atualizações" do
+              WhatsApp real foi propositalmente deixado de fora (pedido
+              direto: "não é funcional da forma em que está") — Agenda ocupa
+              esse espaço em vez disso. Só no mobile: no desktop as mesmas
+              ações já ficam na barra de controles/coluna 3, sem precisar
+              duplicar aqui.
+
+              Achado real, 29/08/2026 (pedido do dono do produto com print):
+              "Ficha IA não precisa na página de lista de contatos, ela tem
+              que ficar dentro da conversa" — removida desta barra (que só
+              aparece na lista, nunca com uma conversa já aberta). O acesso
+              de verdade continua existindo dentro da conversa, pelo ícone
+              (i) no cabeçalho dela (ver mais abaixo, `setMobileAnalysisOpen`),
+              que é o lugar que realmente faz sentido — a Ficha IA é sobre UM
+              contato específico, não faz sentido abrir sem antes escolher
+              qual. */}
           <nav className="atendimento-bottom-nav lg:hidden" aria-label="Navegação do Atendimento">
             <button
               type="button"
@@ -3643,20 +3422,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             >
               <CalendarIcon className="w-[18px] h-[18px]" />
               <span>Agenda</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMobileThreadOpen(true); setMobileAnalysisOpen(true); }}
-              disabled={!selectedLead}
-              title={selectedLead ? undefined : 'Selecione uma conversa pra ver a ficha'}
-              className="atendimento-bottom-nav__item"
-            >
-              {/* Achado real, 29/08/2026 (pedido do dono do produto): ícone
-                  de robô genérico não combinava com "Ficha" (registro/
-                  perfil do contato) — IdCard representa melhor uma ficha de
-                  verdade; o texto do rótulo já deixa claro que é IA. */}
-              <IdCard className="w-[18px] h-[18px]" />
-              <span>Ficha IA</span>
             </button>
             <button
               type="button"
@@ -3763,13 +3528,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   )}
 
-                  {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver PR #70) */}
+                  {/* Ficha IA — só no mobile, onde a coluna 3 fica hidden (ver
+                      PR #70). Único acesso à Ficha IA no mobile desde que a
+                      TASK-0167 removeu o item redundante da barra inferior
+                      (só fazia sentido dentro de uma conversa já aberta,
+                      nunca na lista). Ícone trocado de `Info` genérico pra
+                      `IdCard` — mesmo critério da TASK-0164 (representa uma
+                      ficha de verdade). */}
                   <button
                     onClick={() => setMobileAnalysisOpen(true)}
                     className="atendimento-analysis-trigger lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Ver Ficha IA"
                   >
-                    <Info className="w-4 h-4" />
+                    <IdCard className="w-4 h-4" />
                   </button>
 
                   {/* Transferir pro WhatsApp pessoal do operador — abre um
@@ -4790,6 +4561,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
           // cabeçalho da conversa.
           <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/45 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
+            {/* Achado real, 29/08/2026 (pedido do dono do produto): "Auto IA"
+                morava num painel genérico de Ferramentas — é uma
+                configuração de análise automática da conversa, faz mais
+                sentido aqui dentro da própria Ficha IA. Deixado discreto de
+                propósito (sem fundo/borda): cada análise automática é uma
+                chamada real ao Gemini (custo de token), e a maioria dos
+                operadores deve preferir o botão "Analisar Conversa
+                Completa" (sob demanda) em vez de deixar isso ligado. */}
+            <label
+              className="inline-flex items-center gap-1.5 self-start cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
+              title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
+            >
+              <input
+                type="checkbox"
+                checked={autoAnalyze}
+                onChange={(e) => setAutoAnalyze(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
+              <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
+            </label>
             <ConversationAnalysisPanel
               analysis={selectedLead?.fullAnalysis}
               isLoading={isAnalyzingConversation}
@@ -4830,6 +4622,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
             </div>
             <div className="p-3 space-y-3 overflow-y-auto">
+              {/* Auto IA — mesmo toggle da coluna de desktop (ver comentário
+                  lá acima), reaproveitado aqui na gaveta mobile. */}
+              <label
+                className="inline-flex items-center gap-1.5 cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
+                title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
+              >
+                <input
+                  type="checkbox"
+                  checked={autoAnalyze}
+                  onChange={(e) => setAutoAnalyze(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
+                <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
+              </label>
               <ConversationAnalysisPanel
                 analysis={selectedLead.fullAnalysis}
                 isLoading={isAnalyzingConversation}
@@ -4844,6 +4651,37 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onRefreshContactContext={() => void refreshContactContext()}
                 onSaveContactMemory={handleSaveContactMemory}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ferramentas no mobile — mesma gaveta deslizante da Ficha IA (ver
+          acima), aberta pela aba inferior "Ferramentas" (ícone de
+          engrenagem) em vez de empurrar a lista de conversas pra baixo
+          (achado real, 29/08/2026, pedido do dono do produto). Conteúdo
+          idêntico ao painel de desktop — reaproveita `toolbarSettingsBody`,
+          definido antes do "return" deste componente, sem duplicar JSX. */}
+      {isToolbarSettingsOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          onClick={() => setIsToolbarSettingsOpen(false)}
+        >
+          <div
+            className="bg-[#111b21] w-full max-h-[85vh] rounded-t-2xl border-t border-slate-800 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b border-slate-800 flex-shrink-0">
+              <h3 className="text-sm font-bold text-white">Ferramentas</h3>
+              <button
+                onClick={() => setIsToolbarSettingsOpen(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-3 flex flex-wrap items-center gap-2.5 overflow-y-auto">
+              {toolbarSettingsBody}
             </div>
           </div>
         </div>
@@ -5033,6 +4871,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onDelete={handleDeleteEvent}
         onRegisterPayment={handleRegisterEventPayment}
         onEditPayment={handleEditEventPayment}
+        googleCalendarConnected={googleCalendarConnected}
+        onDisconnectCalendar={handleDisconnectGoogleCalendar}
       />
     </div>
   );
