@@ -40,10 +40,12 @@ import {
   getCampaignCounts,
   listCampaignRecipients,
   updateCampaignStatus,
-  setCampaignHeaderMediaId,
+  updateCampaignSchedule,
+  transitionCampaignToRunning,
   type BroadcastCampaignStatus,
   type BroadcastRecipientStatus,
 } from '../services/broadcastStore';
+import { isValidTimeOfDay } from '../services/sendWindow';
 
 interface BroadcastRouterDeps {
   authenticateToken: RequestHandler;
@@ -286,35 +288,34 @@ export function createBroadcastRouter({ authenticateToken }: BroadcastRouterDeps
   }));
 
   router.patch('/api/admin/broadcast-campaigns/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { status } = req.body || {};
+    const { status, scheduledAt, sendWindowStart, sendWindowEnd, sendWindowTimezone } = req.body || {};
     const validStatuses: BroadcastCampaignStatus[] = ['draft', 'scheduled', 'running', 'paused', 'completed', 'canceled'];
-    if (!validStatuses.includes(status)) {
+    if (status !== undefined && !validStatuses.includes(status)) {
       return res.status(400).json({ error: `Campo "status" precisa ser um de: ${validStatuses.join(', ')}.` });
     }
+    const hasScheduleFields = scheduledAt !== undefined || sendWindowStart !== undefined || sendWindowEnd !== undefined || sendWindowTimezone !== undefined;
+    if (!status && !hasScheduleFields) {
+      return res.status(400).json({ error: 'Informe "status" e/ou os campos de agendamento (scheduledAt/sendWindowStart/sendWindowEnd/sendWindowTimezone).' });
+    }
+    if (sendWindowStart !== undefined && sendWindowStart !== null && (typeof sendWindowStart !== 'string' || !isValidTimeOfDay(sendWindowStart))) {
+      return res.status(400).json({ error: 'Campo "sendWindowStart" precisa estar no formato HH:MM (24h), ou null.' });
+    }
+    if (sendWindowEnd !== undefined && sendWindowEnd !== null && (typeof sendWindowEnd !== 'string' || !isValidTimeOfDay(sendWindowEnd))) {
+      return res.status(400).json({ error: 'Campo "sendWindowEnd" precisa estar no formato HH:MM (24h), ou null.' });
+    }
+
     const tenantId = tenantOf(req);
     try {
-      let campaign = await updateCampaignStatus(tenantId, req.params.id, status);
-
-      // 1ª vez que a campanha entra em execução com template de imagem —
-      // upload fresco a partir do header_image_base64 já persistido, usando
-      // o primeiro número alocado. Um upload só, reaproveitado por todo
-      // destinatário de qualquer número dessa campanha (ver metaSend.ts).
-      if (status === 'running' && !campaign.headerMediaId) {
-        const template = await getBroadcastTemplate(tenantId, campaign.templateId);
-        if (template?.headerType === 'image') {
-          if (!template.headerImageBase64) {
-            return res.status(400).json({ error: 'Este template usa cabeçalho de imagem, mas nenhuma imagem foi salva nele ainda.' });
-          }
-          const allocations = await listCampaignNumberAllocations(tenantId, req.params.id);
-          const firstNumber = await getBroadcastNumber(tenantId, allocations[0]?.broadcastNumberId || '');
-          if (!firstNumber) return res.status(400).json({ error: 'Número de disparo da campanha não encontrado.' });
-          const mimeMatch = template.headerImageBase64.match(/^data:([^;]+);base64,/);
-          const buffer = Buffer.from(stripDataUriPrefix(template.headerImageBase64), 'base64');
-          const mediaId = await uploadWhatsAppMedia(firstNumber.phoneNumberId, firstNumber.accessToken || undefined, buffer, mimeMatch?.[1] || 'image/jpeg', 'header.jpg');
-          await setCampaignHeaderMediaId(tenantId, req.params.id, mediaId);
-          campaign = { ...campaign, headerMediaId: mediaId };
-        }
+      // Ajusta agendamento/janela ANTES da transição de status, pra que
+      // "agendar" numa única chamada (scheduledAt + status: 'scheduled')
+      // já valide com o valor recém-enviado, não com o antigo.
+      if (hasScheduleFields) {
+        await updateCampaignSchedule(tenantId, req.params.id, { scheduledAt, sendWindowStart, sendWindowEnd, sendWindowTimezone });
       }
+
+      const campaign = status
+        ? (status === 'running' ? await transitionCampaignToRunning(tenantId, req.params.id) : await updateCampaignStatus(tenantId, req.params.id, status))
+        : await getCampaign(tenantId, req.params.id);
 
       res.json({ campaign });
     } catch (err) {

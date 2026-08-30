@@ -55,6 +55,10 @@ interface BroadcastCampaign {
   contactListId: string;
   status: 'draft' | 'scheduled' | 'running' | 'paused' | 'completed' | 'canceled';
   consentConfirmed: boolean;
+  scheduledAt: string | null;
+  sendWindowStart: string | null;
+  sendWindowEnd: string | null;
+  sendWindowTimezone: string;
   createdAt: string;
 }
 
@@ -80,6 +84,14 @@ const STATUS_COLORS: Record<BroadcastNumber['status'], string> = {
 const QUALITY_LABELS: Record<BroadcastNumber['qualityRating'], string> = {
   unknown: 'Não sei', high: 'Alta', medium: 'Média', low: 'Baixa',
 };
+
+/** `datetime-local` mostra/edita hora LOCAL do navegador — evita o campo exibir a data errada quando a ISO salva é UTC. */
+function isoToLocalInputValue(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -315,6 +327,11 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
   const [testSendMessage, setTestSendMessage] = useState<string | null>(null);
   const [testSendSucceeded, setTestSendSucceeded] = useState(false);
 
+  // ── Agendamento e janela de horário (TASK-0173) ────────────────────────
+  const [scheduleForm, setScheduleForm] = useState({ scheduledAt: '', sendWindowStart: '', sendWindowEnd: '', sendWindowTimezone: 'America/Sao_Paulo' });
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+
   const loadCampaigns = async () => {
     const res = await apiFetch('/api/admin/broadcast-campaigns');
     if (res.ok) setCampaigns((await res.json()).campaigns || []);
@@ -340,8 +357,63 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
     setSelectedCampaignId(id);
     setTestSendMessage(null);
     setTestSendSucceeded(false);
+    setScheduleError(null);
     const res = await apiFetch(`/api/admin/broadcast-campaigns/${id}`);
-    if (res.ok) setCampaignDetail(await res.json());
+    if (res.ok) {
+      const data = await res.json();
+      setCampaignDetail(data);
+      setScheduleForm({
+        scheduledAt: isoToLocalInputValue(data.campaign.scheduledAt),
+        sendWindowStart: data.campaign.sendWindowStart || '',
+        sendWindowEnd: data.campaign.sendWindowEnd || '',
+        sendWindowTimezone: data.campaign.sendWindowTimezone || 'America/Sao_Paulo',
+      });
+    }
+  };
+
+  const handleSaveSendWindow = async () => {
+    if (!selectedCampaignId) return;
+    setIsSavingSchedule(true);
+    setScheduleError(null);
+    try {
+      const res = await apiFetch(`/api/admin/broadcast-campaigns/${selectedCampaignId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sendWindowStart: scheduleForm.sendWindowStart || null,
+          sendWindowEnd: scheduleForm.sendWindowEnd || null,
+          sendWindowTimezone: scheduleForm.sendWindowTimezone || 'America/Sao_Paulo',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await loadCampaignDetail(selectedCampaignId);
+    } catch (err: any) {
+      setScheduleError(err.message || 'Falha ao salvar janela de horário.');
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
+  const handleScheduleStart = async () => {
+    if (!selectedCampaignId || !scheduleForm.scheduledAt) return;
+    setIsSavingSchedule(true);
+    setScheduleError(null);
+    try {
+      const res = await apiFetch(`/api/admin/broadcast-campaigns/${selectedCampaignId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledAt: new Date(scheduleForm.scheduledAt).toISOString(), status: 'scheduled' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await loadCampaignDetail(selectedCampaignId);
+      await loadCampaigns();
+    } catch (err: any) {
+      setScheduleError(err.message || 'Falha ao agendar campanha.');
+    } finally {
+      setIsSavingSchedule(false);
+    }
   };
 
   const handlePreview = async () => {
@@ -796,6 +868,58 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
               </div>
               <p className="text-[11px] text-slate-500">Pendentes: {campaignDetail.counts.pending} • Em envio: {campaignDetail.counts.sending}</p>
 
+              {['draft', 'scheduled', 'running', 'paused'].includes(campaignDetail.campaign.status) && (
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-3">
+                  <p className="text-xs font-bold text-slate-200">Janela de horário (respeitada a cada envio, em qualquer status)</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-1">Só enviar a partir de</label>
+                      <input type="time" value={scheduleForm.sendWindowStart} onChange={(e) => setScheduleForm({ ...scheduleForm, sendWindowStart: e.target.value })} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-1">até</label>
+                      <input type="time" value={scheduleForm.sendWindowEnd} onChange={(e) => setScheduleForm({ ...scheduleForm, sendWindowEnd: e.target.value })} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-1">Fuso horário</label>
+                      <input value={scheduleForm.sendWindowTimezone} onChange={(e) => setScheduleForm({ ...scheduleForm, sendWindowTimezone: e.target.value })} placeholder="America/Sao_Paulo" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white" />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Deixe os dois horários em branco pra enviar a qualquer hora (padrão atual).</p>
+                  <button onClick={handleSaveSendWindow} disabled={isSavingSchedule} className="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold text-[11px] rounded-lg cursor-pointer">
+                    {isSavingSchedule ? 'Salvando...' : 'Salvar janela'}
+                  </button>
+
+                  {(campaignDetail.campaign.status === 'draft' || campaignDetail.campaign.status === 'scheduled') && (
+                    <div className="pt-2 border-t border-slate-800 space-y-2">
+                      <p className="text-xs font-bold text-slate-200">Agendar início automático</p>
+                      {campaignDetail.campaign.status === 'scheduled' && campaignDetail.campaign.scheduledAt ? (
+                        <>
+                          <p className="text-[11px] text-amber-300">Agendado pra iniciar em {new Date(campaignDetail.campaign.scheduledAt).toLocaleString('pt-BR')} — o job promove sozinho pra "Em execução" nessa hora.</p>
+                          <button onClick={() => handleChangeCampaignStatus('draft')} className="text-[11px] text-slate-400 hover:text-slate-200 font-semibold cursor-pointer">Voltar pra rascunho</button>
+                        </>
+                      ) : (
+                        <div className="flex items-end gap-2">
+                          <div className="flex-1">
+                            <label className="block text-[10px] text-slate-500 mb-1">Data e hora de início</label>
+                            <input type="datetime-local" value={scheduleForm.scheduledAt} onChange={(e) => setScheduleForm({ ...scheduleForm, scheduledAt: e.target.value })} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white" />
+                          </div>
+                          <button onClick={handleScheduleStart} disabled={isSavingSchedule || !scheduleForm.scheduledAt} className="py-1.5 px-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white font-bold text-[11px] rounded-lg cursor-pointer">
+                            Agendar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {scheduleError && <p className="text-[11px] text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{scheduleError}</p>}
+                </div>
+              )}
+
+              {campaignDetail.campaign.status === 'scheduled' && (
+                <div className="flex gap-2">
+                  <button onClick={() => handleChangeCampaignStatus('canceled')} className="py-2 px-3.5 bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-400 font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer"><Ban className="w-4 h-4" /><span>Cancelar</span></button>
+                </div>
+              )}
               {campaignDetail.campaign.status === 'draft' && (
                 <div className="space-y-2">
                   <button onClick={handleTestSend} disabled={isTestSending} className="py-2 px-3.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer">

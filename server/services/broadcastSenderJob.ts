@@ -20,8 +20,11 @@ import { sendWhatsAppTemplateMessage } from './metaSend';
 import { resolveCredentialsForConversation } from './tenantResolver';
 import { getOrCreateConversationForBroadcast, recordOutgoingMessage } from './conversationStore';
 import { effectiveDailyCap, hasCompletedWarmup } from './warmupCurve';
+import { isWithinSendWindow } from './sendWindow';
 import {
   listRunningCampaignsAcrossTenants,
+  listScheduledCampaignsDueToStart,
+  transitionCampaignToRunning,
   listCampaignNumbersWithDetails,
   getCampaign,
   getBroadcastTemplate,
@@ -35,6 +38,7 @@ import {
   updateBroadcastNumberWarmupProgress,
   renderTemplateDisplayText,
   type BroadcastNumber,
+  type BroadcastCampaign,
 } from './broadcastStore';
 
 const DEFAULT_INTERVAL_MS = 20 * 1000;
@@ -83,6 +87,7 @@ async function processCampaignNumber(
   tenantId: string,
   campaignId: string,
   numberInput: BroadcastNumber,
+  campaign: BroadcastCampaign,
   deps: BroadcastSenderJobDeps
 ): Promise<void> {
   // Freio de segurança acima de qualquer cota — qualidade ruim ou
@@ -110,8 +115,6 @@ async function processCampaignNumber(
   const recipients = await dequeuePendingRecipients(campaignId, number.id, quota);
   if (!recipients.length) return;
 
-  const campaign = await getCampaign(tenantId, campaignId);
-  if (!campaign) return;
   const template = await getBroadcastTemplate(tenantId, campaign.templateId);
   if (!template) {
     console.warn(`⚠️  [Disparo] campanha=${campaignId} template=${campaign.templateId} não encontrado — pulando este tick.`);
@@ -171,18 +174,54 @@ async function processCampaignNumber(
 }
 
 async function processCampaign(tenantId: string, campaignId: string, deps: BroadcastSenderJobDeps): Promise<void> {
+  const campaign = await getCampaign(tenantId, campaignId);
+  if (!campaign) return;
+  // Janela de horário comercial da campanha — fora dela, nenhum número
+  // envia neste tick (a fila continua pending, sem gastar cota nenhuma).
+  // start/end nulos = sem restrição (comportamento de antes desta janela
+  // existir, preservado pra qualquer campanha já criada).
+  if (!isWithinSendWindow(new Date(), campaign.sendWindowStart, campaign.sendWindowEnd, campaign.sendWindowTimezone)) return;
+
   const numbersWithDetails = await listCampaignNumbersWithDetails(tenantId, campaignId);
   for (const { number } of numbersWithDetails) {
     try {
-      await processCampaignNumber(tenantId, campaignId, number, deps);
+      await processCampaignNumber(tenantId, campaignId, number, campaign, deps);
     } catch (err) {
       console.warn(`⚠️  [Disparo] tenant=${tenantId} campanha=${campaignId} número=${number.id} falhou neste tick:`, (err as Error)?.message || err);
     }
   }
 }
 
+/**
+ * Promove sozinho campanhas `scheduled` cuja hora marcada já chegou —
+ * sem isso, `scheduledAt` era só um campo decorativo (TASK-0173: o
+ * agendamento nunca disparava nada de verdade). Usa `transitionCampaignToRunning`
+ * (não `updateCampaignStatus` puro) pra também cobrir o upload de header de
+ * imagem na 1ª execução, mesmo caminho que a rota PATCH usa quando um humano
+ * inicia manualmente.
+ */
+async function promoteDueScheduledCampaigns(): Promise<void> {
+  let due: Array<{ tenantId: string; campaignId: string }>;
+  try {
+    due = await listScheduledCampaignsDueToStart();
+  } catch (err) {
+    console.warn('⚠️  [Disparo] Falha ao listar campanhas agendadas:', (err as Error)?.message || err);
+    return;
+  }
+
+  for (const { tenantId, campaignId } of due) {
+    try {
+      await runWithTenantDbContext({ tenantId, source: 'job' }, () => transitionCampaignToRunning(tenantId, campaignId));
+    } catch (err) {
+      console.warn(`⚠️  [Disparo] tenant=${tenantId} campanha=${campaignId} falhou ao promover agendamento:`, (err as Error)?.message || err);
+    }
+  }
+}
+
 /** Uma passada do job — exportada separada do setInterval pra ser chamada diretamente nos testes. */
 export async function runBroadcastSenderTick(deps: BroadcastSenderJobDeps = {}): Promise<void> {
+  await promoteDueScheduledCampaigns();
+
   let running: Array<{ tenantId: string; campaignId: string }>;
   try {
     running = await listRunningCampaignsAcrossTenants();
