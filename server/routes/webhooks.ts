@@ -80,7 +80,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // resolvedTenant vem do Bloco 2.B (server/services/tenantResolver.ts) — já
   // é o tenant/credencial certos pra esse número, resolvidos por
   // phone_number_id antes de chegar aqui.
-  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant) => {
+  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant, firstMessageId?: string) => {
     const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
     const isEvolution = resolvedTenant.provider === 'evolution';
     const isInstagram = resolvedTenant.provider === 'instagram';
@@ -150,7 +150,24 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       });
       const kbContext = formatKnowledgeBaseForPrompt(kb);
       const segment = await getTenantSegment(tenantId);
-      const history = conversation?.messages.slice(0, -historyExclude);
+      // Achado real em produção (Gladys, tenant Monique, 30/08/2026): cortar
+      // por CONTAGEM (`slice(0, -historyExclude)`) supõe que nada mais foi
+      // gravado desde que este lote de mensagens picotadas foi bufferizado.
+      // runExclusive (perPhoneQueue.ts) serializa os ciclos por telefone,
+      // mas um ciclo pode ficar PRESO na fila enquanto o cliente manda MAIS
+      // mensagens — já gravadas na hora (recordIncomingMessage roda ANTES
+      // de qualquer buffer/fila, ver linha ~488), independente da fila.
+      // Quando isso acontece, o corte por contagem pega o lote errado:
+      // inclui a própria mensagem deste ciclo (duplicada com `text`, que já
+      // recebe o mesmo conteúdo) e perde mensagens novas reais. Corta por
+      // IDENTIDADE (tudo antes do ID da primeira mensagem deste lote) — que
+      // permanece correto mesmo com mensagens novas chegando enquanto o
+      // ciclo espera a vez. Cai pro corte antigo por contagem só quando
+      // firstMessageId não foi informado ou não é encontrado no histórico
+      // (ex.: recuperação de um buffer persistido de antes desta correção).
+      const allMessages = conversation?.messages;
+      const cutoffIndex = firstMessageId && allMessages ? allMessages.findIndex((m) => m.id === firstMessageId) : -1;
+      const history = !allMessages ? undefined : cutoffIndex !== -1 ? allMessages.slice(0, cutoffIndex) : allMessages.slice(0, -historyExclude);
       // Sinaliza pro painel (SSE) que a IA começou a processar a última
       // mensagem — ver emitAiReplyStatus em conversationEvents.ts. Emitido só
       // depois de todos os gates de silêncio acima (agente pausado, lead
@@ -365,10 +382,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // de disparar a resposta — espera ~6s de silêncio, evitando responder cada
   // fragmento separadamente (denunciaria automação na hora).
   const handleIncomingText = (phone: string, contactName: string | undefined, text: string, messageId: string, resolvedTenant: ResolvedTenant) => {
-    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant, firstMessageId) =>
       runWithTenantDbContext(
         { tenantId: bufferedTenant.tenantId, source: 'webhook' },
-        () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+        () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant, firstMessageId)
       )
     );
   };
@@ -377,10 +394,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // janela de 6s de silêncio — sem isso, a mensagem ficava perdida pra
   // sempre (achado real, 15/08/2026). Uma vez só no boot do router, o
   // próprio sweeper se reagenda periodicamente por dentro.
-  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant, firstMessageId) =>
     runWithTenantDbContext(
       { tenantId: bufferedTenant.tenantId, source: 'job' },
-      () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+      () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant, firstMessageId)
     )
   );
 

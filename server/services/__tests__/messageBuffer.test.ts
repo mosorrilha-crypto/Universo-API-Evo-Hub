@@ -31,7 +31,7 @@ describe('bufferIncomingText', () => {
       bufferIncomingText('595981111111', 'Cliente', 'tudo bem?', 'msg-2', TENANT_A, onFlush);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(onFlush).toHaveBeenCalledTimes(1);
-      expect(onFlush).toHaveBeenCalledWith('oi\ntudo bem?', 'Cliente', 'msg-2', 2, TENANT_A);
+      expect(onFlush).toHaveBeenCalledWith('oi\ntudo bem?', 'Cliente', 'msg-2', 2, TENANT_A, 'msg-1');
     } finally {
       vi.useRealTimers();
     }
@@ -45,8 +45,8 @@ describe('bufferIncomingText', () => {
       bufferIncomingText('595981234567', 'Cliente', 'oi tenant A', 'msg-a', TENANT_A, onFlushA);
       bufferIncomingText('595981234567', 'Cliente', 'oi tenant B', 'msg-b', TENANT_B, onFlushB);
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(onFlushA).toHaveBeenCalledWith('oi tenant A', 'Cliente', 'msg-a', 1, TENANT_A);
-      expect(onFlushB).toHaveBeenCalledWith('oi tenant B', 'Cliente', 'msg-b', 1, TENANT_B);
+      expect(onFlushA).toHaveBeenCalledWith('oi tenant A', 'Cliente', 'msg-a', 1, TENANT_A, 'msg-a');
+      expect(onFlushB).toHaveBeenCalledWith('oi tenant B', 'Cliente', 'msg-b', 1, TENANT_B, 'msg-b');
     } finally {
       vi.useRealTimers();
     }
@@ -57,7 +57,7 @@ describe('bufferIncomingText', () => {
     await new Promise((r) => setTimeout(r, 10));
     const rows = (supabase.__tables.pending_message_buffers || []).filter((r: any) => r.phone === '595982222222');
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ tenant_id: 'tenant-a', phone: '595982222222', texts: ['oi'], last_message_id: 'msg-1' });
+    expect(rows[0]).toMatchObject({ tenant_id: 'tenant-a', phone: '595982222222', texts: ['oi'], last_message_id: 'msg-1', first_message_id: 'msg-1' });
   });
 
   it('remove a marca persistida depois de um flush normal (timer em memória, sem precisar do sweeper)', async () => {
@@ -83,13 +83,14 @@ describe('startBufferRecoverySweeper', () => {
         texts: ['mensagem presa por um restart'],
         contact_name: 'Cliente Preso',
         last_message_id: 'msg-preso',
+        first_message_id: 'msg-preso-1',
         resolved_tenant: TENANT_A,
         flush_at: new Date(Date.now() - 1000).toISOString(),
       },
     ];
     const recovered: any[] = [];
-    startBufferRecoverySweeper((phone) => (combinedText, contactName, lastMessageId, messageCount, resolvedTenant) => {
-      recovered.push({ phone, combinedText, contactName, lastMessageId, messageCount, resolvedTenant });
+    startBufferRecoverySweeper((phone) => (combinedText, contactName, lastMessageId, messageCount, resolvedTenant, firstMessageId) => {
+      recovered.push({ phone, combinedText, contactName, lastMessageId, messageCount, resolvedTenant, firstMessageId });
     });
 
     await new Promise((r) => setTimeout(r, 20));
@@ -101,9 +102,35 @@ describe('startBufferRecoverySweeper', () => {
       contactName: 'Cliente Preso',
       lastMessageId: 'msg-preso',
       messageCount: 1,
+      firstMessageId: 'msg-preso-1',
     });
     const rows = (supabase.__tables.pending_message_buffers || []).filter((r: any) => r.phone === '595984444444');
     expect(rows).toHaveLength(0); // limpa depois de recuperar, não recupera de novo no próximo tick
+  });
+
+  // TASK-0172: marcas persistidas ANTES da coluna first_message_id existir
+  // não têm esse campo — cai pro last_message_id (mais próximo do correto
+  // do que nada), nunca quebra a recuperação.
+  it('cai pro last_message_id quando a marca presa é de antes da coluna first_message_id existir', async () => {
+    supabase.__tables.pending_message_buffers = [
+      {
+        tenant_id: 'tenant-a',
+        phone: '595984444445',
+        texts: ['mensagem presa, formato antigo'],
+        contact_name: 'Cliente Antigo',
+        last_message_id: 'msg-antigo',
+        resolved_tenant: TENANT_A,
+        flush_at: new Date(Date.now() - 1000).toISOString(),
+      },
+    ];
+    const recovered: any[] = [];
+    startBufferRecoverySweeper((phone) => (combinedText, contactName, lastMessageId, messageCount, resolvedTenant, firstMessageId) => {
+      recovered.push({ phone, firstMessageId });
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(recovered).toEqual([{ phone: '595984444445', firstMessageId: 'msg-antigo' }]);
   });
 
   it('ignora marca cujo flush_at ainda não chegou (não é recuperação, é um buffer normal em andamento)', async () => {
