@@ -511,17 +511,28 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     uploadWhatsAppMedia.mockClear();
     sendWhatsAppMediaMessage.mockClear();
     recordOutgoingMessage.mockClear();
+    saveMediaImage.mockClear();
     const { ai } = makeFakeAiWithPhotoTool(true);
 
     const result = await generateAutoReplyForText(
       'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined, undefined,
-      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
     );
 
     expect(result).not.toBeNull();
     expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
     expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
     expect(recordOutgoingMessage).toHaveBeenCalled();
+
+    // Achado real em produção (Monique, 29/08/2026): a foto abria no
+    // WhatsApp real do lead mas o painel mostrava "Imagem indisponível" pra
+    // sempre — só a mensagem de texto era gravada, o binário nunca ia pro
+    // mediaImageStore (o vídeo já tinha esse fix, a foto ficou pra trás).
+    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+    const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
+    expect(savedMimeType).toBe('image/jpeg');
+    expect(typeof savedBase64).toBe('string');
+    expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
   });
 
   it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {

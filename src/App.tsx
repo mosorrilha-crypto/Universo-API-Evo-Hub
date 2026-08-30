@@ -207,19 +207,30 @@ export const App: React.FC = () => {
   const tenantCapabilities = tenantCapabilitiesState.tenantId === activeTenant.id
     ? tenantCapabilitiesState.values
     : EMPTY_TENANT_NAVIGATION_CAPABILITIES;
-  // O SaaS Admin precisa enxergar toda a operação para administrar a plataforma
-  // e liberar recursos por empresa. O bloqueio comercial continua para os
-  // papéis internos de cada tenant e também é reforçado nas rotas protegidas.
+  // Achado real, 30/08/2026 (pedido direto do dono do produto): o SaaS
+  // Admin usa o seletor de empresas pra entrar no contexto de um tenant
+  // específico e ver a operação exatamente como aquela empresa a vê —
+  // inclusive os recursos que ELA não tem liberados. Um commit anterior
+  // ("fix: preserva acesso do saas admin aos recursos", 27/08/2026) tinha
+  // feito o SaaS Admin ignorar `tenantCapabilities` e ver tudo sempre,
+  // achando que isso era necessário "para auditoria" — na prática isso
+  // quebrou exatamente a função de pré-visualizar uma empresa (ex: Clic
+  // Piscinas, que só tem 6 recursos liberados, mostrava todos). Revertido:
+  // a única coisa exclusiva do SaaS Admin continua sendo o próprio seletor
+  // de empresas pra voltar à conta principal (`canSeeSaasMaster`, usado em
+  // `canAccessSaasAdmin`/`canSwitchTenant` abaixo) — cada recurso
+  // operacional individual volta a depender só do papel + do que a empresa
+  // ATIVA tem contratado, igual pra qualquer tenant admin.
   const canSeeSaasMaster = isSaasSessionConfirmed && hasRoleAtLeast(currentUser?.role, 'saas_admin');
-  const canSeeConversations = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.conversations);
-  const canSeeCrm = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.crm);
-  const canSeeAgenda = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.agenda);
-  const canSeeFinancial = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.financial);
+  const canSeeConversations = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.conversations;
+  const canSeeCrm = hasRoleAtLeast(currentUser?.role, 'operator') && tenantCapabilities.crm;
+  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.agenda;
+  const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && tenantCapabilities.financial;
   const canSeeAdminTools = hasRoleAtLeast(currentUser?.role, 'admin');
-  const canSeeGrowth = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.growth);
-  const canManageAgent = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.agent);
-  const canSeeCatalog = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.catalog);
-  const canSeeQuality = canSeeSaasMaster || (canSeeAdminTools && tenantCapabilities.quality);
+  const canSeeGrowth = canSeeAdminTools && tenantCapabilities.growth;
+  const canManageAgent = canSeeAdminTools && tenantCapabilities.agent;
+  const canSeeCatalog = canSeeAdminTools && tenantCapabilities.catalog;
+  const canSeeQuality = canSeeAdminTools && tenantCapabilities.quality;
   // Recurso novo: SaaS Admin sempre audita; admins de tenant só acessam após
   // liberação explícita no Centro de Controle para a empresa ativa.
   const canSeeSystemLogs = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.systemLogs);
