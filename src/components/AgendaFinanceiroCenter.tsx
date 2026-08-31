@@ -625,7 +625,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
                 Google Agenda, TASK-0144) — no celular real isso lia como "espaço
                 desperdiçado" em vez de "limpo". Célula vazia (início do mês) agora
                 completa a grade com uma borda fina, igual às células com dia. */}
-              {Array.from({ length: (calendarDate.getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-11 rounded-lg border border-slate-800/40 sm:min-h-12 sm:rounded-xl" />)}{eventDays.map(({ day, appointments }) => {
+              {Array.from({ length: (new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1).getDay() + 6) % 7 }, (_, index) => <div key={`blank-${index}`} aria-hidden="true" className="min-h-11 rounded-lg border border-slate-800/40 sm:min-h-12 sm:rounded-xl" />)}{eventDays.map(({ day, appointments }) => {
                 const dayKey = dateInputValue(day);
                 const isToday = dayKey === dateInputValue(new Date());
                 const isSelected = dayKey === selectedDate;
