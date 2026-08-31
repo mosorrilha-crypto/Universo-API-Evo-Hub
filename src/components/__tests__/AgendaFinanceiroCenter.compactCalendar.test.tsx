@@ -63,6 +63,21 @@ describe('AgendaFinanceiroCenter — topo compacto e grade organizada', () => {
     const blanks = container.querySelectorAll('[aria-hidden="true"].min-h-11');
     expect(blanks.length).toBeGreaterThan(0);
   });
+
+  it('calcula as células vazias pelo dia da semana do DIA 1 do mês exibido, não pelo dia da semana de hoje (achado real: 31/08/2026 é segunda-feira, mas o dia 1 de agosto é sábado — usar "hoje" zerava a grade)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); // avança o tempo real por baixo, senão o waitFor do testing-library trava esperando um timer que nunca dispara.
+    vi.setSystemTime(new Date(2026, 7, 31)); // 31/ago/2026 — segunda-feira; dia 1/ago/2026 é sábado.
+    try {
+      const { container } = render(<AgendaFinanceiroCenter {...baseProps()} />);
+      await waitFor(() => expect(api.apiFetch).toHaveBeenCalled());
+
+      // Grade de segunda a domingo: sábado é a penúltima coluna -> 5 células vazias antes do dia 1.
+      const blanks = container.querySelectorAll('[aria-hidden="true"].min-h-11');
+      expect(blanks.length).toBe(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('AgendaFinanceiroCenter — toque no dia da grade (achado real: sempre abria "Novo agendamento")', () => {
