@@ -11,7 +11,7 @@ type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
 
 class FakeQueryBuilder {
-  private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'in', string, any]> = [];
+  private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'lte' | 'in', string, any]> = [];
   private wantSelect = false;
   private maximumRows: number | null = null;
 
@@ -45,6 +45,12 @@ class FakeQueryBuilder {
     return this;
   }
 
+  /** Comparação simples (string/número) — suficiente pra filtro "na hora marcada ou antes" por scheduled_at ISO. */
+  lte(column: string, value: any) {
+    this.filters.push(['lte', column, value]);
+    return this;
+  }
+
   in(column: string, values: any[]) {
     this.filters.push(['in', column, values]);
     return this;
@@ -69,6 +75,7 @@ class FakeQueryBuilder {
       if (kind === 'ilike') return String(row[column] ?? '').toLowerCase() === String(value ?? '').toLowerCase();
       if (kind === 'gte') return row[column] >= value;
       if (kind === 'lt') return row[column] < value;
+      if (kind === 'lte') return row[column] <= value;
       if (kind === 'in') return (value as any[]).includes(row[column]);
       return row[column] === value;
     });

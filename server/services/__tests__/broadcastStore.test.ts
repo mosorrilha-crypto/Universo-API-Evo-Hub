@@ -5,9 +5,15 @@
  * `skipped_recent_duplicate`, e os toggles "incluir mesmo assim" revertem
  * isso — além da divisão da lista entre números por `allocation_count`.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initDb, getDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
+
+vi.mock('../metaSend', () => ({
+  uploadWhatsAppMedia: vi.fn().mockResolvedValue('media-id-test'),
+  sendWhatsAppTemplateMessage: vi.fn(),
+}));
+import { uploadWhatsAppMedia } from '../metaSend';
 import {
   createBroadcastNumber,
   listBroadcastNumbers,
@@ -19,6 +25,9 @@ import {
   getCampaignCounts,
   listCampaignNumberAllocations,
   updateCampaignStatus,
+  updateCampaignSchedule,
+  transitionCampaignToRunning,
+  listScheduledCampaignsDueToStart,
 } from '../broadcastStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
@@ -178,5 +187,152 @@ describe('updateCampaignStatus', () => {
     await expect(updateCampaignStatus(TENANT_A, campaign.id, 'running')).resolves.toBeTruthy();
     await expect(updateCampaignStatus(TENANT_A, campaign.id, 'completed')).resolves.toBeTruthy();
     await expect(updateCampaignStatus(TENANT_A, campaign.id, 'running')).rejects.toThrow(/Transição de status inválida/);
+  });
+
+  it('rejeita agendar ("scheduled") sem scheduledAt definido antes', async () => {
+    const template = await createBroadcastTemplate(TENANT_A, { name: 't', language: 'pt_BR', category: 'marketing', headerType: 'none', bodyVariableLabels: [] });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A');
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'C', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+    await expect(updateCampaignStatus(TENANT_A, campaign.id, 'scheduled')).rejects.toThrow(/scheduledAt/);
+  });
+
+  it('permite voltar de "scheduled" pra "draft" (desagendar sem cancelar a campanha)', async () => {
+    const template = await createBroadcastTemplate(TENANT_A, { name: 't', language: 'pt_BR', category: 'marketing', headerType: 'none', bodyVariableLabels: [] });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A');
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'C', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+    await updateCampaignSchedule(TENANT_A, campaign.id, { scheduledAt: '2026-09-01T12:00:00.000Z' });
+    await updateCampaignStatus(TENANT_A, campaign.id, 'scheduled');
+    const backToDraft = await updateCampaignStatus(TENANT_A, campaign.id, 'draft');
+    expect(backToDraft.status).toBe('draft');
+  });
+});
+
+describe('updateCampaignSchedule', () => {
+  async function setupCampaign() {
+    const template = await createBroadcastTemplate(TENANT_A, { name: 't', language: 'pt_BR', category: 'marketing', headerType: 'none', bodyVariableLabels: [] });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A');
+    return createCampaign(TENANT_A, {
+      name: 'C', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+  }
+
+  it('salva scheduledAt e janela de horário válidos', async () => {
+    const campaign = await setupCampaign();
+    const updated = await updateCampaignSchedule(TENANT_A, campaign.id, {
+      scheduledAt: '2026-09-01T12:00:00.000Z', sendWindowStart: '09:00', sendWindowEnd: '18:00', sendWindowTimezone: 'America/Sao_Paulo',
+    });
+    expect(updated.scheduledAt).toBe('2026-09-01T12:00:00.000Z');
+    expect(updated.sendWindowStart).toBe('09:00');
+    expect(updated.sendWindowEnd).toBe('18:00');
+    expect(updated.sendWindowTimezone).toBe('America/Sao_Paulo');
+  });
+
+  it('rejeita horário de janela em formato inválido', async () => {
+    const campaign = await setupCampaign();
+    await expect(updateCampaignSchedule(TENANT_A, campaign.id, { sendWindowStart: '9h', sendWindowEnd: '18:00' })).rejects.toThrow(/HH:MM/);
+  });
+
+  it('rejeita definir só um lado da janela (início sem fim, ou vice-versa)', async () => {
+    const campaign = await setupCampaign();
+    await expect(updateCampaignSchedule(TENANT_A, campaign.id, { sendWindowStart: '09:00' })).rejects.toThrow(/dois horários/);
+  });
+
+  it('rejeita fuso horário desconhecido', async () => {
+    const campaign = await setupCampaign();
+    await expect(updateCampaignSchedule(TENANT_A, campaign.id, { sendWindowTimezone: 'Marte/Base_Um' })).rejects.toThrow(/não é reconhecido/);
+  });
+
+  it('rejeita data/hora inválida em scheduledAt', async () => {
+    const campaign = await setupCampaign();
+    await expect(updateCampaignSchedule(TENANT_A, campaign.id, { scheduledAt: 'não é uma data' })).rejects.toThrow(/válida/);
+  });
+});
+
+describe('transitionCampaignToRunning', () => {
+  it('template sem cabeçalho de imagem: só transiciona status, nunca chama upload', async () => {
+    const template = await createBroadcastTemplate(TENANT_A, { name: 't', language: 'pt_BR', category: 'marketing', headerType: 'none', bodyVariableLabels: [] });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A');
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'C', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+    const running = await transitionCampaignToRunning(TENANT_A, campaign.id);
+    expect(running.status).toBe('running');
+    expect(running.headerMediaId).toBeNull();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+  });
+
+  it('template com cabeçalho de imagem: faz upload uma vez e grava headerMediaId', async () => {
+    const template = await createBroadcastTemplate(TENANT_A, {
+      name: 't', language: 'pt_BR', category: 'marketing', headerType: 'image', bodyVariableLabels: [],
+      headerImageBase64: 'data:image/jpeg;base64,QQ==',
+    });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1', accessToken: 'tok' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A');
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'C', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+    const running = await transitionCampaignToRunning(TENANT_A, campaign.id);
+    expect(running.status).toBe('running');
+    expect(running.headerMediaId).toBe('media-id-test');
+    expect(uploadWhatsAppMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('template com cabeçalho de imagem mas sem imagem salva: rejeita antes de rodar', async () => {
+    const template = await createBroadcastTemplate(TENANT_A, {
+      name: 't', language: 'pt_BR', category: 'marketing', headerType: 'image', bodyVariableLabels: [],
+    });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A');
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'C', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+    await expect(transitionCampaignToRunning(TENANT_A, campaign.id)).rejects.toThrow(/nenhuma imagem foi salva/);
+  });
+});
+
+describe('listScheduledCampaignsDueToStart', () => {
+  it('só devolve campanhas "scheduled" cuja hora marcada já chegou — não as futuras nem as de outro status', async () => {
+    const template = await createBroadcastTemplate(TENANT_A, { name: 't', language: 'pt_BR', category: 'marketing', headerType: 'none', bodyVariableLabels: [] });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A');
+
+    const due = await createCampaign(TENANT_A, {
+      name: 'Já passou da hora', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+    await updateCampaignSchedule(TENANT_A, due.id, { scheduledAt: '2000-01-01T00:00:00.000Z' });
+    await updateCampaignStatus(TENANT_A, due.id, 'scheduled');
+
+    const future = await createCampaign(TENANT_A, {
+      name: 'Ainda não chegou a hora', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+    await updateCampaignSchedule(TENANT_A, future.id, { scheduledAt: '2999-01-01T00:00:00.000Z' });
+    await updateCampaignStatus(TENANT_A, future.id, 'scheduled');
+
+    const draft = await createCampaign(TENANT_A, {
+      name: 'Rascunho', templateId: template.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 10 }], createdBy: null,
+    });
+
+    const dueList = await listScheduledCampaignsDueToStart();
+    const dueIds = dueList.map((d) => d.campaignId);
+    expect(dueIds).toContain(due.id);
+    expect(dueIds).not.toContain(future.id);
+    expect(dueIds).not.toContain(draft.id);
   });
 });

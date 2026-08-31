@@ -15,7 +15,7 @@ vi.mock('../metaSend', () => ({
   sendWhatsAppTemplateMessage: vi.fn().mockResolvedValue({ messageId: 'wamid-test' }),
   uploadWhatsAppMedia: vi.fn().mockResolvedValue('media-id-test'),
 }));
-import { sendWhatsAppTemplateMessage } from '../metaSend';
+import { sendWhatsAppTemplateMessage, uploadWhatsAppMedia } from '../metaSend';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const NOW = new Date('2026-08-30T12:00:00Z');
@@ -62,6 +62,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   vi.mocked(sendWhatsAppTemplateMessage).mockClear();
+  vi.mocked(uploadWhatsAppMedia).mockClear();
 });
 
 describe('broadcastSenderJob — cotas de segurança', () => {
@@ -233,6 +234,83 @@ describe('broadcastSenderJob — integração com o Atendimento', () => {
     expect(conv?.phone_number_id).toBe('numero-operacional-existente');
     // O envio real ainda tem que ter acontecido, usando as credenciais do
     // número já associado à conversa (não o de disparo).
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('broadcastSenderJob — agendamento e janela de horário (TASK-0173)', () => {
+  it('promove sozinho uma campanha "scheduled" cuja hora já chegou, e ela já envia no mesmo tick', async () => {
+    await seedTemplate('tpl-1');
+    await seedNumber('num-1');
+    await seedCampaign('camp-1', 'tpl-1', { status: 'scheduled', scheduled_at: '2026-08-30T11:59:00Z', consent_confirmed: true });
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 1);
+
+    await runBroadcastSenderTick();
+
+    // A campanha tinha só 1 destinatário pendente, então além de promover
+    // (scheduled -> running) o próprio tick já esvazia a fila e marca
+    // completed — o que importa aqui é que ela deixou de ficar presa em
+    // "scheduled" esperando pra sempre, e o envio de fato aconteceu.
+    const { data: campaign } = await getDb().from('broadcast_campaigns').select('*').eq('id', 'camp-1').maybeSingle();
+    expect(campaign.status).not.toBe('scheduled');
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('NÃO promove uma campanha "scheduled" cuja hora ainda não chegou', async () => {
+    await seedTemplate('tpl-1');
+    await seedNumber('num-1');
+    await seedCampaign('camp-1', 'tpl-1', { status: 'scheduled', scheduled_at: '2026-08-30T12:01:00Z', consent_confirmed: true });
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 1);
+
+    await runBroadcastSenderTick();
+
+    const { data: campaign } = await getDb().from('broadcast_campaigns').select('*').eq('id', 'camp-1').maybeSingle();
+    expect(campaign.status).toBe('scheduled');
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+  });
+
+  it('faz upload do header de imagem ao promover uma campanha agendada, igual a uma ativação manual', async () => {
+    await seedTemplate('tpl-1', { header_type: 'image', header_image_base64: 'data:image/jpeg;base64,QQ==' });
+    await seedNumber('num-1');
+    await seedCampaign('camp-1', 'tpl-1', { status: 'scheduled', scheduled_at: '2026-08-30T11:00:00Z', consent_confirmed: true, header_media_id: null });
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 1);
+
+    await runBroadcastSenderTick();
+
+    const { data: campaign } = await getDb().from('broadcast_campaigns').select('*').eq('id', 'camp-1').maybeSingle();
+    expect(campaign.status).not.toBe('scheduled');
+    expect(campaign.header_media_id).toBe('media-id-test');
+    expect(uploadWhatsAppMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('respeita a janela de horário da campanha — fora da janela, não envia nada mesmo com destinatários pendentes', async () => {
+    await seedTemplate('tpl-1');
+    await seedNumber('num-1');
+    // NOW = 12:00 UTC; janela 13:00-18:00 UTC ainda não começou.
+    await seedCampaign('camp-1', 'tpl-1', { send_window_start: '13:00', send_window_end: '18:00', send_window_timezone: 'UTC' });
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 1);
+
+    await runBroadcastSenderTick();
+
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+    const { data: pending } = await getDb().from('broadcast_campaign_recipients').select('id').eq('campaign_id', 'camp-1').eq('status', 'pending');
+    expect(pending).toHaveLength(1);
+  });
+
+  it('dentro da janela de horário, envia normalmente', async () => {
+    await seedTemplate('tpl-1');
+    await seedNumber('num-1');
+    // NOW = 12:00 UTC; janela 09:00-18:00 UTC já está aberta.
+    await seedCampaign('camp-1', 'tpl-1', { send_window_start: '09:00', send_window_end: '18:00', send_window_timezone: 'UTC' });
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 1);
+
+    await runBroadcastSenderTick();
+
     expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
   });
 });
