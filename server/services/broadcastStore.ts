@@ -9,6 +9,12 @@
  */
 import { getDb, getPlatformDb } from './db';
 import { parseContactsCsv } from './csvParse';
+import { uploadWhatsAppMedia } from './metaSend';
+import { isValidTimeOfDay, isValidTimezone } from './sendWindow';
+
+function stripDataUriPrefix(base64: string): string {
+  return base64.replace(/^data:[^;]+;base64,/, '');
+}
 
 // ─── Números ────────────────────────────────────────────────────────────
 
@@ -491,6 +497,9 @@ export interface BroadcastCampaign {
   dedupeWindowDays: number;
   consentConfirmed: boolean;
   scheduledAt: string | null;
+  sendWindowStart: string | null;
+  sendWindowEnd: string | null;
+  sendWindowTimezone: string;
   startedAt: string | null;
   completedAt: string | null;
   createdBy: string | null;
@@ -510,6 +519,9 @@ function mapCampaignRow(row: any): BroadcastCampaign {
     dedupeWindowDays: row.dedupe_window_days,
     consentConfirmed: row.consent_confirmed,
     scheduledAt: row.scheduled_at ?? null,
+    sendWindowStart: row.send_window_start ?? null,
+    sendWindowEnd: row.send_window_end ?? null,
+    sendWindowTimezone: row.send_window_timezone || 'America/Sao_Paulo',
     startedAt: row.started_at ?? null,
     completedAt: row.completed_at ?? null,
     createdBy: row.created_by ?? null,
@@ -824,8 +836,11 @@ export async function listCampaignRecipients(
 }
 
 const CAMPAIGN_STATUS_TRANSITIONS: Record<BroadcastCampaignStatus, BroadcastCampaignStatus[]> = {
+  // "scheduled -> draft" existe pra dar um jeito de desagendar sem cancelar
+  // a campanha inteira (ver rota PATCH — o painel chama isso de "voltar pra
+  // rascunho").
   draft: ['scheduled', 'running', 'canceled'],
-  scheduled: ['running', 'canceled'],
+  scheduled: ['running', 'canceled', 'draft'],
   running: ['paused', 'completed', 'canceled'],
   paused: ['running', 'canceled'],
   completed: [],
@@ -842,11 +857,69 @@ export async function updateCampaignStatus(tenantId: string, campaignId: string,
   if (newStatus === 'running' && !current.consentConfirmed) {
     throw new Error('Consentimento da lista não confirmado — não é possível iniciar a campanha.');
   }
+  if (newStatus === 'scheduled' && !current.scheduledAt) {
+    throw new Error('Defina a data/hora de início ("scheduledAt") antes de agendar a campanha.');
+  }
 
   const db = getDb();
   const patch: Record<string, any> = { status: newStatus, updated_at: new Date().toISOString() };
   if (newStatus === 'running' && !current.startedAt) patch.started_at = new Date().toISOString();
   if (newStatus === 'completed') patch.completed_at = new Date().toISOString();
+  const { data, error } = await db.from('broadcast_campaigns').update(patch).eq('tenant_id', tenantId).eq('id', campaignId).select('*').single();
+  if (error) throw error;
+  return mapCampaignRow(data);
+}
+
+export interface UpdateCampaignScheduleInput {
+  scheduledAt?: string | null;
+  sendWindowStart?: string | null;
+  sendWindowEnd?: string | null;
+  sendWindowTimezone?: string;
+}
+
+/**
+ * Só ajusta os campos de agendamento/janela de horário, sem mexer no status
+ * — usado tanto pra preparar uma campanha `draft` antes de agendar quanto
+ * pra ajustar a janela de uma campanha já `running`/`paused` (a janela é
+ * respeitada a cada tick do job, não só na hora de agendar).
+ */
+export async function updateCampaignSchedule(
+  tenantId: string,
+  campaignId: string,
+  input: UpdateCampaignScheduleInput
+): Promise<BroadcastCampaign> {
+  const current = await getCampaign(tenantId, campaignId);
+  if (!current) throw new Error('Campanha não encontrada.');
+
+  const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (input.scheduledAt !== undefined) {
+    if (input.scheduledAt !== null && Number.isNaN(Date.parse(input.scheduledAt))) {
+      throw new Error('Campo "scheduledAt" precisa ser uma data/hora válida.');
+    }
+    patch.scheduled_at = input.scheduledAt;
+  }
+
+  const nextStart = input.sendWindowStart !== undefined ? input.sendWindowStart : current.sendWindowStart;
+  const nextEnd = input.sendWindowEnd !== undefined ? input.sendWindowEnd : current.sendWindowEnd;
+  if ((nextStart === null) !== (nextEnd === null)) {
+    throw new Error('Defina os dois horários da janela de envio (início e fim), ou nenhum dos dois.');
+  }
+  if (nextStart !== null && !isValidTimeOfDay(nextStart)) {
+    throw new Error('Campo "sendWindowStart" precisa estar no formato HH:MM (24h).');
+  }
+  if (nextEnd !== null && !isValidTimeOfDay(nextEnd)) {
+    throw new Error('Campo "sendWindowEnd" precisa estar no formato HH:MM (24h).');
+  }
+  if (input.sendWindowStart !== undefined) patch.send_window_start = input.sendWindowStart;
+  if (input.sendWindowEnd !== undefined) patch.send_window_end = input.sendWindowEnd;
+  if (input.sendWindowTimezone !== undefined) {
+    if (!isValidTimezone(input.sendWindowTimezone)) {
+      throw new Error(`Fuso horário "${input.sendWindowTimezone}" não é reconhecido.`);
+    }
+    patch.send_window_timezone = input.sendWindowTimezone;
+  }
+
+  const db = getDb();
   const { data, error } = await db.from('broadcast_campaigns').update(patch).eq('tenant_id', tenantId).eq('id', campaignId).select('*').single();
   if (error) throw error;
   return mapCampaignRow(data);
@@ -862,12 +935,59 @@ export async function setCampaignHeaderMediaId(tenantId: string, campaignId: str
   if (error) throw error;
 }
 
+/**
+ * Transição pra `running` de verdade — engloba a validação de status normal
+ * e, na 1ª vez que a campanha roda com um template de cabeçalho de imagem,
+ * o upload fresco do `header_media_id` (reaproveitado por todo destinatário
+ * de qualquer número da campanha). Antes esse upload só acontecia dentro da
+ * rota PATCH; extraído pra cá porque o job de envio também precisa fazer a
+ * mesma coisa ao promover sozinho uma campanha `scheduled` na hora marcada
+ * — sem isso, uma campanha agendada com imagem de cabeçalho começaria a
+ * rodar sem nunca ter feito o upload.
+ */
+export async function transitionCampaignToRunning(tenantId: string, campaignId: string): Promise<BroadcastCampaign> {
+  let campaign = await updateCampaignStatus(tenantId, campaignId, 'running');
+  if (campaign.headerMediaId) return campaign;
+
+  const template = await getBroadcastTemplate(tenantId, campaign.templateId);
+  if (template?.headerType !== 'image') return campaign;
+  if (!template.headerImageBase64) {
+    throw new Error('Este template usa cabeçalho de imagem, mas nenhuma imagem foi salva nele ainda.');
+  }
+  const allocations = await listCampaignNumberAllocations(tenantId, campaignId);
+  const firstNumber = allocations[0] ? await getBroadcastNumber(tenantId, allocations[0].broadcastNumberId) : null;
+  if (!firstNumber) throw new Error('Número de disparo da campanha não encontrado.');
+
+  const mimeMatch = template.headerImageBase64.match(/^data:([^;]+);base64,/);
+  const buffer = Buffer.from(stripDataUriPrefix(template.headerImageBase64), 'base64');
+  const mediaId = await uploadWhatsAppMedia(firstNumber.phoneNumberId, firstNumber.accessToken || undefined, buffer, mimeMatch?.[1] || 'image/jpeg', 'header.jpg');
+  await setCampaignHeaderMediaId(tenantId, campaignId, mediaId);
+  campaign = { ...campaign, headerMediaId: mediaId };
+  return campaign;
+}
+
 // ─── Usado só pelo job de envio (broadcastSenderJob.ts) ────────────────
 
 /** Cross-tenant — só pro job descobrir quais tenants têm campanha rodando, antes de entrar no contexto RLS de cada um. */
 export async function listRunningCampaignsAcrossTenants(): Promise<Array<{ tenantId: string; campaignId: string }>> {
   const db = getPlatformDb();
   const { data, error } = await db.from('broadcast_campaigns').select('id, tenant_id').eq('status', 'running');
+  if (error) throw error;
+  return (data || []).map((row: any) => ({ tenantId: row.tenant_id, campaignId: row.id }));
+}
+
+/**
+ * Cross-tenant — campanhas `scheduled` cuja hora marcada já chegou, pro job
+ * promover sozinho pra `running` (ver `transitionCampaignToRunning`). Sem
+ * isso o campo `scheduledAt` era só decorativo (TASK-0173).
+ */
+export async function listScheduledCampaignsDueToStart(): Promise<Array<{ tenantId: string; campaignId: string }>> {
+  const db = getPlatformDb();
+  const { data, error } = await db
+    .from('broadcast_campaigns')
+    .select('id, tenant_id')
+    .eq('status', 'scheduled')
+    .lte('scheduled_at', new Date().toISOString());
   if (error) throw error;
   return (data || []).map((row: any) => ({ tenantId: row.tenant_id, campaignId: row.id }));
 }
