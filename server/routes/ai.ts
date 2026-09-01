@@ -110,7 +110,7 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
           return await saveConversationAnalysis(tenantId, leadPhone, Array.isArray(messages) ? messages : [], agentKnowledgeBase || null, analysis, source, { model, actorId: (req as any).user?.id });
         } catch (persistError: any) {
           // A análise continua utilizável na sessão atual; a falha de persistência nunca deve produzir uma resposta inventada nem mascarar o erro do modelo.
-          console.warn(`⚠️ [Ficha IA] análise gerada mas não persistida (tenant=${tenantId}, phone=${leadPhone}):`, persistError?.message || persistError);
+          console.warn('⚠️ [Ficha IA] análise gerada mas não persistida:', { tenantId, leadPhone, message: persistError?.message || persistError });
           return undefined;
         }
       };
