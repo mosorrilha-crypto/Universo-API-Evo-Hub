@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
@@ -118,6 +118,16 @@ interface WhatsAppLeadsSimProps {
   onDeleteLead?: (leadId: string) => void;
   /** Contador de escalonamentos pendentes (não resolvidos) do tenant — pro atalho na caixa de ferramentas do operador, mesmo dado que já alimenta o badge da aba "Escalonamentos" no Header. */
   escalationsPendingCount?: number;
+  /** TASK-0187 (pedido direto, 01/09/2026): lista completa (não só o
+      contador) — usada pra achar e manter visível dentro da própria
+      conversa aberta um escalonamento real ainda não resolvido do lead
+      atual (revisor pré-envio bloqueou uma resposta, IA escalou pra
+      humano, etc.). O sinal que já existia (aiReplyStatusByPhone via SSE)
+      é transitório — some sozinho depois de 9s mesmo que ninguém tenha
+      visto, achado real relatado: "às vezes o revisor trava a conversa e eu
+      não consigo perceber". Este é persistente até o escalonamento ser
+      resolvido de verdade. */
+  escalations?: EscalationInfo[];
   /** Troca a aba ativa do app pra "Escalonamentos" — pedido real do operador: ter um atalho aqui, sem precisar navegar pela barra de abas do topo. */
   onGoToEscalations?: () => void;
   /** Telefone de um lead pra abrir a conversa dele automaticamente — usado pelo botão "Voltar pra conversa" no card de Escalonamento (App.tsx troca a aba pra "whatsapp" e passa o telefone aqui). */
@@ -216,6 +226,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onAddNewLead,
   onDeleteLead,
   escalationsPendingCount = 0,
+  escalations = [],
   onGoToEscalations,
   openLeadPhone,
   openLeadRequestId,
@@ -264,6 +275,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [contactContextPhone, setContactContextPhone] = useState<string | null>(null);
   const [contactContextTenantId, setContactContextTenantId] = useState<string | null>(null);
   const [isContactContextLoading, setIsContactContextLoading] = useState(false);
+  // TASK-0187 (pedido direto, 01/09/2026): "x pra fechar o contexto da
+  // conversa quando ele aparece". Guarda uma assinatura (telefone + horário
+  // da última atualização) em vez de só um booleano — fechar não vira um
+  // opt-out permanente: assim que a IA gerar uma memória/decisão NOVA pra
+  // esse lead (assinatura muda), a faixa volta a aparecer sozinha.
+  const [dismissedContextSignature, setDismissedContextSignature] = useState<string | null>(null);
   const contactContextRequestRef = useRef(0);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
@@ -3494,7 +3511,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="lg:hidden flex-shrink-0 p-1.5 -ml-1.5 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Voltar pra lista de conversas"
                   >
-                    <ArrowLeft className="w-4 h-4" />
+                    {/* TASK-0187: 4->[18px], escala mais perto do WhatsApp
+                        real (mesmo tamanho já usado na barra inferior). */}
+                    <ArrowLeft className="w-[18px] h-[18px]" />
                   </button>
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-xs ring-1 ring-emerald-500/40 flex-shrink-0 ${avatarColorClasses(selectedLead.name || selectedLead.phone)}`}
@@ -3550,7 +3569,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Cadastrar agendamento manual (combinado fora do WhatsApp)"
                     >
-                      <CalendarPlus className="w-4 h-4" />
+                      <CalendarPlus className="w-[18px] h-[18px]" />
                     </button>
                   )}
 
@@ -3562,7 +3581,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Gerar contrato"
                     >
-                      <FileText className="w-4 h-4" />
+                      <FileText className="w-[18px] h-[18px]" />
                     </button>
                   )}
 
@@ -3578,7 +3597,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="atendimento-analysis-trigger lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Ver Ficha IA"
                   >
-                    <IdCard className="w-4 h-4" />
+                    <IdCard className="w-[18px] h-[18px]" />
                   </button>
 
                   {/* Transferir pro WhatsApp pessoal do operador — abre um
@@ -3592,7 +3611,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Transferir pro WhatsApp pessoal do operador"
                   >
-                    <Phone className="w-4 h-4" />
+                    <Phone className="w-[18px] h-[18px]" />
                   </button>
 
                   {/* Achado ao vivo: as ações da conversa (bloquear IA pra
@@ -3612,7 +3631,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title={t('moreOptions')}
                     >
-                      <MoreVertical className="w-4 h-4" />
+                      <MoreVertical className="w-[18px] h-[18px]" />
                     </button>
                     {isHeaderMenuOpen && (() => {
                       const isAiBlocked = !!(selectedLead as any).aiBlockedAt;
@@ -3758,17 +3777,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </div>
 
               {/* Etiquetas livres da conversa (tipo WhatsApp Business).
-                  TASK-0185 (pedido direto, 01/09/2026): mesma cor de fundo
-                  do cabeçalho acima (#202c33, sem border-b entre os dois) —
-                  vira uma segunda linha do mesmo cabeçalho, em vez de uma
-                  barra visualmente separada. Padding reduzido (py-1.5) por
-                  já não precisar reabrir espaço pra uma "nova seção". */}
-              <div className="px-3 pt-0 pb-1.5 bg-[#202c33] border-b border-white/10 flex items-center gap-1.5 flex-wrap relative">
+                  TASK-0185/0187 (pedido direto): mesma cor de fundo do
+                  cabeçalho acima (#202c33) e SEM nenhuma borda fechando o
+                  bloco — o WhatsApp real não deixa nenhuma linha visível
+                  entre o cabeçalho e o começo das mensagens, então tirada de
+                  vez (não só movida) pra bater com o real. Tema das
+                  etiquetas trocado de colorido (`labelColorClasses`, uma cor
+                  por etiqueta) pra um único tom neutro — "ficou muito
+                  carregado", pedido direto pra ficar mais minimalista. */}
+              <div className="px-3 pt-0 pb-1.5 bg-[#202c33] flex items-center gap-1.5 flex-wrap relative">
                 <Tag className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
                 {(selectedLead.conversationLabels || []).map((label) => (
                   <span
                     key={label}
-                    className={`text-[10px] px-2 py-0.5 rounded-full border flex items-center gap-1 ${labelColorClasses(label)}`}
+                    className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600 bg-slate-800/70 text-slate-200 flex items-center gap-1"
                   >
                     {label}
                     <button
@@ -3781,24 +3803,46 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </span>
                 ))}
 
-                {/* TASK-0185: sugestões já aparecem direto na barra, contorno
-                    tracejado pra diferenciar das etiquetas já aplicadas —
-                    antes só apareciam escondidas dentro do dropdown do "+
-                    Etiqueta" (um clique a mais só pra ver o que já existia
-                    pra escolher). Um toque já aplica. */}
+                {/* TASK-0185/0187: sugestões direto na barra, contorno
+                    tracejado pra diferenciar das já aplicadas. Um toque
+                    aplica; o X exclui a sugestão do catálogo do tenant
+                    inteiro (mesma ação de "Gerenciar etiquetas", só que sem
+                    precisar abrir o modal) — pedido direto pra dar conta do
+                    "ficou muito carregado" na raiz, apagando as que não
+                    fazem mais sentido em vez de só escondê-las. */}
                 {(() => {
                   const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
                   const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
                     .filter((l) => !alreadyOn.has(normalizeLabelText(l)));
                   return suggestions.map((l) => (
-                    <button
+                    <span
                       key={l}
-                      onClick={() => handleAddLabel(selectedLead.id, l)}
-                      className={`text-[10px] px-2 py-0.5 rounded-full border border-dashed cursor-pointer hover:opacity-80 ${labelColorClasses(l)}`}
-                      title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
+                      className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 flex items-center gap-1"
                     >
-                      + {l}
-                    </button>
+                      <button
+                        onClick={() => handleAddLabel(selectedLead.id, l)}
+                        className="hover:text-white cursor-pointer"
+                        title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
+                      >
+                        + {l}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(isSpanish
+                            ? `¿Eliminar la etiqueta "${l}" del catálogo de la empresa? Afecta a todas las conversaciones.`
+                            : `Excluir a etiqueta "${l}" do catálogo da empresa? Afeta todas as conversas.`)) return;
+                          try {
+                            await handleDeleteLabelCatalog(l);
+                          } catch (err: any) {
+                            setErrorMsg(err?.message || (isSpanish ? 'No fue posible eliminar la etiqueta.' : 'Não foi possível excluir a etiqueta.'));
+                          }
+                        }}
+                        className="hover:text-rose-300 cursor-pointer"
+                        title={isSpanish ? 'Eliminar del catálogo' : 'Excluir do catálogo'}
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
                   ));
                 })()}
 
@@ -3858,22 +3902,68 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
               </div>
 
+              {/* TASK-0187 (pedido direto, 01/09/2026): alerta PERSISTENTE de
+                  escalonamento aberto dentro da própria conversa — o único
+                  sinal que existia (aiReplyStatusByPhone via SSE) some
+                  sozinho depois de 9s mesmo sem ninguém ter visto, achado
+                  real relatado: "às vezes o revisor trava a conversa ou tem
+                  um escalonamento e eu não consigo perceber". Fica visível
+                  até o escalonamento ser resolvido de verdade (não some
+                  sozinho, não tem botão de fechar — é sinal de segurança,
+                  não decoração). blockedDraft (quando existe) é o rascunho
+                  real que o revisor pré-envio recusou mandar. */}
+              {(selectedLead as any)?.isReal && (() => {
+                const activeEscalation = escalations.find(
+                  (e) => e.phone === selectedLead.phone && e.status !== 'resolved' && e.status !== 'archived' && !e.resolved,
+                );
+                if (!activeEscalation) return null;
+                return (
+                  <div className="bg-rose-950/40 border-b border-rose-800/40 px-3 py-2 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-bold text-rose-200">
+                        {activeEscalation.blockedDraft
+                          ? (isSpanish ? 'El revisor bloqueó una respuesta automática' : 'O revisor bloqueou uma resposta automática')
+                          : (isSpanish ? 'Conversación escalada para un humano' : 'Conversa escalada para humano')}
+                      </p>
+                      <p className="text-[11px] text-rose-300/90 truncate">{activeEscalation.reason}</p>
+                    </div>
+                    {onGoToEscalations && (
+                      <button
+                        type="button"
+                        onClick={onGoToEscalations}
+                        className="shrink-0 rounded-lg border border-rose-500/30 px-2 py-1 text-[10px] font-bold text-rose-200 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                      >
+                        {isSpanish ? 'Ver escalamiento' : 'Ver escalonamento'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Contexto compactado acompanha a conversa real. A ficha completa
                   continua opcional e apenas informa o operador: nunca autoriza
                   confirmação de agenda, pagamento ou qualquer exceção. */}
-              {(selectedLead as any)?.isReal && (
-                <ContactContextPanel
-                  context={visibleContactContext}
-                  isLoading={isContactContextLoading}
-                  isSpanish={isSpanish}
-                  variant="compact"
-                  onRetry={() => void refreshContactContext()}
-                  onOpenDetails={() => {
-                    if (window.innerWidth >= 1024) setShowRightPanel(true);
-                    else setMobileAnalysisOpen(true);
-                  }}
-                />
-              )}
+              {(selectedLead as any)?.isReal && (() => {
+                const contextSignature = selectedLead.phone && visibleContactContext
+                  ? `${selectedLead.phone}:${visibleContactContext.memory?.updatedAt || ''}:${visibleContactContext.latestDecision?.createdAt || ''}`
+                  : null;
+                if (contextSignature && contextSignature === dismissedContextSignature) return null;
+                return (
+                  <ContactContextPanel
+                    context={visibleContactContext}
+                    isLoading={isContactContextLoading}
+                    isSpanish={isSpanish}
+                    variant="compact"
+                    onRetry={() => void refreshContactContext()}
+                    onOpenDetails={() => {
+                      if (window.innerWidth >= 1024) setShowRightPanel(true);
+                      else setMobileAnalysisOpen(true);
+                    }}
+                    onDismiss={contextSignature ? () => setDismissedContextSignature(contextSignature) : undefined}
+                  />
+                );
+              })()}
 
               {/* Real-time Analyzing Banner */}
               {isAnalyzingConversation && (
@@ -4476,138 +4566,152 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   </div>
                 ) : (
-                <form onSubmit={handleSendTextMessage} className="flex items-center space-x-1">
-                  <div className="relative flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowComposerEmojiPicker((v) => !v)}
-                      className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                      title="Emoji"
-                    >
-                      <Smile className="w-5 h-5" />
-                    </button>
-                    {showComposerEmojiPicker && (
-                      <>
-                        <div className="fixed inset-0 z-40" onClick={() => setShowComposerEmojiPicker(false)} />
-                        <div className="absolute bottom-full left-0 mb-2 z-50 w-64 max-h-56 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-2 grid grid-cols-8 gap-0.5 origin-bottom-left animate-pop-in">
-                          {COMPOSER_EMOJIS.map((emoji, idx) => (
+                <form onSubmit={handleSendTextMessage} className="flex items-end space-x-1">
+                  {/* TASK-0187 (pedido direto, 01/09/2026, comparação lado a
+                      lado com o WhatsApp Business real): emoji, texto e
+                      anexo agora vivem dentro da MESMA caixa arredondada —
+                      igual ao WhatsApp, onde só o microfone/enviar fica de
+                      fora. Antes emoji e anexo eram botões soltos ANTES da
+                      caixa; o anexo também mudou de lado (esquerda ->
+                      direita, mesma posição do clipe no WhatsApp real). */}
+                  <div className="flex-1 min-w-0 flex items-end gap-0.5 bg-[#2a3942] rounded-3xl pl-1 pr-1">
+                    <div className="relative flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowComposerEmojiPicker((v) => !v)}
+                        className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
+                        title="Emoji"
+                      >
+                        <Smile className="w-5 h-5" />
+                      </button>
+                      {showComposerEmojiPicker && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowComposerEmojiPicker(false)} />
+                          <div className="absolute bottom-full left-0 mb-2 z-50 w-64 max-h-56 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-2 grid grid-cols-8 gap-0.5 origin-bottom-left animate-pop-in">
+                            {COMPOSER_EMOJIS.map((emoji, idx) => (
+                              <button
+                                key={`${emoji}-${idx}`}
+                                type="button"
+                                onClick={() => setInputMessage((prev) => prev + emoji)}
+                                className="text-lg hover:bg-white/10 rounded p-1 cursor-pointer"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* <textarea> em vez de <input> — cresce com o texto até
+                        um teto de 120px (mesma sensação do WhatsApp real:
+                        mais espaço aparente pra digitar, sem rolar por
+                        dentro de uma caixa de altura fixa). Enter envia,
+                        Shift+Enter quebra linha — mesmo atalho do WhatsApp.
+                        `bg-transparent` porque a cor de fundo agora é da
+                        caixa inteira (div pai), não mais dela sozinha. */}
+                    <textarea
+                      ref={composerTextareaRef}
+                      rows={1}
+                      placeholder={
+                        senderRole === 'lead'
+                          ? (isSpanish ? `Mensaje de ${selectedLead.name}...` : `Mensagem de ${selectedLead.name}...`)
+                          : 'Digitar resposta...'
+                      }
+                      value={inputMessage}
+                      onChange={(e) => setInputMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendTextMessage();
+                        }
+                      }}
+                      className="flex-1 min-w-0 bg-transparent text-sm text-[#e9edef] placeholder-slate-400 py-2.5 leading-6 resize-none overflow-y-auto focus:outline-none"
+                      style={{ maxHeight: '120px' }}
+                    />
+
+                    {/* Anexo — pedido direto (TASK-0184/0187, comparação lado
+                        a lado com o WhatsApp Business real): o clipe de
+                        anexo real e os dois <select> de foto/vídeo de
+                        exemplo viviam como 3 ícones soltos disputando espaço
+                        na linha de composição. Agora é um único menu, com o
+                        clipe como gatilho — igual ao WhatsApp real, que
+                        também agrupa Documento/Câmera/Galeria atrás de um
+                        clipe só, do lado direito da caixa. */}
+                    <div className="relative flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowAttachMenu((v) => !v)}
+                        className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
+                        title={isSpanish ? 'Adjuntar' : 'Anexar'}
+                      >
+                        <Paperclip className="w-5 h-5" />
+                      </button>
+                      {showAttachMenu && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
+                          <div className="absolute bottom-full right-0 mb-2 z-50 w-60 max-h-64 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-1.5 origin-bottom-right animate-pop-in">
                             <button
-                              key={`${emoji}-${idx}`}
                               type="button"
-                              onClick={() => setInputMessage((prev) => prev + emoji)}
-                              className="text-lg hover:bg-white/10 rounded p-1 cursor-pointer"
+                              onClick={() => {
+                                setShowAttachMenu(false);
+                                (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
                             >
-                              {emoji}
+                              <Paperclip className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                              <span>{isSpanish ? 'Documento o foto' : 'Documento ou foto'}</span>
                             </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  {/* Anexo — pedido direto (TASK-0184, 01/09/2026, comparação
-                      lado a lado com o WhatsApp Business real): o clipe de
-                      anexo real e os dois <select> de foto/vídeo de exemplo
-                      viviam como 3 ícones soltos disputando espaço na linha
-                      de composição. Agora é um único menu (mesmo padrão do
-                      seletor de emoji abaixo), com o clipe como gatilho —
-                      igual ao WhatsApp real, que também agrupa Documento/
-                      Câmera/Galeria atrás de um clipe só. */}
-                  <div className="relative flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowAttachMenu((v) => !v)}
-                      className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                      title={isSpanish ? 'Adjuntar' : 'Anexar'}
-                    >
-                      <Paperclip className="w-5 h-5" />
-                    </button>
-                    {showAttachMenu && (
-                      <>
-                        <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
-                        <div className="absolute bottom-full left-0 mb-2 z-50 w-60 max-h-64 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-1.5 origin-bottom-left animate-pop-in">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowAttachMenu(false);
-                              (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                          >
-                            <Paperclip className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                            <span>{isSpanish ? 'Documento o foto' : 'Documento ou foto'}</span>
-                          </button>
 
-                          {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                            <>
-                              <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
-                              </div>
-                              {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  onClick={() => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                >
-                                  <ImageIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                  <span className="truncate">{p.name}</span>
-                                </button>
-                              ))}
-                            </>
-                          )}
+                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                              <>
+                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                  {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
+                                </div>
+                                {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
+                                  >
+                                    <ImageIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                    <span className="truncate">{p.name}</span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
 
-                          {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                            <>
-                              <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
-                              </div>
-                              {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  onClick={() => { setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                >
-                                  <Video className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                  <span className="truncate">{p.name}</span>
-                                </button>
-                              ))}
-                            </>
-                          )}
-                        </div>
-                      </>
-                    )}
+                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                              <>
+                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                  {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
+                                </div>
+                                {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => { setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
+                                  >
+                                    <Video className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                    <span className="truncate">{p.name}</span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
-                  {/* <textarea> em vez de <input> — cresce com o texto até um
-                      teto de 120px (mesma sensação do WhatsApp real: mais
-                      espaço aparente pra digitar, sem rolar por dentro de
-                      uma caixa de altura fixa). Enter envia, Shift+Enter
-                      quebra linha — mesmo atalho do WhatsApp. */}
-                  <textarea
-                    ref={composerTextareaRef}
-                    rows={1}
-                    placeholder={
-                      senderRole === 'lead'
-                        ? (isSpanish ? `Mensaje de ${selectedLead.name}...` : `Mensagem de ${selectedLead.name}...`)
-                        : 'Digitar resposta...'
-                    }
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendTextMessage();
-                      }
-                    }}
-                    className="flex-1 min-w-0 bg-[#2a3942] text-sm text-[#e9edef] placeholder-slate-400 rounded-3xl px-4 py-2.5 leading-6 resize-none overflow-y-auto focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    style={{ maxHeight: '120px' }}
-                  />
-
-                  {/* Respostas rápidas — ícone discreto à direita da caixa de
-                      texto (pedido direto, 29/08/2026: "msg rápida para
-                      Caixa de texto lado direito discreto"). */}
+                  {/* Respostas rápidas — recurso próprio do Universo, sem
+                      equivalente no WhatsApp real; continua fora da caixa,
+                      entre ela e o botão de mic/enviar (pedido direto,
+                      29/08/2026: "msg rápida para Caixa de texto lado
+                      direito discreto"). */}
                   <div className="flex-shrink-0">
                     <QuickRepliesMenu
                       quickReplies={quickReplies}

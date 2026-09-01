@@ -20,6 +20,11 @@ type ContactContextPanelProps = {
   onOpenDetails?: () => void;
   /** Salva somente a allowlist de memória segura, nunca estados vivos. */
   onSaveMemory?: (patch: Partial<OperatorMemoryEditPayload>) => Promise<void>;
+  /** TASK-0187 (pedido direto, 01/09/2026): "x pra fechar o contexto da
+      conversa quando ele aparece" — só no `variant="compact"`; o painel
+      detalhado (`variant="detail"`, dentro da Ficha IA) já é opcional por
+      natureza (só abre quando o operador pede), não precisa de fechar. */
+  onDismiss?: () => void;
 };
 
 const paymentStatusLabel: Record<string, string> = {
@@ -50,6 +55,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
   onRetry,
   onOpenDetails,
   onSaveMemory,
+  onDismiss,
 }) => {
   const [isEditing, setIsEditing] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -184,11 +190,23 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
             </span>
           )}
         </div>
-        {onOpenDetails && (
-          <button type="button" onClick={onOpenDetails} className="atendimento-context-strip__action shrink-0 text-sky-200 hover:text-white">
-            {isSpanish ? 'Ver contexto' : 'Ver contexto'}
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {onOpenDetails && (
+            <button type="button" onClick={onOpenDetails} className="atendimento-context-strip__action text-sky-200 hover:text-white">
+              {isSpanish ? 'Ver contexto' : 'Ver contexto'}
+            </button>
+          )}
+          {onDismiss && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="rounded p-1 text-sky-300/70 hover:bg-white/10 hover:text-white cursor-pointer"
+              title={isSpanish ? 'Cerrar' : 'Fechar'}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
     );
   }
