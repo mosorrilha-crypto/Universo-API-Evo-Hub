@@ -160,9 +160,15 @@ export async function syncLeadToSheet(tenantId: string, config: CalendarConfig, 
  * antigo sem o escopo de Sheets), falha silenciosamente aqui em vez de
  * atrapalhar o atendimento real.
  */
+/** Remove quebra de linha/caracteres de controle antes de gravar em log — o telefone vem de um webhook externo, nunca confie nele puro numa linha de log (CodeQL "Log injection"). */
+function sanitizeForLog(value: string): string {
+  return value.replace(/[\x00-\x1f\x7f]/g, ' ');
+}
+
 export function queueLeadSheetSync(tenantId: string, config: CalendarConfig | undefined, row: LeadSheetRow): void {
   if (!config?.clientId || !config.clientSecret) return;
   syncLeadToSheet(tenantId, config, row).catch((err) => {
-    console.warn(`⚠️  [GoogleSheetsSync] Falha ao sincronizar lead (tenant=${tenantId}, phone=${row.phone}): ${(err as Error).message}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`⚠️  [GoogleSheetsSync] Falha ao sincronizar lead (tenant=${sanitizeForLog(tenantId)}, phone=${sanitizeForLog(row.phone)}): ${sanitizeForLog(message)}`);
   });
 }
