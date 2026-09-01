@@ -21,13 +21,33 @@ import {
   getDocs
 } from 'firebase/firestore';
 
-import firebaseConfig from '../../firebase-applet-config.json';
+// TASK-0191 — antes vinha de firebase-applet-config.json, comitado em texto
+// puro no repositório (GitHub Secret Scanning sinalizou a apiKey como
+// "Public leak" aberto há 22 dias). A apiKey do Firebase Web é pública por
+// design (a segurança real é a regra de auth em firestore.rules, não o
+// segredo desta chave) — mas comitar em texto puro no git ainda gera ruído
+// de alerta de segurança sem necessidade nenhuma, daí a migração pra
+// variáveis de ambiente (mesmo padrão de SUPABASE_URL/etc.), sem trocar o
+// valor da chave em si.
+const firebaseConfig = {
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+};
+const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID;
+
+if (!firebaseConfig.apiKey) {
+  console.warn('[firebase] VITE_FIREBASE_API_KEY não configurada — login com Google/e-mail e Firestore ficam indisponíveis.');
+}
 
 // Inicializa o Firebase App
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
+export const db = getFirestore(app, firestoreDatabaseId || undefined);
 
 const googleProvider = new GoogleAuthProvider();
 
