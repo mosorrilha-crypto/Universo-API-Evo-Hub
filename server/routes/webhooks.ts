@@ -27,6 +27,7 @@ import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnaly
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
+import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { runWithTenantDbContext } from '../services/tenantDbContext';
 import { logStructured } from '../services/structuredLog';
@@ -403,6 +404,19 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.awaitingCustomerChoice) {
           await markPendingFollowUp(tenantId, phone, contactName, 'customer_reply', result.awaitingCustomerChoice, new Date(Date.now() + CUSTOMER_REPLY_FOLLOWUP_MS).toISOString());
         }
+        // TASK-0185 — backup em Google Sheets (fire-and-forget, nunca atrasa
+        // nem derruba o envio real acima). "Agendou?" consulta o agendamento
+        // ativo de verdade (appointmentStore), nunca assume a partir da
+        // resposta da IA; "Interesse" só usa o anúncio real que originou o
+        // lead (adHeadline) — nunca um dado inventado.
+        const appointmentForSheet = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
+        queueLeadSheetSync(tenantId, calendarConfig, {
+          phone,
+          name: contactName,
+          firstContactIso: conversation?.messages?.[0]?.timestamp || new Date().toISOString(),
+          interest: conversation?.adHeadline,
+          scheduled: !!appointmentForSheet,
+        });
         emitAiReplyStatus(tenantId, phone, 'sent');
       } catch (err: any) {
         emitAiReplyStatus(tenantId, phone, 'delivery_failed');

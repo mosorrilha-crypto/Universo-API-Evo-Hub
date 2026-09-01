@@ -63,6 +63,7 @@ import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
+import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
@@ -1183,6 +1184,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // isto é sempre um ciclo de pagamento novo (nunca deve herdar payment_status
     // de um agendamento antigo, existente ou não), mesmo raciocínio do PR #203.
     await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: true });
+
+    // TASK-0185 — backup em Google Sheets: agendamento fechado fora do fluxo
+    // de WhatsApp (manual, no painel) também precisa refletir "Agendou?"
+    // sem esperar a cliente mandar uma mensagem nova.
+    const conversationForSheet = await getConversation(tenantId, phone).catch(() => undefined);
+    queueLeadSheetSync(tenantId, calendarConfig, {
+      phone,
+      name: conversationForSheet?.name,
+      firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
+      interest: conversationForSheet?.adHeadline,
+      scheduled: true,
+    });
 
     // A central cria uma cobrança pendente já no agendamento confirmado. A
     // referência apt:<eventId> é a mesma usada na aprovação do comprovante,

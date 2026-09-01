@@ -578,11 +578,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // agendamento pra consultar disponibilidade e criar/reagendar/cancelar
   // consultas).
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
+  // TASK-0185 — link da planilha de backup no Google Sheets, exibido no
+  // painel de Agenda junto do botão de desconectar (só existe depois da
+  // primeira sincronização de um lead deste tenant).
+  const [backupSheetUrl, setBackupSheetUrl] = useState<string | undefined>(undefined);
 
   const fetchGoogleCalendarStatus = () => {
     apiFetch('/api/google-calendar/status')
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setGoogleCalendarConnected(!!data?.connected))
+      .then((data) => { setGoogleCalendarConnected(!!data?.connected); setBackupSheetUrl(data?.backupSheetUrl); })
       .catch(() => setGoogleCalendarConnected(false));
   };
 
@@ -4883,6 +4887,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onEditPayment={handleEditEventPayment}
         googleCalendarConnected={googleCalendarConnected}
         onDisconnectCalendar={handleDisconnectGoogleCalendar}
+        backupSheetUrl={backupSheetUrl}
       />
     </div>
   );
