@@ -34,6 +34,9 @@ describe('buffer de continuidade da conversa', () => {
     expect(onFlush).toHaveBeenCalledTimes(1);
     expect(onFlush.mock.calls[0]?.[0]).toBe('Y ese cuanto año dura\nLos tres');
     expect(onFlush.mock.calls[0]?.[3]).toBe(2);
+    // TASK-0172: o ID da PRIMEIRA mensagem do lote precisa sobreviver ao
+    // segundo push (nunca é sobrescrito por 'm-2').
+    expect(onFlush.mock.calls[0]?.[5]).toBe('m-1');
   });
 
   it('remove a marca persistida antes de iniciar o processamento da resposta', async () => {

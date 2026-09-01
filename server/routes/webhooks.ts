@@ -80,7 +80,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // resolvedTenant vem do Bloco 2.B (server/services/tenantResolver.ts) — já
   // é o tenant/credencial certos pra esse número, resolvidos por
   // phone_number_id antes de chegar aqui.
-  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant) => {
+  const triggerAutoReply = (phone: string, contactName: string | undefined, text: string, messageId: string, historyExclude: number, resolvedTenant: ResolvedTenant, firstMessageId?: string) => {
     const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
     const isEvolution = resolvedTenant.provider === 'evolution';
     const isInstagram = resolvedTenant.provider === 'instagram';
@@ -121,6 +121,29 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // qualquer outro. Bloqueio é só desse número, não do tenant inteiro
       // (isAgentPaused acima continua valendo pra todos).
       if (conversation?.aiBlockedAt) return;
+      // Achado real (pedido do dono do produto, 30/08/2026): quando o
+      // operador está respondendo manualmente AO VIVO (contato pessoal que
+      // às vezes também é cliente, mesma pessoa numa conversa mista de
+      // negócio+papo pessoal), a IA continuava disparando resposta
+      // automática pra cada mensagem nova do contato — cruzando com a
+      // resposta do operador na mesma janela de segundos. O cliente via as
+      // duas "vozes" ao mesmo tempo (uma resposta de "canal oficial de
+      // atendimento" logo ao lado de "kkkk vamos sin" do operador),
+      // quebrando a ilusão de atendimento humano contínuo — reproduzido
+      // tanto num teste quanto observado numa conversa real. Se o operador
+      // mandou uma mensagem manual pra este número nos últimos minutos, a
+      // IA cede a vez nesta rodada — nenhuma resposta automática enquanto o
+      // operador estiver visivelmente engajado. Reaproveita o histórico já
+      // carregado, sem tabela nova: sentBy='operator' só existe pra
+      // mensagens digitadas de verdade no painel (nunca resposta da IA nem
+      // disparo de campanha, ver StoredMessage.sentBy).
+      const OPERATOR_ACTIVE_PAUSE_MS = 5 * 60 * 1000;
+      const lastOperatorMessage = [...(conversation?.messages || [])]
+        .reverse()
+        .find((m) => m.sender === 'agent' && m.sentBy === 'operator');
+      if (lastOperatorMessage && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS) {
+        return;
+      }
       // Modo "somente anúncios" (pedido real, 14/08/2026): quando o
       // proprietário conecta um número pessoal além do número dedicado do
       // agente (pra não perder mensagem enquanto valida confiança no
@@ -150,7 +173,24 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       });
       const kbContext = formatKnowledgeBaseForPrompt(kb);
       const segment = await getTenantSegment(tenantId);
-      const history = conversation?.messages.slice(0, -historyExclude);
+      // Achado real em produção (Gladys, tenant Monique, 30/08/2026): cortar
+      // por CONTAGEM (`slice(0, -historyExclude)`) supõe que nada mais foi
+      // gravado desde que este lote de mensagens picotadas foi bufferizado.
+      // runExclusive (perPhoneQueue.ts) serializa os ciclos por telefone,
+      // mas um ciclo pode ficar PRESO na fila enquanto o cliente manda MAIS
+      // mensagens — já gravadas na hora (recordIncomingMessage roda ANTES
+      // de qualquer buffer/fila, ver linha ~488), independente da fila.
+      // Quando isso acontece, o corte por contagem pega o lote errado:
+      // inclui a própria mensagem deste ciclo (duplicada com `text`, que já
+      // recebe o mesmo conteúdo) e perde mensagens novas reais. Corta por
+      // IDENTIDADE (tudo antes do ID da primeira mensagem deste lote) — que
+      // permanece correto mesmo com mensagens novas chegando enquanto o
+      // ciclo espera a vez. Cai pro corte antigo por contagem só quando
+      // firstMessageId não foi informado ou não é encontrado no histórico
+      // (ex.: recuperação de um buffer persistido de antes desta correção).
+      const allMessages = conversation?.messages;
+      const cutoffIndex = firstMessageId && allMessages ? allMessages.findIndex((m) => m.id === firstMessageId) : -1;
+      const history = !allMessages ? undefined : cutoffIndex !== -1 ? allMessages.slice(0, cutoffIndex) : allMessages.slice(0, -historyExclude);
       // Sinaliza pro painel (SSE) que a IA começou a processar a última
       // mensagem — ver emitAiReplyStatus em conversationEvents.ts. Emitido só
       // depois de todos os gates de silêncio acima (agente pausado, lead
@@ -365,10 +405,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // de disparar a resposta — espera ~6s de silêncio, evitando responder cada
   // fragmento separadamente (denunciaria automação na hora).
   const handleIncomingText = (phone: string, contactName: string | undefined, text: string, messageId: string, resolvedTenant: ResolvedTenant) => {
-    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+    bufferIncomingText(phone, contactName, text, messageId, resolvedTenant, (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant, firstMessageId) =>
       runWithTenantDbContext(
         { tenantId: bufferedTenant.tenantId, source: 'webhook' },
-        () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+        () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant, firstMessageId)
       )
     );
   };
@@ -377,10 +417,10 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
   // janela de 6s de silêncio — sem isso, a mensagem ficava perdida pra
   // sempre (achado real, 15/08/2026). Uma vez só no boot do router, o
   // próprio sweeper se reagenda periodicamente por dentro.
-  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant) =>
+  startBufferRecoverySweeper((phone) => (combinedText, bufferedContactName, lastMessageId, messageCount, bufferedTenant, firstMessageId) =>
     runWithTenantDbContext(
       { tenantId: bufferedTenant.tenantId, source: 'job' },
-      () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant)
+      () => triggerAutoReply(phone, bufferedContactName, combinedText, lastMessageId, messageCount, bufferedTenant, firstMessageId)
     )
   );
 
@@ -480,12 +520,17 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           console.warn(`⚠️  [Acompanhamento de funil] Falha ao cancelar pendência de ${msg.from}:`, err.message)
         );
 
+        // TASK-0171 — só relevante se a conversa ainda nem existir (alguém
+        // mandando mensagem direto pra um número de disparo antes de
+        // qualquer campanha) — ver getOrCreateConversationRow.
+        const inboundMetaPhoneNumberId = resolvedTenant.provider === 'meta' ? resolvedTenant.metaPhoneNumberId : undefined;
+
         if (msg.type === 'audio') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'audio', text: '🎤 Transcrevendo áudio...', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
           enqueueTranscriptionJob(msg, resolvedTenant);
           enqueued += 1;
         } else if (msg.type === 'text') {
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel });
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: msg.text, timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
           if (msg.text && isPaymentRelated(msg.text)) {
             await logEscalation(tenantId, msg.from, msg.contactName, 'Mensagem sobre pagamento/transferência — nunca confirmar automaticamente, requer verificação humana', msg.text);
           }
@@ -500,7 +545,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // webhookParsers.ts) preserva o que o cliente escreveu; a UI
           // (WhatsAppLeadsSim.tsx) já mostra esse texto como legenda abaixo da
           // foto, então só precisa chegar até aqui.
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId);
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'image', text: msg.caption || '📷 Imagem recebida', timestamp: nowLabel }, msg.messageId, undefined, inboundMetaPhoneNumberId);
 
           // Uma única promise de download, reaproveitada abaixo (await duas
           // vezes na mesma promise não baixa a imagem de novo) — mantém o
@@ -599,7 +644,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           // vídeo/gif, localização, reação, contato etc.) — grava com um
           // rótulo que descreve o que realmente chegou, em vez do
           // "[sticker]"/"[video]" cru de antes (achado real em produção).
-          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel });
+          await recordIncomingMessage(tenantId, msg.from, msg.contactName, { type: 'text', text: friendlyLabelForOtherType(msg.rawType), timestamp: nowLabel }, undefined, undefined, inboundMetaPhoneNumberId);
         }
           }
         );
