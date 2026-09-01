@@ -49,6 +49,15 @@ import { isValidTimeOfDay } from '../services/sendWindow';
 
 interface BroadcastRouterDeps {
   authenticateToken: RequestHandler;
+  /**
+   * TASK-0206 — chamado (melhor esforço, nunca aguardado pela resposta HTTP)
+   * depois de criar ou ativar/agendar uma campanha, pra processar na hora
+   * em vez de esperar o próximo tick do job de fundo (que virou uma rede de
+   * segurança de 5min, não mais o gatilho principal — ver
+   * broadcastSenderJob.ts). Opcional só pra não quebrar testes que montam
+   * o router sem essa dependência.
+   */
+  triggerImmediateBroadcastTick?: () => void;
 }
 
 const NUMBER_STATUSES: BroadcastNumberStatus[] = ['active', 'paused', 'banned', 'warming'];
@@ -76,7 +85,7 @@ function serializeNumber(number: Awaited<ReturnType<typeof getBroadcastNumber>>)
   return { ...rest, tokenSet: !!accessToken };
 }
 
-export function createBroadcastRouter({ authenticateToken }: BroadcastRouterDeps): Router {
+export function createBroadcastRouter({ authenticateToken, triggerImmediateBroadcastTick }: BroadcastRouterDeps): Router {
   const router = Router();
   const requireSaasAdmin = requireRole('saas_admin');
 
@@ -270,6 +279,9 @@ export function createBroadcastRouter({ authenticateToken }: BroadcastRouterDeps
         includeRecentDuplicates: !!includeRecentDuplicates,
         createdBy: req.user?.id || null,
       });
+      // TASK-0206 — toda campanha nasce em 'draft' (broadcastStore.ts),
+      // então não tem trabalho pra processar ainda; o tick é disparado só
+      // quando o status muda pra 'running'/'scheduled' via PATCH abaixo.
       res.status(201).json({ campaign });
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
@@ -316,6 +328,14 @@ export function createBroadcastRouter({ authenticateToken }: BroadcastRouterDeps
       const campaign = status
         ? (status === 'running' ? await transitionCampaignToRunning(tenantId, req.params.id) : await updateCampaignStatus(tenantId, req.params.id, status))
         : await getCampaign(tenantId, req.params.id);
+
+      // TASK-0206 — só vale a pena processar na hora quando a campanha
+      // pode ter trabalho pendente pra fazer agora (running) ou logo (uma
+      // hora de agendamento acabou de ser confirmada); outras transições
+      // (paused/canceled/completed/draft) não precisam de tick nenhum.
+      if (status === 'running' || (status === 'scheduled' && hasScheduleFields)) {
+        triggerImmediateBroadcastTick?.();
+      }
 
       res.json({ campaign });
     } catch (err) {

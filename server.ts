@@ -32,7 +32,7 @@ import { startReminderJob } from './server/services/reminderJob';
 import { startPreReservationFollowUpJob } from './server/services/preReservationFollowUpJob';
 import { startPendingFollowUpJob } from './server/services/pendingFollowUpJob';
 import { startAgentPausedAlertJob } from './server/services/agentPausedAlertJob';
-import { startBroadcastSenderJob } from './server/services/broadcastSenderJob';
+import { startBroadcastSenderJob, runBroadcastSenderTick, type BroadcastSenderJobDeps } from './server/services/broadcastSenderJob';
 import { startEvolutionConnectionAlertJob } from './server/services/evolutionConnectionAlertJob';
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
@@ -167,7 +167,25 @@ async function startServer() {
   }));
   app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
   app.use(createRoadmapRouter({ authenticateToken }));
-  app.use(createBroadcastRouter({ authenticateToken }));
+  // TASK-0206 — deps compartilhadas com startBroadcastSenderJob logo abaixo,
+  // pra que criar/ativar uma campanha (broadcast.ts) dispare um tick
+  // imediato com as mesmas credenciais do job de fundo, em vez de esperar
+  // o próximo intervalo (que virou uma rede de segurança de 5min).
+  const broadcastSenderJobDeps: BroadcastSenderJobDeps = {
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
+  };
+  app.use(createBroadcastRouter({
+    authenticateToken,
+    triggerImmediateBroadcastTick: () => {
+      runBroadcastSenderTick(broadcastSenderJobDeps).catch((err) => {
+        console.warn('⚠️  [Disparo] Falha no tick imediato disparado por ação do operador:', (err as Error)?.message || err);
+      });
+    },
+  }));
   app.use(createCrmRouter({ authenticateToken }));
   app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
@@ -246,13 +264,7 @@ async function startServer() {
   // que evita banimento, não é opcional. Nunca inicia/pausa uma campanha
   // sozinho, só processa o que já está `running`. Ver
   // server/services/broadcastSenderJob.ts (TASK-0171).
-  startBroadcastSenderJob({
-    metaAccessToken: config.metaAccessToken,
-    metaPhoneNumberId: config.metaPhoneNumberId,
-    evolutionApiUrl: config.evolutionApiUrl,
-    evolutionApiKey: config.evolutionApiKey,
-    evolutionInstanceName: config.evolutionInstanceName,
-  });
+  startBroadcastSenderJob(broadcastSenderJobDeps);
 
   // Job em background que alerta o operador quando a sessão Baileys/Evolution
   // de um tenant cai silenciosamente (investigação real, 24/08/2026 — cliente

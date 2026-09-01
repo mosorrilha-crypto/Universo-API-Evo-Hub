@@ -41,7 +41,18 @@ import {
   type BroadcastCampaign,
 } from './broadcastStore';
 
-const DEFAULT_INTERVAL_MS = 20 * 1000;
+// TASK-0206 — achado real (01/09/2026): este job rodava a cada 20s O TEMPO
+// TODO, mesmo em tenants que nunca criaram uma única campanha de disparo —
+// só pra confirmar "não tem nada pra fazer" a cada tick. Contribuiu pro
+// projeto Supabase estourar a cota de egress do Free Plan (31GB usados vs
+// 5GB incluídos) mesmo com uso real baixíssimo. Nada aqui é sensível a
+// segundos (a janela de envio, cota por minuto/dia e curva de aquecimento
+// já toleram folga de sobra) — as rotas de criar/ativar campanha
+// (broadcast.ts) agora chamam `runBroadcastSenderTick` na hora, então este
+// intervalo vira só a rede de segurança (cobre campanhas agendadas pra uma
+// hora futura, sem precisar de um job de agendamento à parte), mesmo
+// padrão do safetyPoll de 90s em WhatsAppLeadsSim.tsx pro SSE.
+const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 /** Lote máximo processado por combinação (campanha, número) a cada tick — evita um tick único demorado demais mesmo com fila grande e cota alta. */
 const MAX_BATCH_PER_TICK = 20;
 
@@ -239,7 +250,7 @@ export async function runBroadcastSenderTick(deps: BroadcastSenderJobDeps = {}):
   }
 }
 
-/** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 20s) — mesmo padrão de startAgentPausedAlertJob/startReminderJob. */
+/** Roda uma vez imediatamente e depois a cada `intervalMs` (padrão 5min, TASK-0206 — rede de segurança, não o gatilho principal) — mesmo padrão de startAgentPausedAlertJob/startReminderJob. */
 export function startBroadcastSenderJob(deps: BroadcastSenderJobDeps = {}): void {
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
   startPeriodicJob(
