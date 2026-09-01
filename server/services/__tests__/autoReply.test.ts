@@ -462,6 +462,38 @@ describe('generateAutoReplyForText — acompanhamento de funil (pedido real, 15/
   });
 });
 
+describe('generateAutoReplyForText — servicoInteresse (TASK-0185, coluna "Interesse" do backup em Google Sheets)', () => {
+  function makeFakeAiWithInterest(servicoInteresse: string | null) {
+    const ai = {
+      models: {
+        generateContent: async (req: any) => {
+          if (req.contents[0].text.includes('Classifique a intenção principal')) return { text: JSON.stringify({ agent: 'faq' }) } as any;
+          return { text: JSON.stringify({ phase: 'informacao', bubbles: ['¡Dale!'], needsHumanConfirmation: false, servicoInteresse }) } as any;
+        },
+      },
+    } as unknown as GoogleGenAI;
+    return ai;
+  }
+
+  it('devolve interestedService quando o modelo identifica um serviço específico do catálogo', async () => {
+    const ai = makeFakeAiWithInterest('Micropigmentación de Cejas');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'quiero microblading', undefined, undefined, []);
+    expect(result?.interestedService).toBe('Micropigmentación de Cejas');
+  });
+
+  it('interestedService fica undefined quando o modelo não identifica nenhum serviço específico', async () => {
+    const ai = makeFakeAiWithInterest(null);
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.interestedService).toBeUndefined();
+  });
+
+  it('string vazia/só espaço conta como "não identificado" (nunca vira interesse vazio)', async () => {
+    const ai = makeFakeAiWithInterest('   ');
+    const result = await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, []);
+    expect(result?.interestedService).toBeUndefined();
+  });
+});
+
 describe('generateAutoReplyForText — menção ao anúncio na abertura', () => {
   // Achado real em produção: todo lead vinha de anúncio ("Técnica brasileña
   // en Luque") mas a IA nunca sabia disso — toda saudação inicial saía

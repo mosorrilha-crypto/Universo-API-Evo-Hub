@@ -18,6 +18,7 @@ import { updateAppointmentSummaryByEventId, updateAppointmentTimesByEventId, cle
 import { clearRemindersForEvent } from '../services/reminderStore';
 import { markEventCompleted, markEventNotCompleted, getCompletedEventIds } from '../services/calendarEventCompletionStore';
 import { getConversation } from '../services/conversationStore';
+import { queueLeadSheetSync, getBackupSheetUrl } from '../services/googleSheetsSync';
 import {
   createFinancialTransaction,
   updateFinancialTransactionBySourceRef,
@@ -92,7 +93,10 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
 
   router.get('/api/google-calendar/status', authenticateToken, requireAgendaModule(), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
-    res.json({ connected: await isGoogleCalendarConnected(tenantId) });
+    // TASK-0185 — link da planilha de backup só existe depois da primeira
+    // sincronização (criada sob demanda, ver googleSheetsSync.ts); undefined
+    // até lá, mesmo com o Calendar já conectado.
+    res.json({ connected: await isGoogleCalendarConnected(tenantId), backupSheetUrl: await getBackupSheetUrl(tenantId) });
   }));
 
   router.get('/api/google-calendar/connect', authenticateToken, googleCalendarConnectRateLimiter, requireAgendaModule(), requireRole('admin'), (req: AuthenticatedRequest, res) => {
@@ -355,6 +359,7 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
     }
     const cfg: CalendarConfig = { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri };
     const eventId = req.params.eventId;
+    const cancelledAppointment = await getAppointmentByEventId(tenantId, eventId).catch(() => undefined);
     try {
       await cancelCalendarEvent(tenantId, cfg, eventId);
     } catch (err: any) {
@@ -362,6 +367,18 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
     }
     await clearAppointmentByEventId(tenantId, eventId);
     await clearRemindersForEvent(tenantId, eventId);
+    // TASK-0185 — backup em Google Sheets: cancelamento manual pelo painel
+    // também precisa refletir "Agendou? não" sem esperar mensagem nova.
+    if (cancelledAppointment?.phone) {
+      const conversationForSheet = await getConversation(tenantId, cancelledAppointment.phone).catch(() => undefined);
+      queueLeadSheetSync(tenantId, cfg, {
+        phone: cancelledAppointment.phone,
+        name: conversationForSheet?.name,
+        firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
+        interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
+        scheduled: false,
+      });
+    }
     res.json({ success: true });
   }));
 

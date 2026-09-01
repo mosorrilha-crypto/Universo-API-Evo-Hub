@@ -22,7 +22,14 @@ import { withStructuredLog } from './structuredLog';
 // google.calendar({auth}) espera, não importa qual cópia é resolvida.
 type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
 
-const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+// TASK-0185 — o escopo de Sheets foi somado ao de Calendar (mesmo app OAuth,
+// mesmo token por tenant em tenant_calendar_tokens) pra alimentar o backup em
+// Google Sheets (googleSheetsSync.ts) sem pedir uma segunda conexão Google
+// separada. Um tenant que já conectou o Calendar ANTES desta mudança só ganha
+// o escopo novo ao reconectar (o botão "Conectar Google Calendar" já força
+// `prompt: 'consent'`, então basta clicar de novo) — o token antigo continua
+// funcionando pra Calendar normalmente até lá, só não habilita Sheets.
+const SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/spreadsheets'];
 
 /**
  * Token por tenant, na tabela Postgres `tenant_calendar_tokens` (Bloco 2.A) —
@@ -128,7 +135,7 @@ export async function disconnectGoogleCalendar(tenantId: string): Promise<void> 
  * funcionava uma vez logo após reconectar no painel, e voltava a falhar com
  * `invalid_grant` minutos depois, repetidamente.
  */
-async function getAuthorizedClient(tenantId: string, clientId?: string, clientSecret?: string, redirectUri?: string): Promise<OAuth2Client> {
+export async function getAuthorizedGoogleClient(tenantId: string, clientId?: string, clientSecret?: string, redirectUri?: string): Promise<OAuth2Client> {
   const refreshToken = await loadRefreshToken(tenantId);
   if (!refreshToken) {
     throw new Error('Google Calendar não está conectado. Conecte no painel antes de agendar.');
@@ -229,7 +236,7 @@ export async function checkFreeBusy(tenantId: string, cfg: CalendarConfig, start
   if (!isWithinBusinessHours(hours, startIso, endIso)) return false;
 
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'checkFreeBusy' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const timeMin = localNaiveToUtcIso(startIso, timezone);
     const timeMax = localNaiveToUtcIso(endIso, timezone);
@@ -311,7 +318,7 @@ async function computeAvailabilityForDates(
   const lastDate = sortedDates[sortedDates.length - 1];
 
   const busy = await withStructuredLog({ tenantId, area: 'googleCalendar', op: 'computeAvailabilityForDates' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const timeMin = localNaiveToUtcIso(`${firstDate}T00:00:00`, timezone);
     const timeMax = localNaiveToUtcIso(`${lastDate}T23:59:59`, timezone);
@@ -386,7 +393,7 @@ export async function createCalendarEvent(
 ): Promise<string> {
   await assertWithinBusinessHours(tenantId, startIso, endIso);
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'createCalendarEvent' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const res = await calendar.events.insert({
       calendarId: 'primary',
@@ -412,7 +419,7 @@ export async function rescheduleCalendarEvent(
 ): Promise<void> {
   await assertWithinBusinessHours(tenantId, newStartIso, newEndIso);
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'rescheduleCalendarEvent' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     await calendar.events.patch({
       calendarId: 'primary',
@@ -434,7 +441,7 @@ export async function rescheduleCalendarEvent(
  */
 export async function updateCalendarEventSummary(tenantId: string, cfg: CalendarConfig, eventId: string, summary: string): Promise<void> {
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'updateCalendarEventSummary' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     await calendar.events.patch({
       calendarId: 'primary',
@@ -446,7 +453,7 @@ export async function updateCalendarEventSummary(tenantId: string, cfg: Calendar
 
 export async function cancelCalendarEvent(tenantId: string, cfg: CalendarConfig, eventId: string): Promise<void> {
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'cancelCalendarEvent' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     await calendar.events.delete({ calendarId: 'primary', eventId });
   });
@@ -464,7 +471,7 @@ export interface UpcomingEvent {
 /** Lista eventos entre duas datas — usado pelo job de lembretes automáticos. */
 export async function listUpcomingEvents(tenantId: string, cfg: CalendarConfig, timeMinIso: string, timeMaxIso: string): Promise<UpcomingEvent[]> {
   return withStructuredLog({ tenantId, area: 'googleCalendar', op: 'listUpcomingEvents' }, async () => {
-    const auth = await getAuthorizedClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
+    const auth = await getAuthorizedGoogleClient(tenantId, cfg.clientId, cfg.clientSecret, cfg.redirectUri);
     const calendar = google.calendar({ version: 'v3', auth });
     const res = await calendar.events.list({
       calendarId: 'primary',

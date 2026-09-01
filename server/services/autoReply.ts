@@ -163,6 +163,18 @@ export interface AutoReplyResult {
    */
   awaitingCustomerChoice?: string;
   /**
+   * TASK-0185 — backup em Google Sheets (coluna "Interesse"): nome EXATO do
+   * serviço/produto do catálogo que a cliente demonstrou interesse nesta
+   * mensagem ou no histórico recente, só quando ela mencionou algo
+   * específico (não uma categoria genérica tipo "cejas" sem detalhar).
+   * undefined quando ainda não ficou claro — quem chama (webhooks.ts)
+   * persiste isso em `conversations.interest` (sempre sobrescreve com o
+   * valor mais recente, diferente de capturedClientName que só preenche uma
+   * vez) e usa como fonte real pra planilha de backup, nunca um palpite
+   * inventado fora do que a cliente disse.
+   */
+  interestedService?: string;
+  /**
    * Pedido real (20/08/2026): a lista de horários em texto livre (mesmo
    * corrigida/encurtada) ainda depende do cliente digitar um horário de
    * volta — botões de resposta rápida reais do WhatsApp resolvem isso num
@@ -451,8 +463,10 @@ Acompanhamento de funil — pedido real (15/08/2026): uma auditoria de conversas
 - "pendenteAvaliacao": preencha com um resumo bem curto (ex: "trabalho anterior de cejas, aguardando avaliação") SOMENTE quando sua resposta pediu uma foto/informação especificamente pra avaliação humana (ex: trabalho anterior, pigmento antigo) antes de decidir o procedimento — null no resto.
 - "aguardandoCliente": preencha com um resumo bem curto (ex: "ofereceu sábado 15 ou segunda 17, esperando escolha") SOMENTE quando sua resposta pediu pro cliente escolher/confirmar algo necessário pra avançar rumo ao agendamento (dia, horário, qual serviço) — null no resto, e nunca preencha os dois campos ao mesmo tempo.
 
+Backup em planilha (pedido real, 01/09/2026, TASK-0185) — preencha "servicoInteresse" com o nome EXATO do serviço/produto do catálogo (igual ao catálogo, nunca uma tradução/paráfrase) que a cliente demonstrou interesse nesta mensagem ou no histórico recente — null quando ela só mencionou uma categoria genérica (ex: "cejas") sem especificar qual serviço dentro dela, ou quando ainda não ficou claro. Nunca invente um serviço que não esteja no catálogo nem que a cliente não tenha mencionado.
+
 Responda ESTRITAMENTE em JSON no formato:
-{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null}
+{"phase": "abertura|informacao|objecao|fechamento", "bubbles": ["primeira bolha curta", "segunda bolha curta (se precisar)"], "needsHumanConfirmation": false, "nomeCapturado": null, "pendenteAvaliacao": null, "aguardandoCliente": null, "servicoInteresse": null}
 Cada bolha deve ter no máximo 1-2 frases. Use só as bolhas necessárias (pode ser só 1). needsHumanConfirmation só true se agent=agendamento e já há dados suficientes pra tentar fechar. nomeCapturado é null na grande maioria das vezes — só preencha nos casos descritos acima.`;
 }
 
@@ -509,7 +523,7 @@ async function generateSpecialistReply(
   contextPack?: AgentContextPack,
   adContext?: string,
   isBurst?: boolean
-): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string } | null> {
+): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
   const specialistModel = 'gemini-3.6-flash';
@@ -600,6 +614,7 @@ async function generateSpecialistReply(
     nomeCapturado?: string | null;
     pendenteAvaliacao?: string | null;
     aguardandoCliente?: string | null;
+    servicoInteresse?: string | null;
   };
   // O modelo pode desobedecer o limite mesmo com a instrução explícita. Duas
   // bolhas preservam uma resposta humana e evitam que o cliente receba uma
@@ -620,7 +635,8 @@ async function generateSpecialistReply(
   // pra virar o texto do escalonamento, sem precisar adivinhar depois.
   const pendingOwnerReview = typeof parsed.pendenteAvaliacao === 'string' && parsed.pendenteAvaliacao.trim() ? parsed.pendenteAvaliacao.trim() : undefined;
   const awaitingCustomerChoice = typeof parsed.aguardandoCliente === 'string' && parsed.aguardandoCliente.trim() ? parsed.aguardandoCliente.trim() : undefined;
-  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName, pendingOwnerReview, awaitingCustomerChoice };
+  const interestedService = typeof parsed.servicoInteresse === 'string' && parsed.servicoInteresse.trim() ? parsed.servicoInteresse.trim() : undefined;
+  return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName, pendingOwnerReview, awaitingCustomerChoice, interestedService };
 }
 
 /**
