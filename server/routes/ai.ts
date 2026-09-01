@@ -282,6 +282,10 @@ INSTRUÇÃO DO OPERADOR: "${hint.trim()}"
 
 Use o histórico da conversa e a base de conhecimento SÓ pra manter o tom, o idioma e o contexto consistentes com o que já foi dito — nunca pra contrariar ou ignorar a instrução do operador. Mesmo quando a instrução for comercial, não ignore uma pergunta específica e ainda sem resposta da última mensagem do lead: responda-a primeiro, salvo se a instrução disser explicitamente o contrário. Não diga que enviou ou vai anexar foto, vídeo, catálogo ou outro arquivo se você não tiver uma ferramenta real de envio de mídia. Não invente disponibilidade, preço, desconto ou confirmação de agenda.
 
+Antes de escrever, releia o histórico da conversa abaixo com atenção (achado real de produção: sem este aviso, o rascunho às vezes repetia um cumprimento e uma informação que já tinham sido enviadas há poucas mensagens):
+- Se o histórico mostra que vocês já se falaram nesta conversa, NUNCA se apresente ou cumprimente de novo (nada de "¡Hola!"/"Olá!" de abertura) — continue a conversa naturalmente, como quem lembra o que já foi dito.
+- Nunca repita uma informação (preço, prazo, condição, link) que já foi enviada ao lead nas mensagens anteriores do "Atendente" — se a instrução do operador pede pra reforçar algo já dito, reformule ou avance a conversa a partir dali, não copie a mesma informação de novo como se fosse a primeira vez.
+
 Responda estritamente em formato JSON:
 {
   "reply": "mensagem pronta pra enviar ao lead, seguindo a instrução do operador, no MESMO idioma que o lead usa na conversa",
