@@ -349,7 +349,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // violando a própria regra do checklist ("nunca deixar um ícone parecer
   // clicável sem função real por trás"). Agora abre um seletor de verdade.
   const [showComposerEmojiPicker, setShowComposerEmojiPicker] = useState(false);
+  // TASK-0184: anexo (arquivo real + foto/vídeo de exemplo) unificados num
+  // só menu por trás do clipe, em vez de 1-2 <select> soltos disputando
+  // espaço na linha de composição com o clipe de verdade (pedido direto do
+  // dono do produto, comparação lado a lado com o WhatsApp Business real).
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
+
+  // TASK-0184: caixa de texto dinâmica igual ao WhatsApp real — cresce com
+  // o texto (até um teto) em vez do <input> de altura fixa que só rolava o
+  // texto por dentro, dando a falsa impressão de pouco espaço pra digitar.
+  useEffect(() => {
+    const el = composerTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [inputMessage]);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
@@ -3443,7 +3459,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {selectedLead ? (
             <>
               {/* WhatsApp Web Chat Header */}
-              <div className="px-3 py-2.5 bg-[#202c33] border-b border-white/10 flex items-center justify-between gap-2 z-10 shadow-none">
+              {/* TASK-0184: agora que o padding vertical do .app-main some no
+                  mobile (ver index.css), com uma conversa aberta o <Header/>
+                  global fica escondido (var(--atendimento-header-h) = 0px) e
+                  este cabeçalho de conversa passa a ser o elemento mais alto
+                  da tela, colado na borda — mesmo risco real já documentado
+                  no Header.tsx (notch/Dynamic Island cobrindo o conteúdo em
+                  PWA fullscreen). paddingTop: env(safe-area-inset-top)
+                  resolve pra 0 fora desse contexto, sem efeito colateral. */}
+              <div className="px-3 py-2.5 bg-[#202c33] border-b border-white/10 flex items-center justify-between gap-2 z-10 shadow-none" style={{ paddingTop: 'calc(0.625rem + env(safe-area-inset-top))' }}>
                 {/* min-w-0 é o que deixa esta metade encolher/truncar de
                     verdade — sem isso, um nome de lead comprido (achado ao
                     vivo: nome tipo e-mail sem espaço nenhum pra quebrar,
@@ -4271,7 +4295,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   conversas de teste/demo (troca "enviar como" + simular
                   imagem/PDF); numa conversa real ela some e os ícones que
                   sobram entram direto na linha de composição abaixo. */}
-              <div className="p-2 space-y-1.5">
+              {/* TASK-0184: mesmo raciocínio do cabeçalho acima — o padding
+                  inferior do .app-main que sumiu no mobile também cobria a
+                  barra de gestos do iOS/Android por baixo da caixa de
+                  texto/mic. paddingBottom: env(safe-area-inset-bottom)
+                  resolve pra 0 fora desse contexto. */}
+              <div className="p-2 space-y-1.5" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}>
 
                 {!(selectedLead as any)?.isReal && (
                   <div className="flex items-center justify-between text-xs px-1">
@@ -4421,7 +4450,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                       title="Emoji"
                     >
-                      <Smile className="w-6 h-6" />
+                      <Smile className="w-5 h-5" />
                     </button>
                     {showComposerEmojiPicker && (
                       <>
@@ -4441,48 +4470,90 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       </>
                     )}
                   </div>
-                  {/* Foto/vídeo de exemplo — ícones discretos à esquerda da
-                      caixa de texto, junto do clipe de anexo (pedido
-                      direto, 29/08/2026: "foto para lado esquerdo"). */}
-                  {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                    <select
-                      onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
-                      defaultValue=""
-                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center flex-shrink-0"
-                      title={isSpanish ? 'Enviar foto de ejemplo de un servicio' : 'Enviar foto de exemplo de um serviço'}
+                  {/* Anexo — pedido direto (TASK-0184, 01/09/2026, comparação
+                      lado a lado com o WhatsApp Business real): o clipe de
+                      anexo real e os dois <select> de foto/vídeo de exemplo
+                      viviam como 3 ícones soltos disputando espaço na linha
+                      de composição. Agora é um único menu (mesmo padrão do
+                      seletor de emoji abaixo), com o clipe como gatilho —
+                      igual ao WhatsApp real, que também agrupa Documento/
+                      Câmera/Galeria atrás de um clipe só. */}
+                  <div className="relative flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowAttachMenu((v) => !v)}
+                      className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                      title={isSpanish ? 'Adjuntar' : 'Anexar'}
                     >
-                      <option value="" disabled>📷</option>
-                      {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
-                      ))}
-                    </select>
-                  )}
+                      <Paperclip className="w-5 h-5" />
+                    </button>
+                    {showAttachMenu && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
+                        <div className="absolute bottom-full left-0 mb-2 z-50 w-60 max-h-64 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-1.5 origin-bottom-left animate-pop-in">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowAttachMenu(false);
+                              (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
+                          >
+                            <Paperclip className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                            <span>{isSpanish ? 'Documento o foto' : 'Documento ou foto'}</span>
+                          </button>
 
-                  {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                    <select
-                      onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
-                      defaultValue=""
-                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center flex-shrink-0"
-                      title={isSpanish ? 'Enviar video de ejemplo de un servicio' : 'Enviar vídeo de exemplo de um serviço'}
-                    >
-                      <option value="" disabled>🎥</option>
-                      {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
-                      ))}
-                    </select>
-                  )}
+                          {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                            <>
+                              <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
+                              </div>
+                              {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
+                                >
+                                  <ImageIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                  <span className="truncate">{p.name}</span>
+                                </button>
+                              ))}
+                            </>
+                          )}
 
-                  <button
-                    type="button"
-                    onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
-                    className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer flex-shrink-0"
-                  >
-                    <Paperclip className="w-6 h-6" />
-                  </button>
+                          {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                            <>
+                              <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
+                              </div>
+                              {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => { setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
+                                >
+                                  <Video className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                  <span className="truncate">{p.name}</span>
+                                </button>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
-                  <input
-                    type="text"
+                  {/* <textarea> em vez de <input> — cresce com o texto até um
+                      teto de 120px (mesma sensação do WhatsApp real: mais
+                      espaço aparente pra digitar, sem rolar por dentro de
+                      uma caixa de altura fixa). Enter envia, Shift+Enter
+                      quebra linha — mesmo atalho do WhatsApp. */}
+                  <textarea
+                    ref={composerTextareaRef}
+                    rows={1}
                     placeholder={
                       senderRole === 'lead'
                         ? (isSpanish ? `Mensaje de ${selectedLead.name}...` : `Mensagem de ${selectedLead.name}...`)
@@ -4490,7 +4561,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
-                    className="flex-1 min-w-0 bg-[#2a3942] text-sm text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-3 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendTextMessage();
+                      }
+                    }}
+                    className="flex-1 min-w-0 bg-[#2a3942] text-sm text-[#e9edef] placeholder-slate-400 rounded-3xl px-4 py-2.5 leading-6 resize-none overflow-y-auto focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    style={{ maxHeight: '120px' }}
                   />
 
                   {/* Respostas rápidas — ícone discreto à direita da caixa de

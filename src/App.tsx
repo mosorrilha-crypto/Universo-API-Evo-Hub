@@ -1409,11 +1409,9 @@ export const App: React.FC = () => {
             altura real de referência pra se basear e sobrava/faltava
             espaço em telas reais — achado real em produção, 29/08/2026,
             depois de três rodadas anteriores tentando acertar com valores
-            fixos de dvh (TASK-0150/0153/0157). h-[calc(100dvh-1.5rem)] e
-            sm:h-[calc(100dvh-3rem)] cancelam exatamente o padding vertical
-            de .app-main (p-3/sm:p-6) nesses breakpoints; em lg (desktop) a
-            aba volta ao fluxo normal (lg:block lg:h-auto), como sempre foi
-            — o cálculo interno lg:h-[calc(100dvh-154px)] do chat-shell já
+            fixos de dvh (TASK-0150/0153/0157). Em lg (desktop) a aba volta
+            ao fluxo normal (lg:block lg:h-auto), como sempre foi — o
+            cálculo interno lg:h-[calc(100dvh-154px)] do chat-shell já
             resolve isso sozinho lá.
 
             Achado real, 29/08/2026 (TASK-0162): esse cálculo nunca soube
@@ -1424,8 +1422,17 @@ export const App: React.FC = () => {
             ResizeObserver (ver useEffect perto de isMobileWhatsAppThreadOpen)
             — 0px quando o Header está escondido (conversa aberta), altura
             real caso contrário. Sem isso, mais um valor chutado igual às
-            seis tentativas anteriores. */}
-        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px)-1.5rem)] sm:h-[calc(100dvh-var(--atendimento-header-h,0px)-3rem)] lg:block lg:h-auto' : 'hidden'}>
+            seis tentativas anteriores.
+
+            Achado real, 01/09/2026 (TASK-0184): até aqui o cálculo também
+            subtraía 1.5rem (mobile) / 3rem (sm), pra cancelar o padding
+            vertical do .app-main (p-3/sm:p-6) que sobrava como faixa preta
+            acima e abaixo da tela — comparação lado a lado com o WhatsApp
+            Business real, que não deixa margem nenhuma aí. Em vez de
+            cancelar o padding só na altura, ele foi zerado na raiz (ver
+            `.app-main.app-main--atendimento` no index.css, abaixo de
+            1024px) — não sobra mais nada pra subtrair aqui. */}
+        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px))] lg:block lg:h-auto' : 'hidden'}>
           <AtendimentoWorkspaceFrame
             activeTenantName={activeTenant.name}
             activeTenant={activeTenant}
