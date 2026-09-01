@@ -89,12 +89,12 @@ export async function transcodeToWhatsAppVoiceNote(
     const magic = outputBuffer.subarray(0, 4).toString('ascii');
     const hasOpusHeader = outputBuffer.includes(Buffer.from('OpusHead'));
     if (output === 'ogg_opus') {
-      console.log(`🎙️  [audioTranscode] probe=ogg_opus input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic}" opus=${hasOpusHeader}`);
+      console.log('🎙️  [audioTranscode] probe=ogg_opus', { inputBytes: inputBuffer.length, outputBytes: outputBuffer.length, magic, opus: hasOpusHeader });
       if (magic !== 'OggS' || !hasOpusHeader) {
         throw new Error('A conversão de áudio não produziu um OGG/Opus válido.');
       }
     } else {
-      console.log(`🎙️  [audioTranscode] fallback=mp3 input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic.slice(0, 3)}" (esperado "ID3")`);
+      console.log('🎙️  [audioTranscode] fallback=mp3', { inputBytes: inputBuffer.length, outputBytes: outputBuffer.length, magic: magic.slice(0, 3), esperado: 'ID3' });
       if (magic.slice(0, 3) !== 'ID3') {
         throw new Error('A conversão de áudio não produziu um MP3 válido.');
       }

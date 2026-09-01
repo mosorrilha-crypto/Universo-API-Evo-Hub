@@ -523,7 +523,7 @@ export async function recordOutgoingMessage(
     // aqui faz o chamador (ex: triggerAutoReply em webhooks.ts) achar que a
     // resposta do agente foi salva quando não foi — relança pra que o
     // try/catch de quem chama trate de verdade (ex: registrar escalonamento).
-    console.error(`❌ [Conversas] tenant=${tenantId} falha ao gravar mensagem ENVIADA pra ${phone} (id=${id}) — resposta do agente perdida do histórico:`, error.message);
+    console.error('❌ [Conversas] falha ao gravar mensagem ENVIADA — resposta do agente perdida do histórico:', { tenantId, phone, id, message: error.message });
     throw new Error(`Falha ao gravar mensagem enviada: ${error.message}`);
   }
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conv.id);

@@ -43,7 +43,7 @@ export async function registerPendingEcho(tenantId: string, phone: string, type:
   const db = getDb();
   const { error } = await db.from('pending_outbound_echoes').insert({ tenant_id: tenantId, phone, type, text: text ?? null, created_at: new Date().toISOString() });
   if (error) {
-    console.warn(`⚠️  [Eco de envio] Falha ao registrar marca pendente pra ${phone}:`, error.message);
+    console.warn('⚠️  [Eco de envio] Falha ao registrar marca pendente:', { phone, message: error.message });
   }
 }
 

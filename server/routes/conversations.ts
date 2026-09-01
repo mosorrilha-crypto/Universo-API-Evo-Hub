@@ -117,23 +117,6 @@ function tenantOf(req: AuthenticatedRequest): string {
   return resolveTenantId(req);
 }
 
-/**
- * Achado real do CodeQL neste PR (js/tainted-format-string + js/log-injection,
- * TASK-0152): `phone` vem direto de `req.params.phone`, sem validação de
- * formato antes deste ponto — embutir esse valor cru dentro do próprio
- * template de log (1º argumento do console.warn) deixa o "formato" do log
- * controlável externamente, e caracteres de controle (quebra de linha) nele
- * permitiriam forjar linhas de log falsas. `encodeURIComponent` percent-
- * codifica qualquer quebra de linha/caractere de controle — usado em vez de
- * um `.replace()` próprio porque o CodeQL não reconhece uma função regex
- * caseira como sanitizador de taint (o alerta de log injection continuou
- * aparecendo até trocar pra essa função nativa reconhecida); nunca usado pra
- * validar dado de negócio, só pra higienizar o que vai pro log.
- */
-function sanitizeForLog(value: string): string {
-  return encodeURIComponent(value);
-}
-
 /** Traduz erros esperados da API tipada em respostas estáveis, sem expor stack ou detalhes do banco. */
 function sendKnowledgeBaseDocumentError(res: Response, error: unknown): Response {
   if (error instanceof KnowledgeBaseDocumentValidationError) {
@@ -213,7 +196,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       await clearAppointmentForPhone(tenantId, phone);
       return true;
     } catch (err: any) {
-      console.warn(`⚠️  [Pagamento rejeitado] falha ao liberar o horário no Calendar (tenant=${tenantId} phone=${phone}):`, err.message);
+      console.warn('⚠️  [Pagamento rejeitado] falha ao liberar o horário no Calendar:', { tenantId, phone, message: err.message });
       return false;
     }
   }
@@ -474,12 +457,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         resolutionNote: 'Resolvido automaticamente: operador respondeu manualmente pelo painel.',
       })));
     } catch (err: any) {
-      console.warn(
-        '⚠️ [Conversas] Falha ao auto-resolver escalonamentos após resposta manual (tenant=%s, phone=%s):',
-        sanitizeForLog(tenantId),
-        sanitizeForLog(phone),
-        err?.message || err
-      );
+      console.warn('⚠️ [Conversas] Falha ao auto-resolver escalonamentos após resposta manual:', { tenantId, phone, message: err?.message || err });
     }
   }
 
@@ -655,7 +633,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           try {
             await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
           } catch (error) {
-            console.warn(`🎙️ [audioFallback] evolution_ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            console.warn('🎙️ [audioFallback] evolution_ogg_opus_failed', { to: req.params.phone.replace(/\D/g, '').slice(-4), reason: error instanceof Error ? error.message : String(error) });
             await applyTranscode('mp3');
             await sendEvolutionVoiceMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, uploadBase64, uploadMimeType);
           }
@@ -671,7 +649,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
               diagnosticTag
             );
             if (diagnosticTag) {
-              console.log(`🔬 [${diagnosticTag}] to=***${req.params.phone.replace(/\D/g, '').slice(-4)} media_id=${mediaId} mime="${uploadMimeType}" bytes=${audioBuffer.length}`);
+              console.log('🔬 [audioDiagnostic]', { diagnosticTag, to: req.params.phone.replace(/\D/g, '').slice(-4), mediaId, mimeType: uploadMimeType, bytes: audioBuffer.length });
             }
           };
 
@@ -680,7 +658,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           } catch (error) {
             // A falha cobre tanto rejeição da Meta quanto uma eventual falha de
             // codificação OGG local. Só então entregamos MP3 como contingência.
-            console.warn(`🎙️ [audioFallback] ogg_opus_failed to=***${req.params.phone.replace(/\D/g, '').slice(-4)} reason=${error instanceof Error ? error.message : String(error)}`);
+            console.warn('🎙️ [audioFallback] ogg_opus_failed', { to: req.params.phone.replace(/\D/g, '').slice(-4), reason: error instanceof Error ? error.message : String(error) });
             await applyTranscode('mp3');
             await sendCurrentAudio('audioMp3Fallback');
           }
@@ -894,7 +872,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         payload: { label: label.trim(), labels },
       });
     } catch (err: any) {
-      console.warn(`⚠️ [Auditoria] Falha ao registrar etiqueta adicionada (tenant=${tenantId}, phone=${req.params.phone}):`, err?.message || err);
+      console.warn('⚠️ [Auditoria] Falha ao registrar etiqueta adicionada:', { tenantId, phone: req.params.phone, message: err?.message || err });
     }
     res.json({ success: true, labels });
   }));
@@ -915,7 +893,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         payload: { label: req.params.label, labels },
       });
     } catch (err: any) {
-      console.warn(`⚠️ [Auditoria] Falha ao registrar etiqueta removida (tenant=${tenantId}, phone=${req.params.phone}):`, err?.message || err);
+      console.warn('⚠️ [Auditoria] Falha ao registrar etiqueta removida:', { tenantId, phone: req.params.phone, message: err?.message || err });
     }
     res.json({ success: true, labels });
   }));
@@ -1300,7 +1278,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       });
     } catch (err) {
       if (isDuplicateSourceRefError(err)) return; // já registrado antes (retry/reentrega) — nada a fazer
-      console.warn(`⚠️  [Financeiro] Falha ao registrar transação automática pro agendamento verificado (tenant=${tenantId}, phone=${phone}):`, (err as Error)?.message || err);
+      console.warn('⚠️  [Financeiro] Falha ao registrar transação automática pro agendamento verificado:', { tenantId, phone, message: (err as Error)?.message || err });
     }
   }
 
@@ -1323,7 +1301,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       });
     } catch (err: any) {
       // Auditoria não pode desfazer uma decisão financeira já confirmada.
-      console.warn(`⚠️ [Auditoria] Falha ao registrar decisão do comprovante (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+      console.warn('⚠️ [Auditoria] Falha ao registrar decisão do comprovante:', { tenantId, phone, message: err?.message || err });
     }
   }
 

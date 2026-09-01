@@ -71,7 +71,7 @@ export async function transcodeToWhatsAppVideo(
     if (outputBuffer.length === 0) {
       throw new Error('ffmpeg produziu um arquivo de saída vazio.');
     }
-    console.log(`🎬 [videoTranscode] input=${buffer.length}B (${mimeType}) output=${outputBuffer.length}B (video/mp4)`);
+    console.log('🎬 [videoTranscode]', { inputBytes: buffer.length, inputMimeType: mimeType, outputBytes: outputBuffer.length, outputMimeType: 'video/mp4' });
     return { buffer: outputBuffer, mimeType: 'video/mp4' };
   } finally {
     await fs.rm(tmpParentDir, { recursive: true, force: true }).catch(() => {});

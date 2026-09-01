@@ -117,7 +117,7 @@ export async function sendEvolutionVoiceMessage(
   if (!res.ok) {
     throw new Error(`Falha ao enviar nota de voz via Evolution API: HTTP ${res.status} — ${JSON.stringify(data).slice(0, 300)}`);
   }
-  console.log(`🎙️ [evolutionVoiceNote] to=***${to.replace(/\D/g, '').slice(-4)} mime="${mimeType}" message_id=${(data as any)?.key?.id || 'não informado'}`);
+  console.log('🎙️ [evolutionVoiceNote]', { to: to.replace(/\D/g, '').slice(-4), mimeType, messageId: (data as any)?.key?.id || 'não informado' });
 }
 
 /** Envio de mídia (imagem, áudio, documento) via Evolution API (POST /message/sendMedia/{instance}). */
