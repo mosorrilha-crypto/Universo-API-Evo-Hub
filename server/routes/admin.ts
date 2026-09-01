@@ -598,6 +598,33 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     return req.user.tenantId;
   }
 
+  /**
+   * TASK-0197 — CodeQL sinalizou SSRF (Critical/High) nos fetches que usam
+   * `cred.api_url` lido de `tenant_evolution_credentials`: por análise
+   * estática, um valor vindo do banco é tratado como potencialmente
+   * externally-controlled. Comparar contra o `evolutionApiUrl` (env) atual
+   * NÃO é a checagem certa aqui — um teste real (`adminEvolutionInstance.test.ts`)
+   * cobre o caso legítimo de reconectar/consultar status usando a credencial
+   * já salva de um tenant mesmo com EVOLUTION_API_URL/KEY globais ausentes
+   * neste servidor (env usada só pra *provisionar instância nova*, não pra
+   * validar uma já existente). A checagem estrutural (URL bem-formada,
+   * protocolo http/https) é a mesma usada em `evolutionSend.ts` — impede um
+   * SSRF de verdade (`javascript:`, `file:`, string malformada) sem quebrar
+   * esse caso legítimo.
+   */
+  function assertValidHttpUrl(url: string): string {
+    let protocol: string;
+    try {
+      protocol = new URL(url).protocol;
+    } catch {
+      throw new Error(`URL da Evolution API inválida: "${url}".`);
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw new Error(`Protocolo não permitido pra Evolution API: "${protocol}".`);
+    }
+    return url;
+  }
+
   router.post('/api/admin/tenants/:id/evolution-instance', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     if (!evolutionApiUrl || !evolutionApiKey) {
       return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível provisionar instância nova.' });
@@ -617,6 +644,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (existingCredError) return res.status(500).json({ error: existingCredError.message });
     if (existingCred) {
+      assertValidHttpUrl(existingCred.api_url);
       try {
         const result = await reconnectExistingInstance(existingCred as any);
         return res.json(result);
@@ -705,6 +733,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    assertValidHttpUrl(cred.api_url);
 
     try {
       const result = await reconnectExistingInstance(cred as any);
@@ -735,6 +764,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    assertValidHttpUrl(cred.api_url);
 
     try {
       const stateRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connectionState/${cred.instance_name}`, {
@@ -783,6 +813,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    assertValidHttpUrl(cred.api_url);
 
     const apiBase = cred.api_url.replace(/\/$/, '');
 
