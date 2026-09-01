@@ -203,6 +203,26 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                             <button type="button" onClick={() => setSuggestionDraftById((previous) => ({ ...previous, [e.id]: e.suggestedReply || '' }))} className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-bold text-sky-200 hover:bg-sky-500/20">Usar sugestão da IA</button>
                           </div>
                         )}
+                        {(() => {
+                          // Achado real (relatado pelo dono do produto, 01/09/2026): mesmo com
+                          // "Aprovar e enviar" já mandando bolhas separadas de verdade (achado
+                          // anterior, 30/08/2026 — ver split(' / ') no handler de envio), o
+                          // operador só via o rascunho como UM bloco de texto com "/" no meio,
+                          // difícil de confiar que ia sair certo sem editar. Preview visual das
+                          // bolhas reais (mesmo split usado no envio) deixa claro o que vai ser
+                          // enviado, pra aprovar direto sem precisar mexer no texto.
+                          const currentDraftText = suggestionDraftById[e.id] ?? e.blockedDraft ?? e.suggestedReply ?? '';
+                          const previewBubbles = currentDraftText.split(' / ').map((bubble) => bubble.trim()).filter(Boolean);
+                          if (previewBubbles.length < 2) return null;
+                          return (
+                            <div className="space-y-1.5 rounded-lg border border-slate-700/60 bg-slate-950/40 p-2">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Vai sair como {previewBubbles.length} mensagens separadas</p>
+                              {previewBubbles.map((bubble, index) => (
+                                <div key={index} className="w-fit max-w-[85%] rounded-2xl rounded-bl-sm border border-emerald-500/25 bg-emerald-600/20 px-3 py-1.5 text-xs text-emerald-50">{bubble}</div>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         <AutoResizeTextarea value={suggestionDraftById[e.id] ?? e.blockedDraft ?? e.suggestedReply ?? ''} onChange={(event) => setSuggestionDraftById((previous) => ({ ...previous, [e.id]: event.target.value }))} placeholder="A sugestão aparecerá aqui para sua revisão." minRows={3} maxLength={900} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none" />
                         {onApproveAndSend && e.serviceWindowExpiresAt && !e.withinServiceWindow && (
                           <p className="text-[10px] font-semibold text-amber-300">Janela de 24h fechada — não dá pra mandar texto livre agora. Use "Orientar IA" (retoma quando o cliente escrever de novo) ou o template de reengajamento.</p>
