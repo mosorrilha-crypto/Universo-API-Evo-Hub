@@ -68,6 +68,25 @@ describe('camada de dados com RLS efetivo', () => {
     });
   });
 
+  it('permite que o callback público do OAuth do Google Calendar (sem JWT autenticado) grave o refresh token via runWithTenantDbContext com source "webhook"', async () => {
+    // TASK-0187 — achado real em produção (01/09/2026, tenant Monique): a
+    // rota GET /api/google-calendar/oauth-callback é pública (sem
+    // authenticateToken, porque o Google redireciona o navegador direto pra
+    // ela) — nunca passava pelo TenantDbContext do AsyncLocalStorage, então
+    // handleGoogleOAuthCallback (que chama getDb() em saveRefreshToken)
+    // sempre rejeitava com "sem contexto de tenant", bloqueando toda
+    // reconexão/primeira conexão do Google Calendar desde o rollout de RLS
+    // (TASK-0083) sem que ninguém percebesse até reconectar de novo. O
+    // tenantId já vem verificado do state assinado (verifyOAuthState) antes
+    // de chegar aqui, então roda como 'webhook' (mesmo padrão dos webhooks
+    // do WhatsApp em tenantResolver.ts).
+    expect(() => getDb()).toThrow(/sem contexto de tenant/i);
+    await runWithTenantDbContext({ tenantId: TENANT_A, source: 'webhook' }, async () => {
+      await Promise.resolve();
+      expect(getDb()).not.toBe(platformClient);
+    });
+  });
+
   it('assina claims curtos que restringem o PostgREST ao tenant e ao papel authenticated', () => {
     const token = createTenantRuntimeAccessToken(config, {
       tenantId: TENANT_A,

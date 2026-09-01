@@ -34,6 +34,7 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireRole, resolveTenantId } from '../middleware/rbac';
+import { runWithTenantDbContext } from '../services/tenantDbContext';
 
 const PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['pago', 'pendente', 'atrasado', 'cancelado'];
@@ -127,8 +128,20 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
       return res.status(400).send('<html><body style="font-family:sans-serif;padding:2rem"><h2>Conexão inválida</h2><p>O link de autorização expirou ou não é válido. Volte ao painel e inicie a conexão novamente.</p><a href="/">Voltar ao painel</a></body></html>');
     }
 
+    // Achado real em produção (01/09/2026, tenant Monique — bug pré-existente
+    // desde a TASK-0083, nunca exercitado até alguém reconectar de novo):
+    // este callback é público (sem authenticateToken), então nunca passa
+    // pelo TenantDbContext do AsyncLocalStorage — handleGoogleOAuthCallback
+    // chama getDb() (saveRefreshToken) e sempre lançava "Acesso ao banco sem
+    // contexto de tenant". Mesma classe de bug dos 8 jobs de fundo corrigidos
+    // na TASK-0083 (setInterval fora de requisição HTTP), só que aqui é uma
+    // requisição HTTP real sem JWT — o tenant já vem verificado do state
+    // assinado acima, então roda como 'webhook' (mesmo padrão de
+    // tenantResolver.ts pros webhooks do WhatsApp).
     try {
-      await handleGoogleOAuthCallback(tenantId, code, googleClientId, googleClientSecret, googleRedirectUri);
+      await runWithTenantDbContext({ tenantId, source: 'webhook' }, () =>
+        handleGoogleOAuthCallback(tenantId, code, googleClientId, googleClientSecret, googleRedirectUri)
+      );
       res.send('<html><body style="font-family:sans-serif;padding:2rem;text-align:center"><h2>✅ Google Calendar conectado!</h2><p>Pode fechar esta aba e voltar ao painel.</p></body></html>');
     } catch (err: any) {
       console.error('❌ [Google Calendar] Falha no callback OAuth:', err.message);
