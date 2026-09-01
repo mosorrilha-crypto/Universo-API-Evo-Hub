@@ -37,6 +37,7 @@ import {
   KnowledgeBaseDocumentValidationError,
 } from '../services/knowledgeBaseStore';
 import { createFinancialTransaction, updateFinancialTransactionBySourceRef, isDuplicateSourceRefError } from '../services/financialStore';
+import { upsertCrmLeadState } from '../services/crmStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
 import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
@@ -1114,6 +1115,20 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
    * só loga, nunca derruba a resposta da ação principal que o operador
    * pediu (o registro financeiro é um efeito colateral, não pode bloquear
    * o fluxo real de pagamento).
+   *
+   * Achado real em produção (01/09/2026): o CRM (server/routes/crm.ts) e este
+   * fluxo de pagamento eram dois sistemas paralelos — confirmar uma seña aqui
+   * nunca refletia no estágio do lead no CRM, então leads com pagamento real
+   * confirmado ficavam parados em 'novo'/'contato'/'proposta' a menos que um
+   * operador voltasse pro CRM e marcasse 'ganho' manualmente (o que raramente
+   * acontecia, já que o pagamento já tinha sido resolvido por outro caminho).
+   * Por isso, depois de confirmar o pagamento com sucesso, avança o lead pro
+   * estágio 'ganho' do CRM diretamente (upsertCrmLeadState) — sem chamar
+   * recordFinancialTransactionForWonDeal (server/routes/crm.ts), que criaria
+   * uma segunda transação financeira 'pendente' duplicada; o registro
+   * financeiro real já foi feito acima. Mesmo padrão de tolerância a falha do
+   * resto da função: erro no CRM só loga, nunca derruba a confirmação real do
+   * pagamento.
    */
   async function recordFinancialTransactionForVerifiedPayment(
     tenantId: string,
@@ -1135,25 +1150,34 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         amount,
         status: 'pago',
       });
-      if (updatedExisting) return;
-      await createFinancialTransaction(tenantId, {
-        id: crypto.randomUUID(),
-        leadId: phone,
-        leadName: conversation?.name || phone,
-        leadPhone: phone,
-        productName: appointment.summary,
-        amount,
-        paymentMethod: 'Transferência Bancária',
-        status: 'pago',
-        date: new Date().toISOString(),
-        operatorName: 'Automático (comprovante aprovado)',
-        channel: appointment.source === 'manual' ? 'Agendamento manual' : 'WhatsApp',
-        sourceRef,
-        entryType: 'income',
-      });
+      if (!updatedExisting) {
+        await createFinancialTransaction(tenantId, {
+          id: crypto.randomUUID(),
+          leadId: phone,
+          leadName: conversation?.name || phone,
+          leadPhone: phone,
+          productName: appointment.summary,
+          amount,
+          paymentMethod: 'Transferência Bancária',
+          status: 'pago',
+          date: new Date().toISOString(),
+          operatorName: 'Automático (comprovante aprovado)',
+          channel: appointment.source === 'manual' ? 'Agendamento manual' : 'WhatsApp',
+          sourceRef,
+          entryType: 'income',
+        });
+      }
     } catch (err) {
-      if (isDuplicateSourceRefError(err)) return; // já registrado antes (retry/reentrega) — nada a fazer
-      console.warn(`⚠️  [Financeiro] Falha ao registrar transação automática pro agendamento verificado (tenant=${tenantId}, phone=${phone}):`, (err as Error)?.message || err);
+      if (!isDuplicateSourceRefError(err)) {
+        console.warn(`⚠️  [Financeiro] Falha ao registrar transação automática pro agendamento verificado (tenant=${tenantId}, phone=${phone}):`, (err as Error)?.message || err);
+      }
+      // duplicado (retry/reentrega): nada a fazer no financeiro, mas ainda assim avança o CRM abaixo
+    }
+
+    try {
+      await upsertCrmLeadState(tenantId, phone, { stage: 'ganho' });
+    } catch (err) {
+      console.warn(`⚠️  [CRM] Falha ao avançar lead pro estágio 'ganho' após pagamento verificado (tenant=${tenantId}, phone=${phone}):`, (err as Error)?.message || err);
     }
   }
 

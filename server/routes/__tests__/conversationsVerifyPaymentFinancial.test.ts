@@ -114,3 +114,79 @@ describe('POST /api/conversations/:phone/verify-payment — cria transação fin
     expect(rows).toHaveLength(0);
   });
 });
+
+/**
+ * Achado real em produção (01/09/2026): o CRM e este fluxo de pagamento
+ * verificado eram dois sistemas paralelos — confirmar uma seña nunca
+ * refletia no estágio do lead no CRM. Este bloco trava a ligação nova:
+ * seña verificada avança o lead pro estágio 'ganho' do CRM automaticamente.
+ */
+describe('POST /api/conversations/:phone/verify-payment — avança o lead pro estágio "ganho" no CRM', () => {
+  beforeEach(() => {
+    seed([{ name: 'Microlips', price: 'Gs 500.000', priceAmount: 500000 }]);
+  });
+
+  it('lead sem nenhum estado de CRM prévio: cria a linha já em "ganho"', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'verified' }),
+    });
+    expect(res.status).toBe(200);
+
+    const crmRows = (supabase as any).__tables.crm_lead_state;
+    expect(crmRows).toHaveLength(1);
+    expect(crmRows[0]).toMatchObject({ tenant_id: TENANT_ID, phone: PHONE, stage: 'ganho' });
+  });
+
+  it('lead já em outro estágio do funil: avança pra "ganho" sem perder os outros dados', async () => {
+    supabase.__tables.crm_lead_state = [
+      { id: 'crm-1', tenant_id: TENANT_ID, phone: PHONE, name: 'Cliente Teste', email: null, stage: 'contato', deal_value: null, assigned_operator: 'Ana', notes: [], tasks: [], updated_at: new Date().toISOString() },
+    ];
+
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'verified' }),
+    });
+    expect(res.status).toBe(200);
+
+    const crmRows = (supabase as any).__tables.crm_lead_state;
+    expect(crmRows).toHaveLength(1);
+    expect(crmRows[0]).toMatchObject({ phone: PHONE, stage: 'ganho', assigned_operator: 'Ana' });
+  });
+
+  it('pagamento rejeitado nunca mexe no estágio do CRM', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected' }),
+    });
+    expect(res.status).toBe(200);
+    const crmRows = (supabase as any).__tables.crm_lead_state || [];
+    expect(crmRows).toHaveLength(0);
+  });
+
+  it('reentrega do mesmo pagamento (retry, sourceRef duplicado) continua idempotente e mantém o CRM em "ganho"', async () => {
+    const first = await fetch(`${baseUrl}/api/conversations/${PHONE}/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'verified' }),
+    });
+    expect(first.status).toBe(200);
+
+    const second = await fetch(`${baseUrl}/api/conversations/${PHONE}/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'verified' }),
+    });
+    expect(second.status).toBe(200);
+
+    const financialRows = (supabase as any).__tables.financial_transactions;
+    expect(financialRows).toHaveLength(1); // sem duplicar no financeiro
+
+    const crmRows = (supabase as any).__tables.crm_lead_state;
+    expect(crmRows).toHaveLength(1);
+    expect(crmRows[0].stage).toBe('ganho');
+  });
+});
