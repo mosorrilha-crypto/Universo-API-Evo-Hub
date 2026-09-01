@@ -7,10 +7,34 @@
 
 const REQUEST_TIMEOUT_MS = 15000;
 
+/**
+ * TASK-0197 — CodeQL sinalizou SSRF (Critical) nos `fetch()` deste arquivo:
+ * `apiUrl` normalmente vem de `tenant_evolution_credentials.api_url`
+ * (lido do banco em admin.ts), então a análise estática trata como
+ * potencialmente externally-controlled. `admin.ts` já valida que esse valor
+ * corresponde ao endpoint único configurado (`EVOLUTION_API_URL`) antes de
+ * chamar qualquer função daqui — esta checagem estrutural (URL bem-formada,
+ * protocolo http/https) é uma segunda camada, direto no ponto de uso do
+ * `fetch`, pra nunca sair batendo em algo tipo `javascript:`/`file:` mesmo
+ * se um chamador futuro pular a validação de admin.ts.
+ */
+function assertValidApiUrl(apiUrl: string): void {
+  let protocol: string;
+  try {
+    protocol = new URL(apiUrl).protocol;
+  } catch {
+    throw new Error(`URL da Evolution API inválida: "${apiUrl}".`);
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new Error(`Protocolo não permitido pra Evolution API: "${protocol}".`);
+  }
+}
+
 function requireCredentials(instanceName: string | undefined, apiUrl: string | undefined, apiKey: string | undefined) {
   if (!instanceName || !apiUrl || !apiKey) {
     throw new Error('Instância/URL/API key da Evolution API ausentes — não é possível falar com essa instância.');
   }
+  assertValidApiUrl(apiUrl);
 }
 
 /**
@@ -188,6 +212,7 @@ export async function showEvolutionTyping(
 ): Promise<void> {
   if (!instanceName || !apiUrl || !apiKey) return;
   try {
+    assertValidApiUrl(apiUrl);
     await fetch(`${apiUrl.replace(/\/$/, '')}/chat/sendPresence/${instanceName}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: apiKey },
