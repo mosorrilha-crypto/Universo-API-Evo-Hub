@@ -98,6 +98,6 @@ export async function deleteKnowledgeBaseDocument(
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.warn(`⚠️  [KB Documentos] Falha ao apagar arquivo do Storage (tenant=${tenantId}, doc=${docId}): HTTP ${res.status} — ${body.slice(0, 300)}`);
+    console.warn('⚠️  [KB Documentos] Falha ao apagar arquivo do Storage:', { tenantId, docId, status: res.status, body: body.slice(0, 300) });
   }
 }

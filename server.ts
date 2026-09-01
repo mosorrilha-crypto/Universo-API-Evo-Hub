@@ -183,7 +183,7 @@ async function startServer() {
   // completo do bug que isso corrige).
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
-    console.error(`❌ [Erro não tratado] ${req.method} ${req.path}:`, err?.stack || err?.message || err);
+    console.error('❌ [Erro não tratado]', { method: req.method, path: req.path, error: err?.stack || err?.message || err });
     notifySystemError({ source: `${req.method} ${req.path}`, message: err?.message || String(err) }).catch(() => {});
     res.status(500).json({ error: 'Erro interno do servidor.' });
   });

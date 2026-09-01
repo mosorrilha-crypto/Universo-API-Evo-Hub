@@ -774,7 +774,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       const parsedMessages = parseEvolutionWebhookPayload(body);
       const enqueued = await enqueueAudioMessages(parsedMessages);
 
-      console.log(`📱 [Evolution Webhook ${instance}] Evento: ${eventName}`, data?.key ? `(Key: ${data.key.id})` : '', enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+      console.log('📱 [Evolution Webhook] Evento recebido', { instance, eventName, keyId: data?.key?.id, audiosEnfileirados: enqueued });
 
       return res.status(200).json({
         success: true,
@@ -795,7 +795,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
 
       const firstMessaging = body.entry?.[0]?.messaging?.[0];
       if (firstMessaging) {
-        console.log(`📸 [Webhook Instagram] Nova mensagem de ${firstMessaging.sender?.id}:`, firstMessaging.message?.text ? redactMessageForLog(firstMessaging.message.text) : '[Anexo]', enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+        console.log('📸 [Webhook Instagram] Nova mensagem', {
+          senderId: firstMessaging.sender?.id,
+          content: firstMessaging.message?.text ? redactMessageForLog(firstMessaging.message.text) : '[Anexo]',
+          audiosEnfileirados: enqueued,
+        });
       }
 
       return res.status(200).json({
@@ -820,7 +824,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         // tenant ainda não resolvido neste ponto (resolução acontece por
         // mensagem dentro de enqueueAudioMessages) — log de diagnóstico do
         // payload bruto, conteúdo sempre redigido.
-        console.log(`📱 [Webhook Meta WhatsApp] Nova mensagem de ${msg.from}:`, msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`, enqueued ? `— ${enqueued} áudio(s) enfileirado(s)` : '');
+        console.log('📱 [Webhook Meta WhatsApp] Nova mensagem', {
+          from: msg.from,
+          content: msg.text?.body ? redactMessageForLog(msg.text.body) : `[Tipo: ${msg.type}]`,
+          audiosEnfileirados: enqueued,
+        });
       }
 
       // Achado ao investigar "o áudio sai mas não chega" ao vivo: o webhook
@@ -835,12 +843,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         for (const status of statuses) {
           const errors = Array.isArray(status?.errors) ? status.errors : [];
           if (status?.status === 'failed' || errors.length > 0) {
-            console.warn(
-              `❌ [Webhook Meta WhatsApp] Status "${status?.status}" pra mensagem ${status?.id} (recipient=${status?.recipient_id}):`,
-              JSON.stringify(errors).slice(0, 500)
-            );
+            console.warn('❌ [Webhook Meta WhatsApp] Falha reportada pra mensagem', {
+              status: status?.status,
+              messageId: status?.id,
+              recipientId: status?.recipient_id,
+              errors: JSON.stringify(errors).slice(0, 500),
+            });
           } else {
-            console.log(`📬 [Webhook Meta WhatsApp] Status "${status?.status}" pra mensagem ${status?.id} (recipient=${status?.recipient_id})`);
+            console.log('📬 [Webhook Meta WhatsApp] Status de mensagem', { status: status?.status, messageId: status?.id, recipientId: status?.recipient_id });
           }
         }
       }
