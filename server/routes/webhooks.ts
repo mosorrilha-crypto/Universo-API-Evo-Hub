@@ -137,11 +137,26 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // carregado, sem tabela nova: sentBy='operator' só existe pra
       // mensagens digitadas de verdade no painel (nunca resposta da IA nem
       // disparo de campanha, ver StoredMessage.sentBy).
+      // TASK-0181 (parte 2) — achado real do dono do produto (01/09/2026):
+      // numa troca rápida em que o operador responde manualmente várias
+      // vezes seguidas, cada resposta dele RENOVA os 5min acima — a IA nunca
+      // recupera a vez sozinha, e não havia nenhum jeito de liberar isso na
+      // hora (só esperar o contato ficar quieto por 5min inteiros). Se o
+      // operador pediu explicitamente "devolver a IA agora" (menu ⋮ da
+      // conversa) DEPOIS da própria última mensagem manual dele, a pausa é
+      // ignorada nesta rodada — uma nova mensagem manual dele depois disso
+      // volta a pausar normalmente (o release não desativa o gate pra sempre).
       const OPERATOR_ACTIVE_PAUSE_MS = 5 * 60 * 1000;
       const lastOperatorMessage = [...(conversation?.messages || [])]
         .reverse()
         .find((m) => m.sender === 'agent' && m.sentBy === 'operator');
-      if (lastOperatorMessage && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS) {
+      const releasedAfterLastOperatorMessage = conversation?.operatorAiReleaseAt
+        && (!lastOperatorMessage || new Date(conversation.operatorAiReleaseAt).getTime() >= new Date(lastOperatorMessage.timestamp).getTime());
+      if (
+        lastOperatorMessage
+        && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS
+        && !releasedAfterLastOperatorMessage
+      ) {
         return;
       }
       // Modo "somente anúncios" (pedido real, 14/08/2026): quando o
@@ -293,6 +308,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           isBookingFlow: result.agent === 'agendamento',
           needsHumanConfirmation: result.needsHumanConfirmation,
           plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
+          contactName,
         }, { ai: getAi!(), groqApiKey });
         if (!safety.approved) {
           const blockedDraft = result.bubbles.join(' / ').slice(0, 900);

@@ -131,6 +131,7 @@ export async function sendOperatorGuidedFollowUp(
     draftBubbles: [message],
     history: conversation?.messages,
     knowledgeContext: escalation.operatorReply,
+    contactName: escalation.contactName,
   }, { ai: deps.ai });
   if (!safety.approved) {
     console.warn(`🛡️ [Revisor pré-envio] retomada guiada bloqueada para ${escalation.phone}: ${safety.reason}`);

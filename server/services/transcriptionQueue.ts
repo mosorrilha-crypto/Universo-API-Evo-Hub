@@ -225,6 +225,7 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
             isBookingFlow: result.agent === 'agendamento',
             needsHumanConfirmation: result.needsHumanConfirmation,
             plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
+            contactName: message.contactName,
           }, { ai: deps.getAi(), groqApiKey: deps.groqApiKey });
           if (!safety.approved) {
             const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
