@@ -6,7 +6,7 @@
  * de knowledgeBaseStore.ts porque é dado do tenant em si (tabela `tenants`),
  * não a base de conhecimento editável (camada 3).
  */
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 
 /**
  * Achado numa auditoria: era 'beauty_studio' — qualquer tenant sem segmento
@@ -83,7 +83,18 @@ export function validateBusinessHours(hours: unknown): hours is BusinessHours {
 }
 
 export async function setTenantBusinessHours(tenantId: string, hours: BusinessHours): Promise<void> {
-  const db = getDb();
+  // TASK-0187 (parte 2) — achado real relatado ao vivo (01/09/2026): salvar
+  // horário de atendimento sempre "funcionava" (sem erro, toast de sucesso)
+  // mas nunca persistia — ao reabrir, voltava vazio. Causa: a tabela
+  // `tenants` só tem policy RLS de SELECT pro papel `authenticated`
+  // (confirmado via pg_policies), nenhuma de UPDATE — getDb() (cliente
+  // tenant-scoped) faz o UPDATE sem erro nenhum, mas RLS filtra pra zero
+  // linhas afetadas silenciosamente (comportamento padrão do Postgres/
+  // PostgREST: UPDATE sem policy que autorize não é erro, só não atualiza
+  // nada). getPlatformDb() é seguro aqui porque o `tenantId` já vem
+  // verificado do JWT autenticado, nunca de input do cliente — mesmo
+  // raciocínio já usado pros jobs de fundo (TASK-0083).
+  const db = getPlatformDb();
   const { error } = await db.from('tenants').update({ business_hours: hours }).eq('id', tenantId);
   if (error) throw error;
 }
