@@ -20,7 +20,7 @@
  * derrubar ou atrasar o atendimento real ao cliente.
  */
 import { google } from 'googleapis';
-import { getDb } from './db';
+import { getDb, getPlatformDb } from './db';
 import { getAuthorizedGoogleClient, type CalendarConfig } from './googleCalendar';
 
 type SheetsClient = ReturnType<typeof google.sheets>;
@@ -59,7 +59,16 @@ export async function getBackupSheetUrl(tenantId: string): Promise<string | unde
 }
 
 async function saveSheetInfo(tenantId: string, sheetId: string, url: string): Promise<void> {
-  const db = getDb();
+  // TASK-0187 (parte 2) — achado durante a investigação do bug de horários
+  // de atendimento: a tabela `tenants` só tem policy RLS de SELECT pro papel
+  // `authenticated` (confirmado via pg_policies), nenhuma de UPDATE — este
+  // UPDATE via getDb() (cliente tenant-scoped) nunca dava erro, mas RLS
+  // filtrava pra zero linhas afetadas silenciosamente, então
+  // `backup_sheet_id`/`backup_sheet_url` NUNCA persistiam de verdade: cada
+  // sincronização recriava uma planilha nova do zero, achando que nenhuma
+  // existia ainda. getPlatformDb() é seguro aqui porque o `tenantId` já vem
+  // verificado antes de chegar nesta função, nunca de input do cliente.
+  const db = getPlatformDb();
   const { error } = await db.from('tenants').update({ backup_sheet_id: sheetId, backup_sheet_url: url }).eq('id', tenantId);
   if (error) throw error;
 }

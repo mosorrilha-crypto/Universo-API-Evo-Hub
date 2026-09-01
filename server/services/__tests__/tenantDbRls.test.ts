@@ -5,6 +5,8 @@ import type { ServerConfig } from '../../config';
 import { createTenantRuntimeAccessToken } from '../../supabaseClient';
 import { getDb, getPlatformDb, initDb } from '../db';
 import { disableTenantDbContextForTests, runWithTenantDbContext } from '../tenantDbContext';
+import { createFakeSupabase } from './fakeSupabase';
+import { setTenantBusinessHours } from '../tenantProfileStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const ACTOR_A = '22222222-2222-2222-2222-222222222222';
@@ -85,6 +87,33 @@ describe('camada de dados com RLS efetivo', () => {
       await Promise.resolve();
       expect(getDb()).not.toBe(platformClient);
     });
+  });
+
+  it('TASK-0187 (parte 2): setTenantBusinessHours persiste de verdade mesmo sem contexto de tenant do AsyncLocalStorage (getPlatformDb, nunca getDb)', async () => {
+    // Achado real relatado ao vivo (01/09/2026): salvar horário de
+    // atendimento nunca dava erro (a rota GET/POST /api/business-hours é
+    // autenticada normalmente), mas nunca persistia — ao reabrir, voltava
+    // vazio. Causa confirmada via `pg_policies` real: a tabela `tenants` só
+    // tem policy de SELECT pro papel `authenticated`, nenhuma de UPDATE.
+    // setTenantBusinessHours usava getDb() (cliente tenant-scoped sob RLS)
+    // — o UPDATE nunca dava erro, mas afetava zero linhas silenciosamente
+    // (comportamento padrão do Postgres/PostgREST sem policy que autorize).
+    // Fix: getPlatformDb(), que nem verifica TenantDbContext — este teste
+    // prova isso rodando SEM nenhum runWithTenantDbContext ativo (cenário
+    // que reproduziria o "sem contexto de tenant" se ainda usasse getDb()).
+    const fakeSupabase = createFakeSupabase({ tenants: [{ id: TENANT_A, name: 'Studio X' }] });
+    initDb(fakeSupabase, config);
+    disableTenantDbContextForTests();
+
+    await expect(setTenantBusinessHours(TENANT_A, { '1': { open: '09:00', close: '18:00' } })).resolves.not.toThrow();
+
+    // Confere a persistência direto pelo mesmo cliente de plataforma usado
+    // por getPlatformDb() (getDb(), sob rlsEnforced, criaria um client real
+    // apontando pra https://example.supabase.co — fora do alcance deste
+    // teste unitário; ver getTenantBusinessHours coberto separadamente sem
+    // RLS em outros testes do projeto).
+    const { data } = await getPlatformDb().from('tenants').select('business_hours').eq('id', TENANT_A).maybeSingle();
+    expect(data?.business_hours).toEqual({ '1': { open: '09:00', close: '18:00' } });
   });
 
   it('assina claims curtos que restringem o PostgREST ao tenant e ao papel authenticated', () => {

@@ -51,7 +51,7 @@ import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore'
 import { listOperationEvents } from '../services/operationEventStore';
 import { archiveSystemIncident, listSystemIncidents, resolveSystemIncident, restoreSystemIncident, reviewSystemIncident } from '../services/systemIncidentStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
-import { getDb } from '../services/db';
+import { getDb, getPlatformDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { generateCorrectedReplySuggestion } from '../services/replySafetyGate';
 import { getContactAgentMemory, OperatorContactMemoryValidationError, updateContactAgentMemoryByOperator } from '../services/contactAgentMemoryStore';
@@ -1694,7 +1694,15 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // slug → religar como um jeito de burlar a trava acima.
     if (enabled) patch.public_catalog_slug_locked = true;
 
-    const { error } = await getDb()
+    // TASK-0187 (parte 2) — achado durante a investigação do bug de horários
+    // de atendimento (relatado ao vivo, 01/09/2026): a tabela `tenants` só
+    // tem policy RLS de SELECT pro papel `authenticated` (confirmado via
+    // pg_policies), nenhuma de UPDATE — getDb() (cliente tenant-scoped)
+    // nunca dava erro aqui, mas RLS filtrava pra zero linhas afetadas
+    // silenciosamente, então salvar o Catálogo Público (endereço, contato,
+    // mensagens do WhatsApp) nunca persistia de verdade. getPlatformDb() é
+    // seguro aqui porque `tenantOf(req)` já vem do JWT autenticado.
+    const { error } = await getPlatformDb()
       .from('tenants')
       .update(patch)
       .eq('id', tenantOf(req));
