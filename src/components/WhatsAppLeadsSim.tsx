@@ -328,6 +328,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // server/services/conversationLabelStore.ts.
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [tenantLabelSuggestions, setTenantLabelSuggestions] = useState<string[]>([]);
+  // TASK-0190 — achado real (01/09/2026): BEAUTY_STUDIO_LABEL_SUGGESTIONS é
+  // texto fixo no código (não vem do catálogo do tenant), então excluir uma
+  // dessas sugestões pelo X só apagava (sem efeito nenhum, já que nunca
+  // existia linha correspondente em conversation_labels) e a sugestão
+  // reaparecia imediatamente no próximo render — "as etiquetas não apagam no
+  // x". Guardado por navegador+tenant (não é dado real de negócio, só
+  // preferência de UI) pra filtrar essas sugestões já dispensadas.
+  const dismissedDefaultSuggestionsKey = (tenantId: string) => `saas_dismissed_label_suggestions_${tenantId}`;
+  const [dismissedDefaultSuggestions, setDismissedDefaultSuggestions] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(dismissedDefaultSuggestionsKey(activeTenant.id));
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
   const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
   // Tela "{isSpanish ? 'Gestionar etiquetas' : 'Gerenciar etiquetas'}" (pedido real, 20/08/2026) — renomear/apagar
@@ -611,11 +627,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // agendamento pra consultar disponibilidade e criar/reagendar/cancelar
   // consultas).
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
+  // TASK-0185 — link da planilha de backup no Google Sheets, exibido no
+  // painel de Agenda junto do botão de desconectar (só existe depois da
+  // primeira sincronização de um lead deste tenant).
+  const [backupSheetUrl, setBackupSheetUrl] = useState<string | undefined>(undefined);
 
   const fetchGoogleCalendarStatus = () => {
     apiFetch('/api/google-calendar/status')
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setGoogleCalendarConnected(!!data?.connected))
+      .then((data) => { setGoogleCalendarConnected(!!data?.connected); setBackupSheetUrl(data?.backupSheetUrl); })
       .catch(() => setGoogleCalendarConnected(false));
   };
 
@@ -1470,6 +1490,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     refreshLabelSuggestions();
   }, []);
 
+  // TASK-0190 — recarrega a lista de sugestões-padrão já dispensadas ao
+  // trocar de tenant (saas_admin usa o seletor de tenant no Header), senão
+  // ficaria comparando o Set carregado no mount contra o tenant errado.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(dismissedDefaultSuggestionsKey(activeTenant.id));
+      setDismissedDefaultSuggestions(saved ? new Set(JSON.parse(saved)) : new Set());
+    } catch {
+      setDismissedDefaultSuggestions(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
   const openLabelManager = async () => {
     setIsLabelManagerOpen(true);
     setIsLoadingLabelCatalog(true);
@@ -1536,6 +1569,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }));
     setLabelCatalog((prev) => prev.filter((entry) => normalizeLabelText(entry.label) !== key));
     refreshLabelSuggestions();
+
+    // TASK-0190 — se a etiqueta excluída é uma das sugestões-padrão fixas no
+    // código (BEAUTY_STUDIO_LABEL_SUGGESTIONS), o DELETE acima não apaga
+    // nada de verdade (nunca existiu como conversation_labels — é só texto
+    // fixo) e ela reapareceria imediatamente sem isto. Guarda a dispensa por
+    // navegador+tenant pra filtrar essas sugestões na renderização.
+    setDismissedDefaultSuggestions((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      try {
+        localStorage.setItem(dismissedDefaultSuggestionsKey(activeTenant.id), JSON.stringify(Array.from(next)));
+      } catch {
+        // localStorage indisponível (modo privado, quota) — a dispensa só não sobrevive a um refresh
+      }
+      return next;
+    });
   };
 
   const normalizeLabelText = (label: string) =>
@@ -3809,7 +3858,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 {(() => {
                   const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
                   const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
-                    .filter((l) => !alreadyOn.has(normalizeLabelText(l)));
+                    .filter((l) => !alreadyOn.has(normalizeLabelText(l)) && !dismissedDefaultSuggestions.has(normalizeLabelText(l)));
                   return suggestions.map((l) => (
                     <span
                       key={l}
@@ -5085,6 +5134,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onEditPayment={handleEditEventPayment}
         googleCalendarConnected={googleCalendarConnected}
         onDisconnectCalendar={handleDisconnectGoogleCalendar}
+        backupSheetUrl={backupSheetUrl}
       />
     </div>
   );

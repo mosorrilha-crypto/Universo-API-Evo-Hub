@@ -60,6 +60,8 @@ export interface StoredConversation {
   manuallyUnread?: boolean;
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver attachAdReferralIfMissing) — undefined se a conversa não veio de um anúncio. */
   adHeadline?: string;
+  /** TASK-0185 (parte 2) — serviço/produto do catálogo que a cliente demonstrou interesse mais recentemente, captado pelo especialista a cada turno (autoReply.ts, campo "servicoInteresse"). Sempre sobrescrito com o valor mais recente (diferente de `name`, fixo uma vez sabido) — usado como coluna "Interesse" no backup em Google Sheets quando não há adHeadline de anúncio real. */
+  interest?: string;
   /** Conversa identificada como vinda de anúncio — automaticamente (ctwa_clid real ou texto batendo com um gatilho configurado, ver markAdGreetingMatched) ou manualmente pelo operador (ver updateConversationState, campo adLead). Só importa no modo "Só Anúncios" (agentStatus.isAdsOnlyMode): libera a resposta automática pra essa conversa mesmo sem referral real. */
   adGreetingMatchedAt?: string;
   /** IA para de responder automaticamente só pra esse número — ligado manualmente pelo operador (lead não qualificado/insistente) OU automaticamente pelo próprio autoReply.ts (alucinação de agenda sem ferramenta pra sustentar, ver stopAutoReply em autoReply.ts). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
@@ -94,6 +96,7 @@ type ConversationRow = {
   muted: boolean | null;
   manually_unread: boolean | null;
   ad_headline: string | null;
+  interest: string | null;
   ai_blocked_at: string | null;
   operator_ai_release_at: string | null;
   ad_greeting_matched_at: string | null;
@@ -144,6 +147,7 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     muted: !!row.muted,
     manuallyUnread: !!row.manually_unread,
     adHeadline: row.ad_headline || undefined,
+    interest: row.interest || undefined,
     aiBlockedAt: row.ai_blocked_at || undefined,
     operatorAiReleaseAt: row.operator_ai_release_at || undefined,
     adGreetingMatchedAt: row.ad_greeting_matched_at || undefined,
@@ -372,6 +376,18 @@ export async function setConversationNameIfMissing(tenantId: string, phone: stri
   if (existing?.name) return;
   await db.from('conversations').update({ name }).eq('id', conv.id);
   emitConversationUpdated(tenantId, phone);
+}
+
+/**
+ * TASK-0185 (parte 2) — diferente de setConversationNameIfMissing acima,
+ * SEMPRE sobrescreve com o valor mais recente: uma cliente pode mudar de
+ * ideia sobre qual serviço quer no meio da conversa, e a planilha de backup
+ * deve refletir o interesse atual, não o primeiro que apareceu.
+ */
+export async function updateConversationInterest(tenantId: string, phone: string, interest: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  await db.from('conversations').update({ interest }).eq('id', conv.id);
 }
 
 /**

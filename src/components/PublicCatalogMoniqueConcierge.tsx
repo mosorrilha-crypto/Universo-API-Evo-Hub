@@ -223,19 +223,6 @@ function optionsForCategory(catalog: PublicCatalogResponse | null, category: str
   return options.sort((a, b) => Number(b.isMicro) - Number(a.isMicro));
 }
 
-/**
- * Achado da revisão de conversão (27/08/2026): a lista completa de serviços
- * competia demais com a oferta do Combo Full Face, sem nenhum atalho pra
- * quem já sabe o que quer. Estes 3 caminhos ficam entre o "Resultados" e o
- * catálogo completo — reduzem a paralisia de escolha oferecendo um contato
- * direto no WhatsApp pra quem não precisa da evaluación completa.
- */
-const startingPoints = [
-  { title: 'Resultado natural', text: 'Quiero verme arreglada sin que se note que hice algo.', recommendation: 'Lash Lift o Diseño con Hilo', message: 'Hola Monique, quiero un resultado natural, sin que se note que hice algo. ¿Qué me recomendás?' },
-  { title: 'Rutina más práctica', text: 'Quiero ahorrar tiempo frente al espejo todos los días.', recommendation: 'Lash Lift, Browlamination o Combo', message: 'Hola Monique, quiero simplificar mi rutina diaria. ¿Qué me recomendás para ahorrar tiempo?' },
-  { title: 'Transformación completa', text: 'Quiero renovar cejas, labios y pestañas en una sola sesión.', recommendation: 'Combo Full Face', message: 'Hola Monique, me interesa el Combo Full Face para renovar cejas, labios y pestañas. ¿Me contás más?' },
-];
-
 interface CatalogCategoryGroup {
   category: string;
   products: CatalogProduct[];
@@ -449,13 +436,6 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .result-card:hover img { transform: scale(1.04); }
         .concierge-scope .result-card span { position: absolute; bottom: .7rem; left: .7rem; border-radius: .35rem; background: rgba(23,32,43,.82); padding: .4rem .55rem; color: #fff; font-size: .58rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .concierge-scope .catalog-section { background: #fff; }
-        .concierge-scope .starting-points { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2.2rem; }
-        .concierge-scope .starting-point { display: flex; flex-direction: column; gap: .3rem; border: 1px solid #dce3ec; border-radius: .75rem; background: #f7f8fa; padding: 1.1rem; transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
-        .concierge-scope .starting-point:hover { border-color: #9eb0df; transform: translateY(-2px); box-shadow: 0 .5rem 1rem rgba(49,87,213,.08); }
-        .concierge-scope .starting-point b { color: #263345; font-size: .82rem; }
-        .concierge-scope .starting-point span { color: #718093; font-size: .72rem; line-height: 1.4; }
-        .concierge-scope .starting-point-service { display: block; margin-top: .5rem; color: #3157d5; font-size: .68rem; font-weight: 800; font-style: normal; }
-        .concierge-scope .starting-point small { display: inline-flex; align-items: center; gap: .25rem; margin-top: .5rem; color: #3157d5; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
         .concierge-scope .catalog-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2rem; }
         .concierge-scope .catalog-accordion { display: flex; flex-direction: column; gap: .7rem; margin-top: 2rem; }
         .concierge-scope .catalog-category { overflow: hidden; border: 1px solid #e0e5ed; border-radius: .75rem; background: #f9fafc; }
@@ -510,9 +490,9 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .footer { background: #17202b; padding: 1.4rem 0; color: #c7d0dd; font-size: .6rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
         .concierge-scope .footer a:hover { color: #fff; }
         @media (min-width: 640px) { .concierge-scope .option-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-        @media (max-width: 767px) { .concierge-scope .section-heading { align-items: start; flex-direction: column; } .concierge-scope .results-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .concierge-scope .result-card.featured { grid-column: span 2; grid-row: auto; min-height: 22rem; } .concierge-scope .catalog-grid { grid-template-columns: 1fr; } .concierge-scope .starting-points { grid-template-columns: 1fr; } .concierge-scope .hero { padding-top: 2.5rem; } .concierge-scope .hero-note { left: .65rem; }
+        @media (max-width: 767px) { .concierge-scope .section-heading { align-items: start; flex-direction: column; } .concierge-scope .results-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .concierge-scope .result-card.featured { grid-column: span 2; grid-row: auto; min-height: 22rem; } .concierge-scope .catalog-grid { grid-template-columns: 1fr; } .concierge-scope .hero { padding-top: 2.5rem; } .concierge-scope .hero-note { left: .65rem; }
           /* Item P2 da revisão de conversão (27/08/2026): textos auxiliares pequenos demais no celular real. */
-          .concierge-scope .helper, .concierge-scope .option small, .concierge-scope .service-card p, .concierge-scope .service-variant-info small, .concierge-scope .starting-point span, .concierge-scope .field span { font-size: .82rem; line-height: 1.5; }
+          .concierge-scope .helper, .concierge-scope .option small, .concierge-scope .service-card p, .concierge-scope .service-variant-info small, .concierge-scope .field span { font-size: .82rem; line-height: 1.5; }
           .concierge-scope .service-meta, .concierge-scope .trust-row { font-size: .7rem; }
         }
 
@@ -573,12 +553,6 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .catalog-category { border-color: #d8c6aa; background: #fbf6ed; }
         .concierge-scope .catalog-category summary > span:first-child { color: #24190f; }
         .concierge-scope .catalog-category-count { color: #846d4d; }
-        .concierge-scope .starting-point { border-color: #d8c6aa; background: #fbf6ed; }
-        .concierge-scope .starting-point:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
-        .concierge-scope .starting-point b { color: #24190f; }
-        .concierge-scope .starting-point span { color: #75624c; }
-        .concierge-scope .starting-point-service { color: #9b6417; }
-        .concierge-scope .starting-point small { color: #9b6417; }
         .concierge-scope .service-card { border-color: #d8c6aa; background: #fbf6ed; overflow: hidden; }
         .concierge-scope .service-card:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
         .concierge-scope .service-card-image { display: block; width: calc(100% + 2.3rem); aspect-ratio: 4 / 3; margin: -1.15rem -1.15rem 1rem; object-fit: cover; }
@@ -663,7 +637,7 @@ export function PublicCatalogMoniqueConcierge() {
             </div>
           </div>
           <div className="hero-visual">
-            <div className="hero-image-wrap"><img src="/monique-novo/full-face.jpg" alt="Resultado real de belleza natural" /></div>
+            <div className="hero-image-wrap"><img src="/monique-novo/hero-retrato.jpg" alt="Resultado real de belleza natural" /></div>
             <div className="hero-note"><b>01</b><span>Elegir bien también es parte del cuidado.</span></div>
           </div>
         </div>
@@ -817,16 +791,6 @@ export function PublicCatalogMoniqueConcierge() {
           <div className="section-heading">
             <div><span className="section-number">03</span><h2>Catálogo claro.<br /><span>Elegí con confianza.</span></h2></div>
             <p>Tocá una categoría para ver precios, duración y detalle de cada servicio.</p>
-          </div>
-          <div className="starting-points">
-            {startingPoints.map((point) => (
-              <a key={point.title} href={whatsappClickUrl(point.message, undefined, 'novo', utmSource)} target="_blank" rel="noreferrer" className="starting-point" onClick={trackWhatsAppContact}>
-                <b>{point.title}</b>
-                <span>{point.text}</span>
-                <em className="starting-point-service">Te recomendamos: {point.recommendation}</em>
-                <small>Consultar <ArrowRight size={12} /></small>
-              </a>
-            ))}
           </div>
           {!catalog && !productsError && (
             <div className="catalog-grid" aria-label="Cargando servicios y precios" aria-busy="true">
