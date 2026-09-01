@@ -3329,7 +3329,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </div>
           </div>
 
-          {/* WhatsApp Web Search Bar */}
+          {/* WhatsApp Web Search Bar — escala aumentada (pedido real,
+              01/09/2026, print comparando lado a lado com o WhatsApp
+              Business real): texto e altura ficavam bem menores que o
+              campo de busca do app real, mesma proporção do ajuste já
+              feito na caixa de digitação da conversa aberta (TASK-0164). */}
           <div className="p-2 bg-[#111b21] border-b border-slate-800/30">
             <div className="relative flex items-center min-w-0">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
@@ -3338,7 +3342,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 placeholder={t('searchConversation')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-7 py-1.5 bg-[#202c33] text-xs text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
               />
               {searchQuery && (
                 <button
@@ -3360,10 +3364,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 lidos" não dependem de análise nenhuma, continuam confiáveis.
                 "Esperando você" removido (pedido direto, 28/08/2026: "eu não
                 sei qual a finalidade dele"). */}
-            <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
+            <div className="flex items-center gap-2 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-xs">
               <button
                 onClick={() => setActiveTabFilter('all')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'all'
                     ? 'bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
@@ -3373,7 +3377,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
               <button
                 onClick={() => setActiveTabFilter('unread')}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer ${
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'unread'
                     ? 'bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
@@ -3482,7 +3486,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onClick={() => { setSearchQuery(''); setActiveTabFilter('all'); }}
               className="atendimento-bottom-nav__item is-active"
             >
-              <MessageCircle className="w-[18px] h-[18px]" />
+              <MessageCircle className="w-[22px] h-[22px]" />
               <span>Conversas</span>
             </button>
             <button
@@ -3491,7 +3495,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               disabled={!onGoToEscalations}
               className="atendimento-bottom-nav__item"
             >
-              <AlertTriangle className="w-[18px] h-[18px]" />
+              <AlertTriangle className="w-[22px] h-[22px]" />
               <span>Pendências</span>
               {escalationsPendingCount > 0 && (
                 <span className="atendimento-bottom-nav__badge">{escalationsPendingCount}</span>
@@ -3502,7 +3506,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
               className="atendimento-bottom-nav__item"
             >
-              <CalendarIcon className="w-[18px] h-[18px]" />
+              <CalendarIcon className="w-[22px] h-[22px]" />
               <span>Agenda</span>
             </button>
             <button
@@ -3510,7 +3514,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onClick={() => setIsToolbarSettingsOpen((v) => !v)}
               className={`atendimento-bottom-nav__item${isToolbarSettingsOpen ? ' is-active' : ''}`}
             >
-              <Settings className="w-[18px] h-[18px]" />
+              <Settings className="w-[22px] h-[22px]" />
               <span>Ferramentas</span>
             </button>
           </nav>
