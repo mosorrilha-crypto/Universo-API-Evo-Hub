@@ -1454,6 +1454,15 @@ export const App: React.FC = () => {
             }}
             onDeleteLead={handleDeleteLead}
             escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
+            // TASK-0187 (pedido direto, 01/09/2026): antes só o número
+            // agregado chegava aqui — o alerta de escalonamento específico
+            // de UMA conversa aberta só existia como um evento SSE
+            // transitório (aiReplyStatusByPhone, some sozinho em 9s, real
+            // incidente relatado: "não consigo perceber" quando o revisor
+            // trava a resposta ou vira escalonamento). Agora a lista real
+            // (persistida) desce inteira, pra WhatsAppLeadsSim conseguir
+            // achar e manter visível o escalonamento aberto do lead atual.
+            escalations={escalations}
             onGoToEscalations={() => handleSetActiveTab('escalations')}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
