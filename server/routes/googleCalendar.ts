@@ -29,7 +29,7 @@ import {
 } from '../services/financialStore';
 import { isFinancialModuleEnabledForCurrentTenant } from '../services/financialModuleAccess';
 import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleAccess';
-import { googleCalendarConnectRateLimiter } from '../middleware/rateLimit';
+import { googleCalendarConnectRateLimiter, googleOAuthCallbackRateLimiter } from '../middleware/rateLimit';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import type { RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -110,7 +110,7 @@ export function createGoogleCalendarRouter({ authenticateToken, isAgendaModuleEn
     res.json({ url });
   });
 
-  router.get('/api/google-calendar/oauth-callback', asyncHandler(async (req, res) => {
+  router.get('/api/google-calendar/oauth-callback', googleOAuthCallbackRateLimiter, asyncHandler(async (req, res) => {
     const code = req.query.code as string | undefined;
     const error = req.query.error as string | undefined;
 
