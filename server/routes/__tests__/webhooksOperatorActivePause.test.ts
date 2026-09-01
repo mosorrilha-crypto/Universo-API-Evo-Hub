@@ -115,6 +115,56 @@ describe('POST /webhook — IA cede a vez quando o operador respondeu manualment
     expect(generateAutoReplyForText).toHaveBeenCalledTimes(1);
   });
 
+  it('TASK-0181 (parte 2): gera resposta automática mesmo dentro dos 5min quando o operador pediu "devolver a IA agora" depois da própria última mensagem manual', async () => {
+    vi.useFakeTimers();
+    const phone = '5567999249354';
+
+    getConversation.mockResolvedValueOnce({
+      phone,
+      messages: [
+        { id: 'm-1', sender: 'lead', type: 'text', text: 'oi', timestamp: new Date(Date.now() - 60_000).toISOString() },
+        { id: 'm-2', sender: 'agent', sentBy: 'operator', type: 'text', text: 'kkkk vamos sin', timestamp: new Date(Date.now() - 30_000).toISOString() },
+      ],
+      operatorAiReleaseAt: new Date(Date.now() - 5_000).toISOString(),
+      updatedAt: 'x',
+      unreadCount: 0,
+    } as any);
+
+    await fetch(`${baseUrl}/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(metaTextPayload(phone, 'msg-4', 'Onde é?')),
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(generateAutoReplyForText).toHaveBeenCalledTimes(1);
+  });
+
+  it('TASK-0181 (parte 2): "devolver a IA agora" pedido ANTES da última mensagem manual não libera — uma nova mensagem do operador depois do release volta a pausar', async () => {
+    vi.useFakeTimers();
+    const phone = '5567999249355';
+
+    getConversation.mockResolvedValueOnce({
+      phone,
+      messages: [
+        { id: 'm-1', sender: 'lead', type: 'text', text: 'oi', timestamp: new Date(Date.now() - 60_000).toISOString() },
+        { id: 'm-2', sender: 'agent', sentBy: 'operator', type: 'text', text: 'kkkk vamos sin', timestamp: new Date(Date.now() - 20_000).toISOString() },
+      ],
+      operatorAiReleaseAt: new Date(Date.now() - 40_000).toISOString(),
+      updatedAt: 'x',
+      unreadCount: 0,
+    } as any);
+
+    await fetch(`${baseUrl}/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(metaTextPayload(phone, 'msg-5', 'Onde é?')),
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(generateAutoReplyForText).not.toHaveBeenCalled();
+  });
+
   it('gera resposta automática normalmente quando a última mensagem do agente foi da própria IA, não do operador', async () => {
     vi.useFakeTimers();
     const phone = '5567999249353';

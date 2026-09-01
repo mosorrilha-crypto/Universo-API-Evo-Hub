@@ -153,6 +153,36 @@ describe('revisor pré-envio de respostas automáticas', () => {
     expect(verdict.approved).toBe(true);
   });
 
+  it('informa ao revisor o nome já conhecido e instrui a não reprovar só por falta de confirmação verbal (TASK-0181: achado real de auditoria, 8 de 15 bloqueios em 10 dias citavam "nome não confirmado" mesmo usando o nome de perfil real)', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ approved: true, severity: 'low', reason: 'Nome de perfil usado corretamente.' }) });
+    const verdict = await reviewAutoReplyBeforeSend({
+      customerMessage: 'Cuánto cuesta el combo de cejas y labios?',
+      draftBubbles: ['Hola, Celeste. El Combo Micro Cejas + Labios está Gs 850.000.'],
+      contactName: 'Celeste',
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(verdict.approved).toBe(true);
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('NOME JÁ CONHECIDO: Celeste'),
+    }));
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('NUNCA reprove só porque a resposta ainda não perguntou ou confirmou verbalmente o nome'),
+    }));
+  });
+
+  it('sinaliza ao revisor quando não há nenhum nome conhecido, pra distinguir de um nome inventado', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ approved: false, severity: 'high', reason: 'Nome inventado, não bate com nenhum nome conhecido.' }) });
+    const verdict = await reviewAutoReplyBeforeSend({
+      customerMessage: '¡Hola! Quiero más información',
+      draftBubbles: ['¡Hola, Liz! ¿Cómo estás?'],
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(verdict.approved).toBe(false);
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('NOME JÁ CONHECIDO: [nenhum — perfil do WhatsApp sem nome configurado]'),
+    }));
+  });
+
   it('aceita a aprovação estruturada do segundo agente', async () => {
     const ai: any = {
       models: {

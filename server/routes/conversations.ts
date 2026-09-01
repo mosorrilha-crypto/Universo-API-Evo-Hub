@@ -51,7 +51,7 @@ import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore'
 import { listOperationEvents } from '../services/operationEventStore';
 import { archiveSystemIncident, listSystemIncidents, resolveSystemIncident, restoreSystemIncident, reviewSystemIncident } from '../services/systemIncidentStore';
 import { sendOperatorGuidedFollowUp, getCustomerServiceWindowStatus } from '../services/operatorFollowUpService';
-import { getDb } from '../services/db';
+import { getDb, getPlatformDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { generateCorrectedReplySuggestion } from '../services/replySafetyGate';
 import { getContactAgentMemory, OperatorContactMemoryValidationError, updateContactAgentMemoryByOperator } from '../services/contactAgentMemoryStore';
@@ -63,6 +63,7 @@ import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
+import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
@@ -958,21 +959,25 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // automática). Uma rota só pra tudo, em vez de vários endpoints quase
   // idênticos — cada campo do body é opcional, só atualiza o que veio.
   router.patch('/api/conversations/:phone/state', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { archived, pinned, muted, unread, name, aiBlocked, adLead } = req.body || {};
-    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true } = {};
+    const { archived, pinned, muted, unread, name, aiBlocked, adLead, releaseAiNow } = req.body || {};
+    const patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true; releaseAiNow?: true } = {};
     if (typeof archived === 'boolean') patch.archived = archived;
     if (typeof pinned === 'boolean') patch.pinned = pinned;
     if (typeof muted === 'boolean') patch.muted = muted;
     if (typeof unread === 'boolean') patch.unread = unread;
     if (typeof aiBlocked === 'boolean') patch.aiBlocked = aiBlocked;
     if (adLead === true) patch.adLead = true;
+    // TASK-0181 (parte 2): botão "Devolver a IA agora" no menu ⋮ da conversa
+    // — libera o gate "operador ativo" de webhooks.ts sem precisar esperar
+    // os 5min de silêncio (ver conversationStore.ConversationStatePatch.releaseAiNow).
+    if (releaseAiNow === true) patch.releaseAiNow = true;
     if (typeof name === 'string') {
       const trimmed = name.trim();
       if (!trimmed) return res.status(400).json({ error: 'Campo "name" não pode ser vazio.' });
       patch.name = trimmed;
     }
     if (Object.keys(patch).length === 0) {
-      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread, name, aiBlocked ou adLead.' });
+      return res.status(400).json({ error: 'Informe ao menos um campo: archived, pinned, muted, unread, name, aiBlocked, adLead ou releaseAiNow.' });
     }
     const conv = await updateConversationState(tenantOf(req), req.params.phone, patch);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
@@ -1179,6 +1184,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // isto é sempre um ciclo de pagamento novo (nunca deve herdar payment_status
     // de um agendamento antigo, existente ou não), mesmo raciocínio do PR #203.
     await setAppointmentForPhone(tenantId, phone, { eventId, summary: serviceName.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: true });
+
+    // TASK-0185 — backup em Google Sheets: agendamento fechado fora do fluxo
+    // de WhatsApp (manual, no painel) também precisa refletir "Agendou?"
+    // sem esperar a cliente mandar uma mensagem nova.
+    const conversationForSheet = await getConversation(tenantId, phone).catch(() => undefined);
+    queueLeadSheetSync(tenantId, calendarConfig, {
+      phone,
+      name: conversationForSheet?.name,
+      firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
+      interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
+      scheduled: true,
+    });
 
     // A central cria uma cobrança pendente já no agendamento confirmado. A
     // referência apt:<eventId> é a mesma usada na aprovação do comprovante,
@@ -1677,7 +1694,15 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // slug → religar como um jeito de burlar a trava acima.
     if (enabled) patch.public_catalog_slug_locked = true;
 
-    const { error } = await getDb()
+    // TASK-0187 (parte 2) — achado durante a investigação do bug de horários
+    // de atendimento (relatado ao vivo, 01/09/2026): a tabela `tenants` só
+    // tem policy RLS de SELECT pro papel `authenticated` (confirmado via
+    // pg_policies), nenhuma de UPDATE — getDb() (cliente tenant-scoped)
+    // nunca dava erro aqui, mas RLS filtrava pra zero linhas afetadas
+    // silenciosamente, então salvar o Catálogo Público (endereço, contato,
+    // mensagens do WhatsApp) nunca persistia de verdade. getPlatformDb() é
+    // seguro aqui porque `tenantOf(req)` já vem do JWT autenticado.
+    const { error } = await getPlatformDb()
       .from('tenants')
       .update(patch)
       .eq('id', tenantOf(req));

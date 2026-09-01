@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
@@ -27,6 +27,7 @@ import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnaly
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
+import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { runWithTenantDbContext } from '../services/tenantDbContext';
 import { logStructured } from '../services/structuredLog';
@@ -137,11 +138,26 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
       // carregado, sem tabela nova: sentBy='operator' só existe pra
       // mensagens digitadas de verdade no painel (nunca resposta da IA nem
       // disparo de campanha, ver StoredMessage.sentBy).
+      // TASK-0181 (parte 2) — achado real do dono do produto (01/09/2026):
+      // numa troca rápida em que o operador responde manualmente várias
+      // vezes seguidas, cada resposta dele RENOVA os 5min acima — a IA nunca
+      // recupera a vez sozinha, e não havia nenhum jeito de liberar isso na
+      // hora (só esperar o contato ficar quieto por 5min inteiros). Se o
+      // operador pediu explicitamente "devolver a IA agora" (menu ⋮ da
+      // conversa) DEPOIS da própria última mensagem manual dele, a pausa é
+      // ignorada nesta rodada — uma nova mensagem manual dele depois disso
+      // volta a pausar normalmente (o release não desativa o gate pra sempre).
       const OPERATOR_ACTIVE_PAUSE_MS = 5 * 60 * 1000;
       const lastOperatorMessage = [...(conversation?.messages || [])]
         .reverse()
         .find((m) => m.sender === 'agent' && m.sentBy === 'operator');
-      if (lastOperatorMessage && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS) {
+      const releasedAfterLastOperatorMessage = conversation?.operatorAiReleaseAt
+        && (!lastOperatorMessage || new Date(conversation.operatorAiReleaseAt).getTime() >= new Date(lastOperatorMessage.timestamp).getTime());
+      if (
+        lastOperatorMessage
+        && Date.now() - new Date(lastOperatorMessage.timestamp).getTime() < OPERATOR_ACTIVE_PAUSE_MS
+        && !releasedAfterLastOperatorMessage
+      ) {
         return;
       }
       // Modo "somente anúncios" (pedido real, 14/08/2026): quando o
@@ -293,6 +309,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           isBookingFlow: result.agent === 'agendamento',
           needsHumanConfirmation: result.needsHumanConfirmation,
           plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
+          contactName,
         }, { ai: getAi!(), groqApiKey });
         if (!safety.approved) {
           const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
@@ -374,6 +391,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.capturedClientName) {
           await setConversationNameIfMissing(tenantId, phone, result.capturedClientName);
         }
+        // TASK-0185 (parte 2) — serviço de interesse real, classificado pelo
+        // especialista a partir do que a cliente disse (nunca inventado);
+        // sempre sobrescreve com o mais recente, ver updateConversationInterest.
+        if (result.interestedService) {
+          await updateConversationInterest(tenantId, phone, result.interestedService);
+        }
         // Acompanhamento de funil (pedido real, 15/08/2026 — auditoria de
         // conversas reais mostrou lead esfriando sem ninguém perceber, ver
         // server/services/pendingFollowUpJob.ts). "owner_review" vence no
@@ -387,6 +410,21 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.awaitingCustomerChoice) {
           await markPendingFollowUp(tenantId, phone, contactName, 'customer_reply', result.awaitingCustomerChoice, new Date(Date.now() + CUSTOMER_REPLY_FOLLOWUP_MS).toISOString());
         }
+        // TASK-0185 — backup em Google Sheets (fire-and-forget, nunca atrasa
+        // nem derruba o envio real acima). "Agendou?" consulta o agendamento
+        // ativo de verdade (appointmentStore), nunca assume a partir da
+        // resposta da IA; "Interesse" prioriza o serviço real captado nesta
+        // rodada (result.interestedService), cai pro último já sabido
+        // (conversation.interest) e só por último pro anúncio que originou o
+        // lead (adHeadline) — nunca um dado inventado.
+        const appointmentForSheet = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
+        queueLeadSheetSync(tenantId, calendarConfig, {
+          phone,
+          name: contactName,
+          firstContactIso: conversation?.messages?.[0]?.timestamp || new Date().toISOString(),
+          interest: result.interestedService || conversation?.interest || conversation?.adHeadline,
+          scheduled: !!appointmentForSheet,
+        });
         emitAiReplyStatus(tenantId, phone, 'sent');
       } catch (err: any) {
         emitAiReplyStatus(tenantId, phone, 'delivery_failed');

@@ -60,10 +60,14 @@ export interface StoredConversation {
   manuallyUnread?: boolean;
   /** Título do anúncio "Clique para WhatsApp" que originou a conversa (ver attachAdReferralIfMissing) — undefined se a conversa não veio de um anúncio. */
   adHeadline?: string;
+  /** TASK-0185 (parte 2) — serviço/produto do catálogo que a cliente demonstrou interesse mais recentemente, captado pelo especialista a cada turno (autoReply.ts, campo "servicoInteresse"). Sempre sobrescrito com o valor mais recente (diferente de `name`, fixo uma vez sabido) — usado como coluna "Interesse" no backup em Google Sheets quando não há adHeadline de anúncio real. */
+  interest?: string;
   /** Conversa identificada como vinda de anúncio — automaticamente (ctwa_clid real ou texto batendo com um gatilho configurado, ver markAdGreetingMatched) ou manualmente pelo operador (ver updateConversationState, campo adLead). Só importa no modo "Só Anúncios" (agentStatus.isAdsOnlyMode): libera a resposta automática pra essa conversa mesmo sem referral real. */
   adGreetingMatchedAt?: string;
   /** IA para de responder automaticamente só pra esse número — ligado manualmente pelo operador (lead não qualificado/insistente) OU automaticamente pelo próprio autoReply.ts (alucinação de agenda sem ferramenta pra sustentar, ver stopAutoReply em autoReply.ts). O resto do atendimento automático do tenant continua normal, diferente de agent_status (pausa geral). */
   aiBlockedAt?: string;
+  /** Quando o operador pediu explicitamente pra devolver o controle pra IA agora (ver ConversationStatePatch.releaseAiNow) — usado só pelo gate "operador ativo" de webhooks.ts, nunca exibido como estado persistente no painel. */
+  operatorAiReleaseAt?: string;
   /** Quantidade de mensagens do lead recebidas depois da última vez que o operador abriu esta conversa (ver markConversationRead). Não confundir com manuallyUnread (override manual do operador) — o painel trata a conversa como não lida quando qualquer um dos dois é verdadeiro. */
   unreadCount: number;
   /** Só na resposta resumida da lista: identifica mudança sem transportar todo o histórico. */
@@ -92,7 +96,9 @@ type ConversationRow = {
   muted: boolean | null;
   manually_unread: boolean | null;
   ad_headline: string | null;
+  interest: string | null;
   ai_blocked_at: string | null;
+  operator_ai_release_at: string | null;
   ad_greeting_matched_at: string | null;
   last_read_at: string;
   /** Qual número do tenant esta conversa usa (principal, ou um broadcast_numbers) — ver getOrCreateConversationForBroadcast/resolveCredentialsForConversation. */
@@ -141,7 +147,9 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
     muted: !!row.muted,
     manuallyUnread: !!row.manually_unread,
     adHeadline: row.ad_headline || undefined,
+    interest: row.interest || undefined,
     aiBlockedAt: row.ai_blocked_at || undefined,
+    operatorAiReleaseAt: row.operator_ai_release_at || undefined,
     adGreetingMatchedAt: row.ad_greeting_matched_at || undefined,
     phoneNumberId: row.phone_number_id ?? null,
     unreadCount: countUnreadMessages(row.messages || [], row.last_read_at),
@@ -368,6 +376,18 @@ export async function setConversationNameIfMissing(tenantId: string, phone: stri
   if (existing?.name) return;
   await db.from('conversations').update({ name }).eq('id', conv.id);
   emitConversationUpdated(tenantId, phone);
+}
+
+/**
+ * TASK-0185 (parte 2) — diferente de setConversationNameIfMissing acima,
+ * SEMPRE sobrescreve com o valor mais recente: uma cliente pode mudar de
+ * ideia sobre qual serviço quer no meio da conversa, e a planilha de backup
+ * deve refletir o interesse atual, não o primeiro que apareceu.
+ */
+export async function updateConversationInterest(tenantId: string, phone: string, interest: string): Promise<void> {
+  const db = getDb();
+  const conv = await getOrCreateConversationRow(tenantId, phone);
+  await db.from('conversations').update({ interest }).eq('id', conv.id);
 }
 
 /**
@@ -702,6 +722,20 @@ export interface ConversationStatePatch {
   aiBlocked?: boolean;
   /** Pedido real (20/08/2026): no modo "Só Anúncios", um lead real de anúncio às vezes chega sem ctwa_clid e sem bater em nenhum gatilho de texto configurado — a IA fica calada e o operador precisa assumir manualmente (ex: Olga Ayala, conversa iniciada por "Buenas precio??" sem referral nenhum). Deixa o operador sinalizar manualmente "esse lead é de anúncio, pode liberar a IA" sem precisar configurar um gatilho novo — mesmo efeito de markAdGreetingMatched, só que via ação humana em vez do texto batendo automaticamente. Sempre true (não existe "desmarcar" — mesma semântica idempotente/nunca-sobrescreve do resto do fluxo de ad referral). */
   adLead?: true;
+  /**
+   * TASK-0181 (parte 2) — pedido real do operador (01/09/2026): o gate
+   * "operador ativo = IA cede a vez" (webhooks.ts, TASK-0177) pausa a IA por
+   * 5min a partir da ÚLTIMA mensagem manual do operador nesta conversa —
+   * numa troca rápida com o cliente, cada resposta manual renova os 5min e a
+   * IA nunca recupera a vez sozinha, sem nenhum jeito de liberar na hora.
+   * Sempre true (idempotente, sem "desmarcar" — mesmo padrão de adLead
+   * acima): registra em operator_ai_release_at que o operador pediu
+   * explicitamente pra devolver o controle agora. O gate ignora a pausa
+   * automática quando esse timestamp for mais recente que a última mensagem
+   * manual do operador; uma nova mensagem manual dele depois disso volta a
+   * pausar normalmente (o "release" não desativa o gate pra sempre).
+   */
+  releaseAiNow?: true;
 }
 
 /**
@@ -725,6 +759,7 @@ export async function updateConversationState(tenantId: string, phone: string, p
   if (patch.unread !== undefined) update.manually_unread = patch.unread;
   if (patch.name !== undefined) update.name = patch.name;
   if (patch.aiBlocked !== undefined) update.ai_blocked_at = patch.aiBlocked ? new Date().toISOString() : null;
+  if (patch.releaseAiNow) update.operator_ai_release_at = new Date().toISOString();
   if (patch.adLead) await markAdGreetingMatched(tenantId, phone);
 
   if (Object.keys(update).length > 0) {

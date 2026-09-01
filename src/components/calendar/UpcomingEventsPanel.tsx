@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LeadInfo } from '../../types';
-import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2, DollarSign, Unlink } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2, DollarSign, Unlink, ExternalLink } from 'lucide-react';
 
 const PAYMENT_METHODS = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'] as const;
 
@@ -169,6 +169,8 @@ interface UpcomingEventsPanelProps {
    * "conectar/ver agenda" no WhatsAppLeadsSim). */
   googleCalendarConnected: boolean | null;
   onDisconnectCalendar: () => void;
+  /** TASK-0185 — link da planilha de backup no Google Sheets, só existe depois da primeira sincronização de um lead deste tenant. */
+  backupSheetUrl?: string;
 }
 
 /** "Hoje" / "Amanhã" / dia da semana curto + data — só pra exibição, não precisa da mesma precisão de fuso do backend (que já resolve tudo antes de mandar o horário). */
@@ -377,7 +379,7 @@ const EventRowControls: React.FC<{
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
   monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary, onReschedule, onDelete, onRegisterPayment, onEditPayment,
-  googleCalendarConnected, onDisconnectCalendar,
+  googleCalendarConnected, onDisconnectCalendar, backupSheetUrl,
 }) => {
   const [isPickingLead, setIsPickingLead] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -493,6 +495,17 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                 ficar dentro da agenda" — desconectar pra trocar de conta,
                 ação rara mas precisa estar em algum lugar do próprio painel
                 de calendário, não num menu de Ferramentas genérico à parte. */}
+            {googleCalendarConnected && backupSheetUrl && (
+              <a
+                href={backupSheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Abrir planilha de backup dos leads no Google Sheets"
+                className="p-1.5 text-slate-400 hover:text-emerald-300 rounded-lg cursor-pointer"
+              >
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            )}
             {googleCalendarConnected && (
               <button
                 onClick={onDisconnectCalendar}

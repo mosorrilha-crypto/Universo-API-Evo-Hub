@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
@@ -118,6 +118,16 @@ interface WhatsAppLeadsSimProps {
   onDeleteLead?: (leadId: string) => void;
   /** Contador de escalonamentos pendentes (não resolvidos) do tenant — pro atalho na caixa de ferramentas do operador, mesmo dado que já alimenta o badge da aba "Escalonamentos" no Header. */
   escalationsPendingCount?: number;
+  /** TASK-0187 (pedido direto, 01/09/2026): lista completa (não só o
+      contador) — usada pra achar e manter visível dentro da própria
+      conversa aberta um escalonamento real ainda não resolvido do lead
+      atual (revisor pré-envio bloqueou uma resposta, IA escalou pra
+      humano, etc.). O sinal que já existia (aiReplyStatusByPhone via SSE)
+      é transitório — some sozinho depois de 9s mesmo que ninguém tenha
+      visto, achado real relatado: "às vezes o revisor trava a conversa e eu
+      não consigo perceber". Este é persistente até o escalonamento ser
+      resolvido de verdade. */
+  escalations?: EscalationInfo[];
   /** Troca a aba ativa do app pra "Escalonamentos" — pedido real do operador: ter um atalho aqui, sem precisar navegar pela barra de abas do topo. */
   onGoToEscalations?: () => void;
   /** Telefone de um lead pra abrir a conversa dele automaticamente — usado pelo botão "Voltar pra conversa" no card de Escalonamento (App.tsx troca a aba pra "whatsapp" e passa o telefone aqui). */
@@ -216,6 +226,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onAddNewLead,
   onDeleteLead,
   escalationsPendingCount = 0,
+  escalations = [],
   onGoToEscalations,
   openLeadPhone,
   openLeadRequestId,
@@ -264,6 +275,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [contactContextPhone, setContactContextPhone] = useState<string | null>(null);
   const [contactContextTenantId, setContactContextTenantId] = useState<string | null>(null);
   const [isContactContextLoading, setIsContactContextLoading] = useState(false);
+  // TASK-0187 (pedido direto, 01/09/2026): "x pra fechar o contexto da
+  // conversa quando ele aparece". Guarda uma assinatura (telefone + horário
+  // da última atualização) em vez de só um booleano — fechar não vira um
+  // opt-out permanente: assim que a IA gerar uma memória/decisão NOVA pra
+  // esse lead (assinatura muda), a faixa volta a aparecer sozinha.
+  const [dismissedContextSignature, setDismissedContextSignature] = useState<string | null>(null);
   const contactContextRequestRef = useRef(0);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
@@ -311,6 +328,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // server/services/conversationLabelStore.ts.
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [tenantLabelSuggestions, setTenantLabelSuggestions] = useState<string[]>([]);
+  // TASK-0190 — achado real (01/09/2026): BEAUTY_STUDIO_LABEL_SUGGESTIONS é
+  // texto fixo no código (não vem do catálogo do tenant), então excluir uma
+  // dessas sugestões pelo X só apagava (sem efeito nenhum, já que nunca
+  // existia linha correspondente em conversation_labels) e a sugestão
+  // reaparecia imediatamente no próximo render — "as etiquetas não apagam no
+  // x". Guardado por navegador+tenant (não é dado real de negócio, só
+  // preferência de UI) pra filtrar essas sugestões já dispensadas.
+  const dismissedDefaultSuggestionsKey = (tenantId: string) => `saas_dismissed_label_suggestions_${tenantId}`;
+  const [dismissedDefaultSuggestions, setDismissedDefaultSuggestions] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(dismissedDefaultSuggestionsKey(activeTenant.id));
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
   const [isLabelPickerOpen, setIsLabelPickerOpen] = useState(false);
   const [newLabelInput, setNewLabelInput] = useState('');
   // Tela "{isSpanish ? 'Gestionar etiquetas' : 'Gerenciar etiquetas'}" (pedido real, 20/08/2026) — renomear/apagar
@@ -349,7 +382,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // violando a própria regra do checklist ("nunca deixar um ícone parecer
   // clicável sem função real por trás"). Agora abre um seletor de verdade.
   const [showComposerEmojiPicker, setShowComposerEmojiPicker] = useState(false);
+  // TASK-0184: anexo (arquivo real + foto/vídeo de exemplo) unificados num
+  // só menu por trás do clipe, em vez de 1-2 <select> soltos disputando
+  // espaço na linha de composição com o clipe de verdade (pedido direto do
+  // dono do produto, comparação lado a lado com o WhatsApp Business real).
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
+
+  // TASK-0184: caixa de texto dinâmica igual ao WhatsApp real — cresce com
+  // o texto (até um teto) em vez do <input> de altura fixa que só rolava o
+  // texto por dentro, dando a falsa impressão de pouco espaço pra digitar.
+  useEffect(() => {
+    const el = composerTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [inputMessage]);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
@@ -578,11 +627,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // agendamento pra consultar disponibilidade e criar/reagendar/cancelar
   // consultas).
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState<boolean | null>(null);
+  // TASK-0185 — link da planilha de backup no Google Sheets, exibido no
+  // painel de Agenda junto do botão de desconectar (só existe depois da
+  // primeira sincronização de um lead deste tenant).
+  const [backupSheetUrl, setBackupSheetUrl] = useState<string | undefined>(undefined);
 
   const fetchGoogleCalendarStatus = () => {
     apiFetch('/api/google-calendar/status')
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setGoogleCalendarConnected(!!data?.connected))
+      .then((data) => { setGoogleCalendarConnected(!!data?.connected); setBackupSheetUrl(data?.backupSheetUrl); })
       .catch(() => setGoogleCalendarConnected(false));
   };
 
@@ -1437,6 +1490,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     refreshLabelSuggestions();
   }, []);
 
+  // TASK-0190 — recarrega a lista de sugestões-padrão já dispensadas ao
+  // trocar de tenant (saas_admin usa o seletor de tenant no Header), senão
+  // ficaria comparando o Set carregado no mount contra o tenant errado.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(dismissedDefaultSuggestionsKey(activeTenant.id));
+      setDismissedDefaultSuggestions(saved ? new Set(JSON.parse(saved)) : new Set());
+    } catch {
+      setDismissedDefaultSuggestions(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenant.id]);
+
   const openLabelManager = async () => {
     setIsLabelManagerOpen(true);
     setIsLoadingLabelCatalog(true);
@@ -1503,6 +1569,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }));
     setLabelCatalog((prev) => prev.filter((entry) => normalizeLabelText(entry.label) !== key));
     refreshLabelSuggestions();
+
+    // TASK-0190 — se a etiqueta excluída é uma das sugestões-padrão fixas no
+    // código (BEAUTY_STUDIO_LABEL_SUGGESTIONS), o DELETE acima não apaga
+    // nada de verdade (nunca existiu como conversation_labels — é só texto
+    // fixo) e ela reapareceria imediatamente sem isto. Guarda a dispensa por
+    // navegador+tenant pra filtrar essas sugestões na renderização.
+    setDismissedDefaultSuggestions((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      try {
+        localStorage.setItem(dismissedDefaultSuggestionsKey(activeTenant.id), JSON.stringify(Array.from(next)));
+      } catch {
+        // localStorage indisponível (modo privado, quota) — a dispensa só não sobrevive a um refresh
+      }
+      return next;
+    });
   };
 
   const normalizeLabelText = (label: string) =>
@@ -2026,7 +2108,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
   // atualizam o estado local.
-  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true }): Promise<boolean> => {
+  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true; releaseAiNow?: true }): Promise<boolean> => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return false;
 
@@ -3443,7 +3525,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {selectedLead ? (
             <>
               {/* WhatsApp Web Chat Header */}
-              <div className="px-3 py-2.5 bg-[#202c33] border-b border-white/10 flex items-center justify-between gap-2 z-10 shadow-none">
+              {/* TASK-0184: agora que o padding vertical do .app-main some no
+                  mobile (ver index.css), com uma conversa aberta o <Header/>
+                  global fica escondido (var(--atendimento-header-h) = 0px) e
+                  este cabeçalho de conversa passa a ser o elemento mais alto
+                  da tela, colado na borda — mesmo risco real já documentado
+                  no Header.tsx (notch/Dynamic Island cobrindo o conteúdo em
+                  PWA fullscreen). paddingTop: env(safe-area-inset-top)
+                  resolve pra 0 fora desse contexto, sem efeito colateral. */}
+              {/* TASK-0185: sem border-b aqui — a fileira de etiquetas logo
+                  abaixo virou a mesma cor de fundo (ver comentário lá), então
+                  as duas fileiras agora formam um cabeçalho único, sem a
+                  emenda visível entre duas cores diferentes que existia
+                  antes ("unifica a cor do cabeçalho", pedido direto,
+                  01/09/2026). A borda que fechava esse cabeçalho desceu pro
+                  final da fileira de etiquetas. */}
+              <div className="px-3 py-2.5 bg-[#202c33] flex items-center justify-between gap-2 z-10 shadow-none" style={{ paddingTop: 'calc(0.625rem + env(safe-area-inset-top))' }}>
                 {/* min-w-0 é o que deixa esta metade encolher/truncar de
                     verdade — sem isso, um nome de lead comprido (achado ao
                     vivo: nome tipo e-mail sem espaço nenhum pra quebrar,
@@ -3459,7 +3556,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="lg:hidden flex-shrink-0 p-1.5 -ml-1.5 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Voltar pra lista de conversas"
                   >
-                    <ArrowLeft className="w-4 h-4" />
+                    {/* TASK-0187: 4->[18px], escala mais perto do WhatsApp
+                        real (mesmo tamanho já usado na barra inferior). */}
+                    <ArrowLeft className="w-[18px] h-[18px]" />
                   </button>
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-xs ring-1 ring-emerald-500/40 flex-shrink-0 ${avatarColorClasses(selectedLead.name || selectedLead.phone)}`}
@@ -3471,11 +3570,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       pro nome e pra fileira de etiquetas subir logo abaixo.
                       Continua visível no menu ⋮ (link "Abrir no WhatsApp") e
                       na lista de conversas pra quem precisar do número. */}
+                  {/* TASK-0185 (pedido direto, 01/09/2026, comparação lado a
+                      lado com o WhatsApp Business real): nome numa linha só
+                      igual ao real (antes text-xs comprimido junto com o
+                      status "online" na mesma linha) — escala mais perto do
+                      app de verdade, hierarquia mais clara. */}
                   <div className="min-w-0">
-                    <h3 className="text-xs font-bold text-[#e9edef] flex items-center gap-2">
-                      <span className="truncate">{selectedLead.name}</span>
-                      <span className="text-[10px] font-normal text-emerald-400 flex-shrink-0">• online</span>
-                    </h3>
+                    <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
+                    <span className="text-[11px] font-normal text-emerald-400">• online</span>
                   </div>
                 </div>
 
@@ -3512,7 +3614,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Cadastrar agendamento manual (combinado fora do WhatsApp)"
                     >
-                      <CalendarPlus className="w-4 h-4" />
+                      <CalendarPlus className="w-[18px] h-[18px]" />
                     </button>
                   )}
 
@@ -3524,7 +3626,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Gerar contrato"
                     >
-                      <FileText className="w-4 h-4" />
+                      <FileText className="w-[18px] h-[18px]" />
                     </button>
                   )}
 
@@ -3540,7 +3642,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="atendimento-analysis-trigger lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Ver Ficha IA"
                   >
-                    <IdCard className="w-4 h-4" />
+                    <IdCard className="w-[18px] h-[18px]" />
                   </button>
 
                   {/* Transferir pro WhatsApp pessoal do operador — abre um
@@ -3554,7 +3656,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     className="hidden lg:flex p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                     title="Transferir pro WhatsApp pessoal do operador"
                   >
-                    <Phone className="w-4 h-4" />
+                    <Phone className="w-[18px] h-[18px]" />
                   </button>
 
                   {/* Achado ao vivo: as ações da conversa (bloquear IA pra
@@ -3574,7 +3676,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title={t('moreOptions')}
                     >
-                      <MoreVertical className="w-4 h-4" />
+                      <MoreVertical className="w-[18px] h-[18px]" />
                     </button>
                     {isHeaderMenuOpen && (() => {
                       const isAiBlocked = !!(selectedLead as any).aiBlockedAt;
@@ -3624,6 +3726,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Ban className="w-3.5 h-3.5" />
                               <span>{isAiBlocked ? (isSpanish ? 'Reactivar IA para este lead' : 'Reativar IA para este lead') : (isSpanish ? 'Bloquear IA para este lead' : 'Bloquear IA para este lead')}</span>
                             </button>
+                            {!isAiBlocked && (
+                              <button
+                                onClick={() => { handleUpdateConversationState(selectedLead.id, { releaseAiNow: true }); setIsHeaderMenuOpen(false); }}
+                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora, sem esperar os 5min."
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span>{isSpanish ? 'Devolver la IA ahora' : 'Devolver a IA agora'}</span>
+                              </button>
+                            )}
                             {!isAdLead && (
                               <button
                                 onClick={async () => {
@@ -3709,13 +3821,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </div>
               </div>
 
-              {/* Etiquetas livres da conversa (tipo WhatsApp Business) */}
-              <div className="px-3 py-2 bg-[#0f191e] border-b border-slate-800/60 flex items-center gap-1.5 flex-wrap relative">
+              {/* Etiquetas livres da conversa (tipo WhatsApp Business).
+                  TASK-0185/0187 (pedido direto): mesma cor de fundo do
+                  cabeçalho acima (#202c33) e SEM nenhuma borda fechando o
+                  bloco — o WhatsApp real não deixa nenhuma linha visível
+                  entre o cabeçalho e o começo das mensagens, então tirada de
+                  vez (não só movida) pra bater com o real. Tema das
+                  etiquetas trocado de colorido (`labelColorClasses`, uma cor
+                  por etiqueta) pra um único tom neutro — "ficou muito
+                  carregado", pedido direto pra ficar mais minimalista. */}
+              <div className="px-3 pt-0 pb-1.5 bg-[#202c33] flex items-center gap-1.5 flex-wrap relative">
                 <Tag className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
                 {(selectedLead.conversationLabels || []).map((label) => (
                   <span
                     key={label}
-                    className={`text-[10px] px-2 py-0.5 rounded-full border flex items-center gap-1 ${labelColorClasses(label)}`}
+                    className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600 bg-slate-800/70 text-slate-200 flex items-center gap-1"
                   >
                     {label}
                     <button
@@ -3727,12 +3847,59 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   </span>
                 ))}
+
+                {/* TASK-0185/0187: sugestões direto na barra, contorno
+                    tracejado pra diferenciar das já aplicadas. Um toque
+                    aplica; o X exclui a sugestão do catálogo do tenant
+                    inteiro (mesma ação de "Gerenciar etiquetas", só que sem
+                    precisar abrir o modal) — pedido direto pra dar conta do
+                    "ficou muito carregado" na raiz, apagando as que não
+                    fazem mais sentido em vez de só escondê-las. */}
+                {(() => {
+                  const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
+                  const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
+                    .filter((l) => !alreadyOn.has(normalizeLabelText(l)) && !dismissedDefaultSuggestions.has(normalizeLabelText(l)));
+                  return suggestions.map((l) => (
+                    <span
+                      key={l}
+                      className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 flex items-center gap-1"
+                    >
+                      <button
+                        onClick={() => handleAddLabel(selectedLead.id, l)}
+                        className="hover:text-white cursor-pointer"
+                        title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
+                      >
+                        + {l}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(isSpanish
+                            ? `¿Eliminar la etiqueta "${l}" del catálogo de la empresa? Afecta a todas las conversaciones.`
+                            : `Excluir a etiqueta "${l}" do catálogo da empresa? Afeta todas as conversas.`)) return;
+                          try {
+                            await handleDeleteLabelCatalog(l);
+                          } catch (err: any) {
+                            setErrorMsg(err?.message || (isSpanish ? 'No fue posible eliminar la etiqueta.' : 'Não foi possível excluir a etiqueta.'));
+                          }
+                        }}
+                        className="hover:text-rose-300 cursor-pointer"
+                        title={isSpanish ? 'Eliminar del catálogo' : 'Excluir do catálogo'}
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  ));
+                })()}
+
+                {/* Só pra criar uma etiqueta NOVA (texto livre) ou gerenciar —
+                    as já cadastradas não moram mais aqui dentro. */}
                 <button
                   onClick={() => { setIsLabelPickerOpen((v) => !v); setNewLabelInput(''); }}
                   className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition-colors flex items-center gap-1 cursor-pointer"
+                  title={isSpanish ? 'Crear nueva etiqueta' : 'Criar nova etiqueta'}
                 >
                   <Plus className="w-2.5 h-2.5" />
-                  {isSpanish ? 'Etiqueta' : 'Etiqueta'}
+                  {isSpanish ? 'Nueva' : 'Nova'}
                 </button>
 
                 {isLabelPickerOpen && (
@@ -3767,26 +3934,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         </button>
                       </form>
 
-                      {(() => {
-                        const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
-                        const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
-                          .filter((l) => !alreadyOn.has(normalizeLabelText(l)));
-                        if (suggestions.length === 0) return null;
-                        return (
-                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto pt-1 border-t border-slate-700">
-                            {suggestions.map((l) => (
-                              <button
-                                key={l}
-                                onClick={() => { handleAddLabel(selectedLead.id, l); setIsLabelPickerOpen(false); }}
-                                className={`text-[10px] px-2 py-0.5 rounded-full border cursor-pointer hover:opacity-80 ${labelColorClasses(l)}`}
-                              >
-                                {l}
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })()}
-
                       <button
                         type="button"
                         onClick={() => { setIsLabelPickerOpen(false); openLabelManager(); }}
@@ -3800,22 +3947,68 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
               </div>
 
+              {/* TASK-0187 (pedido direto, 01/09/2026): alerta PERSISTENTE de
+                  escalonamento aberto dentro da própria conversa — o único
+                  sinal que existia (aiReplyStatusByPhone via SSE) some
+                  sozinho depois de 9s mesmo sem ninguém ter visto, achado
+                  real relatado: "às vezes o revisor trava a conversa ou tem
+                  um escalonamento e eu não consigo perceber". Fica visível
+                  até o escalonamento ser resolvido de verdade (não some
+                  sozinho, não tem botão de fechar — é sinal de segurança,
+                  não decoração). blockedDraft (quando existe) é o rascunho
+                  real que o revisor pré-envio recusou mandar. */}
+              {(selectedLead as any)?.isReal && (() => {
+                const activeEscalation = escalations.find(
+                  (e) => e.phone === selectedLead.phone && e.status !== 'resolved' && e.status !== 'archived' && !e.resolved,
+                );
+                if (!activeEscalation) return null;
+                return (
+                  <div className="bg-rose-950/40 border-b border-rose-800/40 px-3 py-2 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-bold text-rose-200">
+                        {activeEscalation.blockedDraft
+                          ? (isSpanish ? 'El revisor bloqueó una respuesta automática' : 'O revisor bloqueou uma resposta automática')
+                          : (isSpanish ? 'Conversación escalada para un humano' : 'Conversa escalada para humano')}
+                      </p>
+                      <p className="text-[11px] text-rose-300/90 truncate">{activeEscalation.reason}</p>
+                    </div>
+                    {onGoToEscalations && (
+                      <button
+                        type="button"
+                        onClick={onGoToEscalations}
+                        className="shrink-0 rounded-lg border border-rose-500/30 px-2 py-1 text-[10px] font-bold text-rose-200 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                      >
+                        {isSpanish ? 'Ver escalamiento' : 'Ver escalonamento'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Contexto compactado acompanha a conversa real. A ficha completa
                   continua opcional e apenas informa o operador: nunca autoriza
                   confirmação de agenda, pagamento ou qualquer exceção. */}
-              {(selectedLead as any)?.isReal && (
-                <ContactContextPanel
-                  context={visibleContactContext}
-                  isLoading={isContactContextLoading}
-                  isSpanish={isSpanish}
-                  variant="compact"
-                  onRetry={() => void refreshContactContext()}
-                  onOpenDetails={() => {
-                    if (window.innerWidth >= 1024) setShowRightPanel(true);
-                    else setMobileAnalysisOpen(true);
-                  }}
-                />
-              )}
+              {(selectedLead as any)?.isReal && (() => {
+                const contextSignature = selectedLead.phone && visibleContactContext
+                  ? `${selectedLead.phone}:${visibleContactContext.memory?.updatedAt || ''}:${visibleContactContext.latestDecision?.createdAt || ''}`
+                  : null;
+                if (contextSignature && contextSignature === dismissedContextSignature) return null;
+                return (
+                  <ContactContextPanel
+                    context={visibleContactContext}
+                    isLoading={isContactContextLoading}
+                    isSpanish={isSpanish}
+                    variant="compact"
+                    onRetry={() => void refreshContactContext()}
+                    onOpenDetails={() => {
+                      if (window.innerWidth >= 1024) setShowRightPanel(true);
+                      else setMobileAnalysisOpen(true);
+                    }}
+                    onDismiss={contextSignature ? () => setDismissedContextSignature(contextSignature) : undefined}
+                  />
+                );
+              })()}
 
               {/* Real-time Analyzing Banner */}
               {isAnalyzingConversation && (
@@ -4271,7 +4464,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   conversas de teste/demo (troca "enviar como" + simular
                   imagem/PDF); numa conversa real ela some e os ícones que
                   sobram entram direto na linha de composição abaixo. */}
-              <div className="p-2 space-y-1.5">
+              {/* TASK-0184: mesmo raciocínio do cabeçalho acima — o padding
+                  inferior do .app-main que sumiu no mobile também cobria a
+                  barra de gestos do iOS/Android por baixo da caixa de
+                  texto/mic. paddingBottom: env(safe-area-inset-bottom)
+                  resolve pra 0 fora desse contexto. */}
+              <div className="p-2 space-y-1.5" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}>
 
                 {!(selectedLead as any)?.isReal && (
                   <div className="flex items-center justify-between text-xs px-1">
@@ -4413,89 +4611,152 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   </div>
                 ) : (
-                <form onSubmit={handleSendTextMessage} className="flex items-center space-x-1">
-                  <div className="relative flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowComposerEmojiPicker((v) => !v)}
-                      className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                      title="Emoji"
-                    >
-                      <Smile className="w-6 h-6" />
-                    </button>
-                    {showComposerEmojiPicker && (
-                      <>
-                        <div className="fixed inset-0 z-40" onClick={() => setShowComposerEmojiPicker(false)} />
-                        <div className="absolute bottom-full left-0 mb-2 z-50 w-64 max-h-56 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-2 grid grid-cols-8 gap-0.5 origin-bottom-left animate-pop-in">
-                          {COMPOSER_EMOJIS.map((emoji, idx) => (
+                <form onSubmit={handleSendTextMessage} className="flex items-end space-x-1">
+                  {/* TASK-0187 (pedido direto, 01/09/2026, comparação lado a
+                      lado com o WhatsApp Business real): emoji, texto e
+                      anexo agora vivem dentro da MESMA caixa arredondada —
+                      igual ao WhatsApp, onde só o microfone/enviar fica de
+                      fora. Antes emoji e anexo eram botões soltos ANTES da
+                      caixa; o anexo também mudou de lado (esquerda ->
+                      direita, mesma posição do clipe no WhatsApp real). */}
+                  <div className="flex-1 min-w-0 flex items-end gap-0.5 bg-[#2a3942] rounded-3xl pl-1 pr-1">
+                    <div className="relative flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowComposerEmojiPicker((v) => !v)}
+                        className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
+                        title="Emoji"
+                      >
+                        <Smile className="w-5 h-5" />
+                      </button>
+                      {showComposerEmojiPicker && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowComposerEmojiPicker(false)} />
+                          <div className="absolute bottom-full left-0 mb-2 z-50 w-64 max-h-56 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-2 grid grid-cols-8 gap-0.5 origin-bottom-left animate-pop-in">
+                            {COMPOSER_EMOJIS.map((emoji, idx) => (
+                              <button
+                                key={`${emoji}-${idx}`}
+                                type="button"
+                                onClick={() => setInputMessage((prev) => prev + emoji)}
+                                className="text-lg hover:bg-white/10 rounded p-1 cursor-pointer"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* <textarea> em vez de <input> — cresce com o texto até
+                        um teto de 120px (mesma sensação do WhatsApp real:
+                        mais espaço aparente pra digitar, sem rolar por
+                        dentro de uma caixa de altura fixa). Enter envia,
+                        Shift+Enter quebra linha — mesmo atalho do WhatsApp.
+                        `bg-transparent` porque a cor de fundo agora é da
+                        caixa inteira (div pai), não mais dela sozinha. */}
+                    <textarea
+                      ref={composerTextareaRef}
+                      rows={1}
+                      placeholder={
+                        senderRole === 'lead'
+                          ? (isSpanish ? `Mensaje de ${selectedLead.name}...` : `Mensagem de ${selectedLead.name}...`)
+                          : 'Digitar resposta...'
+                      }
+                      value={inputMessage}
+                      onChange={(e) => setInputMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendTextMessage();
+                        }
+                      }}
+                      className="flex-1 min-w-0 bg-transparent text-sm text-[#e9edef] placeholder-slate-400 py-2.5 leading-6 resize-none overflow-y-auto focus:outline-none"
+                      style={{ maxHeight: '120px' }}
+                    />
+
+                    {/* Anexo — pedido direto (TASK-0184/0187, comparação lado
+                        a lado com o WhatsApp Business real): o clipe de
+                        anexo real e os dois <select> de foto/vídeo de
+                        exemplo viviam como 3 ícones soltos disputando espaço
+                        na linha de composição. Agora é um único menu, com o
+                        clipe como gatilho — igual ao WhatsApp real, que
+                        também agrupa Documento/Câmera/Galeria atrás de um
+                        clipe só, do lado direito da caixa. */}
+                    <div className="relative flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowAttachMenu((v) => !v)}
+                        className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
+                        title={isSpanish ? 'Adjuntar' : 'Anexar'}
+                      >
+                        <Paperclip className="w-5 h-5" />
+                      </button>
+                      {showAttachMenu && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
+                          <div className="absolute bottom-full right-0 mb-2 z-50 w-60 max-h-64 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-1.5 origin-bottom-right animate-pop-in">
                             <button
-                              key={`${emoji}-${idx}`}
                               type="button"
-                              onClick={() => setInputMessage((prev) => prev + emoji)}
-                              className="text-lg hover:bg-white/10 rounded p-1 cursor-pointer"
+                              onClick={() => {
+                                setShowAttachMenu(false);
+                                (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
                             >
-                              {emoji}
+                              <Paperclip className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                              <span>{isSpanish ? 'Documento o foto' : 'Documento ou foto'}</span>
                             </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
+
+                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                              <>
+                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                  {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
+                                </div>
+                                {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
+                                  >
+                                    <ImageIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                    <span className="truncate">{p.name}</span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
+
+                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                              <>
+                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                  {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
+                                </div>
+                                {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => { setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
+                                  >
+                                    <Video className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                    <span className="truncate">{p.name}</span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  {/* Foto/vídeo de exemplo — ícones discretos à esquerda da
-                      caixa de texto, junto do clipe de anexo (pedido
-                      direto, 29/08/2026: "foto para lado esquerdo"). */}
-                  {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                    <select
-                      onChange={(e) => { if (e.target.value) { handleSendExamplePhoto(e.target.value); e.target.value = ''; } }}
-                      defaultValue=""
-                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center flex-shrink-0"
-                      title={isSpanish ? 'Enviar foto de ejemplo de un servicio' : 'Enviar foto de exemplo de um serviço'}
-                    >
-                      <option value="" disabled>📷</option>
-                      {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
-                      ))}
-                    </select>
-                  )}
-
-                  {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                    <select
-                      onChange={(e) => { if (e.target.value) { handleSendExampleVideo(e.target.value); e.target.value = ''; } }}
-                      defaultValue=""
-                      className="w-9 p-2 rounded-lg bg-transparent hover:bg-slate-800 border-0 text-slate-400 hover:text-white text-sm cursor-pointer appearance-none text-center flex-shrink-0"
-                      title={isSpanish ? 'Enviar video de ejemplo de un servicio' : 'Enviar vídeo de exemplo de um serviço'}
-                    >
-                      <option value="" disabled>🎥</option>
-                      {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
-                      ))}
-                    </select>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile()}
-                    className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer flex-shrink-0"
-                  >
-                    <Paperclip className="w-6 h-6" />
-                  </button>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
-                  <input
-                    type="text"
-                    placeholder={
-                      senderRole === 'lead'
-                        ? (isSpanish ? `Mensaje de ${selectedLead.name}...` : `Mensagem de ${selectedLead.name}...`)
-                        : 'Digitar resposta...'
-                    }
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    className="flex-1 min-w-0 bg-[#2a3942] text-sm text-[#e9edef] placeholder-slate-400 rounded-full px-4 py-3 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-
-                  {/* Respostas rápidas — ícone discreto à direita da caixa de
-                      texto (pedido direto, 29/08/2026: "msg rápida para
-                      Caixa de texto lado direito discreto"). */}
+                  {/* Respostas rápidas — recurso próprio do Universo, sem
+                      equivalente no WhatsApp real; continua fora da caixa,
+                      entre ela e o botão de mic/enviar (pedido direto,
+                      29/08/2026: "msg rápida para Caixa de texto lado
+                      direito discreto"). */}
                   <div className="flex-shrink-0">
                     <QuickRepliesMenu
                       quickReplies={quickReplies}
@@ -4873,6 +5134,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onEditPayment={handleEditEventPayment}
         googleCalendarConnected={googleCalendarConnected}
         onDisconnectCalendar={handleDisconnectGoogleCalendar}
+        backupSheetUrl={backupSheetUrl}
       />
     </div>
   );
