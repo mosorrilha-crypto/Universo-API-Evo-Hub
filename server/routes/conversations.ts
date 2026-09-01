@@ -72,6 +72,7 @@ import { subscribeTenant } from '../services/conversationEvents';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { resolveTenantId, requireRole } from '../middleware/rbac';
+import { conversationsStreamRateLimiter } from '../middleware/rateLimit';
 
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
@@ -225,7 +226,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
    * o mesmo segredo/algoritmo de authenticateToken (não dá pra reaproveitar
    * o middleware direto, que só lê do header).
    */
-  router.get('/api/conversations/stream', asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/conversations/stream', conversationsStreamRateLimiter, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const token = typeof req.query.token === 'string' ? req.query.token : undefined;
     if (!token) return res.status(401).end();
     let user: any;
