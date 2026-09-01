@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
@@ -391,6 +391,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.capturedClientName) {
           await setConversationNameIfMissing(tenantId, phone, result.capturedClientName);
         }
+        // TASK-0185 (parte 2) — serviço de interesse real, classificado pelo
+        // especialista a partir do que a cliente disse (nunca inventado);
+        // sempre sobrescreve com o mais recente, ver updateConversationInterest.
+        if (result.interestedService) {
+          await updateConversationInterest(tenantId, phone, result.interestedService);
+        }
         // Acompanhamento de funil (pedido real, 15/08/2026 — auditoria de
         // conversas reais mostrou lead esfriando sem ninguém perceber, ver
         // server/services/pendingFollowUpJob.ts). "owner_review" vence no
@@ -407,14 +413,16 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         // TASK-0185 — backup em Google Sheets (fire-and-forget, nunca atrasa
         // nem derruba o envio real acima). "Agendou?" consulta o agendamento
         // ativo de verdade (appointmentStore), nunca assume a partir da
-        // resposta da IA; "Interesse" só usa o anúncio real que originou o
+        // resposta da IA; "Interesse" prioriza o serviço real captado nesta
+        // rodada (result.interestedService), cai pro último já sabido
+        // (conversation.interest) e só por último pro anúncio que originou o
         // lead (adHeadline) — nunca um dado inventado.
         const appointmentForSheet = await getAppointmentForPhone(tenantId, phone).catch(() => undefined);
         queueLeadSheetSync(tenantId, calendarConfig, {
           phone,
           name: contactName,
           firstContactIso: conversation?.messages?.[0]?.timestamp || new Date().toISOString(),
-          interest: conversation?.adHeadline,
+          interest: result.interestedService || conversation?.interest || conversation?.adHeadline,
           scheduled: !!appointmentForSheet,
         });
         emitAiReplyStatus(tenantId, phone, 'sent');

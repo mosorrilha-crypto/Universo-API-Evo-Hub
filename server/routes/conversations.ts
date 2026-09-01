@@ -1193,7 +1193,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       phone,
       name: conversationForSheet?.name,
       firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
-      interest: conversationForSheet?.adHeadline,
+      interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
       scheduled: true,
     });
 
