@@ -1218,6 +1218,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // novidade sem transportar o histórico inteiro em cada polling.
   const lastMessageIdRef = useRef<Map<string, string | null>>(new Map());
   const activeLeadPhoneRef = useRef<string | null>(null);
+  const fetchConversationsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRequestsInFlightRef = useRef<Set<string>>(new Set());
   // Cada request captura o tenant em que começou. Quando o operador troca de
   // empresa, respostas atrasadas do tenant anterior não podem alterar a fila,
@@ -1419,7 +1420,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       // sinal à parte, não liga a nenhuma mudança de mensagem por si só —
       // ver aiReplyStatusByPhone acima.
       source.onmessage = (event) => {
-        fetchRealConversations();
+        // Achado real de consumo de egress do Supabase (01/09/2026): cada
+        // evento SSE (inclusive um simples "entregue"/"lida", sem nenhuma
+        // mudança visível na lista) disparava um GET /api/conversations
+        // completo — com WhatsApp real trocando mensagens o dia todo, isso
+        // rebuscava a lista inteira dezenas de vezes por minuto. Um debounce
+        // curto agrupa uma rajada de eventos próximos (comum quando várias
+        // mensagens/status chegam quase juntos) numa única busca, sem mudar
+        // o comportamento percebido — a lista já atualiza via
+        // loadRealConversationHistory pra conversa aberta, então 400ms de
+        // atraso na lista de fora não é perceptível.
+        if (fetchConversationsDebounceRef.current) clearTimeout(fetchConversationsDebounceRef.current);
+        fetchConversationsDebounceRef.current = setTimeout(fetchRealConversations, 400);
         try {
           const payload = JSON.parse(event.data);
           const phone: string | undefined = payload?.phone;
@@ -1462,7 +1474,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // reconexão real do EventSource, sem voltar a bater a cada 8s.
     const safetyPoll = setInterval(fetchRealConversations, 90000);
 
-    return () => { cancelled = true; source?.close(); clearInterval(safetyPoll); };
+    return () => {
+      cancelled = true;
+      source?.close();
+      clearInterval(safetyPoll);
+      if (fetchConversationsDebounceRef.current) clearTimeout(fetchConversationsDebounceRef.current);
+    };
     // `activeTenant.id` como dependência: sem isso, trocar de conta (ou o
     // saas_admin trocar de tenant) no mesmo componente montado (ele nunca
     // desmonta, ver comentário em App.tsx) deixava o fetch/SSE presos no
