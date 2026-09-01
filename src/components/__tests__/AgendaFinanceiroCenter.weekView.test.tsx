@@ -51,7 +51,12 @@ describe('AgendaFinanceiroCenter — seletor Semana/Mês', () => {
     expect(screen.getByRole('button', { name: 'Mês' })).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Semana' })).not.toBeNull();
     // Grade de mês mostra o dia 1 do mês corrente (célula que só existe na grade de mês).
-    expect(screen.getByRole('button', { name: /^1 / })).not.toBeNull();
+    // TASK-0182 — achado real: quando o dia 1 do mês É hoje (ex: 01/09/2026), o
+    // aria-label ganha o prefixo "Hoje, " (ver AgendaFinanceiroCenter.tsx) e o
+    // regex ancorado no início da string (/^1 /) parava de bater — o teste
+    // quebrava sozinho uma vez por mês, sem nenhuma mudança de código. Aceita
+    // "1 " tanto no início quanto logo depois de "Hoje, "/"Hoy, ".
+    expect(screen.getByRole('button', { name: /(^|, )1 / })).not.toBeNull();
   });
 
   it('troca pra visão de Semana ao tocar no botão e mostra um compromisso posicionado por horário', async () => {
