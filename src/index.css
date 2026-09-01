@@ -196,6 +196,25 @@ button:not(:disabled) {
   animation: page-enter 260ms var(--ease-premium) both;
 }
 
+/* TASK-0195 (pedido direto, 01/09/2026, print do menu mobile "Universo"):
+   "ajusta ... tamanho da fonte e ícones" — renderTab/renderSubmenuItem
+   (Header.tsx) são compartilhados com a barra de navegação DESKTOP, que o
+   dono do produto não reclamou. Em vez de mexer nos helpers compartilhados
+   (risco de mudar o desktop sem querer), escopado só dentro de
+   `.mobile-nav-menu__items` (só a lista de navegação, NÃO o menu inteiro —
+   os cartões de "Empresa ativa"/"Modo visual" logo abaixo têm botões bem
+   menores de propósito, um seletor pego no wrapper inteiro ia inflar eles
+   também). Maior especificidade que as classes utilitárias do Tailwind
+   (`.text-sm`/`.w-4`/`.h-4`), então ganha sem precisar de !important. */
+.mobile-nav-menu__items button {
+  font-size: 0.9375rem; /* 15px, era text-sm = 14px */
+}
+
+.mobile-nav-menu__items button svg {
+  width: 20px;
+  height: 20px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 1ms !important;
