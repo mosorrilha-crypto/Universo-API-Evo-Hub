@@ -236,6 +236,35 @@ const startingPoints = [
   { title: 'Transformación completa', text: 'Quiero renovar cejas, labios y pestañas en una sola sesión.', recommendation: 'Combo Full Face', message: 'Hola Monique, me interesa el Combo Full Face para renovar cejas, labios y pestañas. ¿Me contás más?' },
 ];
 
+interface CatalogCategoryGroup {
+  category: string;
+  products: CatalogProduct[];
+}
+
+/**
+ * Achado real (30/08/2026): "Catálogo claro" listava os ~19 serviços de
+ * todas as categorias, sempre expandidos — a mesma categoria que a pessoa
+ * já viu com preço na Etapa 2 da avaliação aparecia de novo aqui, dobrando a
+ * rolagem sem nenhuma informação nova. Agrupar por categoria (mesma ordem de
+ * `serviceCategories`, "Outros" por último) e deixar cada grupo fechado por
+ * padrão preserva todo o conteúdo — nada é removido — mas só expande quem
+ * realmente quer conferir/comparar de novo.
+ */
+function groupProductsByCategory(products: CatalogProduct[]): CatalogCategoryGroup[] {
+  const byCategory = new Map<string, CatalogProduct[]>();
+  for (const product of products) {
+    const key = product.category || 'Otros';
+    if (!byCategory.has(key)) byCategory.set(key, []);
+    byCategory.get(key)!.push(product);
+  }
+  const knownOrder = serviceCategories.map((item) => item.id);
+  const orderedKeys = [...knownOrder.filter((key) => byCategory.has(key)), ...[...byCategory.keys()].filter((key) => !knownOrder.includes(key))];
+  return orderedKeys.map((category) => ({
+    category,
+    products: [...byCategory.get(category)!].sort((a, b) => Number(isMicropigmentacion(b.name)) - Number(isMicropigmentacion(a.name))),
+  }));
+}
+
 const resultImages = [
   { src: '/monique-novo/full-face.jpg', alt: 'Resultado real de cejas, pestañas y labios', label: 'Cejas + pestañas' },
   { src: '/monique-novo/brow-lift.jpg', alt: 'Resultado real de brow lift y pestañas', label: 'Brow lift' },
@@ -264,6 +293,7 @@ export function PublicCatalogMoniqueConcierge() {
     return new URLSearchParams(window.location.search).get('utm_source') || undefined;
   });
   const categoryOptions = useMemo(() => optionsForCategory(catalog, category), [catalog, category]);
+  const catalogGroups = useMemo(() => (catalog ? groupProductsByCategory(catalog.products) : []), [catalog]);
   const instagramUrl = catalog?.contact.instagramUrl || FALLBACK_INSTAGRAM;
 
   /**
@@ -427,6 +457,16 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .starting-point-service { display: block; margin-top: .5rem; color: #3157d5; font-size: .68rem; font-weight: 800; font-style: normal; }
         .concierge-scope .starting-point small { display: inline-flex; align-items: center; gap: .25rem; margin-top: .5rem; color: #3157d5; font-size: .62rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
         .concierge-scope .catalog-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; margin-top: 2rem; }
+        .concierge-scope .catalog-accordion { display: flex; flex-direction: column; gap: .7rem; margin-top: 2rem; }
+        .concierge-scope .catalog-category { overflow: hidden; border: 1px solid #e0e5ed; border-radius: .75rem; background: #f9fafc; }
+        .concierge-scope .catalog-category summary { display: flex; cursor: pointer; list-style: none; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.25rem; }
+        .concierge-scope .catalog-category summary::-webkit-details-marker { display: none; }
+        .concierge-scope .catalog-category summary > span:first-child { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.5rem; color: #263345; }
+        .concierge-scope .catalog-category-count { display: inline-flex; flex-shrink: 0; align-items: center; gap: .4rem; color: #8b97a7; font-size: .64rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+        .concierge-scope .catalog-category-count svg { transition: transform 160ms var(--ease-out); }
+        .concierge-scope .catalog-category[open] .catalog-category-count svg { transform: rotate(180deg); }
+        .concierge-scope .catalog-category .catalog-grid { margin-top: 0; padding: 0 1.25rem 1.25rem; }
+        .concierge-scope .catalog-category:not([open]) > .catalog-grid { display: none; }
         .concierge-scope .service-card { display: flex; min-height: 13rem; flex-direction: column; justify-content: space-between; border: 1px solid #e0e5ed; border-radius: .75rem; background: #f9fafc; padding: 1.15rem; transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
         .concierge-scope .service-card:hover { border-color: #9eb0df; transform: translateY(-3px); box-shadow: 0 .7rem 1.3rem rgba(39,55,80,.08); }
         .concierge-scope .service-meta, .concierge-scope .service-bottom { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
@@ -530,6 +570,9 @@ export function PublicCatalogMoniqueConcierge() {
         .concierge-scope .result-card span { background: rgba(10,9,8,.88); color: #f7efe2; }
         .concierge-scope .catalog-section { background: #f3eadc; }
         .concierge-scope .catalog-section .section-heading > p { color: #665846; }
+        .concierge-scope .catalog-category { border-color: #d8c6aa; background: #fbf6ed; }
+        .concierge-scope .catalog-category summary > span:first-child { color: #24190f; }
+        .concierge-scope .catalog-category-count { color: #846d4d; }
         .concierge-scope .starting-point { border-color: #d8c6aa; background: #fbf6ed; }
         .concierge-scope .starting-point:hover { border-color: #bc842d; box-shadow: 0 .7rem 1.3rem rgba(99,61,14,.12); }
         .concierge-scope .starting-point b { color: #24190f; }
@@ -572,7 +615,15 @@ export function PublicCatalogMoniqueConcierge() {
         @media (max-width: 767px) { .concierge-scope .gold-promo-grid { grid-template-columns: 1fr; gap: 1.6rem; } .concierge-scope .gold-promo { padding: 2.8rem 0; } .concierge-scope .gold-promo-copy h2 { font-size: 3.5rem; } }
       `}</style>
 
-      <header className="site-header">
+      {/*
+        Bug real reportado (30/08/2026): no iPhone, o menu hambúrguer e o logo
+        ficavam atrás da barra de status (relógio/bateria/sinal) — mesma causa
+        raiz já corrigida em `Header.tsx` (25/08/2026): `viewport-fit=cover`
+        no `index.html` estende o conteúdo por trás da status bar, e esse
+        header (componente isolado, não reaproveita `Header.tsx`) nunca tinha
+        recebido o mesmo `env(safe-area-inset-top)`.
+      */}
+      <header className="site-header" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="container flex items-center justify-between py-4">
           <a href="#inicio" className="brand" aria-label="Monique Sorrilha Beauty Studio, inicio">
             <span className="brand-mark">MS</span>
@@ -765,7 +816,7 @@ export function PublicCatalogMoniqueConcierge() {
         <div className="container">
           <div className="section-heading">
             <div><span className="section-number">03</span><h2>Catálogo claro.<br /><span>Elegí con confianza.</span></h2></div>
-            <p>Precios, duración y objetivo de cada servicio en una sola vista.</p>
+            <p>Tocá una categoría para ver precios, duración y detalle de cada servicio.</p>
           </div>
           <div className="starting-points">
             {startingPoints.map((point) => (
@@ -795,50 +846,60 @@ export function PublicCatalogMoniqueConcierge() {
           )}
           {productsError && <p className="helper">No se pudieron cargar los servicios en este momento. Probá de nuevo en unos minutos.</p>}
           {catalog && (
-            <div className="catalog-grid">
-              {catalog.products.map((service) => {
-                const consultMessage = fillWhatsappTemplate(catalog.contact.whatsappMessageProduct, service.name, service.name);
-                const cardImage = service.imageUrl || PROMO_IMAGE_BY_PRODUCT_NAME[service.name];
-                return (
-                  <article className="service-card" key={service.name}>
-                    {cardImage && <img className="service-card-image" src={cardImage} alt={service.name} loading="lazy" />}
-                    <div className="service-meta">
-                      <span>{service.category || 'Servicios'}</span>
-                      {formatDuration(service.durationMinutes) && <span><Clock3 size={12} /> {formatDuration(service.durationMinutes)}</span>}
-                    </div>
-                    <h3>{service.name}</h3>
-                    {service.description && <p>{service.description}</p>}
-                    {service.variants?.length ? (
-                      <>
-                        {service.price && <p className="service-price-range">{service.price}</p>}
-                        <ul className="service-variants">
-                        {service.variants.map((variant) => {
-                          const variantMessage = fillWhatsappTemplate(variant.whatsappMessage, variant.code, `${service.name} (${variant.code})`);
-                          return (
-                            <li key={variant.code}>
-                              <div className="service-variant-info">
-                                <b>{variant.code}</b>
-                                {variant.description && <small>{variant.description}</small>}
-                              </div>
-                              <div className="service-variant-price">
-                                <span>{variant.price}</span>
-                                {formatDuration(variant.durationMinutes) && <span className="service-variant-duration"><Clock3 size={11} /> {formatDuration(variant.durationMinutes)}</span>}
-                                <a href={whatsappClickUrl(variantMessage, `${service.name} - ${variant.code}`, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={12} /></a>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                      </>
-                    ) : (
-                      <div className="service-bottom">
-                        <b>{service.price}</b>
-                        <a href={whatsappClickUrl(consultMessage, service.name, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
+            <div className="catalog-accordion">
+              {catalogGroups.map((group) => (
+                <details key={group.category} className="catalog-category">
+                  <summary>
+                    <span>{group.category}</span>
+                    <span className="catalog-category-count">{group.products.length} {group.products.length === 1 ? 'servicio' : 'servicios'} <ChevronDown size={16} /></span>
+                  </summary>
+                  <div className="catalog-grid">
+                    {group.products.map((service) => {
+                      const consultMessage = fillWhatsappTemplate(catalog.contact.whatsappMessageProduct, service.name, service.name);
+                      const cardImage = service.imageUrl || PROMO_IMAGE_BY_PRODUCT_NAME[service.name];
+                      return (
+                        <article className="service-card" key={service.name}>
+                          {cardImage && <img className="service-card-image" src={cardImage} alt={service.name} loading="lazy" />}
+                          <div className="service-meta">
+                            <span>{service.category || 'Servicios'}</span>
+                            {formatDuration(service.durationMinutes) && <span><Clock3 size={12} /> {formatDuration(service.durationMinutes)}</span>}
+                          </div>
+                          <h3>{service.name}</h3>
+                          {service.description && <p>{service.description}</p>}
+                          {service.variants?.length ? (
+                            <>
+                              {service.price && <p className="service-price-range">{service.price}</p>}
+                              <ul className="service-variants">
+                              {service.variants.map((variant) => {
+                                const variantMessage = fillWhatsappTemplate(variant.whatsappMessage, variant.code, `${service.name} (${variant.code})`);
+                                return (
+                                  <li key={variant.code}>
+                                    <div className="service-variant-info">
+                                      <b>{variant.code}</b>
+                                      {variant.description && <small>{variant.description}</small>}
+                                    </div>
+                                    <div className="service-variant-price">
+                                      <span>{variant.price}</span>
+                                      {formatDuration(variant.durationMinutes) && <span className="service-variant-duration"><Clock3 size={11} /> {formatDuration(variant.durationMinutes)}</span>}
+                                      <a href={whatsappClickUrl(variantMessage, `${service.name} - ${variant.code}`, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={12} /></a>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                            </>
+                          ) : (
+                            <div className="service-bottom">
+                              <b>{service.price}</b>
+                              <a href={whatsappClickUrl(consultMessage, service.name, 'novo', utmSource)} target="_blank" rel="noreferrer" onClick={trackWhatsAppContact}>Consultar <ArrowRight size={13} /></a>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </details>
+              ))}
             </div>
           )}
           {/*
