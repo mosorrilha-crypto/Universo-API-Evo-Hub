@@ -2026,7 +2026,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // Metadados só do painel (server/services/conversationStore.ts), nunca
   // refletem no WhatsApp real. Leads de demonstração (sem backend) só
   // atualizam o estado local.
-  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true }): Promise<boolean> => {
+  const handleUpdateConversationState = async (leadId: string, patch: { archived?: boolean; pinned?: boolean; muted?: boolean; unread?: boolean; name?: string; aiBlocked?: boolean; adLead?: true; releaseAiNow?: true }): Promise<boolean> => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return false;
 
@@ -3624,6 +3624,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Ban className="w-3.5 h-3.5" />
                               <span>{isAiBlocked ? (isSpanish ? 'Reactivar IA para este lead' : 'Reativar IA para este lead') : (isSpanish ? 'Bloquear IA para este lead' : 'Bloquear IA para este lead')}</span>
                             </button>
+                            {!isAiBlocked && (
+                              <button
+                                onClick={() => { handleUpdateConversationState(selectedLead.id, { releaseAiNow: true }); setIsHeaderMenuOpen(false); }}
+                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora, sem esperar os 5min."
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span>{isSpanish ? 'Devolver la IA ahora' : 'Devolver a IA agora'}</span>
+                              </button>
+                            )}
                             {!isAdLead && (
                               <button
                                 onClick={async () => {
