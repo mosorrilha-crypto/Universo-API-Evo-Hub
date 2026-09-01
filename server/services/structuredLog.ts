@@ -24,20 +24,44 @@ export interface StructuredLogFields {
 }
 
 /** Traduz somente falhas e contingências em itens auditáveis; não envia alertas. */
+/**
+ * Achado real em produção (CLAUDE.md — "Gemini billing exhaustion is a
+ * recurring real incident, not hypothetical"): o prepay credits/spend cap do
+ * Google AI Studio já esgotou em produção mais de uma vez, derrubando TODAS
+ * as chamadas Gemini do projeto ao mesmo tempo (resposta automática,
+ * transcrição, análises) até um humano reabastecer o crédito manualmente.
+ * Antes desta função, esse erro caía como incidente 'medium' genérico,
+ * indistinguível de qualquer timeout/falha transitória isolada de um
+ * tenant — só era descoberto quando alguém percebia várias features de IA
+ * falhando ao mesmo tempo e ia ler o log bruto do Render. Reconhecendo o
+ * padrão de erro aqui, o mesmo incidente que já existe (system_incidents,
+ * SystemLogsPanel) passa a marcar isso como crítico, com a ação concreta já
+ * documentada (reabastecer em ai.studio/projects), em vez de mais um
+ * "runtime error" qualquer na lista.
+ */
+function isGeminiQuotaExhaustedDetail(detail?: string): boolean {
+  return /RESOURCE_EXHAUSTED|prepayment credits|quota exceeded|exceeded your current quota/i.test(detail || '');
+}
+
 export function getSystemIncidentFromStructuredLog(fields: StructuredLogFields): Omit<Parameters<typeof reportSystemIncident>[0], 'tenantId'> | null {
   const isLegacyFallback = fields.area === 'knowledgeBase' && fields.op === 'loadRuntimeSource' && /source=legacy_blob/.test(fields.detail || '');
   const isKnowledgeUnavailable = fields.area === 'knowledgeBase' && fields.op === 'loadRuntimeSource' && /source=unavailable/.test(fields.detail || '');
+  const isGeminiQuotaExhausted = fields.outcome === 'error' && isGeminiQuotaExhaustedDetail(fields.detail);
   if (fields.outcome !== 'error' && !isLegacyFallback && !isKnowledgeUnavailable) return null;
-  const category: SystemIncidentCategory = fields.area === 'knowledgeBase' ? 'knowledge_base'
+  const category: SystemIncidentCategory = isGeminiQuotaExhausted ? 'integration'
+    : fields.area === 'knowledgeBase' ? 'knowledge_base'
     : /auth|session|token/i.test(`${fields.area} ${fields.op}`) ? 'authentication'
       : /catalog/i.test(`${fields.area} ${fields.op}`) ? 'catalog'
         : /media|video|upload/i.test(`${fields.area} ${fields.op}`) ? 'media'
           : /webhook|evolution|meta|calendar|integration/i.test(`${fields.area} ${fields.op}`) ? 'integration' : 'runtime';
-  const severity: SystemIncidentSeverity = isKnowledgeUnavailable || fields.outcome === 'error' && /unavailable|5\d\d|fatal/i.test(fields.detail || '') ? 'critical'
+  const severity: SystemIncidentSeverity = isGeminiQuotaExhausted || isKnowledgeUnavailable || fields.outcome === 'error' && /unavailable|5\d\d|fatal/i.test(fields.detail || '') ? 'critical'
     : isLegacyFallback || fields.area === 'knowledgeBase' ? 'high' : 'medium';
-  const title = isKnowledgeUnavailable ? 'Runtime da Base de Conhecimento indisponível'
+  const title = isGeminiQuotaExhausted ? 'Cota/crédito pré-pago do Gemini esgotado'
+    : isKnowledgeUnavailable ? 'Runtime da Base de Conhecimento indisponível'
     : isLegacyFallback ? 'Fonte legada usada como contingência' : `Falha técnica: ${redactSystemIncidentDetail(fields.area)}.${redactSystemIncidentDetail(fields.op)}`;
-  const suggestedAction = isKnowledgeUnavailable
+  const suggestedAction = isGeminiQuotaExhausted
+    ? 'Reabasteça o crédito pré-pago em ai.studio/projects AGORA — esta falha derruba TODAS as chamadas Gemini do projeto (resposta automática, transcrição, análises) pra TODOS os tenants ao mesmo tempo, não só este. Retentativas (withGeminiRetry) não ajudam numa exaustão sustentada.'
+    : isKnowledgeUnavailable
     ? 'Verifique o banco e o runtime da Base. Preserve o fallback técnico e suspenda publicações até a revisão humana confirmar a recuperação.'
     : isLegacyFallback
     ? 'Revise se os oito documentos estão publicados e confira a telemetria da Base antes de qualquer publicação nova.'
@@ -49,7 +73,7 @@ export function getSystemIncidentFromStructuredLog(fields: StructuredLogFields):
           ? 'Verifique a credencial e a disponibilidade da integração, sem reenviar mensagens nem modificar agenda automaticamente.'
           : 'Revise o detalhe, confirme se a falha persiste e siga a correção sugerida pelo módulo afetado. Não altere dados comerciais sem validação.';
   return {
-    sourceKey: `system:${safeSignal(fields.area)}:${safeSignal(fields.op)}:${isLegacyFallback ? 'legacy-fallback' : isKnowledgeUnavailable ? 'unavailable' : 'error'}`,
+    sourceKey: `system:${safeSignal(fields.area)}:${safeSignal(fields.op)}:${isGeminiQuotaExhausted ? 'gemini-quota-exhausted' : isLegacyFallback ? 'legacy-fallback' : isKnowledgeUnavailable ? 'unavailable' : 'error'}`,
     category, severity, title, detail: redactSystemIncidentDetail(fields.detail), suggestedAction,
     metadata: { area: fields.area, op: fields.op, outcome: fields.outcome, latencyMs: fields.latencyMs ?? null },
   };
