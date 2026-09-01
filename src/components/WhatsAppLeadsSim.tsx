@@ -3467,7 +3467,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   no Header.tsx (notch/Dynamic Island cobrindo o conteúdo em
                   PWA fullscreen). paddingTop: env(safe-area-inset-top)
                   resolve pra 0 fora desse contexto, sem efeito colateral. */}
-              <div className="px-3 py-2.5 bg-[#202c33] border-b border-white/10 flex items-center justify-between gap-2 z-10 shadow-none" style={{ paddingTop: 'calc(0.625rem + env(safe-area-inset-top))' }}>
+              {/* TASK-0185: sem border-b aqui — a fileira de etiquetas logo
+                  abaixo virou a mesma cor de fundo (ver comentário lá), então
+                  as duas fileiras agora formam um cabeçalho único, sem a
+                  emenda visível entre duas cores diferentes que existia
+                  antes ("unifica a cor do cabeçalho", pedido direto,
+                  01/09/2026). A borda que fechava esse cabeçalho desceu pro
+                  final da fileira de etiquetas. */}
+              <div className="px-3 py-2.5 bg-[#202c33] flex items-center justify-between gap-2 z-10 shadow-none" style={{ paddingTop: 'calc(0.625rem + env(safe-area-inset-top))' }}>
                 {/* min-w-0 é o que deixa esta metade encolher/truncar de
                     verdade — sem isso, um nome de lead comprido (achado ao
                     vivo: nome tipo e-mail sem espaço nenhum pra quebrar,
@@ -3495,11 +3502,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       pro nome e pra fileira de etiquetas subir logo abaixo.
                       Continua visível no menu ⋮ (link "Abrir no WhatsApp") e
                       na lista de conversas pra quem precisar do número. */}
+                  {/* TASK-0185 (pedido direto, 01/09/2026, comparação lado a
+                      lado com o WhatsApp Business real): nome numa linha só
+                      igual ao real (antes text-xs comprimido junto com o
+                      status "online" na mesma linha) — escala mais perto do
+                      app de verdade, hierarquia mais clara. */}
                   <div className="min-w-0">
-                    <h3 className="text-xs font-bold text-[#e9edef] flex items-center gap-2">
-                      <span className="truncate">{selectedLead.name}</span>
-                      <span className="text-[10px] font-normal text-emerald-400 flex-shrink-0">• online</span>
-                    </h3>
+                    <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
+                    <span className="text-[11px] font-normal text-emerald-400">• online</span>
                   </div>
                 </div>
 
@@ -3743,8 +3753,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </div>
               </div>
 
-              {/* Etiquetas livres da conversa (tipo WhatsApp Business) */}
-              <div className="px-3 py-2 bg-[#0f191e] border-b border-slate-800/60 flex items-center gap-1.5 flex-wrap relative">
+              {/* Etiquetas livres da conversa (tipo WhatsApp Business).
+                  TASK-0185 (pedido direto, 01/09/2026): mesma cor de fundo
+                  do cabeçalho acima (#202c33, sem border-b entre os dois) —
+                  vira uma segunda linha do mesmo cabeçalho, em vez de uma
+                  barra visualmente separada. Padding reduzido (py-1.5) por
+                  já não precisar reabrir espaço pra uma "nova seção". */}
+              <div className="px-3 pt-0 pb-1.5 bg-[#202c33] border-b border-white/10 flex items-center gap-1.5 flex-wrap relative">
                 <Tag className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
                 {(selectedLead.conversationLabels || []).map((label) => (
                   <span
@@ -3761,12 +3776,37 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   </span>
                 ))}
+
+                {/* TASK-0185: sugestões já aparecem direto na barra, contorno
+                    tracejado pra diferenciar das etiquetas já aplicadas —
+                    antes só apareciam escondidas dentro do dropdown do "+
+                    Etiqueta" (um clique a mais só pra ver o que já existia
+                    pra escolher). Um toque já aplica. */}
+                {(() => {
+                  const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
+                  const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
+                    .filter((l) => !alreadyOn.has(normalizeLabelText(l)));
+                  return suggestions.map((l) => (
+                    <button
+                      key={l}
+                      onClick={() => handleAddLabel(selectedLead.id, l)}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border border-dashed cursor-pointer hover:opacity-80 ${labelColorClasses(l)}`}
+                      title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
+                    >
+                      + {l}
+                    </button>
+                  ));
+                })()}
+
+                {/* Só pra criar uma etiqueta NOVA (texto livre) ou gerenciar —
+                    as já cadastradas não moram mais aqui dentro. */}
                 <button
                   onClick={() => { setIsLabelPickerOpen((v) => !v); setNewLabelInput(''); }}
                   className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition-colors flex items-center gap-1 cursor-pointer"
+                  title={isSpanish ? 'Crear nueva etiqueta' : 'Criar nova etiqueta'}
                 >
                   <Plus className="w-2.5 h-2.5" />
-                  {isSpanish ? 'Etiqueta' : 'Etiqueta'}
+                  {isSpanish ? 'Nueva' : 'Nova'}
                 </button>
 
                 {isLabelPickerOpen && (
@@ -3800,26 +3840,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                       </form>
-
-                      {(() => {
-                        const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
-                        const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
-                          .filter((l) => !alreadyOn.has(normalizeLabelText(l)));
-                        if (suggestions.length === 0) return null;
-                        return (
-                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto pt-1 border-t border-slate-700">
-                            {suggestions.map((l) => (
-                              <button
-                                key={l}
-                                onClick={() => { handleAddLabel(selectedLead.id, l); setIsLabelPickerOpen(false); }}
-                                className={`text-[10px] px-2 py-0.5 rounded-full border cursor-pointer hover:opacity-80 ${labelColorClasses(l)}`}
-                              >
-                                {l}
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })()}
 
                       <button
                         type="button"
