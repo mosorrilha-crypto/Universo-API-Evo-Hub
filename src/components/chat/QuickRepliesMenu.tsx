@@ -134,7 +134,10 @@ export function QuickRepliesMenu({
               }`
         }
       >
-        <Zap className={compact ? 'w-6 h-6' : 'w-3 h-3'} />
+        {/* TASK-0184: 6->5 pra bater com os outros ícones da linha de
+            composição (clipe/emoji), depois do pedido de ícones mais
+            minimalistas pra dar mais sensação de espaço pro texto. */}
+        <Zap className={compact ? 'w-5 h-5' : 'w-3 h-3'} />
         {!compact && <span>{isSpanish ? 'Respuestas' : 'Respostas'}</span>}
       </button>
 

@@ -570,7 +570,10 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
 /* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
    Ferramentas) — só no mobile, onde a tela de Atendimento é a única coisa
    visível; no desktop as mesmas ações já ficam na barra de controles. */
-.atendimento-bottom-nav { display: flex; align-items: stretch; justify-content: space-around; flex-shrink: 0; border-top: 1px solid var(--line-subtle); background: var(--surface-panel); }
+/* TASK-0184: padding-bottom extra = env(safe-area-inset-bottom) — o padding
+   inferior do .app-main que cobria a barra de gestos do iOS/Android nesta
+   tela foi zerado no mobile (ver .app-main.app-main--atendimento acima). */
+.atendimento-bottom-nav { display: flex; align-items: stretch; justify-content: space-around; flex-shrink: 0; border-top: 1px solid var(--line-subtle); background: var(--surface-panel); padding-bottom: env(safe-area-inset-bottom); }
 .atendimento-bottom-nav__item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; flex: 1 1 0; min-width: 0; padding: .45rem .2rem .5rem; border: 0; background: transparent; color: var(--text-secondary); font-size: .58rem; font-weight: 700; cursor: pointer; }
 .atendimento-bottom-nav__item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .atendimento-bottom-nav__item.is-active { color: var(--action); }
@@ -1683,12 +1686,29 @@ html[data-theme='clean'] .operations-module-frame__header {
      fundo escuro" ao redor (era o fundo do .app-main aparecendo nos 2
      cantos laterais, pedido do dono do produto, 29/08/2026). Zera só
      left/right (dois class no seletor = especificidade maior que a regra
-     `.app-main` isolada acima, então ganha sem precisar de !important); o
-     padding vertical continua igual, porque o cálculo de altura da
-     TASK-0162 em App.tsx (h-[calc(100dvh-...-1.5rem)]) já conta com ele. */
+     `.app-main` isolada acima, então ganha sem precisar de !important). */
   .app-main.app-main--atendimento {
     padding-left: 0;
     padding-right: 0;
+  }
+
+  /* TASK-0184 (pedido direto, 01/09/2026, comparação lado a lado com o
+     WhatsApp Business real): no mobile o padding vertical do .app-main
+     (p-3/sm:p-6) sobrava como uma faixa preta acima e abaixo da tela de
+     Atendimento — o WhatsApp real não deixa margem nenhuma aí. A regra
+     acima (TASK-0163) só zerava left/right de propósito, porque até aqui o
+     cálculo de altura da TASK-0162 em App.tsx (h-[calc(100dvh-...-1.5rem)])
+     dependia desse padding vertical continuar existindo pra ele mesmo se
+     cancelar. Agora os dois mudam juntos: zera padding-top/bottom só até
+     `lg` (abaixo disso o chat some da tela fixa mobile e volta ao fluxo
+     normal, onde `lg:h-[calc(100dvh-154px)]` do chat-shell já resolve a
+     altura sozinho, sem depender do .app-main) — e o cálculo em App.tsx
+     não subtrai mais 1.5rem/3rem, já que não sobra padding pra cancelar. */
+  @media (max-width: 1023px) {
+    .app-main.app-main--atendimento {
+      padding-top: 0;
+      padding-bottom: 0;
+    }
   }
 
   .app-toast {
