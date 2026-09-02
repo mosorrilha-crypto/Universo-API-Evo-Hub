@@ -166,6 +166,41 @@
     .area{ grid-template-columns:1fr; }
   }
 
+  .filemap-group{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    margin-bottom:0.9rem; overflow:hidden;
+  }
+  .filemap-group summary{
+    cursor:pointer; list-style:none; padding:0.9rem 1.2rem;
+    display:flex; align-items:center; justify-content:space-between; gap:1rem;
+    font-family:'IBM Plex Sans',sans-serif; font-weight:600; font-size:0.95rem;
+  }
+  .filemap-group summary::-webkit-details-marker{ display:none; }
+  .filemap-group summary::after{
+    content:'+'; font-family:'IBM Plex Mono',monospace; color:var(--accent);
+    font-size:1.1rem; flex:none;
+  }
+  .filemap-group[open] summary::after{ content:'−'; }
+  .filemap-group summary .count{
+    font-family:'IBM Plex Mono',monospace; font-weight:400; font-size:0.72rem;
+    color:var(--slate); margin-left:0.6rem;
+  }
+  .filemap-rows{ border-top:1px solid var(--line); }
+  .filerow{
+    display:grid; grid-template-columns:minmax(150px,240px) 1fr;
+    gap:1rem; padding:0.65rem 1.2rem; border-bottom:1px solid var(--line);
+    font-size:0.86rem;
+  }
+  .filerow:last-child{ border-bottom:none; }
+  .filerow .fname{
+    font-family:'IBM Plex Mono',monospace; font-size:0.78rem; color:var(--accent-ink);
+    word-break:break-word;
+  }
+  .filerow .fdesc{ color:var(--slate); }
+  @media (max-width: 640px){
+    .filerow{ grid-template-columns:1fr; }
+  }
+
   footer{
     margin-top:4rem; padding-top:1.6rem; border-top:1px solid var(--line);
     font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--slate);
@@ -185,7 +220,7 @@
     <p class="lede">Este é o mapa "explodido" do ecossistema: cinco fluxos reais (mensagem, agenda/financeiro, CRM/qualidade, marketing/catálogo, administração/alertas) mostrando <strong>o que já está rodando em produção</strong> — e onde ainda falta algo, marcado como um nó tracejado <em>dentro do próprio fluxo</em>, não numa lista à parte. Baseado no estado real do código, auditado em <code>docs/GUIA-DO-PROJETO.md</code> — não em suposição.</p>
     <div class="badge-row">
       <span class="badge">fonte: docs/GUIA-DO-PROJETO.md</span>
-      <span class="badge">auditado 27/08/2026</span>
+      <span class="badge">auditado 27/08 · atualizado 02/09/2026 (PR #575)</span>
       <span class="badge">tenant real ativo: estúdio de beleza (Monique)</span>
     </div>
     <div class="legend" style="margin-top:1.4rem;">
@@ -201,8 +236,9 @@
     <a href="#fluxo-crm-qualidade"><span class="n">03</span> CRM, Escalonamento &amp; Qualidade</a>
     <a href="#fluxo-marketing-catalogo"><span class="n">04</span> Marketing &amp; Catálogo público</a>
     <a href="#fluxo-admin-alertas"><span class="n">05</span> Administração &amp; Alertas</a>
-    <a href="#fluxo-frontend"><span class="n">06</span> Painel (frontend)</a>
-    <a href="#estado-real"><span class="n">07</span> Estado real por área</a>
+    <a href="#mapa-arquivos"><span class="n">06</span> O que cada arquivo faz</a>
+    <a href="#fluxo-frontend"><span class="n">07</span> Painel (frontend)</a>
+    <a href="#estado-real"><span class="n">08</span> Estado real por área</a>
   </nav>
 
   <section id="fluxo-mensagem">
@@ -294,13 +330,21 @@ flowchart TB
       EX -.->|"últimos 3 exemplos entram<br/>na Camada 4 (contexto dinâmico)"| IA2["próximas respostas<br/>do mesmo tenant"]
       QA["QualityAuditCenter.tsx<br/>qualityAuditStore.ts<br/><i>bugs, ideias, recomendações</i>"] -.->|"evidência pra revisão humana"| PEND3["⏳ decisão de escopo:<br/>não vira regra automática sozinha"]
     end
+    subgraph EVALFLOW["Avaliação automática do agente (TASK-0203, PR #575)"]
+      GEN["generateSyntheticEvalQuestions<br/>agentEvalService.ts<br/><i>Gemini gera casos de teste<br/>a partir da KB real do tenant</i>"] --> RUN["scripts/eval-agent.ts<br/><i>npm run eval:agent -- --tenant</i>"]
+      RUN -->|"roda no pipeline REAL,<br/>sem tocar agenda nem WhatsApp"| PIPE["generateAutoReplyForText"]
+      PIPE --> JUDGE["reviewAutoReplyBeforeSend<br/>+ judgeAgentReplyQuality"]
+      JUDGE --> REPEAT["findRepeatedPhrasesAcrossResponses<br/><i>detecta frase repetida entre casos</i>"]
+      JUDGE -->|"achado"| QA
+    end
 
     style CRM fill:#1f7a5c,color:#fff,stroke:none
     style GATE2 fill:#1f7a5c,color:#fff,stroke:none
     style SENT fill:#1f7a5c,color:#fff,stroke:none
+    style RUN fill:#b9822f,color:#fff,stroke:none
     style PEND3 fill:transparent,stroke:#b9822f,stroke-width:2px,stroke-dasharray:5 4,color:#b9822f
 </pre>
-      <figcaption>"Aprovar e enviar" é o único ciclo hoje que realimenta o agente de verdade (via exemplos aprovados) — a Central de Qualidade é evidência para humano, não regra automática, por decisão deliberada.</figcaption>
+      <figcaption>"Aprovar e enviar" é o único ciclo hoje que realimenta o agente de verdade (via exemplos aprovados). A avaliação automática (mesclada em 02/09/2026) gera perguntas sintéticas e testa o pipeline real offline — mas, como tudo o mais aqui, só produz evidência revisável, nunca corrige o agente sozinha. Hoje só roda via terminal (<code>npm run eval:agent</code>); botão no painel é próximo passo registrado, não implementado.</figcaption>
     </figure>
   </section>
 
@@ -362,8 +406,239 @@ flowchart TB
     </figure>
   </section>
 
+  <section id="mapa-arquivos">
+    <div class="eyebrow">06 · onde cada coisa mora no código</div>
+    <h2>O que cada arquivo do repositório representa</h2>
+    <p class="deck">Não é um índice completo (o repositório tem centenas de arquivos, incluindo testes e migrations) — é o glossário dos arquivos com <strong>lógica de negócio real</strong>, agrupado por assunto. Clique em cada grupo pra abrir. Nomes de arquivo em <code>monospace</code> são caminhos reais, clicáveis mentalmente (abra no seu editor).</p>
+
+    <details class="filemap-group" open>
+      <summary>Raiz do projeto &amp; configuração <span class="count">5 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">server.ts</div><div class="fdesc">Ponto de entrada do backend: monta config, cliente Supabase, todos os routers de <code>server/routes/</code>, os 8 jobs de fundo e os handlers globais de erro.</div></div>
+        <div class="filerow"><div class="fname">vite.config.ts</div><div class="fdesc">Configuração de build do frontend (Vite/React).</div></div>
+        <div class="filerow"><div class="fname">tsconfig.json</div><div class="fdesc">Configuração do TypeScript — <code>npm run lint</code> é só <code>tsc --noEmit</code> contra isso.</div></div>
+        <div class="filerow"><div class="fname">package.json</div><div class="fdesc">Dependências e todos os scripts npm (dev, build, test, task:start, seeds).</div></div>
+        <div class="filerow"><div class="fname">supabase/migrations/*.sql</div><div class="fdesc">74+ migrations SQL idempotentes, aplicadas via Supabase MCP (<code>apply_migration</code>) — histórico completo do schema do banco.</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/routes — a casca HTTP <span class="count">19 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">webhooks.ts</div><div class="fdesc">Recebe toda mensagem do WhatsApp (Meta/Evolution) — o ponto de entrada de tudo (ver fluxo 01).</div></div>
+        <div class="filerow"><div class="fname">auth.ts</div><div class="fdesc">Login de operador (bcrypt+JWT) e sessão.</div></div>
+        <div class="filerow"><div class="fname">conversations.ts</div><div class="fdesc">Histórico de conversa, envio manual pelo operador, mídia (áudio/imagem/vídeo) e SSE de atualização ao vivo do painel.</div></div>
+        <div class="filerow"><div class="fname">ai.ts</div><div class="fdesc">Rotas auxiliares de IA fora do pipeline automático — ex.: "Ficha IA" (texto assistido pro operador escrever).</div></div>
+        <div class="filerow"><div class="fname">googleCalendar.ts</div><div class="fdesc">OAuth do Google Calendar por tenant e consulta de horários realmente livres.</div></div>
+        <div class="filerow"><div class="fname">crm.ts</div><div class="fdesc">Funil de leads (CRM) e a ponte que cria cobrança automática quando um negócio é marcado como ganho.</div></div>
+        <div class="filerow"><div class="fname">financial.ts</div><div class="fdesc">Transações financeiras (receita/despesa) por tenant.</div></div>
+        <div class="filerow"><div class="fname">broadcast.ts</div><div class="fdesc">CRUD e ativação de campanhas de disparo em massa.</div></div>
+        <div class="filerow"><div class="fname">qualityAudit.ts</div><div class="fdesc">Central de Qualidade: revisões, achados de bug/ideia, exemplos aprovados que realimentam o agente.</div></div>
+        <div class="filerow"><div class="fname">publicCatalog.ts</div><div class="fdesc">Catálogo público por tenant (<code>/catalogo/:slug</code>) e o painel de configurações dele.</div></div>
+        <div class="filerow"><div class="fname">commercialOffer.ts</div><div class="fdesc">Página pública de planos comerciais (<code>/oferta</code>) e captura de interesse, com rate limit.</div></div>
+        <div class="filerow"><div class="fname">entitlements.ts</div><div class="fdesc">Consulta do próprio contrato (<code>/api/me/entitlements</code>) e administração de plano/exceções por tenant.</div></div>
+        <div class="filerow"><div class="fname">admin.ts</div><div class="fdesc">Rotas de administração SaaS: criar tenant, credenciais Evolution/WhatsApp, gestão de operadores.</div></div>
+        <div class="filerow"><div class="fname">metaAds.ts</div><div class="fdesc">Gestão e insights de campanhas Meta Ads supervisionadas pelo painel.</div></div>
+        <div class="filerow"><div class="fname">metaCapi.ts</div><div class="fdesc">Envio de eventos de conversão pra Meta (Conversions API).</div></div>
+        <div class="filerow"><div class="fname">pushSubscriptions.ts</div><div class="fdesc">Inscrições de notificação push do navegador (usadas pelos jobs de alerta).</div></div>
+        <div class="filerow"><div class="fname">roadmap.ts</div><div class="fdesc">Itens de roadmap/backlog visíveis no painel.</div></div>
+        <div class="filerow"><div class="fname">telemetry.ts</div><div class="fdesc">Telemetria de uso do próprio app (eventos do frontend).</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/services — mensageria &amp; agente <span class="count">core</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">autoReply.ts</div><div class="fdesc">O cérebro: classifica a mensagem, monta o prompt em camadas e gera a resposta do agente.</div></div>
+        <div class="filerow"><div class="fname">messageBuffer.ts</div><div class="fdesc">Agrupa mensagens em rajada (6s) antes de responder, com recovery persistido se o servidor reiniciar no meio.</div></div>
+        <div class="filerow"><div class="fname">replySafetyGate.ts</div><div class="fdesc">Revisor pré-envio: confere horário citado contra o que o Calendar confirmou; bloqueia se não bater.</div></div>
+        <div class="filerow"><div class="fname">tenantResolver.ts</div><div class="fdesc">Descobre de qual tenant é uma mensagem recebida, pelo <code>phone_number_id</code>.</div></div>
+        <div class="filerow"><div class="fname">webhookParsers.ts</div><div class="fdesc">Interpreta o payload cru do WhatsApp (Meta/Evolution) — inclui a normalização do 9º dígito do celular BR.</div></div>
+        <div class="filerow"><div class="fname">idempotency.ts</div><div class="fdesc">Evita processar a mesma mensagem duas vezes (dedupe por <code>message_id</code>, persistente).</div></div>
+        <div class="filerow"><div class="fname">perPhoneQueue.ts</div><div class="fdesc">Serializa o processamento por número de telefone, evitando corrida entre mensagens do mesmo lead.</div></div>
+        <div class="filerow"><div class="fname">warmupCurve.ts</div><div class="fdesc">Curva de aquecimento de envio (limite gradual) pra número novo, evitando bloqueio da Meta.</div></div>
+        <div class="filerow"><div class="fname">phoneNormalization.ts</div><div class="fdesc">Normaliza formato de número de telefone entre os diferentes canais.</div></div>
+        <div class="filerow"><div class="fname">conversationStore.ts</div><div class="fdesc">Persistência da conversa (Postgres, por tenant) — toda mensagem enviada/recebida passa por aqui.</div></div>
+        <div class="filerow"><div class="fname">conversationEvents.ts</div><div class="fdesc">Publica evento em memória quando chega mensagem nova, pro SSE do painel (ver fluxo 07).</div></div>
+        <div class="filerow"><div class="fname">conversationLabelStore.ts</div><div class="fdesc">Etiquetas/labels manuais numa conversa.</div></div>
+        <div class="filerow"><div class="fname">conversationReplyGuard.ts</div><div class="fdesc">Trava adicional contra a IA responder em cima de uma mensagem já respondida/obsoleta.</div></div>
+        <div class="filerow"><div class="fname">contactAgentMemoryStore.ts</div><div class="fdesc">Memória de contexto por contato, entre conversas.</div></div>
+        <div class="filerow"><div class="fname">agentContextPack.ts</div><div class="fdesc">Monta o pacote de contexto dinâmico (Camada 4) que entra no prompt a cada resposta.</div></div>
+        <div class="filerow"><div class="fname">agentTurnTraceStore.ts</div><div class="fdesc">Rastro técnico de cada turno do agente, pra investigação/depuração.</div></div>
+        <div class="filerow"><div class="fname">agentStatus.ts</div><div class="fdesc">Pausa/retoma a IA por tenant (<code>active</code>/<code>paused</code>/<code>restricted</code>).</div></div>
+        <div class="filerow"><div class="fname">agentPausedAlertJob.ts</div><div class="fdesc">Job de fundo: alerta o admin se a IA ficar pausada com mensagem sem resposta.</div></div>
+        <div class="filerow"><div class="fname">firstContactMessage.ts</div><div class="fdesc">Mensagem de primeiro contato configurável por tenant.</div></div>
+        <div class="filerow"><div class="fname">outboundEchoTracker.ts</div><div class="fdesc">Reconhece o eco de uma mensagem que o próprio sistema mandou, pra não duplicar/reagir a ela.</div></div>
+        <div class="filerow"><div class="fname">quickRepliesStore.ts</div><div class="fdesc">Respostas rápidas pré-cadastradas que o operador usa no painel.</div></div>
+        <div class="filerow"><div class="fname">sendBubbles.ts</div><div class="fdesc">Quebra a resposta da IA em "bolhas" e envia cada uma pelo canal certo (texto, botão, lista).</div></div>
+        <div class="filerow"><div class="fname">sendWindow.ts</div><div class="fdesc">Controla a janela/ritmo de envio de mensagens.</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/services — canais &amp; mídia <span class="count">11 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">metaSend.ts</div><div class="fdesc">Envio real via Meta Cloud API (texto, template, botão, mídia).</div></div>
+        <div class="filerow"><div class="fname">evolutionSend.ts</div><div class="fdesc">Envio real via Evolution API (Baileys) — canal alternativo ao Meta oficial.</div></div>
+        <div class="filerow"><div class="fname">instagramSend.ts</div><div class="fdesc">Envio de mensagem via Instagram (Meta).</div></div>
+        <div class="filerow"><div class="fname">evolutionConnectionAlertJob.ts</div><div class="fdesc">Job de fundo: alerta o admin se a sessão WhatsApp (Evolution) cair silenciosamente.</div></div>
+        <div class="filerow"><div class="fname">audioTranscode.ts</div><div class="fdesc">Reconverte áudio pra Ogg/Opus antes de mandar — sem isso, a nota de voz "envia" mas nunca toca.</div></div>
+        <div class="filerow"><div class="fname">videoTranscode.ts</div><div class="fdesc">Reconversão de vídeo enviado pelo painel pra formato aceito.</div></div>
+        <div class="filerow"><div class="fname">mediaDownload.ts</div><div class="fdesc">Baixa mídia recebida do WhatsApp (foto/áudio/documento do cliente).</div></div>
+        <div class="filerow"><div class="fname">mediaImageStore.ts</div><div class="fdesc">Armazena imagens (produto, anexos) no Storage do Supabase.</div></div>
+        <div class="filerow"><div class="fname">catalogImageThumbnail.ts</div><div class="fdesc">Gera miniatura de imagem de produto do catálogo.</div></div>
+        <div class="filerow"><div class="fname">geminiTranscription.ts</div><div class="fdesc">Transcrição de áudio recebido usando Gemini.</div></div>
+        <div class="filerow"><div class="fname">transcriptionQueue.ts</div><div class="fdesc">Fila de processamento das transcrições, pra não sobrecarregar a cota de IA.</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/services — agenda &amp; agendamento <span class="count">12 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">googleCalendar.ts</div><div class="fdesc">Integração real com a API do Google Calendar (consulta, cria, remarca, cancela).</div></div>
+        <div class="filerow"><div class="fname">appointmentStore.ts</div><div class="fdesc">Persistência do agendamento confirmado por tenant.</div></div>
+        <div class="filerow"><div class="fname">preReservationStore.ts</div><div class="fdesc">Reserva não vinculante (hold) enquanto o cliente ainda não confirmou.</div></div>
+        <div class="filerow"><div class="fname">preReservationFollowUpJob.ts</div><div class="fdesc">Job de fundo: cutuca o cliente que deixou uma pré-reserva sem confirmar.</div></div>
+        <div class="filerow"><div class="fname">heldAppointmentExpiryJob.ts</div><div class="fdesc">Job de fundo: libera automaticamente um horário retido que expirou.</div></div>
+        <div class="filerow"><div class="fname">perTenantCalendarLock.ts</div><div class="fdesc">Lock por tenant pra evitar corrida entre duas ações de agenda simultâneas.</div></div>
+        <div class="filerow"><div class="fname">reminderJob.ts</div><div class="fdesc">Job de fundo: envia lembrete de agendamento, no idioma certo do tenant.</div></div>
+        <div class="filerow"><div class="fname">reminderStore.ts</div><div class="fdesc">Controle de quais lembretes já foram mandados, pra não duplicar.</div></div>
+        <div class="filerow"><div class="fname">calendarEventCompletionStore.ts</div><div class="fdesc">Marca um evento de agenda como concluído/atendido.</div></div>
+        <div class="filerow"><div class="fname">operatorFollowUpService.ts</div><div class="fdesc">Follow-up manual disparado pelo operador.</div></div>
+        <div class="filerow"><div class="fname">pendingFollowUpJob.ts</div><div class="fdesc">Job de fundo: acompanhamento de funil (lead que parou de responder).</div></div>
+        <div class="filerow"><div class="fname">pendingFollowUpStore.ts</div><div class="fdesc">Persistência de quais follow-ups estão pendentes.</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/services — financeiro <span class="count">7 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">financialStore.ts</div><div class="fdesc">Persistência das transações financeiras (receita/despesa) por tenant.</div></div>
+        <div class="filerow"><div class="fname">financialTitleStore.ts</div><div class="fdesc">Títulos financeiros (cobranças a receber) vinculados a um cliente/negócio.</div></div>
+        <div class="filerow"><div class="fname">financialOperationsStore.ts</div><div class="fdesc">Operações financeiras auxiliares (ajustes, estorno).</div></div>
+        <div class="filerow"><div class="fname">financialModuleAccess.ts</div><div class="fdesc">Controle de quem pode acessar o módulo Financeiro (RBAC/entitlements).</div></div>
+        <div class="filerow"><div class="fname">recurringExpenseJob.ts</div><div class="fdesc">Job de fundo: gera despesa recorrente automaticamente todo mês.</div></div>
+        <div class="filerow"><div class="fname">recurringExpenseStore.ts</div><div class="fdesc">Cadastro de despesas recorrentes (descrição, valor, dia do mês).</div></div>
+        <div class="filerow"><div class="fname">paymentPendingAlertJob.ts</div><div class="fdesc">Job de fundo: alerta o admin sobre comprovante de pagamento esperando confirmação humana.</div></div>
+        <div class="filerow"><div class="fname">paymentReceiptAnalysis.ts</div><div class="fdesc">A IA lê o comprovante de pagamento só como dica (nunca confirma sozinha).</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/services — CRM, qualidade &amp; escalonamento <span class="count">10 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">crmStore.ts</div><div class="fdesc">Persistência do funil de leads/negócios do CRM.</div></div>
+        <div class="filerow"><div class="fname">escalationStore.ts</div><div class="fdesc">Casos escalados pro operador (rascunho bloqueado, comprovante, etc.).</div></div>
+        <div class="filerow"><div class="fname">escalationAlertService.ts</div><div class="fdesc">Notifica o operador quando um novo caso é escalado.</div></div>
+        <div class="filerow"><div class="fname">qualityAuditStore.ts</div><div class="fdesc">Persistência de bugs/ideias/recomendações da Central de Qualidade.</div></div>
+        <div class="filerow"><div class="fname">qualityModuleAccess.ts</div><div class="fdesc">Controle de acesso ao módulo de Qualidade.</div></div>
+        <div class="filerow"><div class="fname">approvedReplyExampleStore.ts</div><div class="fdesc">Exemplos de resposta aprovados que realimentam o agente (Camada 4).</div></div>
+        <div class="filerow"><div class="fname">memoryPatternReviewStore.ts</div><div class="fdesc">Revisão de padrões de memória/contexto identificados como suspeitos.</div></div>
+        <div class="filerow"><div class="fname">agentEvalService.ts</div><div class="fdesc">Gera perguntas sintéticas (Gemini) e julga a qualidade das respostas — motor da avaliação automática (ver fluxo 03).</div></div>
+        <div class="filerow"><div class="fname">controlledExperimentStore.ts</div><div class="fdesc">Cadastro de experimentos controlados (testes A/B de prompt/regra).</div></div>
+        <div class="filerow"><div class="fname">controlledExperimentResults.ts</div><div class="fdesc">Resultados agregados de um experimento controlado.</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/services — base de conhecimento, marketing &amp; catálogo <span class="count">9 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">knowledgeBaseStore.ts</div><div class="fdesc">A base de conhecimento do tenant — perfil, regras, catálogo, FAQ (fonte que o agente lê).</div></div>
+        <div class="filerow"><div class="fname">knowledgeBaseDocumentStore.ts</div><div class="fdesc">Documentos tipados versionados da base de conhecimento (rascunho → publicação).</div></div>
+        <div class="filerow"><div class="fname">knowledgeBaseVideoStore.ts</div><div class="fdesc">Vídeos anexados à base de conhecimento.</div></div>
+        <div class="filerow"><div class="fname">metaAdsManagementService.ts</div><div class="fdesc">Gestão de campanha Meta Ads (criar/pausar/ajustar) via API.</div></div>
+        <div class="filerow"><div class="fname">metaAdsInsightsService.ts</div><div class="fdesc">Métricas/insights de campanha Meta Ads.</div></div>
+        <div class="filerow"><div class="fname">metaCapiService.ts</div><div class="fdesc">Envio de evento de conversão pra Meta (Conversions API).</div></div>
+        <div class="filerow"><div class="fname">publicCatalogStore.ts</div><div class="fdesc">Dados do catálogo público por tenant (produtos, preços, opt-in).</div></div>
+        <div class="filerow"><div class="fname">publicCatalogClickStore.ts</div><div class="fdesc">Rastreio de clique no catálogo público.</div></div>
+        <div class="filerow"><div class="fname">commercialOfferStore.ts</div><div class="fdesc">Planos comerciais públicos (Essencial/Profissional) e interesse capturado.</div></div>
+        <div class="filerow"><div class="fname">googleSheetsSync.ts</div><div class="fdesc">Sincronização de dado com Google Sheets.</div></div>
+        <div class="filerow"><div class="fname">broadcastStore.ts</div><div class="fdesc">Cadastro de campanhas de disparo em massa.</div></div>
+        <div class="filerow"><div class="fname">broadcastSenderJob.ts</div><div class="fdesc">Job de fundo: dispara a campanha ativa, por evento + poll de segurança de 5min.</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/services — multi-tenant, admin &amp; infraestrutura <span class="count">16 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">tenantContext.ts</div><div class="fdesc">Resolve o tenant da requisição autenticada (sempre do JWT, nunca de parâmetro do cliente).</div></div>
+        <div class="filerow"><div class="fname">tenantDbContext.ts</div><div class="fdesc">Contexto de banco por tenant sob RLS (chave publicável + JWT curto) — a barreira real de isolamento.</div></div>
+        <div class="filerow"><div class="fname">tenantProfileStore.ts</div><div class="fdesc">Dados de perfil/cadastro do tenant.</div></div>
+        <div class="filerow"><div class="fname">tenantPromptLayerStore.ts</div><div class="fdesc">Camadas de prompt específicas do tenant (Camada 3 da arquitetura em camadas).</div></div>
+        <div class="filerow"><div class="fname">tenantSlug.ts</div><div class="fdesc">Geração/validação do slug público do tenant (usado em <code>/catalogo/:slug</code>).</div></div>
+        <div class="filerow"><div class="fname">featureEntitlementService.ts</div><div class="fdesc">Resolve a decisão efetiva de feature: plano → exceção ativa → uso.</div></div>
+        <div class="filerow"><div class="fname">agendaModuleAccess.ts</div><div class="fdesc">Controle de acesso ao módulo de Agenda.</div></div>
+        <div class="filerow"><div class="fname">systemLogsModuleAccess.ts</div><div class="fdesc">Controle de acesso ao painel de logs de sistema.</div></div>
+        <div class="filerow"><div class="fname">globalPromptStore.ts</div><div class="fdesc">Camada 1 do prompt do agente — universal, igual pra todo tenant.</div></div>
+        <div class="filerow"><div class="fname">systemErrorAlertService.ts</div><div class="fdesc">Job de fundo: alerta o admin sobre erro genérico de sistema.</div></div>
+        <div class="filerow"><div class="fname">systemIncidentStore.ts</div><div class="fdesc">Registro de incidentes de sistema, com severidade (ex.: cota do Gemini esgotada = <code>critical</code>).</div></div>
+        <div class="filerow"><div class="fname">structuredLog.ts</div><div class="fdesc">Log estruturado usado pelos jobs/serviços de alerta e incidente.</div></div>
+        <div class="filerow"><div class="fname">logRedaction.ts</div><div class="fdesc">Remove dado sensível do log antes de gravar/exibir.</div></div>
+        <div class="filerow"><div class="fname">operationEventStore.ts</div><div class="fdesc">Eventos operacionais registrados pra auditoria.</div></div>
+        <div class="filerow"><div class="fname">tokenUsageStore.ts</div><div class="fdesc">Contabiliza uso de token de IA por tenant.</div></div>
+        <div class="filerow"><div class="fname">modelPricing.ts</div><div class="fdesc">Tabela de preço por modelo de IA, usada no cálculo de custo/uso.</div></div>
+        <div class="filerow"><div class="fname">periodicJob.ts</div><div class="fdesc">Helper genérico que todos os jobs de fundo (<code>setInterval</code>) usam.</div></div>
+        <div class="filerow"><div class="fname">db.ts</div><div class="fdesc">Cliente de banco (<code>getDb()</code>/<code>getPlatformDb()</code>) — decide se a query roda sob RLS de tenant ou como plataforma.</div></div>
+        <div class="filerow"><div class="fname">csvParse.ts</div><div class="fdesc">Parser de CSV usado em importação de dado.</div></div>
+        <div class="filerow"><div class="fname">pushSubscriptionStore.ts</div><div class="fdesc">Inscrições de push notification do navegador, por usuário.</div></div>
+        <div class="filerow"><div class="fname">webPush.ts</div><div class="fdesc">Envio de notificação push web.</div></div>
+        <div class="filerow"><div class="fname">groqClient.ts</div><div class="fdesc">Cliente pro roteador alternativo Groq (classificação rápida de mensagem).</div></div>
+        <div class="filerow"><div class="fname">geminiSystemInstructionCache.ts</div><div class="fdesc">Cache do <code>systemInstruction</code> do Gemini por tenant, pra não remontar a cada chamada.</div></div>
+        <div class="filerow"><div class="fname">adminAlertChannel.ts</div><div class="fdesc">Canal comum (push + WhatsApp template) usado pelos 4 jobs de alerta de sistema.</div></div>
+        <div class="filerow"><div class="fname">conversationAnalysisStore.ts</div><div class="fdesc">Análise/resumo de conversa (ex.: pro painel de operações).</div></div>
+        <div class="filerow"><div class="fname">roadmapStore.ts</div><div class="fdesc">Persistência dos itens de roadmap visíveis no painel.</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>server/middleware &amp; scripts <span class="count">10 arquivos</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">server/middleware/auth.ts</div><div class="fdesc">Valida o JWT e popula <code>req.user</code> em toda rota autenticada.</div></div>
+        <div class="filerow"><div class="fname">server/middleware/rbac.ts</div><div class="fdesc">Hierarquia de papel: <code>operator &lt; manager &lt; admin &lt; saas_admin</code>.</div></div>
+        <div class="filerow"><div class="fname">server/middleware/rateLimit.ts</div><div class="fdesc">Limitadores de taxa por rota sensível (OAuth callback, SSE, etc.).</div></div>
+        <div class="filerow"><div class="fname">server/middleware/asyncHandler.ts</div><div class="fdesc">Envolve toda rota async pra Express 4 não derrubar o processo com promise rejeitada.</div></div>
+        <div class="filerow"><div class="fname">server/config.ts</div><div class="fdesc">Carrega e valida toda variável de ambiente (recusa subir se faltar uma crítica).</div></div>
+        <div class="filerow"><div class="fname">server/gemini.ts</div><div class="fdesc"><code>withGeminiRetry</code> — camada de retry ao redor de toda chamada Gemini.</div></div>
+        <div class="filerow"><div class="fname">server/supabaseClient.ts</div><div class="fdesc">Instancia o cliente Supabase (chave publicável, não service key).</div></div>
+        <div class="filerow"><div class="fname">scripts/eval-agent.ts</div><div class="fdesc">CLI da avaliação automática do agente (<code>npm run eval:agent</code>) — ver fluxo 03.</div></div>
+        <div class="filerow"><div class="fname">scripts/create-tenant.ts / create-operator.ts</div><div class="fdesc">Provisionamento manual de tenant/operador via terminal.</div></div>
+        <div class="filerow"><div class="fname">scripts/seed-monique-knowledge-base.ts</div><div class="fdesc">(Re)popula a base de conhecimento do tenant real (Monique) com dado de referência.</div></div>
+        <div class="filerow"><div class="fname">scripts/migrate-legacy-data.ts</div><div class="fdesc">Migração pontual de dado legado pro schema multi-tenant atual.</div></div>
+        <div class="filerow"><div class="fname">scripts/start-task.ts</div><div class="fdesc">Gera o próximo <code>TASK-XXXX</code> e o registro em <code>docs/task-registry/</code> (<code>npm run task:start</code>).</div></div>
+      </div>
+    </details>
+
+    <details class="filemap-group">
+      <summary>src/ — painel React (frontend) <span class="count">principais</span></summary>
+      <div class="filemap-rows">
+        <div class="filerow"><div class="fname">src/App.tsx</div><div class="fdesc">Dono do estado do painel inteiro — tenants, usuário, leads, transações, base de conhecimento.</div></div>
+        <div class="filerow"><div class="fname">src/lib/apiClient.ts</div><div class="fdesc"><code>apiFetch</code> — cliente HTTP central usado por quase toda tela real.</div></div>
+        <div class="filerow"><div class="fname">WhatsAppLeadsSim.tsx</div><div class="fdesc">Tela real de conversas — recebe atualização via SSE (ver fluxo 07).</div></div>
+        <div class="filerow"><div class="fname">AgendaFinanceiroCenter.tsx</div><div class="fdesc">Tela real de Agenda e Financeiro que o usuário vê (não <code>FinancialDashboard.tsx</code>, que não é renderizado em lugar nenhum).</div></div>
+        <div class="filerow"><div class="fname">OperatorCRM.tsx</div><div class="fdesc">Funil de vendas do CRM, ligado à API real.</div></div>
+        <div class="filerow"><div class="fname">EscalationsPanel.tsx</div><div class="fdesc">Casos escalados, incluindo "Aprovar e enviar" rascunho bloqueado.</div></div>
+        <div class="filerow"><div class="fname">QualityAuditCenter.tsx</div><div class="fdesc">Central de Qualidade: bugs, ideias, recomendações, timeline.</div></div>
+        <div class="filerow"><div class="fname">AgentKnowledgeBase.tsx</div><div class="fdesc">Editor visual da base de conhecimento (perfil, catálogo, regras, FAQ, mídias).</div></div>
+        <div class="filerow"><div class="fname">TrafficCenter.tsx</div><div class="fdesc">Central de Tráfego pago (Meta Ads) supervisionada.</div></div>
+        <div class="filerow"><div class="fname">MetaAdsManagementPanel.tsx / MetaAdsResourceBuilder.tsx</div><div class="fdesc">Gestão de campanha e criação de recursos de anúncio.</div></div>
+        <div class="filerow"><div class="fname">BroadcastAdminPanel.tsx</div><div class="fdesc">Criação e ativação de campanhas de disparo em massa.</div></div>
+        <div class="filerow"><div class="fname">PublicCatalogSettings.tsx / PublicCatalogPage.tsx / PublicCatalogMoniqueConcierge.tsx</div><div class="fdesc">Edição do catálogo público no painel + a página pública em si.</div></div>
+        <div class="filerow"><div class="fname">PublicOfferPage.tsx</div><div class="fdesc">Página pública de planos comerciais (<code>/oferta</code>).</div></div>
+        <div class="filerow"><div class="fname">TenantActivationChecklist.tsx</div><div class="fdesc">Checklist de ativação de tenant novo (WhatsApp, agente, agenda, catálogo).</div></div>
+        <div class="filerow"><div class="fname">TenantEntitlementsModal.tsx</div><div class="fdesc">Painel de plano/capacidades por tenant (saas_admin).</div></div>
+        <div class="filerow"><div class="fname">SaaSAdminDashboard.tsx</div><div class="fdesc">Painel administrativo cross-tenant do saas_admin.</div></div>
+        <div class="filerow"><div class="fname">SystemLogsPanel.tsx</div><div class="fdesc">Painel de incidentes de sistema registrados.</div></div>
+        <div class="filerow"><div class="fname">ReconectarWhatsAppQrCode.tsx</div><div class="fdesc">Fluxo de reconexão do QR code do WhatsApp (Evolution).</div></div>
+        <div class="filerow"><div class="fname">calendar/UpcomingEventsPanel.tsx</div><div class="fdesc">Widget de agenda — remarcar/excluir agendamento direto do painel.</div></div>
+        <div class="filerow"><div class="fname">leads/ManualAppointmentModal.tsx, AddLeadModal.tsx, ManageLabelsModal.tsx</div><div class="fdesc">Modais de cadastro manual de agendamento, lead e etiquetas.</div></div>
+        <div class="filerow"><div class="fname">chat/QuickRepliesMenu.tsx, ForwardMessageModal.tsx, ImageLightboxModal.tsx, LeadListRow.tsx</div><div class="fdesc">Componentes de apoio da tela de conversas.</div></div>
+        <div class="filerow"><div class="fname">Header.tsx</div><div class="fdesc">Barra superior, navegação principal e seletor de tenant (só visível pro saas_admin).</div></div>
+      </div>
+    </details>
+  </section>
+
   <section id="fluxo-frontend">
-    <div class="eyebrow">06 · o painel que a operadora usa</div>
+    <div class="eyebrow">07 · o painel que a operadora usa</div>
     <h2>Como o painel (React) fica em tempo real</h2>
     <p class="deck">Em vez de a tela ficar perguntando "tem mensagem nova?" toda hora ao banco, o servidor <strong>avisa</strong> o painel quando algo muda.</p>
 
@@ -385,7 +660,7 @@ flowchart LR
   </section>
 
   <section id="estado-real">
-    <div class="eyebrow">07 · auditoria, não suposição</div>
+    <div class="eyebrow">08 · auditoria, não suposição</div>
     <h2>Estado real por área</h2>
     <p class="deck">Cada linha reflete o que o código faz hoje — não o que a documentação antiga dizia. As pendências já apareceram nos fluxos das seções 01–05 (nó tracejado); aqui é só o resumo tabular pra busca rápida.</p>
 
@@ -445,6 +720,11 @@ flowchart LR
         <div class="name">Central de Qualidade<small>QualityAuditCenter.tsx</small></div>
         <div><span class="chip mid">parcial</span></div>
         <div class="desc">Coleta bugs/ideias/recomendações por tenant — é evidência para revisão humana, não altera o agente sozinha (decisão de escopo, não bug).</div>
+      </div>
+      <div class="area">
+        <div class="name">Avaliação automática do agente<small>agentEvalService.ts, scripts/eval-agent.ts</small></div>
+        <div><span class="chip mid">parcial</span></div>
+        <div class="desc">Mesclada em 02/09/2026 (PR #575, TASK-0203): gera perguntas sintéticas com Gemini a partir da KB real, roda no pipeline de produção de verdade (sem tocar agenda/WhatsApp) e julga a qualidade da resposta. Só roda por terminal (<code>npm run eval:agent</code>); ainda não tem botão no painel, e cada achado cai na Central de Qualidade pra revisão humana, nunca corrige sozinho.</div>
       </div>
       <div class="area">
         <div class="name">Financeiro / Agenda real<small>AgendaFinanceiroCenter.tsx</small></div>
