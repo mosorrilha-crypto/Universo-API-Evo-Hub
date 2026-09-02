@@ -9,9 +9,10 @@ import express from 'express';
 import type { Server } from 'http';
 import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 
-const { callCounter, mockResponse } = vi.hoisted(() => ({
+const { callCounter, mockResponse, lastPrompt } = vi.hoisted(() => ({
   callCounter: { count: 0 },
   mockResponse: { text: '{}', shouldFail: false },
+  lastPrompt: { value: '' },
 }));
 
 vi.mock('../../gemini', async () => {
@@ -20,8 +21,9 @@ vi.mock('../../gemini', async () => {
     ...actual,
     getGeminiClient: () => ({
       models: {
-        generateContent: async () => {
+        generateContent: async (params: any) => {
           callCounter.count += 1;
+          lastPrompt.value = typeof params?.contents === 'string' ? params.contents : '';
           if (mockResponse.shouldFail) throw new Error('Gemini indisponível (simulado no teste)');
           return { text: mockResponse.text };
         },
@@ -108,6 +110,36 @@ describe('POST /api/ai/reply-from-hint', () => {
     expect(data.source).toBe('fallback');
     expect(data.reply).toBe('');
     expect(data.error).toBeTruthy();
+  });
+
+  // TASK-0193 — achado real (dono do produto, 31/08/2026): o rascunho
+  // gerado por esta rota re-cumprimentou ("¡Hola!") e repetiu um preço que
+  // já tinha sido enviado poucas mensagens antes na mesma conversa — o
+  // prompt não tinha nenhuma instrução equivalente às regras 6 e 9 do
+  // autoReply.ts (nunca se reapresentar, nunca repetir o que já foi dito).
+  // Este teste não avalia o texto gerado pelo Gemini (mockado) — verifica
+  // que o PROMPT ENVIADO carrega essas instruções, pra não regredir se
+  // alguém reescrever o prompt sem essa parte.
+  it('o prompt enviado ao Gemini instrui a não se reapresentar nem repetir informação já enviada', async () => {
+    mockResponse.shouldFail = false;
+    mockResponse.text = JSON.stringify({ reply: 'ok', detectedLanguage: 'Português', translation: '' });
+
+    await fetch(`${baseUrl}/api/ai/reply-from-hint`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        leadInfo: { name: 'Cliente Teste', phone: '595981828280' },
+        messages: [
+          { sender: 'lead', text: '¿Cuánto cuesta?' },
+          { sender: 'agent', sentBy: 'operator', text: 'El precio es Gs 550.000' },
+        ],
+        hint: 'reforça o preço',
+      }),
+    });
+
+    expect(lastPrompt.value).toMatch(/n[ãa]o|nunca/i);
+    expect(lastPrompt.value.toLowerCase()).toContain('se apresente');
+    expect(lastPrompt.value.toLowerCase()).toContain('repita uma informa');
   });
 });
 
