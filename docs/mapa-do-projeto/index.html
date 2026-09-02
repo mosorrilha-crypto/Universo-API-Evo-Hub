@@ -220,7 +220,7 @@
     <p class="lede">Este é o mapa "explodido" do ecossistema: cinco fluxos reais (mensagem, agenda/financeiro, CRM/qualidade, marketing/catálogo, administração/alertas) mostrando <strong>o que já está rodando em produção</strong> — e onde ainda falta algo, marcado como um nó tracejado <em>dentro do próprio fluxo</em>, não numa lista à parte. Baseado no estado real do código, auditado em <code>docs/GUIA-DO-PROJETO.md</code> — não em suposição.</p>
     <div class="badge-row">
       <span class="badge">fonte: docs/GUIA-DO-PROJETO.md</span>
-      <span class="badge">auditado 27/08 · atualizado 02/09/2026 (PR #575)</span>
+      <span class="badge">auditado 27/08 · atualizado 02/09/2026 (PR #575, #587)</span>
       <span class="badge">tenant real ativo: estúdio de beleza (Monique)</span>
     </div>
     <div class="legend" style="margin-top:1.4rem;">
@@ -330,21 +330,26 @@ flowchart TB
       EX -.->|"últimos 3 exemplos entram<br/>na Camada 4 (contexto dinâmico)"| IA2["próximas respostas<br/>do mesmo tenant"]
       QA["QualityAuditCenter.tsx<br/>qualityAuditStore.ts<br/><i>bugs, ideias, recomendações</i>"] -.->|"evidência pra revisão humana"| PEND3["⏳ decisão de escopo:<br/>não vira regra automática sozinha"]
     end
-    subgraph EVALFLOW["Avaliação automática do agente (TASK-0203, PR #575)"]
-      GEN["generateSyntheticEvalQuestions<br/>agentEvalService.ts<br/><i>Gemini gera casos de teste<br/>a partir da KB real do tenant</i>"] --> RUN["scripts/eval-agent.ts<br/><i>npm run eval:agent -- --tenant</i>"]
-      RUN -->|"roda no pipeline REAL,<br/>sem tocar agenda nem WhatsApp"| PIPE["generateAutoReplyForText"]
+    subgraph EVALFLOW["Avaliação automática do agente (TASK-0203+0208, PR #575+#587)"]
+      BTN["botão 'Rodar avaliação agora'<br/>QualityAuditCenter.tsx"] --> POSTR["POST /api/quality-audit/eval-runs<br/><i>responde 202 na hora, roda em background</i>"]
+      POSTR --> RUNSTORE["agent_eval_runs<br/>agentEvalRunStore.ts<br/><i>progresso da rodada</i>"]
+      POSTR --> ORCH["runAgentEvaluation<br/>agentEvalService.ts"]
+      ORCH --> GEN["gera casos sintéticos<br/>com a KB real do tenant"]
+      GEN -->|"roda no pipeline REAL,<br/>sem tocar agenda nem WhatsApp"| PIPE["generateAutoReplyForText"]
       PIPE --> JUDGE["reviewAutoReplyBeforeSend<br/>+ judgeAgentReplyQuality"]
       JUDGE --> REPEAT["findRepeatedPhrasesAcrossResponses<br/><i>detecta frase repetida entre casos</i>"]
       JUDGE -->|"achado"| QA
+      RUNSTORE -.->|"GET .../eval-runs,<br/>polling 3s"| BTN
     end
 
     style CRM fill:#1f7a5c,color:#fff,stroke:none
     style GATE2 fill:#1f7a5c,color:#fff,stroke:none
     style SENT fill:#1f7a5c,color:#fff,stroke:none
-    style RUN fill:#b9822f,color:#fff,stroke:none
+    style BTN fill:#1f7a5c,color:#fff,stroke:none
+    style POSTR fill:#1f7a5c,color:#fff,stroke:none
     style PEND3 fill:transparent,stroke:#b9822f,stroke-width:2px,stroke-dasharray:5 4,color:#b9822f
 </pre>
-      <figcaption>"Aprovar e enviar" é o único ciclo hoje que realimenta o agente de verdade (via exemplos aprovados). A avaliação automática (mesclada em 02/09/2026) gera perguntas sintéticas e testa o pipeline real offline — mas, como tudo o mais aqui, só produz evidência revisável, nunca corrige o agente sozinha. Hoje só roda via terminal (<code>npm run eval:agent</code>); botão no painel é próximo passo registrado, não implementado.</figcaption>
+      <figcaption>"Aprovar e enviar" é o único ciclo que realimenta o agente de verdade (via exemplos aprovados). A avaliação automática — botão em produção desde 02/09/2026 (TASK-0208, PR #587) — gera perguntas sintéticas e testa o pipeline real em background, sem terminal; como tudo o mais aqui, só produz evidência revisável na Central de Qualidade, nunca corrige o agente sozinha. Ainda não testada manualmente na UI real contra Supabase/Gemini pela sessão que a mesclou (restrição de egress).</figcaption>
     </figure>
   </section>
 
@@ -433,7 +438,7 @@ flowchart TB
         <div class="filerow"><div class="fname">crm.ts</div><div class="fdesc">Funil de leads (CRM) e a ponte que cria cobrança automática quando um negócio é marcado como ganho.</div></div>
         <div class="filerow"><div class="fname">financial.ts</div><div class="fdesc">Transações financeiras (receita/despesa) por tenant.</div></div>
         <div class="filerow"><div class="fname">broadcast.ts</div><div class="fdesc">CRUD e ativação de campanhas de disparo em massa.</div></div>
-        <div class="filerow"><div class="fname">qualityAudit.ts</div><div class="fdesc">Central de Qualidade: revisões, achados de bug/ideia, exemplos aprovados que realimentam o agente.</div></div>
+        <div class="filerow"><div class="fname">qualityAudit.ts</div><div class="fdesc">Central de Qualidade: revisões, achados de bug/ideia, exemplos aprovados que realimentam o agente; desde 02/09/2026 também <code>POST/GET /eval-runs</code> pra disparar e acompanhar a avaliação automática.</div></div>
         <div class="filerow"><div class="fname">publicCatalog.ts</div><div class="fdesc">Catálogo público por tenant (<code>/catalogo/:slug</code>) e o painel de configurações dele.</div></div>
         <div class="filerow"><div class="fname">commercialOffer.ts</div><div class="fdesc">Página pública de planos comerciais (<code>/oferta</code>) e captura de interesse, com rate limit.</div></div>
         <div class="filerow"><div class="fname">entitlements.ts</div><div class="fdesc">Consulta do próprio contrato (<code>/api/me/entitlements</code>) e administração de plano/exceções por tenant.</div></div>
@@ -534,7 +539,8 @@ flowchart TB
         <div class="filerow"><div class="fname">qualityModuleAccess.ts</div><div class="fdesc">Controle de acesso ao módulo de Qualidade.</div></div>
         <div class="filerow"><div class="fname">approvedReplyExampleStore.ts</div><div class="fdesc">Exemplos de resposta aprovados que realimentam o agente (Camada 4).</div></div>
         <div class="filerow"><div class="fname">memoryPatternReviewStore.ts</div><div class="fdesc">Revisão de padrões de memória/contexto identificados como suspeitos.</div></div>
-        <div class="filerow"><div class="fname">agentEvalService.ts</div><div class="fdesc">Gera perguntas sintéticas (Gemini) e julga a qualidade das respostas — motor da avaliação automática (ver fluxo 03).</div></div>
+        <div class="filerow"><div class="fname">agentEvalService.ts</div><div class="fdesc">Gera perguntas sintéticas (Gemini) e julga a qualidade das respostas — motor da avaliação automática, orquestrado por <code>runAgentEvaluation</code> (ver fluxo 03).</div></div>
+        <div class="filerow"><div class="fname">agentEvalRunStore.ts</div><div class="fdesc">Progresso de cada rodada de avaliação disparada pelo botão do painel (<code>agent_eval_runs</code>) — o que o polling do painel lê.</div></div>
         <div class="filerow"><div class="fname">controlledExperimentStore.ts</div><div class="fdesc">Cadastro de experimentos controlados (testes A/B de prompt/regra).</div></div>
         <div class="filerow"><div class="fname">controlledExperimentResults.ts</div><div class="fdesc">Resultados agregados de um experimento controlado.</div></div>
       </div>
@@ -600,7 +606,7 @@ flowchart TB
         <div class="filerow"><div class="fname">server/config.ts</div><div class="fdesc">Carrega e valida toda variável de ambiente (recusa subir se faltar uma crítica).</div></div>
         <div class="filerow"><div class="fname">server/gemini.ts</div><div class="fdesc"><code>withGeminiRetry</code> — camada de retry ao redor de toda chamada Gemini.</div></div>
         <div class="filerow"><div class="fname">server/supabaseClient.ts</div><div class="fdesc">Instancia o cliente Supabase (chave publicável, não service key).</div></div>
-        <div class="filerow"><div class="fname">scripts/eval-agent.ts</div><div class="fdesc">CLI da avaliação automática do agente (<code>npm run eval:agent</code>) — ver fluxo 03.</div></div>
+        <div class="filerow"><div class="fname">scripts/eval-agent.ts</div><div class="fdesc">CLI da avaliação automática (<code>npm run eval:agent</code>) — hoje um wrapper fino em cima de <code>runAgentEvaluation</code>, a mesma lógica que o botão do painel usa (ver fluxo 03).</div></div>
         <div class="filerow"><div class="fname">scripts/create-tenant.ts / create-operator.ts</div><div class="fdesc">Provisionamento manual de tenant/operador via terminal.</div></div>
         <div class="filerow"><div class="fname">scripts/seed-monique-knowledge-base.ts</div><div class="fdesc">(Re)popula a base de conhecimento do tenant real (Monique) com dado de referência.</div></div>
         <div class="filerow"><div class="fname">scripts/migrate-legacy-data.ts</div><div class="fdesc">Migração pontual de dado legado pro schema multi-tenant atual.</div></div>
@@ -617,7 +623,7 @@ flowchart TB
         <div class="filerow"><div class="fname">AgendaFinanceiroCenter.tsx</div><div class="fdesc">Tela real de Agenda e Financeiro que o usuário vê (não <code>FinancialDashboard.tsx</code>, que não é renderizado em lugar nenhum).</div></div>
         <div class="filerow"><div class="fname">OperatorCRM.tsx</div><div class="fdesc">Funil de vendas do CRM, ligado à API real.</div></div>
         <div class="filerow"><div class="fname">EscalationsPanel.tsx</div><div class="fdesc">Casos escalados, incluindo "Aprovar e enviar" rascunho bloqueado.</div></div>
-        <div class="filerow"><div class="fname">QualityAuditCenter.tsx</div><div class="fdesc">Central de Qualidade: bugs, ideias, recomendações, timeline.</div></div>
+        <div class="filerow"><div class="fname">QualityAuditCenter.tsx</div><div class="fdesc">Central de Qualidade: bugs, ideias, recomendações, timeline, e desde 02/09/2026 o card "Rodar avaliação agora" (dispara a avaliação automática do agente).</div></div>
         <div class="filerow"><div class="fname">AgentKnowledgeBase.tsx</div><div class="fdesc">Editor visual da base de conhecimento (perfil, catálogo, regras, FAQ, mídias).</div></div>
         <div class="filerow"><div class="fname">TrafficCenter.tsx</div><div class="fdesc">Central de Tráfego pago (Meta Ads) supervisionada.</div></div>
         <div class="filerow"><div class="fname">MetaAdsManagementPanel.tsx / MetaAdsResourceBuilder.tsx</div><div class="fdesc">Gestão de campanha e criação de recursos de anúncio.</div></div>
@@ -707,6 +713,11 @@ flowchart LR
         <div class="desc">Reconverte para Ogg/Opus antes de mandar — sem isso, o áudio "manda com sucesso" mas nunca toca do outro lado.</div>
       </div>
       <div class="area">
+        <div class="name">Áudio recebido do cliente<small>transcriptionQueue.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Corrigido em 02/09/2026 (TASK-0209, CRÍTICO): a fila de transcrição cortava o histórico por posição, assumindo que o áudio era sempre a última mensagem — se o cliente mandasse outra mensagem enquanto o áudio ainda transcrevia, a mensagem nova de verdade era descartada do contexto. Corrigido pra cortar por identidade do próprio áudio, mesma classe de bug de uma correção anterior (TASK-0172).</div>
+      </div>
+      <div class="area">
         <div class="name">CRM do operador<small>OperatorCRM.tsx, crmStore.ts</small></div>
         <div><span class="chip on">ativo</span></div>
         <div class="desc">Já ligado à API real (não é mais mock local). Marcar lead como "Ganho" com valor negociado cria cobrança pendente automática no Financeiro.</div>
@@ -722,9 +733,9 @@ flowchart LR
         <div class="desc">Coleta bugs/ideias/recomendações por tenant — é evidência para revisão humana, não altera o agente sozinha (decisão de escopo, não bug).</div>
       </div>
       <div class="area">
-        <div class="name">Avaliação automática do agente<small>agentEvalService.ts, scripts/eval-agent.ts</small></div>
-        <div><span class="chip mid">parcial</span></div>
-        <div class="desc">Mesclada em 02/09/2026 (PR #575, TASK-0203): gera perguntas sintéticas com Gemini a partir da KB real, roda no pipeline de produção de verdade (sem tocar agenda/WhatsApp) e julga a qualidade da resposta. Só roda por terminal (<code>npm run eval:agent</code>); ainda não tem botão no painel, e cada achado cai na Central de Qualidade pra revisão humana, nunca corrige sozinho.</div>
+        <div class="name">Avaliação automática do agente<small>agentEvalService.ts, agentEvalRunStore.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Gera perguntas sintéticas com Gemini a partir da KB real, roda no pipeline de produção de verdade (sem tocar agenda/WhatsApp) e julga a qualidade da resposta. Botão "Rodar avaliação agora" na Central de Qualidade desde 02/09/2026 (TASK-0208, PR #587) — dispara em background (<code>POST /api/quality-audit/eval-runs</code>), painel faz polling do progresso. Cada achado cai na Central de Qualidade pra revisão humana, nunca corrige o agente sozinho. Ainda não validado manualmente contra Supabase/Gemini reais pela sessão que mesclou (restrição de egress na hora).</div>
       </div>
       <div class="area">
         <div class="name">Financeiro / Agenda real<small>AgendaFinanceiroCenter.tsx</small></div>
