@@ -57,6 +57,18 @@ async function seedPendingRecipients(campaignId: string, numberId: string, count
   }
 }
 
+async function seedCampaignTemplateLink(campaignId: string, templateId: string, overrides: Partial<Record<string, any>> = {}) {
+  await getDb().from('broadcast_campaign_templates').insert({ campaign_id: campaignId, template_id: templateId, header_media_id: null, ...overrides });
+}
+
+async function seedPendingRecipientWithTemplate(campaignId: string, numberId: string, phone: string, templateId: string) {
+  await getDb().from('broadcast_contacts').insert({ id: `contact-${phone}`, tenant_id: TENANT_A, list_id: 'list-1', phone, name: `Contato ${phone}`, variables: {} });
+  await getDb().from('broadcast_campaign_recipients').insert({
+    id: `recipient-${phone}`, campaign_id: campaignId, tenant_id: TENANT_A, contact_id: `contact-${phone}`,
+    broadcast_number_id: numberId, template_id: templateId, phone, status: 'pending',
+  });
+}
+
 beforeEach(() => {
   initDb(createFakeSupabase());
   vi.useFakeTimers();
@@ -312,5 +324,39 @@ describe('broadcastSenderJob — agendamento e janela de horário (TASK-0173)', 
     await runBroadcastSenderTick();
 
     expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('broadcastSenderJob — variação de template', () => {
+  it('cada destinatário é enviado usando o template atribuído a ele (não sempre o mesmo)', async () => {
+    await seedTemplate('tpl-a', { name: 'template_a' });
+    await seedTemplate('tpl-b', { name: 'template_b' });
+    await seedNumber('num-1');
+    await seedCampaign('camp-1', 'tpl-a');
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedCampaignTemplateLink('camp-1', 'tpl-a');
+    await seedCampaignTemplateLink('camp-1', 'tpl-b');
+    await seedPendingRecipientWithTemplate('camp-1', 'num-1', '595911111111', 'tpl-a');
+    await seedPendingRecipientWithTemplate('camp-1', 'num-1', '595922222222', 'tpl-b');
+
+    await runBroadcastSenderTick();
+
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(2);
+    const templateNamesUsed = vi.mocked(sendWhatsAppTemplateMessage).mock.calls.map((call) => call[3]);
+    expect(templateNamesUsed.sort()).toEqual(['template_a', 'template_b']);
+  });
+
+  it('recipient com template_id nulo (campanha antiga, criada antes da variação existir) usa o template principal da campanha', async () => {
+    await seedTemplate('tpl-a', { name: 'template_a' });
+    await seedNumber('num-1');
+    await seedCampaign('camp-1', 'tpl-a');
+    await seedCampaignNumber('camp-1', 'num-1');
+    // Sem broadcast_campaign_templates nenhum — simula campanha pré-existente.
+    await seedPendingRecipients('camp-1', 'num-1', 1);
+
+    await runBroadcastSenderTick();
+
+    expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendWhatsAppTemplateMessage).mock.calls[0][3]).toBe('template_a');
   });
 });

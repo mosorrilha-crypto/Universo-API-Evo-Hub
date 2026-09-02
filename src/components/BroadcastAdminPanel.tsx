@@ -44,9 +44,16 @@ interface BroadcastContactList {
   id: string;
   name: string;
   sourceFilename: string | null;
+  source: 'csv' | 'segment_known_leads' | 'segment_has_appointment';
   contactCount: number;
   createdAt: string;
 }
+
+const LIST_SOURCE_LABELS: Record<BroadcastContactList['source'], string> = {
+  csv: 'CSV',
+  segment_known_leads: 'Segmento: já são leads',
+  segment_has_appointment: 'Segmento: já têm agendamento',
+};
 
 interface BroadcastCampaign {
   id: string;
@@ -307,6 +314,39 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
     await loadLists();
   };
 
+  // Monta a lista a partir de dado real já existente no sistema (não CSV)
+  // — "já é lead" ou "já tem agendamento confirmado". Não existe segmento
+  // de "inscrito em evento": o sistema não tem essa entidade.
+  const [segmentListName, setSegmentListName] = useState('');
+  const [segmentChoice, setSegmentChoice] = useState<'known_leads' | 'has_appointment'>('known_leads');
+  const [isCreatingSegmentList, setIsCreatingSegmentList] = useState(false);
+
+  const handleCreateSegmentList = async () => {
+    if (!segmentListName.trim()) {
+      setListError('Dê um nome pra lista antes de criar a partir do segmento.');
+      return;
+    }
+    setIsCreatingSegmentList(true);
+    setListError(null);
+    setListImportMessage(null);
+    try {
+      const res = await apiFetch('/api/admin/broadcast-contact-lists/from-segment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: segmentListName.trim(), segment: segmentChoice }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setListImportMessage(`Lista criada com ${data.imported} contatos a partir do segmento.`);
+      setSegmentListName('');
+      await loadLists();
+    } catch (err: any) {
+      setListError(err.message || 'Falha ao criar lista a partir do segmento.');
+    } finally {
+      setIsCreatingSegmentList(false);
+    }
+  };
+
   // ── Campanhas ────────────────────────────────────────────────────────
   const [campaigns, setCampaigns] = useState<BroadcastCampaign[]>([]);
   const [campaignsLoaded, setCampaignsLoaded] = useState(false);
@@ -316,6 +356,10 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
     includeExistingContacts: false, includeRecentDuplicates: false,
   });
   const [allocations, setAllocations] = useState<Array<{ broadcastNumberId: string; count: string }>>([{ broadcastNumberId: '', count: '' }]);
+  // Variação de template (opcional): templates extras além do principal —
+  // o job alterna entre eles por destinatário (round-robin) em vez de
+  // mandar o texto idêntico pra lista inteira.
+  const [extraTemplateIds, setExtraTemplateIds] = useState<string[]>([]);
   const [preview, setPreview] = useState<{ totalContacts: number; toSend: number; skippedExistingContact: number; skippedRecentDuplicate: number } | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [campaignError, setCampaignError] = useState<string | null>(null);
@@ -435,6 +479,7 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
   const resetCampaignForm = () => {
     setCampaignForm({ name: '', templateId: '', contactListId: '', dedupeWindowDays: '3', consentConfirmed: false, includeExistingContacts: false, includeRecentDuplicates: false });
     setAllocations([{ broadcastNumberId: '', count: '' }]);
+    setExtraTemplateIds([]);
     setPreview(null);
     setCampaignError(null);
   };
@@ -458,6 +503,7 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
         body: JSON.stringify({
           name: campaignForm.name,
           templateId: campaignForm.templateId,
+          extraTemplateIds: extraTemplateIds.filter((id) => id && id !== campaignForm.templateId),
           contactListId: campaignForm.contactListId,
           dedupeWindowDays: Number(campaignForm.dedupeWindowDays) || 3,
           consentConfirmed: campaignForm.consentConfirmed,
@@ -729,17 +775,38 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
               <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportCsv(f); }} />
             </label>
           </div>
+          <div className="border-t border-slate-800 pt-4 space-y-2">
+            <h3 className="text-xs font-bold text-slate-200">Ou criar a partir de um segmento (dados reais do sistema, sem CSV)</h3>
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nome da lista</label>
+                <input value={segmentListName} onChange={(e) => setSegmentListName(e.target.value)} placeholder="Ex.: Leads conhecidos" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Segmento</label>
+                <select value={segmentChoice} onChange={(e) => setSegmentChoice(e.target.value as any)} className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                  <option value="known_leads">Já são leads (já conversaram)</option>
+                  <option value="has_appointment">Já têm agendamento confirmado</option>
+                </select>
+              </div>
+              <button onClick={handleCreateSegmentList} disabled={isCreatingSegmentList} className="py-2 px-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer">
+                {isCreatingSegmentList ? <Loader2 className="w-4 h-4 animate-spin" /> : null}<span>Criar lista</span>
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500">Não existe segmento de "inscrito em evento" — o sistema não tem essa entidade. Esses 2 segmentos usam dados reais já existentes (Atendimento e Agenda).</p>
+          </div>
           {listImportMessage && <p className="text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-3 py-2">{listImportMessage}</p>}
           {listError && <p className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{listError}</p>}
           {lists.length === 0 ? (
             <p className="text-xs text-slate-500 py-8 text-center">{listsLoaded ? 'Nenhuma lista importada ainda.' : 'Carregando...'}</p>
           ) : (
             <table className="w-full text-xs text-left">
-              <thead className="text-slate-500 border-b border-slate-800"><tr><th className="py-2 pr-3">Nome</th><th className="py-2 pr-3">Contatos</th><th></th></tr></thead>
+              <thead className="text-slate-500 border-b border-slate-800"><tr><th className="py-2 pr-3">Nome</th><th className="py-2 pr-3">Origem</th><th className="py-2 pr-3">Contatos</th><th></th></tr></thead>
               <tbody>
                 {lists.map((l) => (
                   <tr key={l.id} className="border-b border-slate-800/60">
                     <td className="py-2 pr-3 text-slate-200 font-semibold">{l.name}</td>
+                    <td className="py-2 pr-3 text-slate-500">{LIST_SOURCE_LABELS[l.source] || l.source}</td>
                     <td className="py-2 pr-3 text-slate-400 flex items-center gap-1"><UsersIcon className="w-3.5 h-3.5" />{l.contactCount}</td>
                     <td className="py-2 flex justify-end"><button onClick={() => handleDeleteList(l)} className="p-1.5 bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-400 rounded-lg cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button></td>
                   </tr>
@@ -782,6 +849,20 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
                       {lists.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.contactCount})</option>)}
                     </select>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-2">Variação de template (opcional — alterna entre os templates por destinatário, reduz o risco de "texto idêntico pra todo mundo")</label>
+                  {extraTemplateIds.map((id, idx) => (
+                    <div key={idx} className="flex items-center gap-2 mb-2">
+                      <select value={id} onChange={(e) => setExtraTemplateIds(extraTemplateIds.map((x, i) => i === idx ? e.target.value : x))} className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                        <option value="">Selecione um template equivalente...</option>
+                        {templates.filter((t) => t.id !== campaignForm.templateId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                      <button type="button" onClick={() => setExtraTemplateIds(extraTemplateIds.filter((_, i) => i !== idx))} className="p-1.5 bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 rounded-lg cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setExtraTemplateIds([...extraTemplateIds, ''])} className="text-[11px] text-violet-400 hover:text-violet-300 font-semibold cursor-pointer">+ adicionar template equivalente</button>
                 </div>
 
                 <div>

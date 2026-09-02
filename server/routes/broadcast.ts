@@ -28,6 +28,8 @@ import {
   type BroadcastTemplateCategory,
   type BroadcastTemplateHeaderType,
   importContactList,
+  createContactListFromSegment,
+  type ContactListSegment,
   listContactLists,
   getContactListContacts,
   getContactList,
@@ -37,6 +39,7 @@ import {
   listCampaigns,
   getCampaign,
   listCampaignNumberAllocations,
+  listCampaignTemplateLinks,
   getCampaignCounts,
   listCampaignRecipients,
   updateCampaignStatus,
@@ -224,6 +227,26 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     res.status(201).json({ list: result.list, imported: result.imported, duplicatesIgnored: result.duplicatesIgnored });
   }));
 
+  // Monta a lista a partir de dado real já existente no sistema (não CSV)
+  // — "já é lead" (conversations) ou "já tem agendamento confirmado"
+  // (appointments com eventId real). Não existe segmento de "inscrito em
+  // evento": o sistema não tem essa entidade, e inventar uma fabricaria
+  // dado de negócio que não existe (mesma regra do agente de IA).
+  const CONTACT_LIST_SEGMENTS: ContactListSegment[] = ['known_leads', 'has_appointment'];
+  router.post('/api/admin/broadcast-contact-lists/from-segment', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { name, segment } = req.body || {};
+    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
+    if (!CONTACT_LIST_SEGMENTS.includes(segment)) {
+      return res.status(400).json({ error: `Campo "segment" precisa ser um de: ${CONTACT_LIST_SEGMENTS.join(', ')}.` });
+    }
+    try {
+      const result = await createContactListFromSegment(tenantOf(req), name.trim(), segment, req.user?.id || null);
+      res.status(201).json({ list: result.list, imported: result.imported });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  }));
+
   router.get('/api/admin/broadcast-contact-lists/:id/contacts', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
@@ -252,11 +275,14 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
 
   router.post('/api/admin/broadcast-campaigns', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const {
-      name, templateId, contactListId, dedupeWindowDays, consentConfirmed,
+      name, templateId, extraTemplateIds, contactListId, dedupeWindowDays, consentConfirmed,
       numberAllocations, includeExistingContacts, includeRecentDuplicates,
     } = req.body || {};
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
     if (typeof templateId !== 'string' || !templateId) return res.status(400).json({ error: 'Campo "templateId" é obrigatório.' });
+    if (extraTemplateIds !== undefined && (!Array.isArray(extraTemplateIds) || extraTemplateIds.some((t: any) => typeof t !== 'string'))) {
+      return res.status(400).json({ error: 'Campo "extraTemplateIds" precisa ser uma lista de IDs de template.' });
+    }
     if (typeof contactListId !== 'string' || !contactListId) return res.status(400).json({ error: 'Campo "contactListId" é obrigatório.' });
     if (!Array.isArray(numberAllocations) || !numberAllocations.length) {
       return res.status(400).json({ error: 'Selecione ao menos um número de disparo em "numberAllocations".' });
@@ -271,6 +297,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
       const campaign = await createCampaign(tenantOf(req), {
         name: name.trim(),
         templateId,
+        extraTemplateIds: extraTemplateIds || undefined,
         contactListId,
         dedupeWindowDays: dedupeWindowDays || 3,
         consentConfirmed: !!consentConfirmed,
@@ -292,11 +319,12 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     const tenantId = tenantOf(req);
     const campaign = await getCampaign(tenantId, req.params.id);
     if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
-    const [numberAllocations, counts] = await Promise.all([
+    const [numberAllocations, templateLinks, counts] = await Promise.all([
       listCampaignNumberAllocations(tenantId, req.params.id),
+      listCampaignTemplateLinks(req.params.id),
       getCampaignCounts(tenantId, req.params.id),
     ]);
-    res.json({ campaign, numberAllocations, counts: counts.total, countsByNumber: counts.byNumber });
+    res.json({ campaign, numberAllocations, templateLinks, counts: counts.total, countsByNumber: counts.byNumber });
   }));
 
   router.patch('/api/admin/broadcast-campaigns/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
