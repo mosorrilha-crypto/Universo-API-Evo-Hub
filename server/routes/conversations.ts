@@ -27,6 +27,7 @@ import {
   getKnowledgeBase,
   setKnowledgeBase,
   collectReferencedVideoIds,
+  collectReferencedImageIds,
   formatKnowledgeBaseForPrompt,
   findProductMatch,
   resolveProductAmountByName,
@@ -45,6 +46,7 @@ import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLog
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
+import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, deleteKnowledgeBaseImage, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, permanentlyDeleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
@@ -1452,11 +1454,19 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     // do Storage: qualquer videoId que estava referenciado na KB anterior e
     // deixou de aparecer na nova é, de fato, lixo (produto/bloco removido ou
     // vídeo trocado por outro) — nunca uma troca que ainda não foi salva.
-    const previousVideoIds = collectReferencedVideoIds(await getKnowledgeBase(tenantId));
+    // TASK-0218 — mesma lógica pra imagem (collectReferencedImageIds).
+    const previousKb = await getKnowledgeBase(tenantId);
+    const previousVideoIds = collectReferencedVideoIds(previousKb);
+    const previousImageIds = collectReferencedImageIds(previousKb);
     await setKnowledgeBase(tenantId, knowledgeBase);
     const currentVideoIds = collectReferencedVideoIds(knowledgeBase);
+    const currentImageIds = collectReferencedImageIds(knowledgeBase);
     const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
-    await Promise.all(orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)));
+    const orphanedImageIds = [...previousImageIds].filter((id) => !currentImageIds.has(id));
+    await Promise.all([
+      ...orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)),
+      ...orphanedImageIds.map((imageId) => deleteKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantId, imageId)),
+    ]);
     res.json({ success: true });
   }));
 
@@ -1912,6 +1922,63 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('Vary', 'Authorization');
     res.send(video.buffer);
+  }));
+
+  // TASK-0218 — upload real de imagem (foto de exemplo de produto/variante,
+  // antes/depois, bloco de imagem do 1º contato) pro Storage, mesmo padrão
+  // de POST /api/knowledge-base/videos acima: quem associa a referência
+  // (imageId) a um produto/bloco é o cliente (AgentKnowledgeBase.tsx), no
+  // mesmo formData local que já guarda os campos de imagem — só persiste de
+  // verdade quando a base inteira é salva (POST /api/knowledge-base ou o
+  // draft/publish de documentos tipados abaixo). Sem transcodificação
+  // (diferente de vídeo): JPEG/PNG/WebP já são aceitos direto pela Meta.
+  router.post('/api/knowledge-base/images', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { fileName, mimeType, base64 } = req.body || {};
+    if (!fileName?.trim() || !base64 || !mimeType) {
+      return res.status(400).json({ error: 'Campos "fileName", "mimeType" e "base64" são obrigatórios.' });
+    }
+    const resolvedMimeType = String(mimeType).split(';')[0].trim();
+    if (!ALLOWED_IMAGE_MIME_TYPES.has(resolvedMimeType)) {
+      return res.status(400).json({ error: `Formato de imagem não aceito (${resolvedMimeType}) — use JPEG, PNG ou WebP.` });
+    }
+    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buffer.length > MAX_IMAGE_BYTES) {
+      return res.status(400).json({ error: `Imagem maior que ${MAX_IMAGE_BYTES / (1024 * 1024)}MB (limite da Meta pra mensagem de imagem) — comprima antes de enviar.` });
+    }
+    if (buffer.length === 0) {
+      return res.status(400).json({ error: 'Arquivo de imagem vazio.' });
+    }
+
+    const imageId = `image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await uploadKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantId, imageId, buffer, resolvedMimeType);
+
+    // Issue #261 (mesmo padrão já usado por vídeo) — NÃO apaga a imagem
+    // anterior aqui. A referência nova só é persistida de fato quando a KB
+    // inteira é salva; a limpeza da imagem antiga acontece só depois do
+    // save real, comparando o que deixou de ser referenciado (ver
+    // POST /api/knowledge-base acima).
+    res.json({
+      imageId,
+      mimeType: resolvedMimeType,
+      fileName: String(fileName).trim(),
+      sizeBytes: buffer.length,
+    });
+  }));
+
+  // Baixa/visualiza a imagem real — nunca pública (autenticado + escopada
+  // por tenant já pela própria chave de Storage), mesmo padrão de
+  // GET /api/knowledge-base/videos/:videoId acima.
+  router.get('/api/knowledge-base/images/:imageId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const image = await getKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantOf(req), req.params.imageId);
+    if (!image) return res.status(404).json({ error: 'Imagem não encontrada.' });
+    res.setHeader('Content-Type', image.contentType);
+    // Mesmo padrão de cache privado por id estável já usado pra vídeo — o
+    // id é imutável (trocar a foto gera um id novo), então 1h de cache por
+    // id é seguro e reduz egress repetido do Storage.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Vary', 'Authorization');
+    res.send(image.buffer);
   }));
 
   // Upload de arquivo (ex: catálogo em PDF) pra um bloco tipo "file" da
