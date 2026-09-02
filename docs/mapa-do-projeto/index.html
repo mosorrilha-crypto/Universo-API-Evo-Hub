@@ -166,21 +166,6 @@
     .area{ grid-template-columns:1fr; }
   }
 
-  .gap-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
-  .gap-card{
-    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.1rem 1.2rem;
-    border-left:3px solid var(--rose);
-  }
-  .gap-card.mid{ border-left-color:var(--amber); }
-  .gap-card h3{ font-size:1rem; margin:0 0 0.4rem; font-family:'IBM Plex Sans',sans-serif; font-weight:600; }
-  .gap-card p{ font-size:0.86rem; color:var(--slate); margin:0; }
-
-  .qa{ display:flex; flex-direction:column; gap:1.4rem; }
-  .qa-item{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.3rem 1.4rem; }
-  .qa-item .q{ font-family:'Fraunces',serif; font-weight:600; font-size:1.08rem; margin:0 0 0.5rem; }
-  .qa-item .a{ color:var(--slate); font-size:0.92rem; }
-  .qa-item .verdict{ display:inline-block; margin-top:0.7rem; }
-
   footer{
     margin-top:4rem; padding-top:1.6rem; border-top:1px solid var(--line);
     font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--slate);
@@ -197,19 +182,27 @@
   <header class="hero">
     <div class="eyebrow">Universo · dossiê de arquitetura viva</div>
     <h1>O que o Universo já faz — e onde ainda tem buraco</h1>
-    <p class="lede">Este é o mapa "explodido" do sistema: <strong>como uma mensagem do WhatsApp vira uma resposta da IA</strong>, o que já está rodando de verdade em produção, e o que ainda é lacuna conhecida. Baseado no estado real do código, auditado em <code>docs/GUIA-DO-PROJETO.md</code> — não em suposição.</p>
+    <p class="lede">Este é o mapa "explodido" do ecossistema: cinco fluxos reais (mensagem, agenda/financeiro, CRM/qualidade, marketing/catálogo, administração/alertas) mostrando <strong>o que já está rodando em produção</strong> — e onde ainda falta algo, marcado como um nó tracejado <em>dentro do próprio fluxo</em>, não numa lista à parte. Baseado no estado real do código, auditado em <code>docs/GUIA-DO-PROJETO.md</code> — não em suposição.</p>
     <div class="badge-row">
       <span class="badge">fonte: docs/GUIA-DO-PROJETO.md</span>
       <span class="badge">auditado 27/08/2026</span>
       <span class="badge">tenant real ativo: estúdio de beleza (Monique)</span>
     </div>
+    <div class="legend" style="margin-top:1.4rem;">
+      <span class="item"><span class="dot on"></span> Ativo em produção</span>
+      <span class="item"><span class="dot mid"></span> Parcial / com ressalva</span>
+      <span class="item"><span class="dot gap"></span> Pendência (nó tracejado no próprio fluxo)</span>
+    </div>
   </header>
 
   <nav class="toc" aria-label="Sumário">
     <a href="#fluxo-mensagem"><span class="n">01</span> Fluxo da mensagem</a>
-    <a href="#fluxo-frontend"><span class="n">02</span> Painel (frontend)</a>
-    <a href="#estado-real"><span class="n">03</span> Estado real por área</a>
-    <a href="#gaps"><span class="n">04</span> Lacunas conhecidas</a>
+    <a href="#fluxo-agenda-financeiro"><span class="n">02</span> Agenda &amp; Financeiro</a>
+    <a href="#fluxo-crm-qualidade"><span class="n">03</span> CRM, Escalonamento &amp; Qualidade</a>
+    <a href="#fluxo-marketing-catalogo"><span class="n">04</span> Marketing &amp; Catálogo público</a>
+    <a href="#fluxo-admin-alertas"><span class="n">05</span> Administração &amp; Alertas</a>
+    <a href="#fluxo-frontend"><span class="n">06</span> Painel (frontend)</a>
+    <a href="#estado-real"><span class="n">07</span> Estado real por área</a>
   </nav>
 
   <section id="fluxo-mensagem">
@@ -247,8 +240,130 @@ flowchart TB
     </figure>
   </section>
 
+  <section id="fluxo-agenda-financeiro">
+    <div class="eyebrow">02 · da reserva ao dinheiro</div>
+    <h2>Agenda &amp; Financeiro</h2>
+    <p class="deck">O que acontece depois que a IA decide agendar — até o registro financeiro. Os nós tracejados vermelhos são pendências reais, não hipóteses.</p>
+
+    <figure class="diagram-card">
+<pre class="mermaid">
+flowchart TB
+    IA["Especialista Gemini<br/><i>decide agendar durante a conversa</i>"] --> PRE["criar_pre_reserva<br/>preReservationStore.ts<br/><i>reserva não vinculante</i>"]
+    PRE --> LOCK["perTenantCalendarLock.ts<br/><i>evita corrida por horário</i>"]
+    LOCK --> HOLD{cliente confirma<br/>a tempo?}
+    HOLD -->|não| EXP["heldAppointmentExpiryJob.ts<br/><i>libera o horário sozinho</i>"]
+    HOLD -->|sim| CONF["criar_agendamento<br/>appointmentStore.ts<br/><i>Google Calendar real</i>"]
+    CONF --> REM["reminderJob.ts<br/><i>lembrete antes do horário,<br/>idioma por tenant</i>"]
+    REM -.->|"canal Meta fora da janela de 24h<br/>exige template aprovado"| PEND1["⏳ PENDENTE<br/>template lembrete_agendamento_es/pt<br/>aguardando aprovação no Meta Business Manager"]
+    CONF --> PAY["cliente manda comprovante<br/>(card Escalonamentos, kind payment_proof)"]
+    PAY --> HUMAN["operador confirma manualmente<br/><i>IA só lê o comprovante como dica,<br/>nunca decide sozinha</i>"]
+    HUMAN --> FIN["financial_transactions<br/>financialStore.ts"]
+    FIN --> REC["recurringExpenseJob.ts<br/><i>gera despesa recorrente<br/>todo mês, idempotente</i>"]
+    FIN -.->|"nenhum provedor real conectado"| PEND2["⏳ PENDENTE<br/>gateway de pagamento (Stripe/PIX/etc.)<br/>hoje é só registro manual"]
+
+    style IA fill:#1f7a5c,color:#fff,stroke:none
+    style CONF fill:#1f7a5c,color:#fff,stroke:none
+    style FIN fill:#1f7a5c,color:#fff,stroke:none
+    style HUMAN fill:#b9822f,color:#fff,stroke:none
+    style PEND1 fill:transparent,stroke:#a84b3a,stroke-width:2px,stroke-dasharray:5 4,color:#a84b3a
+    style PEND2 fill:transparent,stroke:#a84b3a,stroke-width:2px,stroke-dasharray:5 4,color:#a84b3a
+</pre>
+      <figcaption>O gate de pagamento (awaiting_payment → pending_verification → verified/rejected → confirmed) é mais rígido que projetos comparáveis auditados — a IA nunca confirma pagamento sozinha.</figcaption>
+    </figure>
+  </section>
+
+  <section id="fluxo-crm-qualidade">
+    <div class="eyebrow">03 · quando a IA erra, ou o lead vira venda</div>
+    <h2>CRM, Escalonamento &amp; Central de Qualidade</h2>
+    <p class="deck">Dois ciclos que já realimentam o negócio de verdade — um fecha venda, o outro corrige a IA com supervisão humana.</p>
+
+    <figure class="diagram-card">
+<pre class="mermaid">
+flowchart TB
+    subgraph CRMFLOW["Funil de vendas"]
+      LEAD["Lead na conversa"] --> CRM["OperatorCRM.tsx<br/>crmStore.ts"]
+      CRM -->|"marcado como Ganho<br/>com valor negociado"| WON["recordFinancialTransactionForWonDeal<br/>(crm.ts)"]
+      WON --> FIN2["financial_transactions<br/><i>cobrança 'pendente' automática</i>"]
+    end
+    subgraph QAFLOW["Revisor pré-envio + Qualidade"]
+      RISK["resposta arriscada da IA"] --> GATE2["replySafetyGate.ts<br/><i>revisor pré-envio</i>"]
+      GATE2 -->|"bloqueia"| ESC["escalations.blocked_draft<br/>EscalationsPanel.tsx"]
+      ESC --> REVOP["operador revisa o rascunho"]
+      REVOP -->|"Aprovar e enviar"| SENT["POST /conversations/:phone/send"]
+      SENT --> EX["tenant_approved_reply_examples"]
+      EX -.->|"últimos 3 exemplos entram<br/>na Camada 4 (contexto dinâmico)"| IA2["próximas respostas<br/>do mesmo tenant"]
+      QA["QualityAuditCenter.tsx<br/>qualityAuditStore.ts<br/><i>bugs, ideias, recomendações</i>"] -.->|"evidência pra revisão humana"| PEND3["⏳ decisão de escopo:<br/>não vira regra automática sozinha"]
+    end
+
+    style CRM fill:#1f7a5c,color:#fff,stroke:none
+    style GATE2 fill:#1f7a5c,color:#fff,stroke:none
+    style SENT fill:#1f7a5c,color:#fff,stroke:none
+    style PEND3 fill:transparent,stroke:#b9822f,stroke-width:2px,stroke-dasharray:5 4,color:#b9822f
+</pre>
+      <figcaption>"Aprovar e enviar" é o único ciclo hoje que realimenta o agente de verdade (via exemplos aprovados) — a Central de Qualidade é evidência para humano, não regra automática, por decisão deliberada.</figcaption>
+    </figure>
+  </section>
+
+  <section id="fluxo-marketing-catalogo">
+    <div class="eyebrow">04 · de onde o lead vem</div>
+    <h2>Marketing, Catálogo público &amp; Oferta comercial</h2>
+    <p class="deck">Tráfego pago, catálogo público por tenant e a página comercial que capta interesse em novos planos.</p>
+
+    <figure class="diagram-card">
+<pre class="mermaid">
+flowchart TB
+    ADS["Meta Ads<br/>metaAdsManagementService.ts<br/>metaAdsInsightsService.ts"] --> TC["TrafficCenter.tsx<br/><i>painel supervisionado</i>"]
+    ADS --> CAPI["metaCapiService.ts<br/><i>Conversions API</i>"]
+    ADSCLICK["Cliente clica no anúncio"] --> WA2["mensagem chega no WhatsApp"]
+    WA2 -.-> FLUXOPRINCIPAL["ver seção 01 —<br/>fluxo da mensagem"]
+
+    CAT["publicCatalogStore.ts<br/>/catalogo/:slug"] --> CLICK["publicCatalogClickStore.ts<br/><i>rastreio de clique</i>"]
+    CAT --> BTN["botão flutuante WhatsApp<br/>mensagem editável no painel"]
+    OFERTA["/oferta — commercialOfferStore.ts<br/><i>planos Essencial e Profissional</i>"] --> INTERESSE["contato de interesse comercial<br/><i>rate-limit 8/IP/hora</i>"]
+    INTERESSE -.->|"sem ativação automática do tenant"| PEND4["⏳ PENDENTE<br/>ativar piloto exige canal + operador<br/>+ conversa de teste manual"]
+
+    BC["BroadcastAdminPanel.tsx<br/>broadcastSenderJob.ts"] -->|"campanha muda pra<br/>running/scheduled"| DISPARO["disparo em massa<br/>(gatilho por evento)"]
+    BC -.->|"sem botão manual liga/desliga"| PEND5["🟡 parcial: só gatilho automático<br/>+ poll de segurança de 5min"]
+
+    style ADS fill:#1f7a5c,color:#fff,stroke:none
+    style CAT fill:#1f7a5c,color:#fff,stroke:none
+    style DISPARO fill:#1f7a5c,color:#fff,stroke:none
+    style PEND4 fill:transparent,stroke:#a84b3a,stroke-width:2px,stroke-dasharray:5 4,color:#a84b3a
+    style PEND5 fill:transparent,stroke:#b9822f,stroke-width:2px,stroke-dasharray:5 4,color:#b9822f
+</pre>
+      <figcaption>Catálogo público e oferta comercial já são reais em produção; falta só decisão de negócio (trocar link de anúncios pela URL própria) e ativação manual de novos pilotos comerciais.</figcaption>
+    </figure>
+  </section>
+
+  <section id="fluxo-admin-alertas">
+    <div class="eyebrow">05 · quem administra e quem vigia</div>
+    <h2>Administração, Entitlements &amp; Alertas de sistema</h2>
+    <p class="deck">Como um tenant novo nasce, o que controla o que ele pode usar, e os 4 jobs de fundo que já vigiam a operação sozinhos.</p>
+
+    <figure class="diagram-card">
+<pre class="mermaid">
+flowchart TB
+    ADMIN["saas_admin cria tenant<br/>POST /api/admin/tenants"] --> CHECK["TenantActivationChecklist.tsx<br/><i>WhatsApp, agente, agenda, catálogo</i>"]
+    CHECK --> ENT["featureEntitlementService.ts<br/><i>plano → exceção ativa → uso</i>"]
+    ENT --> RBAC["rbac.ts<br/>operator &lt; manager &lt; admin &lt; saas_admin"]
+
+    J1["agentPausedAlertJob.ts<br/><i>IA pausada sem resposta</i>"] --> ALERT["push + template WhatsApp<br/>pro admin_alert_phone"]
+    J2["evolutionConnectionAlertJob.ts<br/><i>sessão WhatsApp caiu</i>"] --> ALERT
+    J3["systemErrorAlertService.ts<br/><i>erro genérico de sistema</i>"] --> ALERT
+    J4["paymentPendingAlertJob.ts<br/><i>comprovante esperando confirmação</i>"] --> ALERT
+    ALERT -.->|"fora desses 4 casos específicos"| PEND6["⏳ PENDENTE<br/>sem error tracking geral<br/>(só console.log/warn, 145+ ocorrências)"]
+
+    style ENT fill:#1f7a5c,color:#fff,stroke:none
+    style RBAC fill:#1f7a5c,color:#fff,stroke:none
+    style ALERT fill:#b9822f,color:#fff,stroke:none
+    style PEND6 fill:transparent,stroke:#a84b3a,stroke-width:2px,stroke-dasharray:5 4,color:#a84b3a
+</pre>
+      <figcaption>Decisão deliberada de não depender de serviço externo de observabilidade — mas fora desses 4 alertas específicos, um incidente só aparece se alguém for procurar no log do Render.</figcaption>
+    </figure>
+  </section>
+
   <section id="fluxo-frontend">
-    <div class="eyebrow">02 · o painel que a operadora usa</div>
+    <div class="eyebrow">06 · o painel que a operadora usa</div>
     <h2>Como o painel (React) fica em tempo real</h2>
     <p class="deck">Em vez de a tela ficar perguntando "tem mensagem nova?" toda hora ao banco, o servidor <strong>avisa</strong> o painel quando algo muda.</p>
 
@@ -270,21 +385,21 @@ flowchart LR
   </section>
 
   <section id="estado-real">
-    <div class="eyebrow">03 · auditoria, não suposição</div>
+    <div class="eyebrow">07 · auditoria, não suposição</div>
     <h2>Estado real por área</h2>
-    <p class="deck">Cada linha reflete o que o código faz hoje — não o que a documentação antiga dizia.</p>
+    <p class="deck">Cada linha reflete o que o código faz hoje — não o que a documentação antiga dizia. As pendências já apareceram nos fluxos das seções 01–05 (nó tracejado); aqui é só o resumo tabular pra busca rápida.</p>
 
     <div class="legend">
       <span class="item"><span class="dot on"></span> Ativo em produção</span>
       <span class="item"><span class="dot mid"></span> Parcial / com ressalva</span>
-      <span class="item"><span class="dot gap"></span> Lacuna conhecida</span>
+      <span class="item"><span class="dot gap"></span> Pendência</span>
     </div>
 
     <div class="area-list">
       <div class="area">
-        <div class="name">Isolamento multi-tenant<small>tenantContext.ts</small></div>
+        <div class="name">Isolamento multi-tenant<small>tenantContext.ts, RLS</small></div>
         <div><span class="chip on">ativo</span></div>
-        <div class="desc"><code>tenantId</code> sempre vem do JWT autenticado — nunca de parâmetro enviado pelo cliente. Sem fallback silencioso para um tenant padrão.</div>
+        <div class="desc"><code>tenantId</code> sempre vem do JWT autenticado — nunca de parâmetro enviado pelo cliente. RLS efetivo em produção desde 26/08/2026 (chave publicável + JWT curto por tenant), não é mais só disciplina de código.</div>
       </div>
       <div class="area">
         <div class="name">Roteamento de webhook<small>tenantResolver.ts</small></div>
@@ -294,7 +409,17 @@ flowchart LR
       <div class="area">
         <div class="name">Agente de IA + Calendar<small>autoReply.ts</small></div>
         <div><span class="chip on">ativo</span></div>
-        <div class="desc">Classificação → resposta especialista → agendamento real via function-calling no Google Calendar, com trava anti-alucinação no fim.</div>
+        <div class="desc">Classificação → resposta especialista → agendamento real via function-calling no Google Calendar, com trava anti-alucinação preventiva e reativa.</div>
+      </div>
+      <div class="area">
+        <div class="name">Pré-reserva &amp; expiração de hold<small>preReservationStore.ts, heldAppointmentExpiryJob.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Reserva não vinculante com lock por tenant; libera sozinho se o cliente não confirmar. Ver fluxo 02.</div>
+      </div>
+      <div class="area">
+        <div class="name">Lembrete de agendamento<small>reminderJob.ts</small></div>
+        <div><span class="chip mid">parcial</span></div>
+        <div class="desc">Código pronto (idioma por tenant, botões de confirmar/remarcar); canal Meta fora da janela de 24h depende de 2 templates ainda não aprovados no Meta Business Manager.</div>
       </div>
       <div class="area">
         <div class="name">Pausa do agente<small>agentStatus.ts</small></div>
@@ -307,24 +432,49 @@ flowchart LR
         <div class="desc">Reconverte para Ogg/Opus antes de mandar — sem isso, o áudio "manda com sucesso" mas nunca toca do outro lado.</div>
       </div>
       <div class="area">
-        <div class="name">CRM do operador<small>OperatorCRM.tsx</small></div>
-        <div><span class="chip gap">lacuna</span></div>
-        <div class="desc">Ainda é <code>localStorage</code> puro — nenhuma chamada de API. O que a operadora anota ali não é salvo em nenhum servidor.</div>
+        <div class="name">CRM do operador<small>OperatorCRM.tsx, crmStore.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Já ligado à API real (não é mais mock local). Marcar lead como "Ganho" com valor negociado cria cobrança pendente automática no Financeiro.</div>
+      </div>
+      <div class="area">
+        <div class="name">Escalonamento &amp; Aprovar/enviar<small>EscalationsPanel.tsx, replySafetyGate.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Rascunho bloqueado pode ser aprovado e enviado direto do painel; vira "exemplo aprovado" que realimenta as próximas respostas do mesmo tenant.</div>
+      </div>
+      <div class="area">
+        <div class="name">Central de Qualidade<small>QualityAuditCenter.tsx</small></div>
+        <div><span class="chip mid">parcial</span></div>
+        <div class="desc">Coleta bugs/ideias/recomendações por tenant — é evidência para revisão humana, não altera o agente sozinha (decisão de escopo, não bug).</div>
       </div>
       <div class="area">
         <div class="name">Financeiro / Agenda real<small>AgendaFinanceiroCenter.tsx</small></div>
         <div><span class="chip on">ativo</span></div>
-        <div class="desc">Essa é a tela que o usuário realmente vê (não <code>FinancialDashboard.tsx</code>, que nem é renderizada em lugar nenhum).</div>
+        <div class="desc">Essa é a tela que o usuário realmente vê (não <code>FinancialDashboard.tsx</code>, que nem é renderizada em lugar nenhum). Despesas recorrentes automáticas desde 26/08.</div>
       </div>
       <div class="area">
         <div class="name">Pagamentos<small>—</small></div>
-        <div><span class="chip gap">lacuna</span></div>
-        <div class="desc">Ainda não existe integração com gateway de pagamento real — status de pagamento é rastreado, mas não cobrado automaticamente.</div>
+        <div><span class="chip gap">pendência</span></div>
+        <div class="desc">Nenhum gateway real (Stripe/PIX/etc.) — status de pagamento é rastreado e vira registro financeiro, mas não é cobrado automaticamente.</div>
       </div>
       <div class="area">
-        <div class="name">Observabilidade<small>—</small></div>
-        <div><span class="chip gap">lacuna</span></div>
-        <div class="desc">Sem rastreamento de erro dedicado (tipo Sentry) — hoje o diagnóstico depende de ler log do Render manualmente.</div>
+        <div class="name">Marketing / Meta Ads<small>metaAdsManagementService.ts, TrafficCenter.tsx</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Gestão e insights de campanha supervisionados no painel, com Conversions API (CAPI) integrada.</div>
+      </div>
+      <div class="area">
+        <div class="name">Catálogo público<small>publicCatalogStore.ts, /catalogo/:slug</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Produtos e preços vigentes por tenant, edição própria no painel, botão de WhatsApp com mensagem editável e rastreio de clique.</div>
+      </div>
+      <div class="area">
+        <div class="name">Oferta comercial pública<small>/oferta, commercialOfferStore.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Compara planos Essencial/Profissional e capta interesse comercial; ativar um piloto novo ainda exige canal e operador manuais.</div>
+      </div>
+      <div class="area">
+        <div class="name">Entitlements &amp; planos<small>featureEntitlementService.ts</small></div>
+        <div><span class="chip mid">parcial</span></div>
+        <div class="desc">Fonte de verdade de plano/exceção/uso já existe e é auditável; a aplicação de guarda por feature em cada domínio de negócio ainda é incremental.</div>
       </div>
       <div class="area">
         <div class="name">Disparo em massa<small>broadcastSenderJob.ts</small></div>
@@ -332,34 +482,24 @@ flowchart LR
         <div class="desc">Funciona, mas sem botão manual liga/desliga — hoje é gatilho automático por evento + poll de segurança a cada 5 min (TASK-0206).</div>
       </div>
       <div class="area">
+        <div class="name">Alertas de sistema<small>4 jobs: agente pausado, WhatsApp caiu, erro genérico, pagamento pendente</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Cada um alerta push + template WhatsApp pro admin_alert_phone, só uma vez por episódio.</div>
+      </div>
+      <div class="area">
+        <div class="name">Observabilidade geral<small>—</small></div>
+        <div><span class="chip gap">pendência</span></div>
+        <div class="desc">Fora dos 4 alertas específicos, sem rastreamento de erro dedicado (tipo Sentry) — diagnóstico depende de ler log do Render manualmente.</div>
+      </div>
+      <div class="area">
+        <div class="name">SSE de conversas em tempo real<small>conversationEvents.ts</small></div>
+        <div><span class="chip gap">pendência</span></div>
+        <div class="desc">Em memória, single-instance, não sobrevive a restart — bloqueia escalar horizontalmente sem perder atualização ao vivo pra parte dos usuários.</div>
+      </div>
+      <div class="area">
         <div class="name">Testes / CI<small>vitest, GitHub Actions</small></div>
         <div><span class="chip on">ativo</span></div>
-        <div class="desc">237 arquivos de teste, CodeQL rodando (repositório público de propósito, pra ter GHAS de graça).</div>
-      </div>
-    </div>
-  </section>
-
-  <section id="gaps">
-    <div class="eyebrow">04 · o que falta, em ordem de prioridade</div>
-    <h2>Lacunas conhecidas</h2>
-    <p class="deck">Isso não é "bug" — é trabalho que ainda não foi feito, listado do mais pra menos urgente.</p>
-
-    <div class="gap-grid">
-      <div class="gap-card">
-        <h3>SSE de uma instância só</h3>
-        <p>O aviso em tempo real do painel só funciona enquanto o mesmo processo do servidor está de pé — não sobrevive a restart nem escala pra múltiplas instâncias.</p>
-      </div>
-      <div class="gap-card">
-        <h3>Sem rastreamento de erro</h3>
-        <p>Um erro em produção só aparece se alguém for olhar o log do Render na hora — não existe alerta automático de exceção.</p>
-      </div>
-      <div class="gap-card mid">
-        <h3>Sem gateway de pagamento</h3>
-        <p>O sistema registra que algo foi pago, mas não cobra ninguém de verdade ainda — é status manual, não cobrança automática.</p>
-      </div>
-      <div class="gap-card mid">
-        <h3>CRM do operador é só local</h3>
-        <p><code>OperatorCRM.tsx</code> não fala com o backend — o que é digitado ali fica só no navegador de quem digitou.</p>
+        <div class="desc">237 arquivos de teste / 1275 testes, CodeQL rodando (repositório público de propósito, pra ter GHAS de graça).</div>
       </div>
     </div>
   </section>
