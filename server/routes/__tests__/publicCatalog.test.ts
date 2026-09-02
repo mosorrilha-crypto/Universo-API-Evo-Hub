@@ -11,7 +11,7 @@ let baseUrl = '';
 async function startServer(seed: Record<string, any[]>) {
   initDb(createFakeSupabase(seed));
   const app = express();
-  app.use(createPublicCatalogRouter());
+  app.use(createPublicCatalogRouter({ supabaseUrl: undefined, supabaseKey: undefined }));
   return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
     const started = app.listen(0, () => {
       const address = started.address();
