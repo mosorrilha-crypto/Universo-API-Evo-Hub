@@ -3021,8 +3021,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           tarefa alargaria o mesmo bug pra 640–1023px se a condição não
           fosse simplificada). Removida a exceção — abaixo de `lg` o estado
           "Ferramentas aberta" é 100% coberto pela gaveta (`lg:hidden`, mais
-          abaixo), que já tem seu próprio cabeçalho + botão de fechar. */}
-      <div className="relative p-3 rounded-card bg-[var(--surface-panel)] border border-[var(--line-subtle)] shadow-xl shadow-slate-950/25 space-y-2.5 lg:max-w-xs flex-shrink-0 hidden lg:block">
+          abaixo), que já tem seu próprio cabeçalho + botão de fechar.
+
+          TASK-0213 (pedido direto, 02/09/2026): "não quero isso como um
+          módulo, quero ele integrado à página igual o cabeçalho" — tirado
+          o visual de cartão flutuante (rounded-card/border/shadow/bg
+          própria/max-w-xs, que fazia ela parecer uma caixinha separada boiando
+          sobre a lista) e trocado pelo mesmo estilo flush já usado na faixa
+          "Status do agente" logo abaixo (fundo sólido igual ao da coluna,
+          só uma borda fina embaixo) — integrada à página, não mais um
+          "widget" à parte. */}
+      <div className="flex-shrink-0 hidden lg:block bg-[#111b21] border-b border-slate-800/30 px-3 py-2">
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -3535,7 +3544,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               que é o lugar que realmente faz sentido — a Ficha IA é sobre UM
               contato específico, não faz sentido abrir sem antes escolher
               qual. */}
-          <nav className="atendimento-bottom-nav lg:hidden" aria-label="Navegação do Atendimento">
+          {/* TASK-0213 (achado real, 02/09/2026, print do dono do produto):
+              esta barra continuava aparecendo em telas de desktop de verdade
+              (≥1024px) junto com a caixa de ferramentas, exatamente a
+              duplicação que a TASK-0212 devia ter eliminado. Causa raiz: a
+              regra crua `.atendimento-bottom-nav { display: flex }` no
+              index.css não está dentro de nenhum `@layer` — no Tailwind v4,
+              CSS fora de `@layer` sempre vence sobre utilitários (que vivem
+              dentro de `@layer utilities`), não importa a ordem no bundle
+              nem a especificidade. `lg:hidden` sozinho nunca teve chance
+              contra isso. Mesmo padrão de bug e mesma correção já usada na
+              TASK-0159 pro `.atendimento-workspace__header` (`!important`
+              via `lg:!hidden`). */}
+          <nav className="atendimento-bottom-nav lg:!hidden" aria-label="Navegação do Atendimento">
             <button
               type="button"
               onClick={() => { setSearchQuery(''); setActiveTabFilter('all'); }}
