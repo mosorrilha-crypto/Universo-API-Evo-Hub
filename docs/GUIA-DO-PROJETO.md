@@ -25,8 +25,10 @@ cuidado extra (ver `CLAUDE.md` na raiz pra convenções de código e comandos).
 conteúdo deste guia — diagramas de fluxo por área (mensagem, agenda/
 financeiro, CRM/qualidade, marketing/catálogo, administração/alertas),
 glossário do que cada arquivo do repositório representa, tabela de estado
-real por área e pendências marcadas dentro do próprio fluxo, pensada pra
-quem está começando a se orientar no projeto. Abra localmente no navegador
+real por área, pendências marcadas dentro do próprio fluxo, e (desde
+02/09/2026, TASK-0215) uma seção 09 de **fluxo geral unificado** mostrando
+como as cinco áreas se conectam entre si — pensada pra quem está começando
+a se orientar no projeto. Abra localmente no navegador
 (`file://.../docs/mapa-do-projeto/index.html`); não é servido pela
 aplicação.
 
@@ -46,7 +48,8 @@ que já vale pra este guia), na mesma tarefa: (1) edite o arquivo local,
 (2) republique o Artifact **na mesma URL acima** (nunca crie um artefato
 novo pra isso — perde o link já compartilhado), (3) valide lint/testes/
 build antes de commitar. É um **snapshot mantido manualmente, atualizado
-por último em 02/09/2026** (inclui o PR #587/TASK-0208-0209) — se ninguém
+por último em 02/09/2026** (inclui o PR #587/TASK-0208-0209 e a seção de
+fluxo geral unificado + pendência do Microsoft Clarity, TASK-0215) — se ninguém
 seguir esse passo, o link fica com conteúdo desatualizado mesmo com o
 arquivo do repositório já correto. Este arquivo (`GUIA-DO-PROJETO.md`)
 continua sendo a fonte de verdade em caso de conflito entre os dois.

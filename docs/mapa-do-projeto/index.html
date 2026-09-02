@@ -220,7 +220,7 @@
     <p class="lede">Este é o mapa "explodido" do ecossistema: cinco fluxos reais (mensagem, agenda/financeiro, CRM/qualidade, marketing/catálogo, administração/alertas) mostrando <strong>o que já está rodando em produção</strong> — e onde ainda falta algo, marcado como um nó tracejado <em>dentro do próprio fluxo</em>, não numa lista à parte. Baseado no estado real do código, auditado em <code>docs/GUIA-DO-PROJETO.md</code> — não em suposição.</p>
     <div class="badge-row">
       <span class="badge">fonte: docs/GUIA-DO-PROJETO.md</span>
-      <span class="badge">auditado 27/08 · atualizado 02/09/2026 (PR #575, #587)</span>
+      <span class="badge">auditado 27/08 · atualizado 02/09/2026 (PR #575, #587, TASK-0215)</span>
       <span class="badge">tenant real ativo: estúdio de beleza (Monique)</span>
     </div>
     <div class="legend" style="margin-top:1.4rem;">
@@ -239,6 +239,7 @@
     <a href="#mapa-arquivos"><span class="n">06</span> O que cada arquivo faz</a>
     <a href="#fluxo-frontend"><span class="n">07</span> Painel (frontend)</a>
     <a href="#estado-real"><span class="n">08</span> Estado real por área</a>
+    <a href="#fluxo-geral"><span class="n">09</span> Fluxo geral unificado</a>
   </nav>
 
   <section id="fluxo-mensagem">
@@ -370,6 +371,8 @@ flowchart TB
     CAT --> BTN["botão flutuante WhatsApp<br/>mensagem editável no painel"]
     OFERTA["/oferta — commercialOfferStore.ts<br/><i>planos Essencial e Profissional</i>"] --> INTERESSE["contato de interesse comercial<br/><i>rate-limit 8/IP/hora</i>"]
     INTERESSE -.->|"sem ativação automática do tenant"| PEND4["⏳ PENDENTE<br/>ativar piloto exige canal + operador<br/>+ conversa de teste manual"]
+    CAT -.->|"sem heatmap/gravação de sessão<br/>hoje"| PEND7["⏳ PENDENTE (TASK-0215)<br/>Microsoft Clarity nas páginas públicas<br/>(catálogo + /oferta) — gratuito,<br/>ver onde o lead abandona antes do WhatsApp"]
+    OFERTA -.-> PEND7
 
     BC["BroadcastAdminPanel.tsx<br/>broadcastSenderJob.ts"] -->|"campanha muda pra<br/>running/scheduled"| DISPARO["disparo em massa<br/>(gatilho por evento)"]
     BC -.->|"sem botão manual liga/desliga"| PEND5["🟡 parcial: só gatilho automático<br/>+ poll de segurança de 5min"]
@@ -379,8 +382,9 @@ flowchart TB
     style DISPARO fill:#1f7a5c,color:#fff,stroke:none
     style PEND4 fill:transparent,stroke:#a84b3a,stroke-width:2px,stroke-dasharray:5 4,color:#a84b3a
     style PEND5 fill:transparent,stroke:#b9822f,stroke-width:2px,stroke-dasharray:5 4,color:#b9822f
+    style PEND7 fill:transparent,stroke:#a84b3a,stroke-width:2px,stroke-dasharray:5 4,color:#a84b3a
 </pre>
-      <figcaption>Catálogo público e oferta comercial já são reais em produção; falta só decisão de negócio (trocar link de anúncios pela URL própria) e ativação manual de novos pilotos comerciais.</figcaption>
+      <figcaption>Catálogo público e oferta comercial já são reais em produção; falta só decisão de negócio (trocar link de anúncios pela URL própria), ativação manual de novos pilotos comerciais, e (levantado 02/09/2026, TASK-0215) instrumentar essas páginas públicas com Microsoft Clarity — ferramenta gratuita de heatmap/gravação de sessão — pra enxergar onde o visitante desiste antes de chamar no WhatsApp. Ainda não implementado; precisa checar CSP do <code>server.ts</code> antes (liberar <code>*.clarity.ms</code>) e carregar o script só nas rotas públicas, nunca no painel logado.</figcaption>
     </figure>
   </section>
 
@@ -783,6 +787,11 @@ flowchart LR
         <div class="desc">Fora dos 4 alertas específicos, sem rastreamento de erro dedicado (tipo Sentry) — diagnóstico depende de ler log do Render manualmente.</div>
       </div>
       <div class="area">
+        <div class="name">Analytics de comportamento nas páginas públicas<small>/catalogo/:slug, /oferta</small></div>
+        <div><span class="chip gap">pendência</span></div>
+        <div class="desc">Levantado 02/09/2026 (TASK-0215): nenhuma ferramenta de heatmap/gravação de sessão instalada hoje. Microsoft Clarity é candidato (gratuito, sem limite de uso) — falta decidir e implementar; precisa checar CSP em <code>server.ts</code> e restringir o script às rotas públicas.</div>
+      </div>
+      <div class="area">
         <div class="name">SSE de conversas em tempo real<small>conversationEvents.ts</small></div>
         <div><span class="chip gap">pendência</span></div>
         <div class="desc">Em memória, single-instance, não sobrevive a restart — bloqueia escalar horizontalmente sem perder atualização ao vivo pra parte dos usuários.</div>
@@ -793,6 +802,68 @@ flowchart LR
         <div class="desc">237 arquivos de teste / 1275 testes, CodeQL rodando (repositório público de propósito, pra ter GHAS de graça).</div>
       </div>
     </div>
+  </section>
+
+  <section id="fluxo-geral">
+    <div class="eyebrow">09 · como as 5 seções acima se encaixam</div>
+    <h2>Fluxo geral — o Universo como um só sistema</h2>
+    <p class="deck">Cada seção 01–05 mostra um pedaço isolado. Este é o mesmo ecossistema visto de fora: como um lead vira mensagem, como a mensagem vira agenda ou venda, e como administração/alertas vigiam tudo isso ao mesmo tempo — tudo desaguando no painel que a operadora realmente usa. Não é um fluxo novo, é a costura dos outros cinco.</p>
+
+    <figure class="diagram-card">
+<pre class="mermaid">
+flowchart TB
+    subgraph S04["04 · Marketing e Catálogo público"]
+      LEAD_IN["Anúncio Meta Ads clicado<br/>ou catálogo público /<br/>oferta comercial"]
+    end
+
+    subgraph S01["01 · Fluxo da mensagem"]
+      MSG["Webhook → tenant →<br/>Gemini router → especialista<br/>→ replySafetyGate → envia"]
+    end
+
+    subgraph S02["02 · Agenda e Financeiro"]
+      AGN["Pré-reserva → confirma<br/>no Calendar → comprovante<br/>→ financial_transactions"]
+    end
+
+    subgraph S03["03 · CRM, Escalonamento e Qualidade"]
+      CRMQ["Funil de vendas (Ganho/Perdido)<br/>+ rascunho bloqueado revisado<br/>+ avaliação automática do agente"]
+    end
+
+    subgraph S05["05 · Administração e Alertas"]
+      ADM["Entitlements/RBAC por tenant<br/>+ 4 jobs de fundo vigiando<br/>(IA pausada, WhatsApp caiu,<br/>erro genérico, pagto pendente)"]
+    end
+
+    subgraph S07["07 · Painel (frontend)"]
+      PAINEL["Operadora vê tudo em<br/>tempo real via SSE"]
+    end
+
+    LEAD_IN -->|"vira contato novo<br/>no WhatsApp"| MSG
+    MSG -->|"IA decide agendar<br/>durante a conversa"| AGN
+    MSG -->|"resposta arriscada é<br/>bloqueada pro operador revisar"| CRMQ
+    MSG -->|"lead qualificado<br/>entra no funil"| CRMQ
+    AGN -->|"cliente manda comprovante<br/>→ operador confirma"| CRMQ
+    CRMQ -->|"'Aprovar e enviar' vira<br/>exemplo aprovado"| MSG
+    CRMQ -->|"'Ganho' com valor<br/>negociado"| AGN
+
+    ADM -.->|"pausa/retoma, mede uso,<br/>alerta se algo cair"| MSG
+    ADM -.-> AGN
+    ADM -.-> CRMQ
+    ADM -.->|"checklist de ativação<br/>de tenant novo"| LEAD_IN
+
+    LEAD_IN --> PAINEL
+    MSG --> PAINEL
+    AGN --> PAINEL
+    CRMQ --> PAINEL
+    ADM --> PAINEL
+
+    style LEAD_IN fill:#1f7a5c,color:#fff,stroke:none
+    style MSG fill:#1f7a5c,color:#fff,stroke:none
+    style AGN fill:#1f7a5c,color:#fff,stroke:none
+    style CRMQ fill:#1f7a5c,color:#fff,stroke:none
+    style ADM fill:#b9822f,color:#fff,stroke:none
+    style PAINEL fill:#b9822f,color:#fff,stroke:none
+</pre>
+      <figcaption>Leitura: um lead nasce no marketing/catálogo (04), vira conversa real (01), a IA decide se agenda (02) ou se precisa de intervenção humana (03) — e o que sai aprovado ali realimenta a própria IA (seta CRMQ → MSG, o único ciclo de aprendizado real hoje). Administração/Alertas (05) não participa da conversa, mas vigia os outros quatro fluxos ao mesmo tempo e é quem decide se um tenant novo pode nascer. Tudo isso converge no painel (07), que é a única tela onde a operadora enxerga o sistema inteiro de uma vez — os detalhes internos de cada caixa estão nas seções 01–05 acima.</figcaption>
+    </figure>
   </section>
 
   <footer>
