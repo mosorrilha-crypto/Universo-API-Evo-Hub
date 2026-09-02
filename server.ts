@@ -190,7 +190,7 @@ async function startServer() {
   app.use(createFinancialRouter({ authenticateToken }));
   initWebPush({ vapidPublicKey: config.vapidPublicKey, vapidPrivateKey: config.vapidPrivateKey, vapidSubject: config.vapidSubject });
   app.use(createPushSubscriptionsRouter({ authenticateToken, vapidPublicKey: config.vapidPublicKey }));
-  app.use(createQualityAuditRouter({ authenticateToken }));
+  app.use(createQualityAuditRouter({ authenticateToken, getAi: () => getGeminiClient(config), groqApiKey: config.groqApiKey }));
 
   // Middleware de erro global do Express — precisa vir DEPOIS de todas as
   // rotas de API acima (é assim que o Express decide quem trata um

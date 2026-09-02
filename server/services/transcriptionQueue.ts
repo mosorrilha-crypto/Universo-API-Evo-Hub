@@ -99,7 +99,8 @@ async function processLoop(deps: TranscriptionQueueDeps) {
   }
 }
 
-async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
+/** Exportado só pra teste direto (TASK-0209) — o worker real só é alcançável via startTranscriptionWorker/enqueueTranscriptionJob (loop infinito, difícil de testar sem fake timers frágeis). */
+export async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
   const startedAt = Date.now();
   const { message, resolvedTenant } = job;
   const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;
@@ -192,7 +193,29 @@ async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
         if (await shouldBlockForAdsOnlyMode(tenantId, message.from, outcome.result.transcription)) return;
         const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
         const segment = await getTenantSegment(tenantId);
-        const history = conversation?.messages.slice(0, -1);
+        // TASK-0209 — achado real de auditoria estrutural (mesma classe do
+        // TASK-0172, achada aqui no caminho de ÁUDIO): cortar a última
+        // posição do array (`slice(0, -1)`) supõe que o próprio áudio é
+        // sempre o último item de `conversation.messages`. Mas entre o
+        // cliente mandar o áudio (gravado na hora por recordIncomingMessage,
+        // em webhooks.ts) e este job rodar (fila serial única de
+        // transcrição + download + chamada ao Gemini — latência real de
+        // vários segundos, plausivelmente mais que os 10s de silêncio do
+        // messageBuffer.ts), o MESMO cliente pode mandar uma mensagem nova
+        // — gravada imediatamente, fora desta fila. Quando isso acontece, o
+        // corte por posição pega o item errado: mantém o próprio áudio
+        // dentro do histórico (duplicado com `outcome.result.transcription`,
+        // já passado à parte como a "mensagem atual") e descarta a mensagem
+        // nova de verdade do cliente, perdida do contexto. Corta por
+        // IDENTIDADE (o messageId real do áudio, já em escopo) — permanece
+        // correto mesmo com mensagem nova chegando durante a espera; cai no
+        // corte antigo por posição só se o id não for encontrado (não
+        // deveria acontecer, updateMessageText já rodou pra esta mensagem
+        // logo acima, mas mantém o mesmo fallback do padrão já usado em
+        // webhooks.ts/triggerAutoReply).
+        const allMessages = conversation?.messages;
+        const audioIndex = allMessages ? allMessages.findIndex((m) => m.id === message.messageId) : -1;
+        const history = !allMessages ? undefined : audioIndex !== -1 ? allMessages.slice(0, audioIndex) : allMessages.slice(0, -1);
         // Mesmo sinal pro painel do caminho de texto (ver triggerAutoReply em webhooks.ts).
         emitAiReplyStatus(tenantId, message.from, 'generating');
         try {
