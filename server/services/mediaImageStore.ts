@@ -12,6 +12,27 @@
  */
 const BUCKET = 'app-data';
 
+/**
+ * TASK-0200 — CodeQL sinalizou "File data in outbound network request"
+ * (Medium, `js/file-data-in-outbound-network-request`): dado binário
+ * recebido do cliente (`buffer`) é enviado a `supabaseUrl` sem validar essa
+ * URL antes. `supabaseUrl` vem sempre de configuração do servidor (env
+ * `SUPABASE_URL`), nunca de input por requisição — mesma checagem
+ * estrutural (URL bem-formada, protocolo http/https) já usada como segunda
+ * camada em `evolutionSend.ts`/`admin.ts` (TASK-0197).
+ */
+function assertValidHttpUrl(url: string): void {
+  let protocol: string;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    throw new Error(`URL do Storage inválida: "${url}".`);
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new Error(`Protocolo não permitido para o Storage: "${protocol}".`);
+  }
+}
+
 export async function saveMediaImage(
   supabaseUrl: string | undefined,
   supabaseKey: string | undefined,
@@ -20,6 +41,7 @@ export async function saveMediaImage(
   mimeType: string
 ): Promise<void> {
   if (!supabaseUrl || !supabaseKey) return;
+  assertValidHttpUrl(supabaseUrl);
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 
@@ -53,6 +75,7 @@ export async function getMediaImage(
   messageId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
   if (!supabaseUrl || !supabaseKey) return null;
+  assertValidHttpUrl(supabaseUrl);
   const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/media/${encodeURIComponent(messageId)}`, {
     headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
   });

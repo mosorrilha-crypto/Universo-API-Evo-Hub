@@ -2,7 +2,6 @@ import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import crypto from 'crypto';
 // @ts-ignore — ffmpeg-static não publica tipos, só o caminho do binário via default export.
 import ffmpegPath from 'ffmpeg-static';
 
@@ -51,11 +50,16 @@ export async function transcodeToWhatsAppVoiceNote(
   const cleanBase64 = stripDataUrlPrefix(base64);
   const inputBuffer = Buffer.from(cleanBase64, 'base64');
 
-  const tmpDir = os.tmpdir();
-  const id = crypto.randomBytes(8).toString('hex');
-  const inputPath = path.join(tmpDir, `voice-in-${id}`);
   const outputMimeType = output === 'ogg_opus' ? 'audio/ogg; codecs=opus' : 'audio/mpeg';
-  const outputPath = path.join(tmpDir, `voice-out-${id}.${output === 'ogg_opus' ? 'ogg' : 'mp3'}`);
+
+  // Achado do CodeQL (js/insecure-temporary-file, High): `path.join(os.tmpdir(),
+  // nome-previsível)` seguido de `fs.writeFile` não é atômico (janela TOCTOU).
+  // `fs.mkdtemp` cria o diretório de forma atômica com sufixo aleatório
+  // garantido pelo próprio Node — mesmo padrão já usado abaixo em
+  // `isAudioEffectivelySilent`.
+  const tmpParentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'voice-transcode-'));
+  const inputPath = path.join(tmpParentDir, 'input');
+  const outputPath = path.join(tmpParentDir, `output.${output === 'ogg_opus' ? 'ogg' : 'mp3'}`);
   const ffmpegArgs = output === 'ogg_opus'
     ? [
         '-y', '-i', inputPath, '-vn',
@@ -85,20 +89,19 @@ export async function transcodeToWhatsAppVoiceNote(
     const magic = outputBuffer.subarray(0, 4).toString('ascii');
     const hasOpusHeader = outputBuffer.includes(Buffer.from('OpusHead'));
     if (output === 'ogg_opus') {
-      console.log(`🎙️  [audioTranscode] probe=ogg_opus input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic}" opus=${hasOpusHeader}`);
+      console.log('🎙️  [audioTranscode] probe=ogg_opus', { inputBytes: inputBuffer.length, outputBytes: outputBuffer.length, magic, opus: hasOpusHeader });
       if (magic !== 'OggS' || !hasOpusHeader) {
         throw new Error('A conversão de áudio não produziu um OGG/Opus válido.');
       }
     } else {
-      console.log(`🎙️  [audioTranscode] fallback=mp3 input=${inputBuffer.length}B output=${outputBuffer.length}B magic="${magic.slice(0, 3)}" (esperado "ID3")`);
+      console.log('🎙️  [audioTranscode] fallback=mp3', { inputBytes: inputBuffer.length, outputBytes: outputBuffer.length, magic: magic.slice(0, 3), esperado: 'ID3' });
       if (magic.slice(0, 3) !== 'ID3') {
         throw new Error('A conversão de áudio não produziu um MP3 válido.');
       }
     }
     return { base64: outputBuffer.toString('base64'), mimeType: outputMimeType };
   } finally {
-    await fs.unlink(inputPath).catch(() => {});
-    await fs.unlink(outputPath).catch(() => {});
+    await fs.rm(tmpParentDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 

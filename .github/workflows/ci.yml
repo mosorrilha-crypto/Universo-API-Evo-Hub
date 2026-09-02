@@ -35,6 +35,14 @@ jobs:
       - name: Build
         run: npm run build
 
+  # TASK-0202 — restaurado depois de ter sido removido na TASK-0192 (PR
+  # #576), que concluiu (corretamente, na época) que o job falhava sempre
+  # porque este era um repositório PRIVADO sem licença paga de GitHub
+  # Advanced Security (Dependency review é gratuito só em repositório
+  # público). O usuário deixou o repositório público de propósito
+  # justamente pra ter esse recurso de graça — com isso, o job volta a fazer
+  # sentido. Se o repo voltar a ficar privado sem GHAS pago, este job vai
+  # voltar a falhar em todo PR — remova de novo nesse cenário.
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'

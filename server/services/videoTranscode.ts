@@ -2,7 +2,6 @@ import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import crypto from 'crypto';
 // @ts-ignore — ffmpeg-static não publica tipos, só o caminho do binário via default export.
 import ffmpegPath from 'ffmpeg-static';
 
@@ -30,11 +29,18 @@ export async function transcodeToWhatsAppVideo(
     throw new Error('ffmpeg não disponível neste ambiente — não foi possível converter o vídeo pro formato aceito pela Meta.');
   }
 
-  const tmpDir = os.tmpdir();
-  const id = crypto.randomBytes(8).toString('hex');
   const inputExt = (mimeType.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '') || 'bin';
-  const inputPath = path.join(tmpDir, `video-in-${id}.${inputExt}`);
-  const outputPath = path.join(tmpDir, `video-out-${id}.mp4`);
+
+  // Achado do CodeQL (js/insecure-temporary-file, High): `path.join(os.tmpdir(),
+  // nome-previsível)` seguido de `fs.writeFile` não é atômico — em tese um
+  // processo concorrente no mesmo host poderia prever/pré-criar esse caminho
+  // antes da escrita (TOCTOU). `fs.mkdtemp` cria o diretório de forma atômica
+  // com sufixo aleatório garantido pelo próprio Node (falha se já existir),
+  // sem essa janela de corrida — mesmo padrão já usado em
+  // `isAudioEffectivelySilent` (audioTranscode.ts).
+  const tmpParentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'video-transcode-'));
+  const inputPath = path.join(tmpParentDir, `input.${inputExt}`);
+  const outputPath = path.join(tmpParentDir, 'output.mp4');
 
   await fs.writeFile(inputPath, buffer);
   try {
@@ -65,10 +71,9 @@ export async function transcodeToWhatsAppVideo(
     if (outputBuffer.length === 0) {
       throw new Error('ffmpeg produziu um arquivo de saída vazio.');
     }
-    console.log(`🎬 [videoTranscode] input=${buffer.length}B (${mimeType}) output=${outputBuffer.length}B (video/mp4)`);
+    console.log('🎬 [videoTranscode]', { inputBytes: buffer.length, inputMimeType: mimeType, outputBytes: outputBuffer.length, outputMimeType: 'video/mp4' });
     return { buffer: outputBuffer, mimeType: 'video/mp4' };
   } finally {
-    await fs.unlink(inputPath).catch(() => {});
-    await fs.unlink(outputPath).catch(() => {});
+    await fs.rm(tmpParentDir, { recursive: true, force: true }).catch(() => {});
   }
 }

@@ -1,3 +1,11 @@
+# TASK-0202 — restaurado depois de ter sido removido na TASK-0192 (PR #576),
+# que concluiu (corretamente, na época) que o job falhava sempre porque este
+# era um repositório PRIVADO sem licença paga de GitHub Advanced Security
+# (CodeQL/Dependency review são gratuitos só em repositório público). O
+# usuário deixou o repositório público de propósito justamente pra ter esse
+# scan de graça — com isso, o workflow volta a fazer sentido. Se o repo
+# voltar a ficar privado sem GHAS pago, este arquivo vai voltar a falhar em
+# todo PR/push — remova de novo nesse cenário (mesmo raciocínio da TASK-0192).
 name: CodeQL
 
 on:

@@ -321,9 +321,15 @@ export async function uploadWhatsAppMedia(
       });
       const info = await infoRes.json().catch(() => ({}) as any);
       const localSha256 = crypto.createHash('sha256').update(mediaBuffer).digest('hex');
-      console.log(
-        `🔎 [uploadWhatsAppMedia] media_id=${data.id} — Meta: mime_type="${info?.mime_type}" file_size=${info?.file_size} sha256=${info?.sha256} | local: size=${mediaBuffer.length} sha256=${localSha256} sha256_bate=${info?.sha256 === localSha256}`
-      );
+      console.log('🔎 [uploadWhatsAppMedia] diagnóstico', {
+        mediaId: data.id,
+        metaMimeType: info?.mime_type,
+        metaFileSize: info?.file_size,
+        metaSha256: info?.sha256,
+        localSize: mediaBuffer.length,
+        localSha256,
+        sha256Bate: info?.sha256 === localSha256,
+      });
     } catch (err) {
       console.warn('⚠️  [uploadWhatsAppMedia] Falha ao consultar diagnóstico do media_id na Meta:', (err as Error).message);
     }

@@ -42,6 +42,20 @@ export const commercialInterestRateLimiter = rateLimit({
 });
 
 
+// Achado de segurança (02/09/2026, auditoria comparando com o DeskcommCRM):
+// POST /api/auth/login não tinha nenhum rate limit — só a checagem de conta
+// em server/services/authLoginAttempts.ts. Este limite por IP é a defesa
+// complementar: barra quem varre muitas contas de um lugar só (o limite por
+// conta não vê isso, já que cada e-mail tentado tem seu próprio contador).
+// Generoso o bastante pra não travar NAT corporativo/rede compartilhada.
+export const authLoginRateLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de login. Aguarde alguns minutos e tente novamente.' },
+});
+
 // Confirmação de sessão é chamada ao abrir o aplicativo. Limite moderado por
 // IP evita abuso de validação de token sem prejudicar recargas normais.
 export const authSessionRateLimiter = rateLimit({
@@ -63,4 +77,35 @@ export const googleCalendarConnectRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Muitas tentativas de conexão com o Google Calendar. Aguarde um minuto e tente novamente.' },
+});
+
+// TASK-0198 (achado do CodeQL, js/missing-rate-limiting): o callback OAuth
+// do Google é uma rota PÚBLICA por natureza (o Google redireciona o
+// navegador do usuário direto pra ela — não passa por authenticateToken).
+// A prova de legitimidade real vem do `state` assinado (verifyOAuthState em
+// googleCalendar.ts), mas nada limitava quantas vezes essa rota podia ser
+// batida por IP antes disso, sem custo de autenticação nenhum.
+export const googleOAuthCallbackRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de conexão. Aguarde um minuto e tente novamente.' },
+});
+
+// TASK-0198 (achado do CodeQL, js/missing-rate-limiting): GET
+// /api/conversations/stream verifica o JWT manualmente (EventSource não
+// manda header Authorization, então o token vem por querystring — ver
+// conversations.ts) só DEPOIS de aceitar a requisição, e mantém a conexão
+// SSE aberta indefinidamente. Sem limite, um IP conseguiria abrir conexões
+// (válidas ou não) sem restrição nenhuma, esgotando conexões/memória do
+// processo. Limite mais alto que os outros por ser uma rota que o próprio
+// painel reabre em reconexões normais de rede (EventSource já reconecta
+// sozinho no browser).
+export const conversationsStreamRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de conexão. Aguarde um minuto e tente novamente.' },
 });

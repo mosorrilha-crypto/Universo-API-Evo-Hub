@@ -15,6 +15,7 @@
     "create:operator": "tsx scripts/create-operator.ts",
     "create:tenant": "tsx scripts/create-tenant.ts",
     "seed:monique-kb": "tsx scripts/seed-monique-knowledge-base.ts",
+    "eval:agent": "tsx scripts/eval-agent.ts",
     "task:start": "tsx scripts/start-task.ts"
   },
   "dependencies": {
