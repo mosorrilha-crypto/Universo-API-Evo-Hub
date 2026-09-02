@@ -3555,14 +3555,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               nem a especificidade. `lg:hidden` sozinho nunca teve chance
               contra isso. Mesmo padrão de bug e mesma correção já usada na
               TASK-0159 pro `.atendimento-workspace__header` (`!important`
-              via `lg:!hidden`). */}
+              via `lg:!hidden`).
+
+              TASK-0216 (pedido direto, 02/09/2026, novo print): ícones
+              22px->24px (w-6 h-6), acompanhando o bump de escala do CSS
+              (`.atendimento-bottom-nav__item` no index.css) — ainda
+              parecia pequena/desproporcional perto do resto da UI. */}
           <nav className="atendimento-bottom-nav lg:!hidden" aria-label="Navegação do Atendimento">
             <button
               type="button"
               onClick={() => { setSearchQuery(''); setActiveTabFilter('all'); }}
               className="atendimento-bottom-nav__item is-active"
             >
-              <MessageCircle className="w-[22px] h-[22px]" />
+              <MessageCircle className="w-6 h-6" />
               <span>Conversas</span>
             </button>
             <button
@@ -3571,7 +3576,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               disabled={!onGoToEscalations}
               className="atendimento-bottom-nav__item"
             >
-              <AlertTriangle className="w-[22px] h-[22px]" />
+              <AlertTriangle className="w-6 h-6" />
               <span>Pendências</span>
               {escalationsPendingCount > 0 && (
                 <span className="atendimento-bottom-nav__badge">{escalationsPendingCount}</span>
@@ -3582,7 +3587,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
               className="atendimento-bottom-nav__item"
             >
-              <CalendarIcon className="w-[22px] h-[22px]" />
+              <CalendarIcon className="w-6 h-6" />
               <span>Agenda</span>
             </button>
             <button
@@ -3590,7 +3595,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onClick={() => setIsToolbarSettingsOpen((v) => !v)}
               className={`atendimento-bottom-nav__item${isToolbarSettingsOpen ? ' is-active' : ''}`}
             >
-              <Settings className="w-[22px] h-[22px]" />
+              <Settings className="w-6 h-6" />
               <span>Ferramentas</span>
             </button>
           </nav>
