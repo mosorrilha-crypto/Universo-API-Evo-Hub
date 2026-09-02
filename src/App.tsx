@@ -1404,15 +1404,12 @@ export const App: React.FC = () => {
             perdendo temporariamente mensagens reais recém-chegadas do
             polling até o próximo ciclo de 8s. Bug real relatado em
             produção: mensagem aparecia e sumia da conversa. */}
-        {/* flex flex-col + altura explícita no mobile (< lg): sem isso, o
+        {/* flex flex-col + altura explícita: sem isso, o
             .atendimento-chat-shell interno (WhatsAppLeadsSim) não tem uma
             altura real de referência pra se basear e sobrava/faltava
             espaço em telas reais — achado real em produção, 29/08/2026,
             depois de três rodadas anteriores tentando acertar com valores
-            fixos de dvh (TASK-0150/0153/0157). Em lg (desktop) a aba volta
-            ao fluxo normal (lg:block lg:h-auto), como sempre foi — o
-            cálculo interno lg:h-[calc(100dvh-154px)] do chat-shell já
-            resolve isso sozinho lá.
+            fixos de dvh (TASK-0150/0153/0157).
 
             Achado real, 29/08/2026 (TASK-0162): esse cálculo nunca soube
             quanto o <Header/> global mede quando está visível (lista de
@@ -1427,19 +1424,30 @@ export const App: React.FC = () => {
             Achado real, 01/09/2026 (TASK-0184): até aqui o cálculo também
             subtraía 1.5rem (mobile) / 3rem (sm), pra cancelar o padding
             vertical do .app-main (p-3/sm:p-6) que sobrava como faixa preta
-            acima e abaixo da tela — comparação lado a lado com o WhatsApp
-            Business real, que não deixa margem nenhuma aí. Em vez de
-            cancelar o padding só na altura, ele foi zerado na raiz (ver
+            acima e abaixo da tela. Em vez de cancelar o padding só na
+            altura, ele foi zerado na raiz (ver
             `.app-main.app-main--atendimento` no index.css, abaixo de
-            1024px) — não sobra mais nada pra subtrair aqui. */}
-        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px))] lg:block lg:h-auto' : 'hidden'}>
-          <AtendimentoWorkspaceFrame
-            activeTenantName={activeTenant.name}
-            activeTenant={activeTenant}
-            tenants={tenants}
-            canSwitchTenant={canSeeSaasMaster}
-            onSelectTenant={handleSelectTenant}
-          >
+            1024px) — nada a subtrair abaixo de `lg`.
+
+            Achado real, 01/09/2026 (TASK-0212): até aqui, em `lg` (desktop),
+            a aba escapava pro fluxo normal (`lg:block lg:h-auto`) e o
+            `.atendimento-chat-shell` tentava se virar sozinho com uma altura
+            fixa chutada (`lg:h-[calc(100dvh-154px)]`) — nunca soube que era
+            irmã da caixa de ferramentas acima dela nem que o `.app-main`
+            mantém o padding vertical em `lg` (só é zerado abaixo de 1024px;
+            em `lg` fica de propósito, pra dar respiro ao redor do card
+            arredondado da conversa — diferente do mobile "edge to edge").
+            Resultado: a soma de tudo passava de `100dvh`, gerando rolagem
+            na página inteira (pedido direto pra eliminar, comparando com o
+            WhatsApp Web). Agora a aba fica com altura limitada em QUALQUER
+            largura — sem escape pra `lg:h-auto` — e o `lg:h-[...]` extra
+            subtrai também o padding vertical de `.app-main` nesse breakpoint
+            (`lg:p-8` = 2rem de cada lado = 4rem no total) já que ele
+            continua existindo ali. O `.atendimento-chat-shell` (WhatsAppLeadsSim)
+            passou de altura fixa pra `lg:flex-1 lg:min-h-0`, dividindo esse
+            espaço já correto via flexbox em vez de mais um número mágico. */}
+        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px))] lg:h-[calc(100dvh-var(--atendimento-header-h,0px)-4rem)]' : 'hidden'}>
+          <AtendimentoWorkspaceFrame>
           <WhatsAppLeadsSim
             key={activeTenant.id}
             knowledgeBase={knowledgeBase}
