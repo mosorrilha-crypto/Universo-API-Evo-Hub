@@ -1,3 +1,4 @@
+import type { GoogleGenAI } from '@google/genai';
 import { Router, type RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import type { AuthenticatedRequest } from '../middleware/auth';
@@ -13,6 +14,8 @@ import {
   type QualityReviewKind,
   type QualityReviewStatus,
 } from '../services/qualityAuditStore';
+import { runAgentEvaluation } from '../services/agentEvalService';
+import { createAgentEvalRun, finishAgentEvalRun, listAgentEvalRuns, updateAgentEvalRunProgress } from '../services/agentEvalRunStore';
 import { calculateControlledExperimentResult } from '../services/controlledExperimentResults';
 import {
   createControlledExperiment,
@@ -33,7 +36,13 @@ interface QualityAuditRouterDeps {
   authenticateToken: RequestHandler;
   /** Injeção de teste; em produção consulta o entitlement do tenant corrente. */
   isQualityModuleEnabled?: () => Promise<boolean>;
+  /** TASK-0208 — avaliação automática (botão "Rodar avaliação automática"). Getter deferido, mesmo padrão já usado em webhooks.ts. */
+  getAi?: () => GoogleGenAI | null;
+  groqApiKey?: string;
 }
+
+const EVAL_RUN_MAX_COUNT = 100;
+const EVAL_RUN_MIN_COUNT = 1;
 
 function tenantOf(req: AuthenticatedRequest): string {
   return resolveTenantId(req);
@@ -52,7 +61,7 @@ function safeContext(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function createQualityAuditRouter({ authenticateToken, isQualityModuleEnabled }: QualityAuditRouterDeps): Router {
+export function createQualityAuditRouter({ authenticateToken, isQualityModuleEnabled, getAi, groqApiKey }: QualityAuditRouterDeps): Router {
   const router = Router();
   const qualityModuleEnabled = isQualityModuleEnabled || isQualityModuleEnabledForCurrentTenant;
 
@@ -183,6 +192,68 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
       },
     });
     res.json({ experiment });
+  }));
+
+  /**
+   * TASK-0208 — botão "Rodar avaliação automática" (pedido direto do dono
+   * do produto, ver TASK-0203). Uma rodada de N casos leva minutos (cada
+   * caso faz várias chamadas Gemini sequenciais) — não cabe numa
+   * requisição HTTP síncrona, então cria o registro de progresso e
+   * responde IMEDIATAMENTE com o runId; a avaliação continua rodando no
+   * processo do servidor em background (fire-and-forget controlado —
+   * qualquer erro é capturado e gravado em agent_eval_runs.error, nunca
+   * derruba o processo). O painel faz polling em GET .../eval-runs pra
+   * acompanhar. Os ACHADOS de falha continuam caindo em quality_reviews,
+   * igual ao script de terminal (mesma função runAgentEvaluation).
+   */
+  router.post('/api/quality-audit/eval-runs', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const ai = getAi?.();
+    if (!ai) return res.status(503).json({ error: 'Gemini não configurado (GEMINI_API_KEY ausente) — avaliação automática indisponível.' });
+    const tenantId = tenantOf(req);
+    const rawCount = req.body?.count;
+    const parsedCount = Number(rawCount);
+    // count=0 é um valor explícito (deve virar EVAL_RUN_MIN_COUNT, não o
+    // padrão) — diferente de ausente/inválido, que cai no padrão de 10.
+    // `Number(x) || 10` erraria isso: 0 é falsy em JS, cairia no padrão.
+    const requestedCount = rawCount === undefined || !Number.isFinite(parsedCount)
+      ? 10
+      : Math.max(EVAL_RUN_MIN_COUNT, Math.min(parsedCount, EVAL_RUN_MAX_COUNT));
+
+    const run = await createAgentEvalRun({ tenantId, requestedCount, requestedBy: req.user?.id || null });
+    res.status(202).json({ run });
+
+    // A partir daqui a resposta HTTP já foi enviada — este bloco roda em
+    // background. Nunca deixa uma exceção não tratada escapar (viraria
+    // unhandledRejection e derrubaria o processo inteiro, ver CLAUDE.md).
+    runAgentEvaluation({
+      tenantId,
+      ai,
+      count: requestedCount,
+      groqApiKey,
+      onProgress: async ({ completed, passed, failed }) => {
+        try {
+          await updateAgentEvalRunProgress(run.id, { completedCount: completed, passCount: passed, failCount: failed });
+        } catch (err) {
+          console.warn(`⚠️  [Avaliação automática] falha ao atualizar progresso do run ${run.id}:`, (err as Error)?.message || err);
+        }
+      },
+    })
+      .then(async (summary) => {
+        await finishAgentEvalRun(run.id, { status: 'completed', repeatedPhraseCount: summary.repeatedPhrases.length });
+      })
+      .catch(async (err) => {
+        console.warn(`⚠️  [Avaliação automática] run ${run.id} falhou:`, (err as Error)?.message || err);
+        try {
+          await finishAgentEvalRun(run.id, { status: 'failed', error: (err as Error)?.message || String(err) });
+        } catch (persistError) {
+          console.warn(`⚠️  [Avaliação automática] falha ao registrar erro do run ${run.id}:`, (persistError as Error)?.message || persistError);
+        }
+      });
+  }));
+
+  router.get('/api/quality-audit/eval-runs', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const runs = await listAgentEvalRuns(tenantOf(req));
+    res.json({ runs });
   }));
 
   /** Materializa na fila apenas candidatos recorrentes; não muda prompt, KB ou agente. */
