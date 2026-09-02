@@ -17,6 +17,7 @@
     "seed:monique-kb": "tsx scripts/seed-monique-knowledge-base.ts",
     "eval:agent": "tsx scripts/eval-agent.ts",
     "encrypt:calendar-tokens": "tsx scripts/encrypt-calendar-tokens.ts",
+    "encrypt:phase2-credentials": "tsx scripts/encrypt-phase2-credentials.ts",
     "task:start": "tsx scripts/start-task.ts"
   },
   "dependencies": {

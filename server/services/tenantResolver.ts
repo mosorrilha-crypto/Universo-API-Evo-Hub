@@ -18,6 +18,19 @@
  */
 import { getPlatformDb } from './db';
 import { LEGACY_DEFAULT_TENANT_ID } from './tenantContext';
+import { decryptSecret } from './tokenCrypto';
+
+/**
+ * Item 2 (fase 2) da auditoria de segurança, 02/09/2026: access_token/api_key
+ * podem estar cifrados (tenant_meta_credentials, tenant_evolution_credentials,
+ * tenant_instagram_credentials, broadcast_numbers — ver tokenCrypto.ts) ou em
+ * texto puro legado. decryptSecret já reconhece os dois formatos; este helper
+ * só evita repetir a checagem de null/undefined em cada leitura abaixo, no
+ * caminho quente de toda mensagem recebida/enviada.
+ */
+function maybeDecrypt(value: string | null | undefined): string | undefined {
+  return value ? decryptSecret(value) : undefined;
+}
 
 export interface ResolvedTenant {
   tenantId: string;
@@ -60,7 +73,7 @@ export async function resolveTenantByPhoneNumberId(
       if (data) {
         return {
           tenantId: data.tenant_id,
-          metaAccessToken: data.access_token || shared.metaAccessToken,
+          metaAccessToken: maybeDecrypt(data.access_token) || shared.metaAccessToken,
           metaPhoneNumberId: data.phone_number_id,
         };
       }
@@ -80,7 +93,7 @@ export async function resolveTenantByPhoneNumberId(
       if (broadcastNumber) {
         return {
           tenantId: broadcastNumber.tenant_id,
-          metaAccessToken: broadcastNumber.access_token || shared.metaAccessToken,
+          metaAccessToken: maybeDecrypt(broadcastNumber.access_token) || shared.metaAccessToken,
           metaPhoneNumberId: broadcastNumber.phone_number_id,
         };
       }
@@ -122,7 +135,7 @@ export async function resolveTenantByEvolutionInstance(
           provider: 'evolution',
           evolutionInstanceName: data.instance_name,
           evolutionApiUrl: data.api_url || shared.evolutionApiUrl,
-          evolutionApiKey: data.api_key || shared.evolutionApiKey,
+          evolutionApiKey: maybeDecrypt(data.api_key) || shared.evolutionApiKey,
         };
       }
     } catch (err) {
@@ -166,7 +179,7 @@ export async function resolveTenantByInstagramAccountId(instagramAccountId: stri
         tenantId: data.tenant_id,
         provider: 'instagram',
         instagramAccountId: data.instagram_account_id,
-        instagramAccessToken: data.access_token,
+        instagramAccessToken: maybeDecrypt(data.access_token),
       };
     }
   } catch (err) {
@@ -197,7 +210,7 @@ export async function resolveMetaCredentialsForTenant(
       .maybeSingle();
     if (data) {
       return {
-        metaAccessToken: data.access_token || shared.metaAccessToken,
+        metaAccessToken: maybeDecrypt(data.access_token) || shared.metaAccessToken,
         metaPhoneNumberId: data.phone_number_id || shared.metaPhoneNumberId,
       };
     }
@@ -232,7 +245,7 @@ export async function resolveCredentialsForTenant(
         provider: 'evolution',
         evolutionInstanceName: evo.instance_name,
         evolutionApiUrl: evo.api_url || sharedEvo.evolutionApiUrl,
-        evolutionApiKey: evo.api_key || sharedEvo.evolutionApiKey,
+        evolutionApiKey: maybeDecrypt(evo.api_key) || sharedEvo.evolutionApiKey,
       };
     }
 
@@ -247,7 +260,7 @@ export async function resolveCredentialsForTenant(
       return {
         tenantId,
         provider: 'meta',
-        metaAccessToken: meta.access_token || sharedMeta.metaAccessToken,
+        metaAccessToken: maybeDecrypt(meta.access_token) || sharedMeta.metaAccessToken,
         metaPhoneNumberId: meta.phone_number_id || sharedMeta.metaPhoneNumberId,
       };
     }
@@ -301,7 +314,7 @@ export async function resolveCredentialsForConversation(
       return {
         tenantId,
         provider: 'meta',
-        metaAccessToken: data.access_token || sharedMeta.metaAccessToken,
+        metaAccessToken: maybeDecrypt(data.access_token) || sharedMeta.metaAccessToken,
         metaPhoneNumberId: data.phone_number_id,
       };
     }
