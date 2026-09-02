@@ -1,5 +1,6 @@
 import { getDb } from './db';
 import { recordOperationEvent } from './operationEventStore';
+import { decryptSecret } from './tokenCrypto';
 
 const META_GRAPH_VERSION = 'v26.0';
 const MAX_CAMPAIGN_NAME_LENGTH = 120;
@@ -184,7 +185,7 @@ async function getManagementCredentials(tenantId: string): Promise<MetaAdsManage
   }
   return {
     adAccountId: validAdAccountId(data.meta_ads_account_id),
-    accessToken: data.meta_ads_management_access_token,
+    accessToken: decryptSecret(data.meta_ads_management_access_token),
   };
 }
 
