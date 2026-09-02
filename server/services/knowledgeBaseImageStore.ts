@@ -18,6 +18,8 @@
  * associa esse id no formData local — só persiste de fato quando "Salvar
  * Regras no Agente"/publicar salva a base inteira.
  */
+import { logStructured } from './structuredLog';
+
 const BUCKET = 'app-data';
 
 /** JPEG/PNG/WebP — os três formatos que a Meta Cloud API aceita direto pra mensagem de imagem do WhatsApp, sem conversão nenhuma (diferente de vídeo, que às vezes precisa de transcode). */
@@ -84,6 +86,45 @@ export async function getKnowledgeBaseImage(
   const buffer = Buffer.from(await res.arrayBuffer());
   const contentType = res.headers.get('content-type') || 'image/jpeg';
   return { buffer, contentType };
+}
+
+/**
+ * Resolve o binário real de uma imagem da KB, com o mesmo contrato de
+ * compatibilidade pedido pra migração inteira:
+ *   se existir imageId: usa a mídia no Storage
+ *   senão, se existir base64 legado: usa o base64 e registra observabilidade
+ *   senão: considera a imagem ausente
+ * `imageId` presente mas não encontrado no Storage é tratado como ausente
+ * (nunca cai pro base64 legado — os dois não deveriam coexistir de verdade;
+ * se `imageId` foi definido, é porque já foi migrado). Usado pelos 3 pontos
+ * que enviam a foto de verdade por WhatsApp (runMidiaTool em autoReply.ts,
+ * firstContactMessage.ts, e o envio manual em conversations.ts), pra não
+ * triplicar essa lógica de fallback.
+ */
+export async function resolveKnowledgeBaseImageBinary(
+  supabaseUrl: string | undefined,
+  supabaseKey: string | undefined,
+  tenantId: string,
+  imageId: string | undefined,
+  mimeType: string | undefined,
+  legacyBase64: string | undefined,
+  logOp: string
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  if (imageId) {
+    const image = await getKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantId, imageId);
+    if (!image) return null;
+    return { buffer: image.buffer, mimeType: mimeType || image.contentType };
+  }
+  if (legacyBase64) {
+    // Achado real (TASK-0074/0075): o próprio uso deste fallback é o sinal
+    // de que ainda existe conteúdo não migrado — sem observabilidade, não
+    // dava pra saber quando a migração pode ser considerada concluída pra
+    // um tenant. Não é erro (a leitura funciona normalmente), por isso
+    // outcome 'success' — só um marcador rastreável de "ainda legado".
+    logStructured({ tenantId, area: 'knowledgeBase', op: logOp, outcome: 'success', detail: 'source=legacy_base64_fallback' });
+    return { buffer: Buffer.from(legacyBase64.replace(/^data:[^;]+;base64,/, ''), 'base64'), mimeType: mimeType || 'image/jpeg' };
+  }
+  return null;
 }
 
 /** Melhor esforço: chamado ao trocar a imagem de um produto/bloco por outra, pra não acumular lixo no Storage a cada troca. Nunca deve travar o upload novo se falhar. */

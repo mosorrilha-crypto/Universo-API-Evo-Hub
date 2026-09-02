@@ -46,7 +46,7 @@ import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLog
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
 import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
-import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, deleteKnowledgeBaseImage, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
+import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, deleteKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, permanentlyDeleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
@@ -975,13 +975,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     const kb = await getKnowledgeBase(tenantId);
     const match = findProductMatch(kb, productName);
-    const media = match?.variant?.exampleImageBase64 ? match.variant : match?.product;
-    if (!media?.exampleImageBase64) {
+    const media = match?.variant?.exampleImageId || match?.variant?.exampleImageBase64 ? match.variant : match?.product;
+    if (!media?.exampleImageId && !media?.exampleImageBase64) {
       return res.status(404).json({ error: 'Esse serviço não tem foto de exemplo cadastrada na Base de Conhecimento.' });
+    }
+    // TASK-0218: resolve o binário via Storage (exampleImageId) com fallback
+    // pro Base64 legado inline — mesmo contrato usado em runMidiaTool e
+    // firstContactMessage.ts.
+    const resolvedPhoto = await resolveKnowledgeBaseImageBinary(
+      supabaseUrl,
+      supabaseKey,
+      tenantId,
+      media.exampleImageId,
+      media.exampleImageMimeType,
+      media.exampleImageBase64,
+      'conversations:send-example-photo'
+    );
+    if (!resolvedPhoto) {
+      return res.status(404).json({ error: 'A foto cadastrada não foi encontrada no Storage — tente subir de novo na Base de Conhecimento.' });
     }
 
     try {
-      const mimeType = media.exampleImageMimeType || 'image/jpeg';
+      const mimeType = resolvedPhoto.mimeType;
+      const photoBase64 = resolvedPhoto.buffer.toString('base64');
       const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, req.params.phone);
       const channel = await resolveCredentialsForConversation(
         tenantId,
@@ -989,12 +1005,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         { metaAccessToken, metaPhoneNumberId },
         { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
       );
-      const cleanImageBase64 = media.exampleImageBase64.replace(/^data:[^;]+;base64,/, '');
       if (channel.provider === 'evolution') {
-        await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, cleanImageBase64, mimeType, `${productName}.jpg`, productName);
+        await sendEvolutionMediaMessage(channel.evolutionInstanceName, channel.evolutionApiUrl, channel.evolutionApiKey, req.params.phone, photoBase64, mimeType, `${productName}.jpg`, productName);
       } else {
-        const exampleImageBuffer = Buffer.from(cleanImageBase64, 'base64');
-        const mediaId = await uploadWhatsAppMedia(channel.metaPhoneNumberId, channel.metaAccessToken, exampleImageBuffer, mimeType, `${productName}.jpg`);
+        const mediaId = await uploadWhatsAppMedia(channel.metaPhoneNumberId, channel.metaAccessToken, resolvedPhoto.buffer, mimeType, `${productName}.jpg`);
         await sendWhatsAppMediaMessage(channel.metaPhoneNumberId, channel.metaAccessToken, req.params.phone, mediaId, mimeType, productName);
       }
 
@@ -1017,7 +1031,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         undefined,
         messageId
       );
-      await saveMediaImage(supabaseUrl, supabaseKey, messageId, media.exampleImageBase64, mimeType);
+      await saveMediaImage(supabaseUrl, supabaseKey, messageId, photoBase64, mimeType);
       res.json({ success: true, conversation: conv });
     } catch (err: any) {
       if (isGeoRestrictedError(err)) await markGeoRestricted(tenantId, req.params.phone, err.message);
