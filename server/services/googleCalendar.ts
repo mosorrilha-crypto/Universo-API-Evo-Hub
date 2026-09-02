@@ -14,6 +14,7 @@ import jwt from 'jsonwebtoken';
 import { getDb, getPlatformDb } from './db';
 import { getTenantBusinessHours, type BusinessHours } from './tenantProfileStore';
 import { withStructuredLog } from './structuredLog';
+import { decryptSecret, encryptSecret } from './tokenCrypto';
 
 // Evita importar o tipo OAuth2Client de 'google-auth-library' diretamente —
 // o pacote 'googleapis' reexporta uma cópia própria (via googleapis-common)
@@ -39,14 +40,18 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googlea
 async function loadRefreshToken(tenantId: string): Promise<string | null> {
   const db = getDb();
   const { data } = await db.from('tenant_calendar_tokens').select('refresh_token').eq('tenant_id', tenantId).maybeSingle();
-  return data?.refresh_token || null;
+  if (!data?.refresh_token) return null;
+  // decryptSecret reconhece texto puro legado (sem o prefixo "v1:") e
+  // devolve como está — cobre tenants conectados antes desta mudança sem
+  // precisar de backfill pra continuar funcionando (ver tokenCrypto.ts).
+  return decryptSecret(data.refresh_token);
 }
 
 async function saveRefreshToken(tenantId: string, refreshToken: string): Promise<void> {
   const db = getDb();
   const { error } = await db
     .from('tenant_calendar_tokens')
-    .upsert({ tenant_id: tenantId, refresh_token: refreshToken, connected_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+    .upsert({ tenant_id: tenantId, refresh_token: encryptSecret(refreshToken), connected_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
   if (error) throw error;
 }
 
