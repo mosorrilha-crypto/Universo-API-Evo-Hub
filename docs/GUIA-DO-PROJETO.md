@@ -39,6 +39,22 @@ clonar o repositório. É um Claude Artifact vinculado à conta do dono do
 produto, já com compartilhamento habilitado (qualquer um com o link
 consegue abrir, não precisa estar logado na mesma conta).
 
+Desde 02/09/2026 (TASK-0219) também existe uma segunda cópia hospedada
+independentemente no Render, pra outros analistas acessarem sem depender
+de conta/link do Claude:
+**https://universo-mapa-arquitetura.onrender.com**
+— servida como Static Site a partir de `docs/mapa-do-projeto/site/index.html`,
+uma cópia derivada (não a mesma fonte do Artifact acima) com o Mermaid
+carregado via CDN e inicializado no carregamento, já que a renderização de
+diagrama do arquivo original depende de injeção feita pelo próprio Artifact
+na hora de publicar — fora dele, os `<pre class="mermaid">` apareceriam como
+texto cru. Hoje aponta pra branch `claude/gestor-refinamento-atendimento-mwu1a7`
+(auto-deploy a cada commit nela), não pra `main` — reapontar pro Render se/quando
+essa branch for mesclada e apagada. **Ao editar o mapa, atualize as três coisas
+na mesma tarefa:** o arquivo fonte, a cópia standalone em `site/index.html`
+(ou regenere-a) e republique o Artifact — do contrário os três ficam
+desatualizados entre si sem aviso.
+
 **Regra pras próximas sessões:** hoje todo editor deste repositório é uma
 sessão de Claude, então editar o arquivo sem republicar o link é
 considerado tarefa incompleta, não um passo opcional separado. Sempre que
