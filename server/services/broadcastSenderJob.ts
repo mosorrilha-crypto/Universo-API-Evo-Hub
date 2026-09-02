@@ -26,6 +26,7 @@ import {
   listScheduledCampaignsDueToStart,
   transitionCampaignToRunning,
   listCampaignNumbersWithDetails,
+  listCampaignTemplatesWithDetails,
   getCampaign,
   getBroadcastTemplate,
   getBroadcastContactsByIds,
@@ -39,6 +40,7 @@ import {
   renderTemplateDisplayText,
   type BroadcastNumber,
   type BroadcastCampaign,
+  type CampaignTemplateWithDetails,
 } from './broadcastStore';
 
 // TASK-0206 — achado real (01/09/2026): este job rodava a cada 20s O TEMPO
@@ -126,16 +128,35 @@ async function processCampaignNumber(
   const recipients = await dequeuePendingRecipients(campaignId, number.id, quota);
   if (!recipients.length) return;
 
-  const template = await getBroadcastTemplate(tenantId, campaign.templateId);
-  if (!template) {
-    console.warn(`⚠️  [Disparo] campanha=${campaignId} template=${campaign.templateId} não encontrado — pulando este tick.`);
-    return;
+  // Uma campanha pode ter mais de um template vinculado (variação de
+  // texto/formato) — cada `recipient.templateId` já diz qual usar,
+  // atribuído no round-robin da criação da campanha. `recipient.templateId`
+  // nulo só acontece em recipients de campanhas criadas antes dessa
+  // feature existir — cai pro `campaign.templateId` de sempre.
+  const templateLinks = await listCampaignTemplatesWithDetails(tenantId, campaignId);
+  const templatesById = new Map<string, CampaignTemplateWithDetails>(templateLinks.map((link) => [link.templateId, link]));
+  // Campanhas criadas antes de broadcast_campaign_templates existir não têm
+  // nenhum link — cai pro template único de sempre (campaign.templateId).
+  if (!templatesById.size) {
+    const legacyTemplate = await getBroadcastTemplate(tenantId, campaign.templateId);
+    if (!legacyTemplate) {
+      console.warn(`⚠️  [Disparo] campanha=${campaignId} template=${campaign.templateId} não encontrado — pulando este tick.`);
+      return;
+    }
+    templatesById.set(campaign.templateId, { id: '', templateId: campaign.templateId, headerMediaId: campaign.headerMediaId, template: legacyTemplate });
   }
 
   const contactsById = await getBroadcastContactsByIds(tenantId, recipients.map((r) => r.contactId));
 
   for (const recipient of recipients) {
     await markRecipientSending(recipient.id);
+    const templateLink = templatesById.get(recipient.templateId || campaign.templateId);
+    if (!templateLink) {
+      await markRecipientFailed(recipient.id, `Template ${recipient.templateId || campaign.templateId} não encontrado ou não vinculado à campanha.`);
+      continue;
+    }
+    const template = templateLink.template;
+    const headerMediaId = templateLink.headerMediaId || (templateLink.templateId === campaign.templateId ? campaign.headerMediaId : null);
     const contact = contactsById.get(recipient.contactId);
     const variables = contact?.variables || {};
     try {
@@ -161,7 +182,7 @@ async function processCampaignNumber(
         template.language,
         bodyParams,
         undefined,
-        campaign.headerMediaId || undefined
+        headerMediaId || undefined
       );
 
       const displayText = renderTemplateDisplayText(template.bodyText, variables) || template.name;
