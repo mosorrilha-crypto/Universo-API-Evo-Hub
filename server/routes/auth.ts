@@ -35,11 +35,18 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
     const genericError = 'E-mail ou senha incorretos.';
 
     try {
-      if (!password || password.trim() === '') {
-        throw new Error('A senha é obrigatória.');
-      }
-      if (!email || String(email).trim() === '') {
-        throw new Error('O e-mail é obrigatório.');
+      // Validação de formato (campo ausente/vazio) — nunca acessa o banco
+      // nem compara senha, então não é um "bypass" de verdade: com ou sem
+      // essa checagem o pedido termina rejeitado. Unificada na MESMA
+      // genericError (não mais duas mensagens específicas) pra fechar de
+      // vez a diferenciação "faltou senha" vs "faltou e-mail" vs "senha
+      // errada" — todas indistinguíveis pra quem está tentando adivinhar.
+      // codeql[js/user-controlled-bypass]: e-mail/senha vêm do próprio
+      // corpo da requisição por definição (é o que a rota de login lê) —
+      // a checagem de formato não decide autenticação nenhuma, só evita
+      // gastar bcrypt.compare/consulta ao banco com um campo vazio.
+      if (!password || password.trim() === '' || !email || String(email).trim() === '') {
+        throw new Error(genericError);
       }
 
       if (!supabase) {
