@@ -19,6 +19,17 @@ pagamento/CRM. **Está em produção com um tenant pagante real** (um studio de 
 mensagens reais de clientes — qualquer mudança no caminho mensagem/agendamento/pagamento exige
 cuidado extra (ver `CLAUDE.md` na raiz pra convenções de código e comandos).
 
+## Mapa visual (onboarding)
+
+`docs/mapa-do-projeto/index.html` é uma versão navegável no navegador do
+conteúdo deste guia — diagrama do fluxo da mensagem, diagrama do fluxo do
+painel, tabela de estado real por área e lacunas conhecidas, pensada pra
+quem está começando a se orientar no projeto. Abra localmente no navegador
+(`file://.../docs/mapa-do-projeto/index.html`); não é servido pela
+aplicação. É um **snapshot gerado a partir deste guia em 2026-09-01/02** —
+se este guia mudar, o mapa pode ficar desatualizado até alguém regenerá-lo;
+este arquivo (`GUIA-DO-PROJETO.md`) continua sendo a fonte de verdade.
+
 ## Arquitetura em uma tela
 
 ```

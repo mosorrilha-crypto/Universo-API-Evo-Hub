@@ -1,0 +1,372 @@
+<title>Mapa do Universo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --ink:#171b1a;
+    --paper:#f6f2e9;
+    --paper-2:#efe9db;
+    --accent:#1f7a5c;
+    --accent-ink:#0f4c38;
+    --amber:#b9822f;
+    --amber-bg:#f6ead3;
+    --rose:#a84b3a;
+    --rose-bg:#f5e1da;
+    --slate:#5b6b66;
+    --line:#d8cfb9;
+    --card:#fffdf7;
+    --shadow: 0 1px 0 rgba(23,27,26,0.05);
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#ece7db;
+      --paper:#14181a;
+      --paper-2:#1b201f;
+      --accent:#4fbf95;
+      --accent-ink:#bdeedb;
+      --amber:#e0a94f;
+      --amber-bg:#2c2415;
+      --rose:#e08874;
+      --rose-bg:#2c1a16;
+      --slate:#93a19b;
+      --line:#33302a;
+      --card:#1a1e1c;
+      --shadow: 0 1px 0 rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#ece7db;
+    --paper:#14181a;
+    --paper-2:#1b201f;
+    --accent:#4fbf95;
+    --accent-ink:#bdeedb;
+    --amber:#e0a94f;
+    --amber-bg:#2c2415;
+    --rose:#e08874;
+    --rose-bg:#2c1a16;
+    --slate:#93a19b;
+    --line:#33302a;
+    --card:#1a1e1c;
+    --shadow: 0 1px 0 rgba(0,0,0,0.4);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    line-height:1.55;
+  }
+  ::selection{ background:var(--accent); color:var(--paper); }
+
+  .wrap{ max-width:920px; margin:0 auto; padding:3.5rem 1.5rem 6rem; }
+
+  h1,h2,h3{ font-family:'Fraunces', Georgia, serif; text-wrap:balance; letter-spacing:-0.01em; color:var(--ink); }
+
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.72rem;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--accent-ink);
+    display:flex; align-items:center; gap:0.5rem;
+  }
+  .eyebrow::before{ content:''; width:1.4rem; height:1px; background:var(--accent); display:inline-block; }
+
+  header.hero{ margin-bottom:3.5rem; }
+  header.hero h1{ font-size:clamp(2.1rem, 5vw, 3.1rem); font-weight:600; margin:0.6rem 0 1rem; }
+  header.hero p.lede{ font-size:1.1rem; color:var(--slate); max-width:60ch; margin:0 0 1.4rem; }
+  header.hero p.lede strong{ color:var(--ink); font-weight:600; }
+
+  .badge-row{ display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:1.2rem; }
+  .badge{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.72rem;
+    padding:0.3rem 0.6rem;
+    border-radius:999px;
+    border:1px solid var(--line);
+    color:var(--slate);
+    background:var(--card);
+  }
+
+  nav.toc{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr));
+    gap:0.6rem;
+    background:var(--paper-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:1rem;
+    margin-bottom:3.5rem;
+  }
+  nav.toc a{
+    color:var(--ink); text-decoration:none; font-size:0.88rem;
+    display:flex; align-items:baseline; gap:0.45rem;
+  }
+  nav.toc a span.n{ font-family:'IBM Plex Mono',monospace; color:var(--accent); font-size:0.78rem; }
+  nav.toc a:hover{ color:var(--accent-ink); }
+
+  section{ margin-bottom:4rem; scroll-margin-top:1.5rem; }
+  section h2{ font-size:1.55rem; font-weight:600; margin:0 0 0.35rem; }
+  section > p.deck{ color:var(--slate); max-width:66ch; margin:0 0 1.6rem; }
+
+  .diagram-card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:1.4rem;
+    box-shadow:var(--shadow);
+    overflow-x:auto;
+  }
+  .diagram-card figcaption{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.75rem;
+    color:var(--slate);
+    margin-top:0.9rem;
+    padding-top:0.8rem;
+    border-top:1px dashed var(--line);
+  }
+
+  /* status legend */
+  .legend{ display:flex; flex-wrap:wrap; gap:1.1rem; margin:1.4rem 0 2rem; font-size:0.85rem; }
+  .legend .item{ display:flex; align-items:center; gap:0.45rem; color:var(--slate); }
+  .dot{ width:0.62rem; height:0.62rem; border-radius:50%; flex:none; }
+  .dot.on{ background:var(--accent); }
+  .dot.mid{ background:var(--amber); }
+  .dot.gap{ background:var(--rose); }
+
+  .chip{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.68rem;
+    letter-spacing:0.03em;
+    padding:0.18rem 0.55rem;
+    border-radius:999px;
+    white-space:nowrap;
+    font-weight:500;
+  }
+  .chip.on{ background:var(--accent); color:var(--paper); }
+  .chip.mid{ background:var(--amber-bg); color:var(--amber); border:1px solid var(--amber);}
+  .chip.gap{ background:var(--rose-bg); color:var(--rose); border:1px solid var(--rose);}
+
+  .area-list{ display:flex; flex-direction:column; gap:0; border-top:1px solid var(--line); }
+  .area{
+    display:grid;
+    grid-template-columns:minmax(140px,220px) auto 1fr;
+    gap:1rem;
+    align-items:start;
+    padding:1rem 0;
+    border-bottom:1px solid var(--line);
+  }
+  .area .name{ font-weight:600; font-size:0.95rem; }
+  .area .name small{ display:block; font-family:'IBM Plex Mono',monospace; font-weight:400; color:var(--slate); font-size:0.72rem; margin-top:0.2rem; }
+  .area .desc{ color:var(--slate); font-size:0.88rem; }
+  .area .desc code{ font-family:'IBM Plex Mono',monospace; background:var(--paper-2); padding:0.05rem 0.35rem; border-radius:4px; font-size:0.82rem; color:var(--ink); }
+
+  @media (max-width: 640px){
+    .area{ grid-template-columns:1fr; }
+  }
+
+  .gap-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
+  .gap-card{
+    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.1rem 1.2rem;
+    border-left:3px solid var(--rose);
+  }
+  .gap-card.mid{ border-left-color:var(--amber); }
+  .gap-card h3{ font-size:1rem; margin:0 0 0.4rem; font-family:'IBM Plex Sans',sans-serif; font-weight:600; }
+  .gap-card p{ font-size:0.86rem; color:var(--slate); margin:0; }
+
+  .qa{ display:flex; flex-direction:column; gap:1.4rem; }
+  .qa-item{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1.3rem 1.4rem; }
+  .qa-item .q{ font-family:'Fraunces',serif; font-weight:600; font-size:1.08rem; margin:0 0 0.5rem; }
+  .qa-item .a{ color:var(--slate); font-size:0.92rem; }
+  .qa-item .verdict{ display:inline-block; margin-top:0.7rem; }
+
+  footer{
+    margin-top:4rem; padding-top:1.6rem; border-top:1px solid var(--line);
+    font-family:'IBM Plex Mono', monospace; font-size:0.72rem; color:var(--slate);
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem;
+  }
+
+  .mermaid{ font-family:'IBM Plex Sans', sans-serif !important; }
+
+  @media (prefers-reduced-motion: reduce){ *{ animation-duration:0.01ms !important; transition-duration:0.01ms !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Universo · dossiê de arquitetura viva</div>
+    <h1>O que o Universo já faz — e onde ainda tem buraco</h1>
+    <p class="lede">Este é o mapa "explodido" do sistema: <strong>como uma mensagem do WhatsApp vira uma resposta da IA</strong>, o que já está rodando de verdade em produção, e o que ainda é lacuna conhecida. Baseado no estado real do código, auditado em <code>docs/GUIA-DO-PROJETO.md</code> — não em suposição.</p>
+    <div class="badge-row">
+      <span class="badge">fonte: docs/GUIA-DO-PROJETO.md</span>
+      <span class="badge">auditado 27/08/2026</span>
+      <span class="badge">tenant real ativo: estúdio de beleza (Monique)</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Sumário">
+    <a href="#fluxo-mensagem"><span class="n">01</span> Fluxo da mensagem</a>
+    <a href="#fluxo-frontend"><span class="n">02</span> Painel (frontend)</a>
+    <a href="#estado-real"><span class="n">03</span> Estado real por área</a>
+    <a href="#gaps"><span class="n">04</span> Lacunas conhecidas</a>
+  </nav>
+
+  <section id="fluxo-mensagem">
+    <div class="eyebrow">01 · o coração do produto</div>
+    <h2>Do "oi" no WhatsApp até a resposta da IA</h2>
+    <p class="deck">Esse é o caminho que <strong>toda mensagem real de cliente</strong> percorre hoje, já em produção. Cada caixa é um arquivo real do backend.</p>
+
+    <figure class="diagram-card">
+<pre class="mermaid">
+flowchart TB
+    WA["📱 Cliente manda mensagem<br/>no WhatsApp"] --> WH["webhooks.ts<br/><i>recebe o webhook da Meta</i>"]
+    WH -->|"verifica assinatura<br/>x-hub-signature-256"| SIG{assinatura<br/>válida?}
+    SIG -->|não| DROP1["❌ rejeita (403)"]
+    SIG -->|sim| TR["tenantResolver.ts<br/><i>descobre de qual tenant é,<br/>pelo phone_number_id</i>"]
+    TR -->|"não reconhece o número"| DROP2["❌ descarta<br/>(nunca grava em tenant errado)"]
+    TR -->|reconhece| IDEM["idempotency.ts<br/><i>já processei esse message_id?</i>"]
+    IDEM -->|"sim, duplicado"| DROP3["❌ ignora"]
+    IDEM -->|não| BUF["autoReply.ts — buffer<br/><i>agrupa mensagens em rajada</i>"]
+    BUF --> ROUTER["Gemini router<br/><i>classifica: triagem / faq /<br/>agendamento / reclamação</i>"]
+    ROUTER --> ESP["Gemini especialista<br/><i>Knowledge Base do tenant +<br/>histórico da conversa</i>"]
+    ESP -->|"se for agendamento"| CAL["Google Calendar<br/><i>function-calling real:<br/>consulta, cria, remarca, cancela</i>"]
+    CAL --> ESP
+    ESP --> GATE["replySafetyGate.ts<br/><i>confere se a data/hora citada<br/>bate com o que o Calendar confirmou</i>"]
+    GATE --> SEND["envia a resposta pelo<br/>WhatsApp (Meta Cloud API)"]
+    SEND --> CLI["📱 Cliente recebe a resposta"]
+
+    style WA fill:#1f7a5c,color:#fff,stroke:none
+    style CLI fill:#1f7a5c,color:#fff,stroke:none
+    style DROP1 fill:#a84b3a,color:#fff,stroke:none
+    style DROP2 fill:#a84b3a,color:#fff,stroke:none
+    style DROP3 fill:#a84b3a,color:#fff,stroke:none
+    style CAL fill:#b9822f,color:#fff,stroke:none
+</pre>
+      <figcaption>Ativo em produção agora — inclui a "trava anti-alucinação" (replySafetyGate): a IA nunca pode afirmar um horário que o Calendar não confirmou de verdade.</figcaption>
+    </figure>
+  </section>
+
+  <section id="fluxo-frontend">
+    <div class="eyebrow">02 · o painel que a operadora usa</div>
+    <h2>Como o painel (React) fica em tempo real</h2>
+    <p class="deck">Em vez de a tela ficar perguntando "tem mensagem nova?" toda hora ao banco, o servidor <strong>avisa</strong> o painel quando algo muda.</p>
+
+    <figure class="diagram-card">
+<pre class="mermaid">
+flowchart LR
+    DB[("Supabase<br/>Postgres")] --> EV["conversationEvents.ts<br/><i>publica evento quando<br/>chega mensagem nova</i>"]
+    EV -->|"Server-Sent Events"| UI["WhatsAppLeadsSim.tsx<br/><i>tela de conversas do painel</i>"]
+    UI -.->|"a cada 90s, só por segurança"| POLL["poll de segurança"]
+    POLL -.-> DB
+    UI --> APP["App.tsx<br/><i>estado central: tenants,<br/>leads, KB, financeiro</i>"]
+    APP -->|"cache local"| LS[("localStorage<br/>do navegador")]
+
+    style DB fill:#1f7a5c,color:#fff,stroke:none
+    style UI fill:#b9822f,color:#fff,stroke:none
+</pre>
+      <figcaption>SSE é em memória e não sobrevive a um restart do servidor — por isso existe o poll de 90s como rede de segurança, nunca como mecanismo principal.</figcaption>
+    </figure>
+  </section>
+
+  <section id="estado-real">
+    <div class="eyebrow">03 · auditoria, não suposição</div>
+    <h2>Estado real por área</h2>
+    <p class="deck">Cada linha reflete o que o código faz hoje — não o que a documentação antiga dizia.</p>
+
+    <div class="legend">
+      <span class="item"><span class="dot on"></span> Ativo em produção</span>
+      <span class="item"><span class="dot mid"></span> Parcial / com ressalva</span>
+      <span class="item"><span class="dot gap"></span> Lacuna conhecida</span>
+    </div>
+
+    <div class="area-list">
+      <div class="area">
+        <div class="name">Isolamento multi-tenant<small>tenantContext.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc"><code>tenantId</code> sempre vem do JWT autenticado — nunca de parâmetro enviado pelo cliente. Sem fallback silencioso para um tenant padrão.</div>
+      </div>
+      <div class="area">
+        <div class="name">Roteamento de webhook<small>tenantResolver.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Mensagem chega e é associada ao tenant pelo <code>phone_number_id</code>. Número desconhecido → mensagem é descartada, nunca gravada no tenant errado.</div>
+      </div>
+      <div class="area">
+        <div class="name">Agente de IA + Calendar<small>autoReply.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Classificação → resposta especialista → agendamento real via function-calling no Google Calendar, com trava anti-alucinação no fim.</div>
+      </div>
+      <div class="area">
+        <div class="name">Pausa do agente<small>agentStatus.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Operadora pode pausar a IA por tenant. Alerta automático (template aprovado da Meta) se ficar pausado com mensagens sem resposta.</div>
+      </div>
+      <div class="area">
+        <div class="name">Áudio enviado pelo painel<small>audioTranscode.ts</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Reconverte para Ogg/Opus antes de mandar — sem isso, o áudio "manda com sucesso" mas nunca toca do outro lado.</div>
+      </div>
+      <div class="area">
+        <div class="name">CRM do operador<small>OperatorCRM.tsx</small></div>
+        <div><span class="chip gap">lacuna</span></div>
+        <div class="desc">Ainda é <code>localStorage</code> puro — nenhuma chamada de API. O que a operadora anota ali não é salvo em nenhum servidor.</div>
+      </div>
+      <div class="area">
+        <div class="name">Financeiro / Agenda real<small>AgendaFinanceiroCenter.tsx</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">Essa é a tela que o usuário realmente vê (não <code>FinancialDashboard.tsx</code>, que nem é renderizada em lugar nenhum).</div>
+      </div>
+      <div class="area">
+        <div class="name">Pagamentos<small>—</small></div>
+        <div><span class="chip gap">lacuna</span></div>
+        <div class="desc">Ainda não existe integração com gateway de pagamento real — status de pagamento é rastreado, mas não cobrado automaticamente.</div>
+      </div>
+      <div class="area">
+        <div class="name">Observabilidade<small>—</small></div>
+        <div><span class="chip gap">lacuna</span></div>
+        <div class="desc">Sem rastreamento de erro dedicado (tipo Sentry) — hoje o diagnóstico depende de ler log do Render manualmente.</div>
+      </div>
+      <div class="area">
+        <div class="name">Disparo em massa<small>broadcastSenderJob.ts</small></div>
+        <div><span class="chip mid">parcial</span></div>
+        <div class="desc">Funciona, mas sem botão manual liga/desliga — hoje é gatilho automático por evento + poll de segurança a cada 5 min (TASK-0206).</div>
+      </div>
+      <div class="area">
+        <div class="name">Testes / CI<small>vitest, GitHub Actions</small></div>
+        <div><span class="chip on">ativo</span></div>
+        <div class="desc">237 arquivos de teste, CodeQL rodando (repositório público de propósito, pra ter GHAS de graça).</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="gaps">
+    <div class="eyebrow">04 · o que falta, em ordem de prioridade</div>
+    <h2>Lacunas conhecidas</h2>
+    <p class="deck">Isso não é "bug" — é trabalho que ainda não foi feito, listado do mais pra menos urgente.</p>
+
+    <div class="gap-grid">
+      <div class="gap-card">
+        <h3>SSE de uma instância só</h3>
+        <p>O aviso em tempo real do painel só funciona enquanto o mesmo processo do servidor está de pé — não sobrevive a restart nem escala pra múltiplas instâncias.</p>
+      </div>
+      <div class="gap-card">
+        <h3>Sem rastreamento de erro</h3>
+        <p>Um erro em produção só aparece se alguém for olhar o log do Render na hora — não existe alerta automático de exceção.</p>
+      </div>
+      <div class="gap-card mid">
+        <h3>Sem gateway de pagamento</h3>
+        <p>O sistema registra que algo foi pago, mas não cobra ninguém de verdade ainda — é status manual, não cobrança automática.</p>
+      </div>
+      <div class="gap-card mid">
+        <h3>CRM do operador é só local</h3>
+        <p><code>OperatorCRM.tsx</code> não fala com o backend — o que é digitado ali fica só no navegador de quem digitou.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>gerado a partir de docs/GUIA-DO-PROJETO.md</span>
+    <span>Universo · WhatsApp AI-agent SaaS</span>
+  </footer>
+
+</div>
