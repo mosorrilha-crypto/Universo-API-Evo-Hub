@@ -1,14 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, ChevronDown, MessageSquareText } from 'lucide-react';
-import { Tenant } from '../types';
+import React from 'react';
 
 type AtendimentoWorkspaceFrameProps = {
   children: React.ReactNode;
-  activeTenantName: string;
-  tenants?: Tenant[];
-  activeTenant?: Tenant;
-  canSwitchTenant?: boolean;
-  onSelectTenant?: (tenant: Tenant) => void;
 };
 
 /**
@@ -17,106 +10,28 @@ type AtendimentoWorkspaceFrameProps = {
  * operação" (título grande + estatísticas 223 conversas/pendências/IA
  * supervisionada) foi removido por completo — repetia informação que já
  * fica visível na própria lista de conversas logo abaixo, e ocupava tela
- * útil que o WhatsApp real não gasta com isso. O cabeçalho vira uma faixa
- * fina, só com o nome do app e a empresa ativa — mais perto do "WhatsApp"
- * simples do topo do app real do que de um painel de métricas.
+ * útil que o WhatsApp real não gasta com isso.
+ *
+ * TASK-0212 (pedido direto, 01/09/2026, novo print comparando com o
+ * WhatsApp Web): o que sobrou do refinamento acima (faixa fina só com
+ * "Atendimento" + seletor de empresa) foi removido também. Era escondido no
+ * mobile desde 29/08/2026 por ser redundante com a barra de abas inferior
+ * (a aba "Conversas" já ativa já deixa claro onde a tela está); a
+ * justificativa original pra manter no desktop ("há espaço de sobra e o
+ * seletor de empresa é mais usado ali") não se sustenta mais — o dono do
+ * produto apontou que essa faixa some espaço útil de tela mesmo no
+ * desktop, e o seletor de empresa que ela carregava é uma DUPLICATA exata
+ * do que já existe no menu de perfil do SaaS Admin em `Header.tsx`
+ * (`isProfileMenuOpen`, mesmos `tenants`/`activeTenant`/`onSelectTenant`) —
+ * nunca foi a única forma de trocar de empresa, só uma segunda entrada
+ * redundante. O componente agora é só o wrapper de layout
+ * (`.atendimento-workspace`/`.atendimento-workspace__content`), que
+ * continua existindo porque a cadeia de flexbox que resolve a altura do
+ * Atendimento no mobile (TASK-0159/TASK-0162) depende dessas duas classes.
  */
-export default function AtendimentoWorkspaceFrame({
-  children,
-  activeTenantName,
-  tenants = [],
-  activeTenant,
-  canSwitchTenant = false,
-  onSelectTenant,
-}: AtendimentoWorkspaceFrameProps) {
-  const tenantMenuRef = useRef<HTMLDivElement>(null);
-  const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
-  const canSelectTenant = canSwitchTenant && tenants.length > 1 && Boolean(activeTenant && onSelectTenant);
-
-  useEffect(() => {
-    if (!isTenantMenuOpen) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (tenantMenuRef.current && !tenantMenuRef.current.contains(event.target as Node)) setIsTenantMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsTenantMenuOpen(false);
-    };
-    document.addEventListener('mousedown', closeOnOutsideClick);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('mousedown', closeOnOutsideClick);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [isTenantMenuOpen]);
-
-  useEffect(() => {
-    if (!canSelectTenant) setIsTenantMenuOpen(false);
-  }, [canSelectTenant]);
-
-  const selectTenant = (tenant: Tenant) => {
-    onSelectTenant?.(tenant);
-    setIsTenantMenuOpen(false);
-  };
-
+export default function AtendimentoWorkspaceFrame({ children }: AtendimentoWorkspaceFrameProps) {
   return (
     <section className="atendimento-workspace" aria-label="Central de atendimento">
-      {/* Escondido no mobile sempre (não só com conversa aberta) — achado
-          real, 29/08/2026: mesmo na lista de conversas, esta faixa (título
-          "Atendimento" + seletor de empresa) ficou redundante com a barra
-          de abas inferior do mobile (já deixa claro que a tela é a de
-          Conversas) e o seletor de empresa é uma função de admin raramente
-          usada nessa tela — só ocupava espaço vertical que a lista podia
-          usar. No desktop continua sempre visível (há espaço de sobra e o
-          seletor de empresa é mais usado ali).
-          `!hidden`/`lg:!flex` (com !important) — sem isso, a regra própria
-          de `.atendimento-workspace__header { display: flex }` no
-          index.css tem a mesma especificidade da utilitária `.hidden` do
-          Tailwind e vem depois no bundle, então sempre vencia e o
-          cabeçalho nunca sumia de verdade no mobile (achado real em
-          produção, print do dono do produto, 29/08/2026). */}
-      <header className="atendimento-workspace__header atendimento-workspace__header--compact !hidden lg:!flex">
-        <div className="atendimento-workspace__identity">
-          <div className="atendimento-workspace__icon" aria-hidden="true"><MessageSquareText size={16} /></div>
-          <h1>Atendimento</h1>
-        </div>
-        <div className="atendimento-workspace__tenant" ref={tenantMenuRef}>
-          {canSelectTenant ? (
-            <>
-              <button
-                type="button"
-                className="atendimento-workspace__tenant-trigger"
-                aria-haspopup="menu"
-                aria-expanded={isTenantMenuOpen}
-                aria-controls="atendimento-tenant-menu"
-                aria-label={`Trocar empresa ativa. Empresa atual: ${activeTenantName}`}
-                onClick={() => setIsTenantMenuOpen((value) => !value)}
-              >
-                <strong>{activeTenantName}</strong>
-                <ChevronDown className={`atendimento-workspace__tenant-chevron${isTenantMenuOpen ? ' is-open' : ''}`} size={15} aria-hidden="true" />
-              </button>
-              {isTenantMenuOpen && (
-                <div id="atendimento-tenant-menu" className="atendimento-workspace__tenant-menu" role="menu" aria-label="Selecionar empresa ativa">
-                  {tenants.map((tenant) => (
-                    <button
-                      key={tenant.id}
-                      type="button"
-                      role="menuitem"
-                      className={`atendimento-workspace__tenant-option${tenant.id === activeTenant?.id ? ' is-active' : ''}`}
-                      onClick={() => selectTenant(tenant)}
-                    >
-                      <span>{tenant.name}</span>
-                      {tenant.id === activeTenant?.id && <CheckCircle2 size={14} aria-hidden="true" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <strong>{activeTenantName}</strong>
-          )}
-        </div>
-      </header>
-
       <div className="atendimento-workspace__content">{children}</div>
     </section>
   );
