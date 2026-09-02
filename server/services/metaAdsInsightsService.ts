@@ -1,4 +1,5 @@
 import { getDb } from './db';
+import { decryptSecret, encryptSecret } from './tokenCrypto';
 
 const META_GRAPH_VERSION = 'v26.0';
 
@@ -293,7 +294,7 @@ async function getTenantMetaAdsCredentials(tenantId: string): Promise<MetaAdsCre
 
   const accessToken = data.meta_ads_access_token || data.capi_access_token;
   if (!accessToken) return null;
-  return { adAccountId: validAdAccountId(data.meta_ads_account_id), accessToken };
+  return { adAccountId: validAdAccountId(data.meta_ads_account_id), accessToken: decryptSecret(accessToken) };
 }
 
 /** Retorna somente o estado da conexão: o token nunca sai do servidor. */
@@ -341,8 +342,8 @@ export async function saveMetaAdsConnection(
   }
 
   const update: Record<string, string> = { tenant_id: tenantId, meta_ads_account_id: adAccountId };
-  if (accessToken) update.meta_ads_access_token = accessToken;
-  if (managementAccessToken) update.meta_ads_management_access_token = managementAccessToken;
+  if (accessToken) update.meta_ads_access_token = encryptSecret(accessToken);
+  if (managementAccessToken) update.meta_ads_management_access_token = encryptSecret(managementAccessToken);
 
   const { error } = await database
     .from('tenant_meta_credentials')

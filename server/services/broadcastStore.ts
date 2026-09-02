@@ -11,6 +11,7 @@ import { getDb, getPlatformDb } from './db';
 import { parseContactsCsv } from './csvParse';
 import { uploadWhatsAppMedia } from './metaSend';
 import { isValidTimeOfDay, isValidTimezone } from './sendWindow';
+import { decryptSecret, encryptSecret } from './tokenCrypto';
 
 function stripDataUriPrefix(base64: string): string {
   return base64.replace(/^data:[^;]+;base64,/, '');
@@ -46,7 +47,7 @@ function mapNumberRow(row: any): BroadcastNumber {
     label: row.label,
     phoneNumberId: row.phone_number_id,
     wabaId: row.waba_id ?? null,
-    accessToken: row.access_token ?? null,
+    accessToken: row.access_token ? decryptSecret(row.access_token) : null,
     status: row.status,
     warmupProgressDays: row.warmup_progress_days ?? 0,
     warmupLastAdvancedOn: row.warmup_last_advanced_on ?? null,
@@ -92,7 +93,7 @@ export async function createBroadcastNumber(tenantId: string, input: CreateBroad
       label: input.label,
       phone_number_id: input.phoneNumberId,
       waba_id: input.wabaId || null,
-      access_token: input.accessToken || null,
+      access_token: input.accessToken ? encryptSecret(input.accessToken) : null,
       status: 'warming',
       warmup_progress_days: 0,
       warmup_last_advanced_on: null,
@@ -123,7 +124,7 @@ export async function updateBroadcastNumber(tenantId: string, id: string, patch:
   const update: Record<string, any> = { updated_at: new Date().toISOString() };
   if (patch.label !== undefined) update.label = patch.label;
   if (patch.wabaId !== undefined) update.waba_id = patch.wabaId;
-  if (patch.accessToken !== undefined && patch.accessToken !== '') update.access_token = patch.accessToken;
+  if (patch.accessToken !== undefined && patch.accessToken !== '') update.access_token = encryptSecret(patch.accessToken);
   if (patch.status !== undefined) update.status = patch.status;
   if (patch.qualityRating !== undefined) update.quality_rating = patch.qualityRating;
   if (patch.perMinuteCap !== undefined) update.per_minute_cap = patch.perMinuteCap;
