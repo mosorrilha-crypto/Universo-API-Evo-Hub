@@ -34,19 +34,22 @@ Também existe publicado como página web em:
 **https://claude.ai/code/artifact/b7a564a3-024a-4b15-848a-c1323fbc1f4a**
 — mesmo conteúdo do arquivo acima, mas acessível por link sem precisar
 clonar o repositório. É um Claude Artifact vinculado à conta do dono do
-produto; se o link parecer não abrir pra alguém, é porque o
-compartilhamento dele precisa ser habilitado por quem tem acesso à conta
-(menu de compartilhamento do próprio artefato) — isso não afeta o arquivo
-local, que é sempre a cópia completa e sem depender de permissão nenhuma.
+produto, já com compartilhamento habilitado (qualquer um com o link
+consegue abrir, não precisa estar logado na mesma conta).
 
-É um **snapshot mantido manualmente, atualizado por último em 02/09/2026**
-(inclui o PR #587/TASK-0208-0209) — sempre que uma sessão fizer uma
-mudança estrutural real (nova fase concluída, gap fechado, feature nova),
-atualize `docs/mapa-do-projeto/index.html` na mesma PR e republique o
-artefato acima (mesmo link, basta publicar de novo em cima da mesma URL).
-Se este guia mudar e ninguém atualizar o mapa, ele fica desatualizado até
-alguém regenerá-lo; este arquivo (`GUIA-DO-PROJETO.md`) continua sendo a
-fonte de verdade em caso de conflito.
+**Regra pras próximas sessões:** hoje todo editor deste repositório é uma
+sessão de Claude, então editar o arquivo sem republicar o link é
+considerado tarefa incompleta, não um passo opcional separado. Sempre que
+mudar `docs/mapa-do-projeto/index.html` por uma mudança estrutural real do
+projeto (nova fase concluída, gap fechado, feature nova — o mesmo gatilho
+que já vale pra este guia), na mesma tarefa: (1) edite o arquivo local,
+(2) republique o Artifact **na mesma URL acima** (nunca crie um artefato
+novo pra isso — perde o link já compartilhado), (3) valide lint/testes/
+build antes de commitar. É um **snapshot mantido manualmente, atualizado
+por último em 02/09/2026** (inclui o PR #587/TASK-0208-0209) — se ninguém
+seguir esse passo, o link fica com conteúdo desatualizado mesmo com o
+arquivo do repositório já correto. Este arquivo (`GUIA-DO-PROJETO.md`)
+continua sendo a fonte de verdade em caso de conflito entre os dois.
 
 ## Arquitetura em uma tela
 
