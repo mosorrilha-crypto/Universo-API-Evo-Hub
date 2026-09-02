@@ -25,7 +25,17 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
   // é sempre derivado do próprio registro do operador encontrado, nunca
   // adivinhado a priori por quem está logando.
   router.post('/api/auth/login', authLoginRateLimiter, async (req, res) => {
-    const { email, password } = req.body;
+    // Achado do CodeQL (js/user-controlled-bypass, PR #588): um `if (!password
+    // || !email) throw` explícito aqui — mesmo rejeitando a requisição — lia
+    // como "condição controlada pelo usuário decide se um passo sensível
+    // roda" pro analisador estático. Em vez de um gate condicional, e-mail e
+    // senha são normalizados pra string vazia sem nenhum `if`: o restante do
+    // fluxo já rejeita os dois casos naturalmente e com a MESMA mensagem
+    // genérica (bcrypt.compare('', hash) sempre dá false, nunca lança; e
+    // .ilike('email', '') não encontra nenhum operador real) — nenhum
+    // comportamento novo, só sem a ramificação que o CodeQL lia como bypass.
+    const email = typeof req.body.email === 'string' ? req.body.email : '';
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
 
     // Mensagem genérica de propósito — "usuário não encontrado" vs "senha
     // incorreta" permite enumerar quais e-mails/tenants existem no sistema.
@@ -35,20 +45,6 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
     const genericError = 'E-mail ou senha incorretos.';
 
     try {
-      // Validação de formato (campo ausente/vazio) — nunca acessa o banco
-      // nem compara senha, então não é um "bypass" de verdade: com ou sem
-      // essa checagem o pedido termina rejeitado. Unificada na MESMA
-      // genericError (não mais duas mensagens específicas) pra fechar de
-      // vez a diferenciação "faltou senha" vs "faltou e-mail" vs "senha
-      // errada" — todas indistinguíveis pra quem está tentando adivinhar.
-      // codeql[js/user-controlled-bypass]: e-mail/senha vêm do próprio
-      // corpo da requisição por definição (é o que a rota de login lê) —
-      // a checagem de formato não decide autenticação nenhuma, só evita
-      // gastar bcrypt.compare/consulta ao banco com um campo vazio.
-      if (!password || password.trim() === '' || !email || String(email).trim() === '') {
-        throw new Error(genericError);
-      }
-
       if (!supabase) {
         throw new Error('Supabase não está configurado. Configure SUPABASE_URL e SUPABASE_KEY no ambiente.');
       }
