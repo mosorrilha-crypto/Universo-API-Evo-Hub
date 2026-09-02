@@ -2,7 +2,8 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { authSessionRateLimiter } from '../middleware/rateLimit';
+import { authLoginRateLimiter, authSessionRateLimiter } from '../middleware/rateLimit';
+import { clearFailedLogins, isLoginLocked, recordFailedLogin } from '../services/authLoginAttempts';
 
 interface AuthRouterDeps {
   jwtSecret: string;
@@ -23,8 +24,15 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
   // .eq('tenant_id', 'tenant_004') nunca encontrava a linha. O tenant certo
   // é sempre derivado do próprio registro do operador encontrado, nunca
   // adivinhado a priori por quem está logando.
-  router.post('/api/auth/login', async (req, res) => {
+  router.post('/api/auth/login', authLoginRateLimiter, async (req, res) => {
     const { email, password } = req.body;
+
+    // Mensagem genérica de propósito — "usuário não encontrado" vs "senha
+    // incorreta" permite enumerar quais e-mails/tenants existem no sistema.
+    // A mesma mensagem cobre também a conta bloqueada por excesso de
+    // tentativas, pelo mesmo motivo: uma mensagem diferente revelaria que
+    // aquele e-mail existe e tem tentativas recentes.
+    const genericError = 'E-mail ou senha incorretos.';
 
     try {
       if (!password || password.trim() === '') {
@@ -38,6 +46,16 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
         throw new Error('Supabase não está configurado. Configure SUPABASE_URL e SUPABASE_KEY no ambiente.');
       }
 
+      // Achado de segurança (02/09/2026): sem isso, um atacante com muitos
+      // IPs (ou nenhum limite de IP relevante) tinha tentativas ilimitadas
+      // contra UMA conta específica. Verificado ANTES da consulta ao banco
+      // e da comparação de senha — a conta trancada nem chega a gastar um
+      // bcrypt.compare (mais barato pro servidor, e o atacante não aprende
+      // nada sobre o timing de uma senha "quase certa").
+      if (isLoginLocked(String(email))) {
+        throw new Error(genericError);
+      }
+
       const { data, error } = await supabase
         .from('operators')
         .select('*')
@@ -46,13 +64,14 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
 
       const operator = data as any;
 
-      // Mensagem genérica de propósito — "usuário não encontrado" vs "senha
-      // incorreta" permite enumerar quais e-mails/tenants existem no sistema.
-      const genericError = 'E-mail ou senha incorretos.';
       if (error || !operator) throw new Error(genericError);
 
       const validPassword = await bcrypt.compare(password, operator.password_hash);
-      if (!validPassword) throw new Error(genericError);
+      if (!validPassword) {
+        recordFailedLogin(String(email));
+        throw new Error(genericError);
+      }
+      clearFailedLogins(String(email));
 
       // Bloqueio de acesso do tenant (TASK-0070, tenants.is_active) — checado
       // só DEPOIS da senha validar, pra não virar um jeito de descobrir se um

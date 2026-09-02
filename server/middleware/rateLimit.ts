@@ -42,6 +42,20 @@ export const commercialInterestRateLimiter = rateLimit({
 });
 
 
+// Achado de segurança (02/09/2026, auditoria comparando com o DeskcommCRM):
+// POST /api/auth/login não tinha nenhum rate limit — só a checagem de conta
+// em server/services/authLoginAttempts.ts. Este limite por IP é a defesa
+// complementar: barra quem varre muitas contas de um lugar só (o limite por
+// conta não vê isso, já que cada e-mail tentado tem seu próprio contador).
+// Generoso o bastante pra não travar NAT corporativo/rede compartilhada.
+export const authLoginRateLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de login. Aguarde alguns minutos e tente novamente.' },
+});
+
 // Confirmação de sessão é chamada ao abrir o aplicativo. Limite moderado por
 // IP evita abuso de validação de token sem prejudicar recargas normais.
 export const authSessionRateLimiter = rateLimit({
