@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -118,6 +118,20 @@ interface ControlledExperimentResult {
   windowHours: number;
   metrics: Array<{ key: 'human_corrections' | 'escalations' | 'blocked_responses'; label: string; before: number; after: number; delta: number; interpretation: 'improved' | 'worsened' | 'stable' }>;
   limitations: string[];
+}
+
+/** TASK-0208 — status de uma rodada de avaliação automática sintética (ver server/services/agentEvalService.ts). Os achados de falha aparecem na lista normal de reviews (kind='bug'), esta é só o progresso da execução em background. */
+interface AgentEvalRun {
+  id: string;
+  status: 'running' | 'completed' | 'failed';
+  requestedCount: number;
+  completedCount: number;
+  passCount: number;
+  failCount: number;
+  repeatedPhraseCount: number;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
 }
 
 interface QualityAuditCenterProps {
@@ -312,6 +326,10 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [composerTitle, setComposerTitle] = useState('');
   const [composerDescription, setComposerDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [evalRuns, setEvalRuns] = useState<AgentEvalRun[]>([]);
+  const [evalCount, setEvalCount] = useState(10);
+  const [startingEval, setStartingEval] = useState(false);
+  const [evalError, setEvalError] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -338,6 +356,63 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   useEffect(() => {
     loadData();
   }, []);
+
+  const loadEvalRuns = async () => {
+    try {
+      const response = await apiFetch('/api/quality-audit/eval-runs');
+      const data = await response.json().catch(() => null);
+      if (!response.ok) return; // rota exige admin — silencioso pra operador sem permissão, igual ao resto do painel
+      setEvalRuns(Array.isArray(data?.runs) ? data.runs : []);
+    } catch {
+      // best-effort — não trava o painel se isto falhar
+    }
+  };
+
+  useEffect(() => {
+    loadEvalRuns();
+  }, []);
+
+  // Enquanto alguma rodada estiver "running", faz polling a cada 3s pra
+  // acompanhar o progresso — uma rodada de 100 casos leva minutos, não dá
+  // pra manter a requisição original aberta (ver POST .../eval-runs).
+  // Some findings pro painel principal quando terminar: recarrega a lista
+  // de reviews também, pra os achados novos (kind=bug) aparecerem sem
+  // precisar recarregar a página.
+  useEffect(() => {
+    if (!evalRuns.some((run) => run.status === 'running')) return;
+    const interval = setInterval(async () => {
+      await loadEvalRuns();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [evalRuns]);
+
+  const previousRunningIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const stillRunning = new Set(evalRuns.filter((run) => run.status === 'running').map((run) => run.id));
+    const justFinished = [...previousRunningIdsRef.current].some((id) => !stillRunning.has(id));
+    if (justFinished) loadData();
+    previousRunningIdsRef.current = stillRunning;
+  }, [evalRuns]);
+
+  const handleStartEval = async () => {
+    setStartingEval(true);
+    setEvalError(null);
+    try {
+      const response = await apiFetch('/api/quality-audit/eval-runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: evalCount }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível iniciar a avaliação automática.');
+      setEvalRuns((prev) => [data.run, ...prev]);
+      onToast(isSpanish ? 'Evaluación automática iniciada — puede tardar algunos minutos.' : 'Avaliação automática iniciada — pode levar alguns minutos.');
+    } catch (error: any) {
+      setEvalError(error?.message || 'Não foi possível iniciar a avaliação automática.');
+    } finally {
+      setStartingEval(false);
+    }
+  };
 
   const filteredReviews = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -621,6 +696,60 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
                 <ControlPill label="Pagamento" value="Humano" tone="emerald" />
               </div>
             </div>
+          </div>
+
+          <div className="bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">{isSpanish ? 'Evaluación automática del agente' : 'Avaliação automática do agente'}</h3>
+                <p className="text-xs text-slate-500 mt-1">{isSpanish ? 'Genera preguntas sintéticas basadas en el catálogo real, las corre en el agente de verdad y registra cada falla aquí abajo para revisión — nunca corrige nada solo.' : 'Gera perguntas sintéticas baseadas no catálogo real, roda no agente de verdade e registra cada falha logo abaixo pra revisão — nunca corrige nada sozinho.'}</p>
+              </div>
+              <Sparkles className="w-5 h-5 text-sky-300" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-slate-400 flex items-center gap-2">
+                {isSpanish ? 'Cantidad de casos' : 'Quantidade de casos'}
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={evalCount}
+                  onChange={(e) => setEvalCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+                  disabled={startingEval}
+                  className="w-20 bg-slate-800 border border-slate-700 rounded-control px-2 py-1.5 text-xs text-white"
+                />
+              </label>
+              <button
+                onClick={handleStartEval}
+                disabled={startingEval}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-semibold hover:bg-sky-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                {startingEval ? (isSpanish ? 'Iniciando...' : 'Iniciando...') : (isSpanish ? 'Ejecutar ahora' : 'Rodar avaliação agora')}
+              </button>
+            </div>
+            {evalError && <p className="text-xs text-rose-400 mt-2">{evalError}</p>}
+            {evalRuns.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {evalRuns.slice(0, 5).map((run) => (
+                  <div key={run.id} className="flex items-center justify-between gap-3 p-2.5 rounded-panel border border-slate-800 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {run.status === 'running' && <Clock3 className="w-3.5 h-3.5 text-amber-300 flex-shrink-0 animate-pulse" />}
+                      {run.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" />}
+                      {run.status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />}
+                      <span className="text-slate-300 truncate">
+                        {run.status === 'running'
+                          ? (isSpanish ? `Ejecutando: ${run.completedCount}/${run.requestedCount}` : `Rodando: ${run.completedCount}/${run.requestedCount}`)
+                          : run.status === 'completed'
+                          ? (isSpanish ? `${run.passCount}/${run.requestedCount} aprobaron, ${run.failCount} fallaron` : `${run.passCount}/${run.requestedCount} passaram, ${run.failCount} falharam`)
+                          : (isSpanish ? `Falló: ${run.error || 'error desconocido'}` : `Falhou: ${run.error || 'erro desconhecido'}`)}
+                      </span>
+                    </div>
+                    <span className="text-slate-500 flex-shrink-0">{new Date(run.startedAt).toLocaleString(isSpanish ? 'es-PY' : 'pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}

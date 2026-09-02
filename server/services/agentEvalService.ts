@@ -1,6 +1,11 @@
+import { randomUUID } from 'crypto';
 import type { GoogleGenAI } from '@google/genai';
 import { withGeminiRetry } from '../gemini';
-import { formatKnowledgeBaseForPrompt, type AgentKnowledgeBase } from './knowledgeBaseStore';
+import { formatKnowledgeBaseForPrompt, getRuntimeKnowledgeBase, type AgentKnowledgeBase } from './knowledgeBaseStore';
+import { getTenantSegment } from './tenantProfileStore';
+import { generateAutoReplyForText, type AgentType } from './autoReply';
+import { reviewAutoReplyBeforeSend, type ReplySafetyVerdict } from './replySafetyGate';
+import { createQualityReview } from './qualityAuditStore';
 
 /**
  * TASK-0203 — pedido direto do dono do produto: usar um "robô" pra gerar
@@ -192,4 +197,136 @@ export function findRepeatedPhrasesAcrossResponses(
 
 function normalizeForRepetitionCheck(text: string): string {
   return text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+export interface AgentEvalCaseResult extends SyntheticEvalCase {
+  agent?: AgentType;
+  bubbles?: string[];
+  safety?: ReplySafetyVerdict;
+  quality?: QualityJudgeVerdict;
+  passed?: boolean;
+  error?: string;
+}
+
+export interface AgentEvalRunSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  createdReviewCount: number;
+  repeatedPhrases: { phrase: string; count: number }[];
+}
+
+/**
+ * TASK-0208 — orquestração compartilhada entre `scripts/eval-agent.ts` (CLI)
+ * e a rota `POST /api/quality-audit/eval-runs` (botão no painel), pra não
+ * duplicar a lógica de "gerar → rodar no pipeline real → avaliar →
+ * registrar falha" em dois lugares. `onProgress` existe pra quem chama
+ * (rota ou CLI) reportar progresso sem esta função saber COMO (atualiza
+ * linha no banco / imprime no terminal); `onCaseResult` existe só pro CLI
+ * conseguir salvar o dump completo em `--out`, sem custar nada a quem não
+ * usa (a rota do painel não passa isso).
+ */
+export async function runAgentEvaluation(options: {
+  tenantId: string;
+  ai: GoogleGenAI;
+  count: number;
+  groqApiKey?: string;
+  onProgress?: (progress: { completed: number; total: number; passed: number; failed: number }) => void | Promise<void>;
+  onCaseResult?: (result: AgentEvalCaseResult) => void;
+}): Promise<AgentEvalRunSummary> {
+  const { tenantId, ai, count, groqApiKey, onProgress, onCaseResult } = options;
+
+  const runtimeKb = await getRuntimeKnowledgeBase(tenantId);
+  if (runtimeKb.source === 'unavailable') {
+    throw new Error('Base de Conhecimento indisponível pra este tenant — não dá pra gerar casos grounded sem ela.');
+  }
+  const kb = runtimeKb.knowledgeBase;
+  const kbContext = formatKnowledgeBaseForPrompt(kb);
+  const segment = await getTenantSegment(tenantId);
+
+  const cases = await generateSyntheticEvalQuestions(ai, kb, count);
+
+  let passed = 0;
+  let failed = 0;
+  let createdReviewCount = 0;
+  const bubblesForRepetitionCheck: { bubbles: string[] }[] = [];
+
+  const reportFailure = async (c: SyntheticEvalCase, extra: { agent?: AgentType; bubbles?: string[]; safety?: ReplySafetyVerdict; quality?: QualityJudgeVerdict; error?: string }) => {
+    failed++;
+    const issueParts = [
+      extra.safety && !extra.safety.approved ? `Revisor de segurança: ${extra.safety.reason}` : null,
+      extra.quality?.issues?.length ? `Qualidade: ${extra.quality.issues.join('; ')}` : null,
+      extra.error ? `Erro: ${extra.error}` : null,
+    ].filter((p): p is string => Boolean(p));
+    await createQualityReview({
+      tenantId,
+      kind: 'bug',
+      title: `[Avaliação automática] ${c.category}: falha em caso sintético`,
+      description: `Pergunta sintética (${c.note || 'sem nota'}): "${c.text}"\n\nProblema encontrado: ${issueParts.join(' | ') || 'não especificado'}`,
+      context: { source: 'synthetic_eval', category: c.category, question: c.text, history: c.history, agent: extra.agent },
+      originalValue: extra.bubbles?.join('\n') || null,
+      correctedValue: extra.quality?.suggestedFix || null,
+    });
+    createdReviewCount++;
+    onCaseResult?.({ ...c, agent: extra.agent, bubbles: extra.bubbles, safety: extra.safety, quality: extra.quality, error: extra.error, passed: false });
+  };
+
+  for (const c of cases) {
+    const fakePhone = `eval-${randomUUID()}`;
+    let genResult;
+    try {
+      genResult = await generateAutoReplyForText(
+        tenantId, ai, c.text, undefined, kbContext, c.history, fakePhone,
+        undefined /* calendarConfig — de propósito ausente, nunca toca a agenda real */,
+        segment, undefined, undefined, undefined, undefined, groqApiKey, undefined, false
+      );
+    } catch (err) {
+      await reportFailure(c, { error: (err as Error)?.message || String(err) });
+      await onProgress?.({ completed: passed + failed, total: cases.length, passed, failed });
+      continue;
+    }
+    if (!genResult) {
+      await reportFailure(c, { error: 'Sem resposta (Gemini indisponível, fallback honesto acionado)' });
+      await onProgress?.({ completed: passed + failed, total: cases.length, passed, failed });
+      continue;
+    }
+
+    const bubbles = genResult.bubbles;
+    let safety: ReplySafetyVerdict;
+    let quality: QualityJudgeVerdict;
+    try {
+      [safety, quality] = await Promise.all([
+        reviewAutoReplyBeforeSend(
+          {
+            customerMessage: c.text,
+            draftBubbles: bubbles,
+            history: c.history,
+            knowledgeContext: kbContext,
+            isBookingFlow: genResult.agent === 'agendamento',
+            needsHumanConfirmation: genResult.needsHumanConfirmation,
+          },
+          { ai, groqApiKey }
+        ),
+        judgeAgentReplyQuality(ai, { customerMessage: c.text, history: c.history, bubbles }),
+      ]);
+    } catch (err) {
+      await reportFailure(c, { agent: genResult.agent, bubbles, error: `Falha ao avaliar: ${(err as Error)?.message || err}` });
+      await onProgress?.({ completed: passed + failed, total: cases.length, passed, failed });
+      continue;
+    }
+
+    const isPassed = safety.approved && quality.passed;
+    if (isPassed) {
+      passed++;
+      bubblesForRepetitionCheck.push({ bubbles });
+      onCaseResult?.({ ...c, agent: genResult.agent, bubbles, safety, quality, passed: true });
+    } else {
+      bubblesForRepetitionCheck.push({ bubbles });
+      await reportFailure(c, { agent: genResult.agent, bubbles, safety, quality });
+    }
+    await onProgress?.({ completed: passed + failed, total: cases.length, passed, failed });
+  }
+
+  const repeatedPhrases = findRepeatedPhrasesAcrossResponses(bubblesForRepetitionCheck);
+  return { total: cases.length, passed, failed, createdReviewCount, repeatedPhrases };
 }
