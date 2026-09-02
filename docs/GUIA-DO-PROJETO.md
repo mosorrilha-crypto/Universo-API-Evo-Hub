@@ -22,13 +22,31 @@ cuidado extra (ver `CLAUDE.md` na raiz pra convenções de código e comandos).
 ## Mapa visual (onboarding)
 
 `docs/mapa-do-projeto/index.html` é uma versão navegável no navegador do
-conteúdo deste guia — diagrama do fluxo da mensagem, diagrama do fluxo do
-painel, tabela de estado real por área e lacunas conhecidas, pensada pra
+conteúdo deste guia — diagramas de fluxo por área (mensagem, agenda/
+financeiro, CRM/qualidade, marketing/catálogo, administração/alertas),
+glossário do que cada arquivo do repositório representa, tabela de estado
+real por área e pendências marcadas dentro do próprio fluxo, pensada pra
 quem está começando a se orientar no projeto. Abra localmente no navegador
 (`file://.../docs/mapa-do-projeto/index.html`); não é servido pela
-aplicação. É um **snapshot gerado a partir deste guia em 2026-09-01/02** —
-se este guia mudar, o mapa pode ficar desatualizado até alguém regenerá-lo;
-este arquivo (`GUIA-DO-PROJETO.md`) continua sendo a fonte de verdade.
+aplicação.
+
+Também existe publicado como página web em:
+**https://claude.ai/code/artifact/b7a564a3-024a-4b15-848a-c1323fbc1f4a**
+— mesmo conteúdo do arquivo acima, mas acessível por link sem precisar
+clonar o repositório. É um Claude Artifact vinculado à conta do dono do
+produto; se o link parecer não abrir pra alguém, é porque o
+compartilhamento dele precisa ser habilitado por quem tem acesso à conta
+(menu de compartilhamento do próprio artefato) — isso não afeta o arquivo
+local, que é sempre a cópia completa e sem depender de permissão nenhuma.
+
+É um **snapshot mantido manualmente, atualizado por último em 02/09/2026**
+(inclui o PR #587/TASK-0208-0209) — sempre que uma sessão fizer uma
+mudança estrutural real (nova fase concluída, gap fechado, feature nova),
+atualize `docs/mapa-do-projeto/index.html` na mesma PR e republique o
+artefato acima (mesmo link, basta publicar de novo em cima da mesma URL).
+Se este guia mudar e ninguém atualizar o mapa, ele fica desatualizado até
+alguém regenerá-lo; este arquivo (`GUIA-DO-PROJETO.md`) continua sendo a
+fonte de verdade em caso de conflito.
 
 ## Arquitetura em uma tela
 
