@@ -37,6 +37,7 @@ import { startEvolutionConnectionAlertJob } from './server/services/evolutionCon
 import { startPaymentPendingAlertJob } from './server/services/paymentPendingAlertJob';
 import { startHeldAppointmentExpiryJob } from './server/services/heldAppointmentExpiryJob';
 import { startRecurringExpenseJob } from './server/services/recurringExpenseJob';
+import { reconcileOrphanedAgentEvalRuns } from './server/services/agentEvalRunStore';
 import { initWebPush } from './server/services/webPush';
 import { notifySystemError } from './server/services/systemErrorAlertService';
 import { configureAdminAlertChannel } from './server/services/adminAlertChannel';
@@ -92,6 +93,21 @@ async function startServer() {
   initDb(supabase, config);
   if (!supabase) {
     console.warn('⚠️  SUPABASE_URL/SUPABASE_KEY ausentes — conversas, agenda, base de conhecimento e login real não vão funcionar até configurar.');
+  } else {
+    // Achado real (03/09/2026): a avaliação automática do agente
+    // (agentEvalService.runAgentEvaluation) roda em background dentro do
+    // processo Node que recebeu o POST — se um deploy reinicia o processo
+    // no meio de uma rodada (comum: cada merge nesta sessão redeployou
+    // enquanto uma rodada de teste estava em andamento), a linha em
+    // agent_eval_runs fica presa em "running" pra sempre, porque nenhum
+    // outro processo sabe que ela existe pra terminar. O painel então
+    // mostra a barra de progresso girando indefinidamente. Como este
+    // processo ACABOU de subir, qualquer linha "running" já existente
+    // nesse momento é, por definição, órfã — marcada como "failed" pra não
+    // enganar o painel.
+    reconcileOrphanedAgentEvalRuns().catch((err) => {
+      console.error('⚠️  Falha ao reconciliar rodadas de avaliação automática órfãs:', (err as Error)?.message || err);
+    });
   }
 
   // Credencial compartilhada (.env) pro canal de alerta AO OPERADOR (não é o
