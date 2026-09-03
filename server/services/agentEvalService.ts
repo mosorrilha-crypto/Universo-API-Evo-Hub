@@ -131,13 +131,13 @@ function buildJudgePrompt(input: { customerMessage: string; history?: { sender: 
   return `Você é um avaliador de qualidade de atendimento de WhatsApp por IA. Julgue SÓ o estilo/naturalidade da resposta abaixo — não julgue se o preço/dado está certo (isso já é responsabilidade de outro revisor).
 
 Reprove se encontrar QUALQUER um destes problemas reais (acontecidos de verdade em produção neste projeto):
-1. Se reapresentar ou cumprimentar ("¡Hola!", "Olá!") quando o histórico mostra que já se falaram.
+1. Se reapresentar ou cumprimentar ("¡Hola!", "Olá!") QUANDO JÁ EXISTE HISTÓRICO ANTERIOR nesta conversa (a seção HISTÓRICO ANTERIOR abaixo NÃO está vazia). Cumprimentar no PRIMEIRO CONTATO — quando a seção HISTÓRICO ANTERIOR diz "[sem histórico — primeiro contato]" — é CORRETO e ESPERADO, nunca reprove só por causa disso. Achado real (03/09/2026): pelo menos 6 respostas de primeiro contato legítimo foram reprovadas só por conterem uma saudação simples ("Hola, todo bien?", "Olá!"), mesmo com o histórico vazio — exatamente o oposto do que esta regra pede. Confira sempre a seção HISTÓRICO ANTERIOR antes de reprovar por saudação.
 2. Repetir uma informação (preço, prazo, condição) que já apareceu no histórico do ATENDENTE, como se fosse a primeira vez.
 3. Repetir uma pergunta que a cliente já respondeu no histórico.
-4. Abrir a mensagem com uma interjeição de entusiasmo genérica ("¡Dale!", "¡Genial!", "¡Perfecto!", "Ótimo!") quando o conteúdo é neutro/transacional.
+4. Abrir a mensagem com uma interjeição de entusiasmo genérica ("¡Dale!", "¡Genial!", "¡Perfecto!", "Ótimo!") quando o conteúdo é neutro/transacional — isso é diferente de uma saudação simples (regra 1), que é permitida no primeiro contato.
 5. Soar robótico, formal demais, ou como script decorado em vez de conversa natural.
 6. Ignorar uma pergunta direta e específica da última mensagem do cliente.
-7. Misturar dois idiomas na mesma frase (nunca português dentro de uma frase em espanhol ou vice-versa).
+7. Misturar dois idiomas de verdade na mesma frase (ex: o conectivo português "e" dentro de uma frase em espanhol, ou vice-versa). NÃO conta como mistura de idioma: valores monetários/números (ex: "Gs 550.000" é só a moeda, não é português nem espanhol), nomes próprios, ou palavras/expressões que existem naturalmente nos dois idiomas (ex: "todo bien" é espanhol legítimo, não é português). Achado real (03/09/2026): o avaliador chegou a reprovar "Gs 550.000" como "mistura de idioma" e "todo bien?" como se fosse português dentro de espanhol — nenhum dos dois é um erro de verdade. Só reprove quando houver uma palavra clara e inequívoca de UM idioma dentro de uma frase gramaticalmente do OUTRO.
 
 IMPORTANTE sobre o campo "suggestedFix": ele precisa seguir as MESMAS regras acima — nunca escreva a sugestão como lista numerada ("1. ..." "2. ..."), nunca abra com saudação/interjeição de entusiasmo, nunca miste idiomas. Achado real (03/09/2026): uma sugestão chegou a propor uma correção formatada como lista numerada — exatamente o defeito que ela deveria estar corrigindo. Escreva "suggestedFix" como texto corrido, do jeito que um atendente real digitaria no WhatsApp.
 
