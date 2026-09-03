@@ -505,6 +505,10 @@ export interface LeadInfo {
   /** true = existe conversa real de WhatsApp pra esse telefone (ver GET /api/crm/leads) — false quando o lead foi cadastrado manualmente no CRM e ainda não trocou mensagem nenhuma. */
   hasConversation?: boolean;
   email?: string;
+  /** TASK-0243 — timestamp da última mensagem do LEAD (não da conversa em geral) — usado pra filtrar "dentro/fora da janela de 24h da Meta" na lista, sem abrir cada conversa. `undefined` = lead nunca escreveu. */
+  lastLeadMessageAt?: string;
+  /** Número do tenant que esta conversa usa — presente só em conversas do canal Meta Cloud API (nunca em Evolution/Instagram, ver server/services/conversationStore.ts). A restrição de janela de 24h/template só existe pra esse canal. */
+  phoneNumberId?: string | null;
 }
 
 export interface TranscriptionResult {

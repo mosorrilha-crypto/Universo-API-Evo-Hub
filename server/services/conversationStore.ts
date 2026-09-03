@@ -74,6 +74,8 @@ export interface StoredConversation {
   lastMessageId?: string;
   /** Número do tenant que esta conversa usa (nulo = número principal/legado) — ver resolveCredentialsForConversation. */
   phoneNumberId?: string | null;
+  /** TASK-0243 — timestamp da última mensagem do LEAD (não da conversa em geral, que normalmente termina com uma resposta do agente/operador) — só na resposta resumida da lista, pra filtrar "dentro/fora da janela de 24h" em lote sem 1 consulta por conversa (ver conversation_list_summaries, migration 0076). `undefined` = lead nunca escreveu. */
+  lastLeadMessageAt?: string;
 }
 
 /** Infere o país a partir do prefixo do telefone (E.164 sem "+") — só pra exibir no painel, não afeta lógica de envio. */
@@ -117,6 +119,7 @@ type ConversationSummaryRow = Omit<ConversationRow, 'messages'> & {
   last_message_reactions: MessageReaction[] | null;
   last_message_sent_by: MessageRow['sent_by'] | null;
   unread_count: number | null;
+  last_lead_message_at: string | null;
 };
 
 type MessageRow = {
@@ -207,6 +210,7 @@ function toStoredConversationSummary(row: ConversationSummaryRow): StoredConvers
   })) });
   conversation.unreadCount = row.unread_count || 0;
   conversation.lastMessageId = row.last_message_id || undefined;
+  conversation.lastLeadMessageAt = row.last_lead_message_at || undefined;
   return conversation;
 }
 
