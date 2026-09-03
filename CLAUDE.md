@@ -8,6 +8,8 @@ Universo is a multi-tenant WhatsApp AI-agent SaaS: Express + TypeScript backend 
 
 **Read `docs/GUIA-DO-PROJETO.md` first, always** — it's the single source of truth for what's actually done vs. pending, audited against the real code (not just docs). It exists specifically because sessions restart often and the docs below drift out of sync with reality; when they conflict, `GUIA-DO-PROJETO.md` wins. Keep it updated in the same PR whenever you complete a phase, close a known gap, or discover a new one — don't defer that to a future "docs session".
 
+For a visual, beginner-friendly tour of the same content (flow diagrams per area, a glossary of what each repo file does, a status table with pending items marked inline) see `docs/GUIA-DO-PROJETO.md`'s "Mapa visual (onboarding)" section — it links both the local HTML file (`docs/mapa-do-projeto/index.html`) and its published Claude Artifact URL. It's a manually-maintained snapshot, not auto-generated: update it in the same PR whenever `GUIA-DO-PROJETO.md` changes structurally, the same discipline as the guide itself.
+
 Other docs carry deeper/historical context — read them for detail, not for current status:
 - `docs/AGENTE-VERTICAL-ARQUITETURA.md` — the layered-prompt agent architecture and its rollout plan. Stays consistent with current code.
 - `docs/PLANO-EVOLUCAO.md` — evolution roadmap; **stale since ~2026-08-06**, describes multi-tenant work as pending that is now mostly done. Historical record of decisions, not a status source.
