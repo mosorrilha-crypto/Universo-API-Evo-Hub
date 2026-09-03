@@ -260,8 +260,21 @@ export const Header: React.FC<HeaderProps> = ({
   // menu não registrava. env(safe-area-inset-top) é 0 em navegador normal
   // (não muda nada fora de PWA em tela cheia/notch), então esse padding só
   // entra em ação exatamente no caso que quebrava.
+  // TASK-0226 (achado real, 03/09/2026, pedido direto): este wrapper
+  // sempre teve `mx-auto max-w-7xl` fixo, sem saber que a TASK-0222/0225
+  // tornaram o conteúdo do Atendimento borda a borda (zera padding/
+  // max-width em `.app-main--atendimento`, só quando `activeTab ===
+  // 'whatsapp'`) — resultado real reportado: em monitor largo, o
+  // cabeçalho e a fileira de abas ficavam presos e centralizados em
+  // 1280px enquanto a conversa abaixo já esticava até a borda ("o
+  // cabeçalho e o menu não estão estendendo junto"). Sem teto só quando
+  // a aba ativa é Atendimento — nas outras abas (Vendas/Agenda/
+  // Financeiro/etc.), o conteúdo abaixo continua capado em `max-w-7xl`
+  // (não mudou), então o cabeçalho precisa continuar capado igual, senão
+  // o mesmo desalinhamento apareceria ao contrário nessas telas.
+  const headerInnerClassName = activeTab === 'whatsapp' ? 'px-4 sm:px-6 lg:px-8' : 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8';
   return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div className={headerInnerClassName}>
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">
         {/* Escala aumentada (pedido real, 01/09/2026, com print comparando lado a lado com o WhatsApp Business real): o logo+nome ficava bem menor que o wordmark "WhatsApp" do app real, mesma proporção do ajuste já feito na conversa aberta (TASK-0164). */}
         <div className="flex min-w-0 items-center gap-2"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-5 h-5" /></div><span className="truncate text-lg font-bold text-white">Universo</span></div>
