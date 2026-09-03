@@ -2635,6 +2635,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setInputMessage(replyText);
   };
 
+  // Evolution não tem conceito de template (diferente do fluxo Meta em
+  // operatorFollowUpService.ts) — o texto já sai pronto, sem placeholder,
+  // pro operador revisar/editar antes do envio de texto livre normal.
+  const buildReengagementDraft = (leadName: string, tenantName: string): string =>
+    `Oi ${leadName}! Aqui é a equipe da ${tenantName}, ainda estamos por aqui pra te ajudar 😊 Responde essa mensagem quando puder!`;
+
+  // Preenche o compositor com sugestão de retomada — sem modal de
+  // template como na Meta, só um rascunho pra revisão humana.
+  const handleDraftReengagementMessage = (lead: LeadInfo) => {
+    if (!activeTenant?.name) return;
+    handleDraftSuggestedReply(buildReengagementDraft(lead.name, activeTenant.name));
+    composerTextareaRef.current?.focus();
+  };
+
   // Simulate sending an Audio Note from Lead or Agent
   const handleSendAudioNote = async (promptText?: string) => {
     if (!selectedLead) return;
@@ -4666,9 +4680,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </span>
                         </div>
                       ) : !isMetaChannel ? (
-                        <div className="flex items-center gap-1.5 text-amber-400/90 font-semibold" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span>Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-1.5 text-amber-400/90 font-semibold" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDraftReengagementMessage(selectedLead)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            Sugerir mensagem de retomada
+                          </button>
                         </div>
                       ) : isReopenBlockedByWaba ? (
                         <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Fale com o suporte para configurar a conta oficial do WhatsApp Business (WABA) desta empresa.">
