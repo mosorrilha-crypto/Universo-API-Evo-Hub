@@ -14,6 +14,7 @@ import { getTenantSegment } from './tenantProfileStore';
 import { logEscalation, isPaymentRelated, looksLikeHarassment } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
+import { runWithTenantDbContext } from './tenantDbContext';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
 
@@ -99,8 +100,31 @@ async function processLoop(deps: TranscriptionQueueDeps) {
   }
 }
 
-/** Exportado só pra teste direto (TASK-0209) — o worker real só é alcançável via startTranscriptionWorker/enqueueTranscriptionJob (loop infinito, difícil de testar sem fake timers frágeis). */
+/**
+ * Exportado só pra teste direto (TASK-0209) — o worker real só é alcançável via startTranscriptionWorker/enqueueTranscriptionJob (loop infinito, difícil de testar sem fake timers frágeis).
+ *
+ * Achado real de produção (03/09/2026): este worker roda no loop assíncrono
+ * separado de `processLoop` (setTimeout entre iterações), fora da cadeia de
+ * qualquer requisição HTTP/webhook — nunca herdava o `TenantDbContext`
+ * (AsyncLocalStorage, ver `tenantDbContext.ts`) que `getDb()` exige pra
+ * liberar acesso sob RLS. Resultado: TODO áudio recebido de qualquer tenant
+ * ficava travado pra sempre no placeholder "🎤 Transcrevendo áudio..." — a
+ * chamada de verdade (`updateMessageText`, `getKnowledgeBase`, etc.) sempre
+ * falhava com "Acesso ao banco sem contexto de tenant... recusado pra
+ * preservar RLS", capturado silenciosamente pelo catch abaixo (só um log de
+ * warning, nunca reportado ao operador). Todos os outros jobs em background
+ * do projeto (`messageBuffer.ts`, `pendingFollowUpJob.ts`, etc.) já
+ * envolvem seu próprio trabalho em `runWithTenantDbContext({..., source:
+ * 'job'})` — só este ficou de fora. Os testes existentes não pegaram isso
+ * porque mockam a camada de dados inteira, nunca exercitando o `getDb()`
+ * real.
+ */
 export async function processJob(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
+  const { resolvedTenant } = job;
+  return runWithTenantDbContext({ tenantId: resolvedTenant.tenantId, source: 'job' }, () => processJobWithTenantContext(job, deps));
+}
+
+async function processJobWithTenantContext(job: TranscriptionJob, deps: TranscriptionQueueDeps) {
   const startedAt = Date.now();
   const { message, resolvedTenant } = job;
   const { tenantId, metaAccessToken: token, metaPhoneNumberId: phoneNumberId } = resolvedTenant;

@@ -159,43 +159,48 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </button>
           </form>
 
-          {/* Alternative Google / Firebase Login — ainda não emite um Bearer
-              token de backend (ver PARTE 1 do card "[AUTH] Login real com
-              Google" no Trello, bloqueada por falta de credencial do Firebase
-              Admin). Rotas protegidas continuam corretamente bloqueadas (401)
-              até esse login virar um JWT de verdade. */}
+          {/* Login com Google (TASK-0218) — o ID token do Firebase é verificado
+              no backend (server/services/firebaseAdmin.ts) contra a API real
+              do Google, e só então trocado por um JWT de verdade se o e-mail
+              corresponder a um operador já cadastrado no Supabase (mesma
+              política de acesso do login por senha: nunca cria operador
+              automaticamente). */}
           <div className="pt-3 border-t border-slate-800">
             <button
               type="button"
               onClick={async () => {
                 setErrorMsg(null);
+                setIsSubmitting(true);
                 try {
                   const googleUser = await loginWithGoogle();
+                  const idToken = await googleUser.getIdToken();
+                  const res = await apiFetch('/api/auth/login-google', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ idToken }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    throw new Error(data.error || t('loginFailed'));
+                  }
                   const authenticatedUser: UserProfile = {
-                    id: googleUser.uid,
-                    name: googleUser.displayName || googleUser.email?.split('@')[0] || 'Usuário Google',
-                    email: googleUser.email || '',
-                    // Nunca 'admin' automático: login Google (Firebase) prova só que a
-                    // pessoa é dona daquele e-mail, não que ela é um operador
-                    // autorizado deste sistema — antes, qualquer conta Google virava
-                    // admin sem checagem nenhuma. Sem mapeamento real Google→Supabase,
-                    // o papel mais seguro por padrão é o de menor privilégio.
-                    role: 'operator',
+                    id: data.operator.email,
+                    tenantId: data.operator.tenantId,
+                    name: data.operator.name,
+                    email: data.operator.email,
+                    role: data.operator.role,
                     avatar: googleUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-                    department: 'Autenticação Firebase (sem operador cadastrado)',
-                    tenantId: 'tenant_004',
+                    department: 'Operador',
                   };
-                  // Login Google não emite Bearer token de backend: não temos como
-                  // provar que esse e-mail corresponde a um operador real do
-                  // Supabase, então as rotas protegidas continuam corretamente
-                  // bloqueadas (401) até haver um login de verdade (senha real do
-                  // operador cadastrado).
-                  onLogin(authenticatedUser, undefined);
+                  onLogin(authenticatedUser, data.token);
                 } catch (err: any) {
-                  setErrorMsg(`Erro ao autenticar via Google: ${err.message || 'Falha no login'}`);
+                  setErrorMsg(err.message || 'Erro ao autenticar via Google.');
+                } finally {
+                  setIsSubmitting(false);
                 }
               }}
-              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center space-x-2 border border-slate-700 transition-all cursor-pointer"
+              disabled={isSubmitting}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-800/50 disabled:cursor-not-allowed text-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center space-x-2 border border-slate-700 transition-all cursor-pointer"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.2 9 5 12 5z" />

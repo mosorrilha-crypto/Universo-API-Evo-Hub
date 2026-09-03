@@ -89,7 +89,10 @@ describe('runMidiaTool — fallback Groq → Gemini', () => {
 
     expect(result).not.toBeNull();
     expect(getToolCalls()).toBe(0);
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
+    // TASK-0241: envio de verdade adiado pra depois da aprovação do revisor
+    // pré-envio — aqui só confere que a decisão foi planejada corretamente.
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips', mimeType: 'image/jpeg' });
   });
 
   it('Groq decidindo "nenhuma" não manda mídia nem chama o Gemini', async () => {
@@ -116,7 +119,8 @@ describe('runMidiaTool — fallback Groq → Gemini', () => {
 
     expect(result).not.toBeNull();
     expect(getToolCalls()).toBe(1);
-    expect(uploadWhatsAppMedia).toHaveBeenCalled();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto' });
   });
 
   it('cai pro Gemini quando o Groq devolve JSON malformado', async () => {

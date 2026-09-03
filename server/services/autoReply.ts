@@ -118,6 +118,33 @@ export interface DeferredCalendarAction {
   summary: string;
 }
 
+/**
+ * Foto/vídeo de exemplo que o modelo decidiu mandar, mas ainda NÃO foi
+ * enviada de verdade — mesmo princípio do DeferredCalendarAction acima,
+ * aplicado à mídia. Achado real de produção (03/09/2026, teste do dono do
+ * produto no fluxo de agendamento): antes desta correção, `runMidiaTool`
+ * enviava a foto/vídeo IMEDIATAMENTE durante a geração do rascunho, sem
+ * nenhuma dependência do revisor pré-envio (`reviewAutoReplyBeforeSend`,
+ * webhooks.ts) — se o revisor bloqueasse o TEXTO que explicava/acompanhava
+ * a mídia (por qualquer motivo, mesmo sem relação com a mídia em si), a
+ * mídia já tinha saído, irreversível, e o cliente ficava com uma foto/vídeo
+ * sozinho no WhatsApp, sem nenhuma mensagem de texto explicando o que era
+ * ou respondendo a pergunta real dele (confirmado com uma conversa real:
+ * cliente perguntou "Tem horário amanhã?", só uma foto de exemplo chegou,
+ * a pergunta nunca foi respondida). O buffer já resolvido (Storage ou
+ * Base64 legado) fica guardado aqui só em memória, dentro do mesmo ciclo de
+ * requisição — nunca é persistido nem serializado.
+ */
+export interface DeferredMediaAction {
+  kind: 'foto' | 'video';
+  mediaName: string;
+  /** Texto usado tanto como legenda salva na mensagem quanto como marcador de dedupe (wasMediaRecentlySent). */
+  marker: string;
+  buffer: Buffer;
+  mimeType: string;
+  filename: string;
+}
+
 export interface AutoReplyResult {
   phase: ConversationPhase;
   bubbles: string[];
@@ -139,6 +166,8 @@ export interface AutoReplyResult {
   routerElapsedMs: number;
   /** Ações de agenda pendentes de aprovação do revisor; nunca foram executadas na geração do rascunho. */
   deferredCalendarActions?: DeferredCalendarAction[];
+  /** Foto/vídeo de exemplo pendente de aprovação do revisor — só é enviada de verdade (executeApprovedMediaAction) depois que o texto que a acompanha for aprovado. */
+  deferredMediaAction?: DeferredMediaAction;
   /**
    * Nome que a cliente disse na conversa (não veio do perfil do WhatsApp) —
    * quem chama deve persistir isso na conversa (mesmo campo que já guarda o
@@ -448,11 +477,14 @@ REGRAS DE ESTILO (sempre aplicar):
 	13. Se o cliente mandou mais de uma mensagem em sequência rápida (você vai ver isso como mais de um turno seu de "mensagem do cliente" seguidos, sem nenhuma resposta sua entre eles), a última dessas mensagens é a que define o que responder agora — se ela muda de assunto ou pivota o pedido (ex: pergunta pelo combo e na sequência pergunta só por um item), responda à mais recente; não reabra nem repita informação sobre a mensagem anterior que ela já deixou pra trás, a menos que a mais recente dependa diretamente dela.
 	14. PRIORIDADE ABSOLUTA: a nova mensagem do cliente define o trabalho deste turno. Responda PRIMEIRO cada pergunta concreta que ela contém, inclusive quando houver duas ou mais na mesma frase. Só faça uma pergunta de avanço quando for necessária para responder corretamente. Nunca mencione agenda, datas, horários ou disponibilidade depois de uma pergunta puramente informativa sobre preço, duração, procedimento, foto, vídeo ou localização — agenda só entra quando a cliente manifesta intenção de marcar ou pede disponibilidade.
 	15. Quando a nova mensagem pedir localização/endereço e o contexto tiver Link de localização (Google Maps), inclua esse link nesta mesma resposta. Quando pedir preço e o serviço estiver claro, informe o preço oficial; se o serviço não estiver claro, peça UMA especificação curta, sem desviar para agenda. Quando pedir preço e localização juntos, responda ambos no mesmo turno.
-	16. FOTO, VÍDEO E MÍDIA: só diga que enviou uma mídia quando a seção "Ações reais já executadas nesta mensagem" confirmar que o envio ocorreu. Se a ação informar falha ou não houver mídia compatível cadastrada, explique isso de forma curta e honesta, indicando a alternativa específica disponível; jamais diga genericamente que não há material nem troque o pedido por lista de serviços ou agenda.
+	16. FOTO, VÍDEO E MÍDIA: uma foto/vídeo planejado (a seção "Ações reais já executadas nesta mensagem" vai dizer "será enviada... depois de aprovada") ainda NÃO foi enviado de verdade — NUNCA diga "te mandei"/"aproveitei e te mandei"/"enviei" no passado; pode mencionar naturalmente que está te mandando um exemplo, no presente/futuro próximo (ex: "Segue um exemplo aqui:"). Achado real de produção (03/09/2026, TASK-0241): dizer no passado que a mídia já foi enviada, quando na verdade seu envio de verdade só acontece DEPOIS da sua resposta ser aprovada, deixava a frase incoerente se o revisor bloqueasse o texto (mídia nunca saía, mas seria tarde demais se você já tivesse afirmado que sim). Se a ação informar falha ou não houver mídia compatível cadastrada, explique isso de forma curta e honesta, indicando a alternativa específica disponível; jamais diga genericamente que não há material nem troque o pedido por lista de serviços ou agenda.
 	17. Não abra quase toda mensagem com uma interjeição de entusiasmo ("¡Dale!", "¡Genial!", "¡Buenísimo!", "¡Súper!", "¡Perfecto!", "¡Qué bueno!", "Ótimo!" ou qualquer variação parecida) — achado real de auditoria (29/08/2026): conversas reais de produção mostraram o agente abrindo praticamente TODA mensagem consecutiva de uma mesma conversa com uma exclamação diferente, inclusive em trocas puramente transacionais (informar um horário, passar dado de pagamento, confirmar recebimento de comprovante). Trocar a palavra a cada vez não resolve a regra 12 — o padrão repetido de "abrir sempre com uma exclamação" é tão perceptível quanto repetir a mesma frase pronta. Varie de verdade: na maioria das vezes responda direto, sem abertura nenhuma; quando fizer sentido confirmar algo, use uma confirmação neutra e curta (ex: "Sim", "Certo", sem ponto de exclamação); reserve entusiasmo de verdade pra quando o conteúdo da mensagem da cliente genuinamente pedir (ela decidiu algo, deu uma notícia boa, agradeceu) — nunca como reflexo automático em toda resposta.
 	18. Não recorra sempre à mesma fórmula pronta pra justificar por que o resultado vai ficar bem-feito/personalizado (variações de "en la evaluación presencial Monique analiza tus rasgos/tu piel para definir la técnica ideal") — achado real de auditoria (30/08/2026): a mesma ideia, só com palavras levemente diferentes a cada vez, apareceu em pelo menos 3 conversas reais distintas de clientes diferentes na mesma janela de poucas horas. Um cliente sozinho nunca percebe isso (só falou com você uma vez), mas quem lê várias conversas seguidas (o dono do negócio, um cliente que compara prints com uma amiga) percebe na hora que é um roteiro fixo — mesmo risco da regra 12/17, aplicado a uma explicação inteira, não só a uma interjeição. Varie de verdade a forma de explicar o processo (ou simplesmente responda sem essa justificativa toda vez, quando ela não for necessária) — nunca deixe "tus rasgos"/"evaluación presencial analiza" virar um reflexo automático toda vez que o assunto for personalização de técnica.
 	19. PONTUAÇÃO NATURAL, NÃO GRAMATICALMENTE "PERFEITA": achado real de auditoria (03/09/2026) — dezenas de mensagens reais de produção mostraram quase toda primeira mensagem de conversas diferentes abrindo com "¡Hola! ¿Cómo estás?"/"¡Hola, [nome]! ¿Cómo estás?" (ou variação quase idêntica), sempre com os DOIS sinais de pontuação em espanhol (abertura e fechamento) corretos. Uma pessoa real digitando rápido no WhatsApp raramente usa o sinal de abertura (¡ ou ¿) numa frase curta — geralmente só o de fechamento, ou nenhum dos dois. Em espanhol, prefira "Hola, todo bien?"/"Hola, [nome], todo bien?" (sem o ¡/¿ de abertura) na maior parte das vezes, e varie a saudação de verdade, não só trocando o nome. Isso vale de forma geral, em qualquer idioma: excesso de pontuação "correta" (os dois sinais de uma exclamação/pergunta, ponto final em toda frase curta, vírgulas em todo lugar que a gramática formal pediria) é tão revelador de robô quanto repetir a mesma frase pronta (regra 12) — escreva como alguém digitando rápido no celular, não como um texto revisado.
 	20. CONECTIVOS EM ESPANHOL: numa frase em espanhol, o conectivo "e" é SEMPRE "y" — nunca use o conectivo português "e" dentro de uma frase em espanhol (ex: "Gs 550.000 y incluye..." nunca "Gs 550.000 e incluye..."). Achado real de auditoria (03/09/2026, avaliação automática): mesmo já documentado na Base de Conhecimento do tenant como erro conhecido, o agente repetiu o mesmo erro em pelo menos 2 casos simulados diferentes na mesma rodada de teste — reforçando aqui porque a instrução na Base de Conhecimento sozinha não bastou. O mesmo cuidado vale pra outros conectivos/artigos que mudam entre os dois idiomas ("o" espanhol vs "ou" português, "el/la" vs "o/a", "pero" vs "mas") — revise mentalmente a frase inteira em espanhol antes de responder, nunca herde uma palavra de conexão do português só porque parece natural.
+	21. DURAÇÃO/VALIDADE DO EFEITO: quando a descrição de um produto/variante no catálogo abaixo citar explicitamente uma duração aproximada do efeito/resultado (ex: "Duración aproximada: 20 días"), cite ESSE número exato — nunca arredonde, aproxime pra outra unidade (dias virando semanas) ou generalize. Achado real de auditoria (03/09/2026, avaliação automática): um caso simulado perguntou quanto tempo dura o efeito de uma variante cuja descrição já dizia claramente "Duración aproximada: 20 días" — a resposta citou "entre 4 a 6 semanas", um número diferente do que estava certo ali na frente. O dado correto já estava disponível no contexto; o problema foi não usar o número exato dele. Isso é tão grave quanto inventar um dado ausente (regra 5) — copie o número da descrição, não estime de memória.
+	22. NÃO ENCERRE TODA APRESENTAÇÃO DE OPÇÕES COM A MESMA PERGUNTA DE "NATURAL OU MARCANTE": achado real de auditoria (03/09/2026, relato direto do dono do negócio): a mesma pergunta de dicotomia ("¿buscás algo más natural o preferís algo más definido/marcado/con volumen?", "você prefere um estilo mais natural ou mais preenchido?") apareceu em pelo menos 11 conversas reais diferentes ao longo de duas semanas, sempre logo depois de listar opções do catálogo — e o dono do negócio relatou que a cliente frequentemente NÃO responde a essa pergunta, travando a conversa aí. Vira reflexo automático (mesmo risco das regras 12/17/18) e não ajuda a avançar quando ninguém reage a ela. Depois de apresentar as opções, prefira: deixar a cliente escolher livremente sem forçar uma dicotomia; perguntar algo mais concreto e fácil de responder (qual serviço despertou mais interesse, se quer ver disponibilidade); ou simplesmente aguardar a resposta dela sem emendar outra pergunta. Só pergunte sobre estilo/acabado (natural vs. marcante) quando a própria cliente já tiver sinalizado interesse num serviço específico e essa escolha for realmente necessária pra cotar o preço certo — nunca como fechamento padrão de toda lista de opções.
+	23. EXEMPLO CONCRETO DE REPETIÇÃO A EVITAR (reforço da regra 9): se o histórico mostra que você JÁ respondeu "O Lash Lift custa Gs 140.000, é uma curvatura suave nas suas pálpebras naturais sem extensões" e a cliente pergunta de novo "Quanto custa mesmo o Lash Lift?", NUNCA repita a explicação completa de novo como se fosse a primeira vez (ex: "O Lash Lift sai por Gs 140.000. Ele curva e realça os seus próprios cílios naturais, sem precisar de extensão" é ERRADO aqui) — responda curto, reconhecendo que já foi dito (ex: "Sai por Gs 140.000, como te falei antes" ou "Isso, Gs 140.000") e avance a conversa (pergunte se quer agendar, por exemplo). Achado real de auditoria (03/09/2026, avaliação automática): esse exato padrão de repetir a explicação inteira de novo apareceu em várias rodadas de teste diferentes, mesmo com a regra 9 já pedindo o contrário — o exemplo concreto aqui existe porque a instrução genérica sozinha não bastou.
 	${knowledgeBaseContext || ''}
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
@@ -1613,7 +1645,7 @@ async function runMidiaTool(
   mediaConfig: MediaSendConfig,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   groqApiKey?: string
-): Promise<{ actionsSummary: string[] }> {
+): Promise<{ actionsSummary: string[]; deferredMediaAction?: DeferredMediaAction }> {
   const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
   const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageId || p.exampleImageBase64 || p.variants?.some((variant) => variant.exampleImageId || variant.exampleImageBase64));
   const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId || p.variants?.some((variant) => variant.exampleVideoId));
@@ -1713,51 +1745,18 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
       return { actionsSummary: [`Tentou enviar vídeo de "${mediaName}" mas o arquivo não foi encontrado no Storage.`] };
     }
 
-    try {
-      const mimeType = videoMedia.exampleVideoMimeType || video.contentType;
-      const filename = videoMedia.exampleVideoFileName || `${mediaName}.mp4`;
-
-      if (mediaConfig.provider === 'evolution') {
-        await sendEvolutionMediaMessage(
-          mediaConfig.evolutionInstanceName,
-          mediaConfig.evolutionApiUrl,
-          mediaConfig.evolutionApiKey,
-          phone,
-          video.buffer.toString('base64'),
-          mimeType,
-          filename,
-          mediaName
-        );
-      } else {
-        const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, video.buffer, mimeType, filename);
-        await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, mediaName);
-      }
-
-      // Achado real em produção (15/08/2026, Clic Piscinas): o vídeo abria
-      // normalmente no WhatsApp real do lead, mas o painel nunca teve
-      // preview de vídeo nenhum — só um card estático "Vídeo enviado".
-      // Salva o binário sob o MESMO id da mensagem (mesmo mecanismo já
-      // usado pra imagem enviada pelo painel, ver mediaImageStore.ts) pra
-      // GET /api/media/:messageId conseguir servir de volta.
-      const videoMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, videoMessageId, video.buffer.toString('base64'), mimeType);
-      await recordOutgoingMessage(tenantId, phone, {
-        type: 'file',
-        text: `🎥 Vídeo de exemplo: ${mediaName}`,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      }, 'ai', undefined, undefined, videoMessageId);
-      return { actionsSummary: [`Enviou o vídeo de exemplo real de "${mediaName}" pro cliente agora.`] };
-    } catch (err: any) {
-      // Achado real em produção (20/08/2026): esse catch nunca logava nada —
-      // uma falha real de envio (upload rejeitado pela Meta, timeout, mídia
-      // corrompida) ficava 100% invisível nos logs do servidor, só virava um
-      // texto genérico pro modelo escrever pro cliente. Zero "Enviou a foto"
-      // e zero "não bateu com nenhum produto" nos logs de 7 dias, mesmo com
-      // clientes reais pedindo foto de serviços que TINHAM foto cadastrada,
-      // só fazia sentido por uma falha exatamente aqui, nunca logada.
-      console.warn(`⚠️  [runMidiaTool] enviar_video_exemplo: falha ao enviar vídeo de "${mediaName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
-      return { actionsSummary: [`Tentou enviar o vídeo de "${mediaName}" mas falhou (${err.message}) — não prometa que o vídeo foi enviado.`] };
-    }
+    // TASK-0241: o envio de verdade (upload + sendMediaMessage +
+    // recordOutgoingMessage) foi movido pra executeApprovedMediaAction,
+    // chamado só DEPOIS que o revisor pré-envio aprovar o texto que
+    // acompanha este vídeo — nunca mais aqui, durante a geração do
+    // rascunho. Só resolve o binário aqui (etapa que já pode falhar sozinha,
+    // daí o try/catch continuar existindo) e devolve pronto pra enviar.
+    const mimeType = videoMedia.exampleVideoMimeType || video.contentType;
+    const filename = videoMedia.exampleVideoFileName || `${mediaName}.mp4`;
+    return {
+      actionsSummary: [`Um vídeo de exemplo de "${mediaName}" será enviado ao cliente junto com esta resposta, depois de aprovada — NUNCA diga que já enviou o vídeo (ainda não foi), mas pode mencionar naturalmente que está te mandando um vídeo de exemplo.`],
+      deferredMediaAction: { kind: 'video', mediaName, marker: videoMarker, buffer: video.buffer, mimeType, filename },
+    };
   }
 
   const photoMedia = matched?.variant?.exampleImageId || matched?.variant?.exampleImageBase64 ? matched.variant : matched?.product?.exampleImageId || matched?.product?.exampleImageBase64 ? matched.product : undefined;
@@ -1792,49 +1791,64 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     return { actionsSummary: [`Tentou enviar foto de "${photoName}" mas o arquivo não foi encontrado no Storage.`] };
   }
 
-  try {
-    const mimeType = resolvedPhoto.mimeType;
-    const filename = `${photoName}.jpg`;
-    const photoBase64 = resolvedPhoto.buffer.toString('base64');
+  // TASK-0241: mesma correção do vídeo acima — o envio de verdade só
+  // acontece depois da aprovação do revisor pré-envio (executeApprovedMediaAction),
+  // nunca aqui durante a geração do rascunho.
+  const mimeType = resolvedPhoto.mimeType;
+  const filename = `${photoName}.jpg`;
+  return {
+    actionsSummary: [`Uma foto de exemplo de "${photoName}" será enviada ao cliente junto com esta resposta, depois de aprovada — NUNCA diga que já enviou a foto (ainda não foi), mas pode mencionar naturalmente que está te mandando um exemplo.`],
+    deferredMediaAction: { kind: 'foto', mediaName: photoName, marker: photoMarker, buffer: resolvedPhoto.buffer, mimeType, filename },
+  };
+}
 
+export interface ApprovedMediaExecution {
+  sent: boolean;
+  error?: string;
+}
+
+/**
+ * Executa de verdade o envio de foto/vídeo já decidido por runMidiaTool, mas
+ * só depois do texto que acompanha essa mídia ter sido aprovado pelo revisor
+ * pré-envio (webhooks.ts) — mesmo princípio de executeApprovedCalendarActions
+ * acima, aplicado à mídia (TASK-0241). Se o revisor bloquear o texto, o
+ * chamador simplesmente nunca chama esta função e a mídia nunca sai.
+ */
+export async function executeApprovedMediaAction(
+  tenantId: string,
+  phone: string,
+  mediaConfig: MediaSendConfig | undefined,
+  action: DeferredMediaAction | undefined,
+): Promise<ApprovedMediaExecution> {
+  if (!action || !mediaConfig) return { sent: false };
+  try {
     if (mediaConfig.provider === 'evolution') {
       await sendEvolutionMediaMessage(
         mediaConfig.evolutionInstanceName,
         mediaConfig.evolutionApiUrl,
         mediaConfig.evolutionApiKey,
         phone,
-        photoBase64,
-        mimeType,
-        filename,
-        photoName
+        action.buffer.toString('base64'),
+        action.mimeType,
+        action.filename,
+        action.mediaName
       );
     } else {
-      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, resolvedPhoto.buffer, mimeType, filename);
-      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, photoName);
+      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, action.buffer, action.mimeType, action.filename);
+      await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, action.mimeType, action.mediaName);
     }
 
-    // Mesmo achado do vídeo acima (15/08/2026, Clic Piscinas) — achado real
-    // aqui, 29/08/2026 (tenant Monique): a foto abria normalmente no
-    // WhatsApp real do lead, mas o painel mostrava "Imagem indisponível"
-    // pra sempre, porque só a mensagem de texto era gravada — o binário
-    // nunca era salvo em mediaImageStore sob o id da mensagem. O envio
-    // MANUAL (POST /send-example-photo em conversations.ts) já fazia isso
-    // certo; só o envio automático da própria IA (aqui) ficou pra trás.
-    const photoMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, photoMessageId, photoBase64, mimeType);
+    const mediaMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, mediaMessageId, action.buffer.toString('base64'), action.mimeType);
     await recordOutgoingMessage(tenantId, phone, {
-      type: 'image',
-      text: `📷 Foto de exemplo: ${photoName}`,
+      type: action.kind === 'video' ? 'file' : 'image',
+      text: action.marker,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    }, 'ai', undefined, undefined, photoMessageId);
-    return { actionsSummary: [`Enviou a foto de exemplo real de "${photoName}" pro cliente agora.`] };
+    }, 'ai', undefined, undefined, mediaMessageId);
+    return { sent: true };
   } catch (err: any) {
-    // Mesmo achado do catch de vídeo acima — nunca logava nada, então uma
-    // falha real de upload/envio (a foto real da Monique pode passar de
-    // 3MB em base64 — perto do limite de mídia da própria Meta) ficava
-    // invisível pra sempre, só virava um texto genérico pro cliente.
-    console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: falha ao enviar foto de "${photoName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
-    return { actionsSummary: [`Tentou enviar a foto de "${photoName}" mas falhou (${err.message}) — não prometa que a foto foi enviada.`] };
+    console.warn(`⚠️  [executeApprovedMediaAction] falha ao enviar ${action.kind} de "${action.mediaName}" (tenant=${tenantId}, phone=${phone}):`, err?.message || err);
+    return { sent: false, error: err?.message };
   }
 }
 
@@ -1924,6 +1938,7 @@ export async function generateAutoReplyForText(
     let confirmedTimes: string[] = [];
     let quickReplyOptions: AutoReplyResult['quickReplyOptions'];
     let deferredCalendarActions: DeferredCalendarAction[] = [];
+    let deferredMediaAction: DeferredMediaAction | undefined;
     // Epic 4.5.7 — precisa ser "as ferramentas rodaram de verdade nesta
     // mensagem", não "confirmaram algum horário livre". Achado numa
     // auditoria pós-lançamento: gatear só por confirmedTimes.length deixava
@@ -2001,10 +2016,11 @@ export async function generateAutoReplyForText(
     }
 
     if (phone && hasMediaSendConfig(mediaConfig)) {
-      const { actionsSummary } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history, groqApiKey);
+      const { actionsSummary, deferredMediaAction: plannedMedia } = await runMidiaTool(tenantId, ai, text, phone, mediaConfig!, history, groqApiKey);
       if (actionsSummary.length) {
         contextParts.push(actionsSummary.map((s) => `- ${s}`).join('\n'));
       }
+      deferredMediaAction = plannedMedia;
     }
 
     if (contextParts.length) {
@@ -2255,7 +2271,7 @@ export async function generateAutoReplyForText(
       ]);
     }
 
-    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions, deferredCalendarActions };
+    return { ...specialist, bubbles, needsHumanConfirmation, stopAutoReply, agent, routerElapsedMs, quickReplyOptions, deferredCalendarActions, deferredMediaAction };
   } catch (err) {
     console.warn('Gemini Auto-Reply (texto) error:', err);
     return null;

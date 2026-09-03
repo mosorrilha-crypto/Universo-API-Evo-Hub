@@ -104,8 +104,19 @@ function pushesBooking(text: string): boolean {
   return /\b(agendamos|agendar|agenda|reservamos|reservar|turno|disponibilidad para|fecha disponible|que dia te queda)\b/i.test(normalize(text));
 }
 
+/**
+ * Achado real (03/09/2026, avaliação sintética, TASK-0238): o padrão antigo
+ * usava um curinga `se[a-z]*na` pra pegar "seña"/"sena" (sinal de pagamento
+ * em espanhol, sem acento depois do `normalize()`), mas isso também batia
+ * em qualquer palavra "se...na" — inclusive "semana" (s-e-m-a-n-a), uma das
+ * palavras mais comuns em espanhol/português. Resultado: qualquer mensagem
+ * mencionando "semana" (ex: "tem horário pra semana que vem?") era tratada
+ * como contendo dado de pagamento sensível e escalada pra revisão humana à
+ * toa. Trocado pelo padrão específico "sena" (sem curinga), igual ao já
+ * usado e testado em `escalationStore.ts`'s `isPaymentRelated`.
+ */
 function isPaymentOrSensitive(text: string): boolean {
-  return /\b(pago|pague|transferencia|transferir|comprobante|comprovante|deposito|se[a-z]*na|tarjeta|cartao|cedula|documento|contrase[ñn]a|senha)\b/i.test(normalize(text));
+  return /\b(pago|pague|transferencia|transferir|comprobante|comprovante|deposito|sena|tarjeta|cartao|cedula|documento|contrasena|senha)\b/i.test(normalize(text));
 }
 
 /**
@@ -180,7 +191,11 @@ function buildReviewerPrompt(input: ReplySafetyInput): string {
 
 Reprove se houver qualquer uma destas situações: informação não sustentada pelo contexto/base, preço/duração/serviço inventado, afirmação de agendamento ou pagamento sem confirmação, repetição ou nova apresentação numa conversa em andamento, idioma inadequado, tom inadequado, promessa indevida, pedido de dados sensíveis, pressão para agendar após uma pergunta apenas informativa, ou dúvida relevante sem base suficiente. Para espanhol, preserve espanhol paraguaio e voseo quando a cliente usar espanhol.
 
-NOME DO CLIENTE: quanto a chamar a cliente pelo nome, reprove SOMENTE se o rascunho usar um nome que não bate com o "NOME JÁ CONHECIDO" informado abaixo (nem com nenhum nome que a própria cliente disse na HISTÓRICO/ÚLTIMA MENSAGEM) — isso é nome inventado, um caso de "informação não sustentada pelo contexto". NUNCA reprove só porque a resposta ainda não perguntou ou confirmou verbalmente o nome antes de responder uma dúvida informativa (preço, procedimento, localização): usar o "NOME JÁ CONHECIDO" (perfil do WhatsApp) direto na resposta é o comportamento correto e esperado, não um defeito.
+IDIOMA: julgue o idioma SÓ do RASCUNHO A VALIDAR abaixo — nunca reprove por um erro de idioma (mistura de português/espanhol, conectivo errado) que apareceu numa mensagem ANTERIOR do próprio atendente dentro do HISTÓRICO; aquela mensagem já foi enviada, não é o rascunho sendo avaliado agora. Achado real (03/09/2026): um rascunho 100% correto e num só idioma foi reprovado citando um erro de mistura de idioma que só existia numa resposta anterior do histórico — o rascunho atual não tinha esse problema.
+
+REPETIÇÃO COM RECONHECIMENTO: repetir um preço/dado já dito no histórico enquanto RECONHECE explicitamente que já foi dito (ex: "como te comenté", "como te falei", "como já disse", "te dije recién") é o comportamento CORRETO esperado — NUNCA reprove por "repetição" quando o rascunho já contém essa frase de reconhecimento. Reprove por repetição SOMENTE quando o dado for repetido sem nenhum reconhecimento, como se fosse a primeira vez. Achado real (03/09/2026): dois rascunhos que já diziam "como te comenté recién"/"como te falei" foram reprovados mesmo assim como "repetição" — exatamente o comportamento que a regra 23 da Camada 1 pede pra evitar repetição "burra" foi punido em vez de aprovado.
+
+NOME DO CLIENTE: a regra de negócio real é "solicite ou confirme o nome antes de avançar para a consulta de agenda" — ou seja, o nome só é exigido no momento em que a resposta for checar disponibilidade/horários ou criar um agendamento. Fora desse momento — respondendo dúvida informativa (preço, procedimento, localização, pagamento), fazendo triagem/primeiro contato, ou acolhendo e encaminhando uma reclamação pra equipe humana — NUNCA reprove só porque a resposta ainda não perguntou ou confirmou verbalmente o nome; isso vale pra QUALQUER categoria de resposta, não só dúvida de preço. Achado real (03/09/2026): reprovações por "nome não solicitado" continuaram aparecendo mesmo em triagem e reclamação — categorias que ficaram de fora da lista de exemplos anterior (que citava só preço/procedimento/localização) — por isso a regra agora cobre TODAS as categorias, com exceção única da consulta de agenda. Separadamente, reprove SOMENTE se o rascunho usar um nome que não bate com o "NOME JÁ CONHECIDO" informado abaixo (nem com nenhum nome que a própria cliente disse na HISTÓRICO/ÚLTIMA MENSAGEM) — isso é nome inventado, um caso de "informação não sustentada pelo contexto", diferente de simplesmente não ter perguntado o nome ainda.
 
 AÇÕES DE AGENDA PLANEJADAS são a única exceção: elas ainda NÃO foram executadas, mas só serão executadas DEPOIS da sua aprovação e com nova verificação de disponibilidade. Quando uma ação planejada específica sustenta o serviço e horário citados, você pode aprovar uma mensagem que informe uma PRÉ-RESERVA pendente de pagamento. Nunca aprove texto que diga que pagamento ou confirmação definitiva já ocorreu.
 

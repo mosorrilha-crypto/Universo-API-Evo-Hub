@@ -31,11 +31,24 @@ describe('safeParseGeminiJson', () => {
     expect(safeParseGeminiJson(raw)).toEqual({ passed: false, issues: ['soou robótico'], suggestedFix: 'responda direto' });
   });
 
+  it('conserta a chave "issues" totalmente omitida antes do array (reprodução exata do erro real: vírgula seguida direto de "[")', () => {
+    const raw = '{"passed":false,["reapresentou mesmo já tendo o nome"],"suggestedFix":"oi, tudo bem?"}';
+    expect(safeParseGeminiJson(raw)).toEqual({
+      passed: false,
+      issues: ['reapresentou mesmo já tendo o nome'],
+      suggestedFix: 'oi, tudo bem?',
+    });
+  });
+
   it('relança o erro original quando não há nenhum bloco { no texto', () => {
     expect(() => safeParseGeminiJson('não gerei JSON nenhum dessa vez')).toThrow();
   });
 
   it('relança o erro original quando o JSON está truncado/cortado (nenhuma camada de recuperação consegue consertar)', () => {
     expect(() => safeParseGeminiJson('{"passed": true, "issues": ["texto cortado no meio')).toThrow();
+  });
+
+  it('anexa um trecho do texto bruto à mensagem de erro, pra dar pra diagnosticar uma malformação nova sem log nenhum salvo em outro lugar', () => {
+    expect(() => safeParseGeminiJson('não gerei JSON nenhum dessa vez')).toThrow(/texto bruto recebido.*não gerei JSON nenhum dessa vez/s);
   });
 });
