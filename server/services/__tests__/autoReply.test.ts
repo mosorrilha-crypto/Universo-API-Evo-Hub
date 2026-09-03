@@ -276,7 +276,7 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
     const systemInstruction: string = calls[1].config.systemInstruction;
-    expect(systemInstruction).toContain('Não abra quase toda mensagem com uma interjeição de entusiasmo');
+    expect(systemInstruction).toContain('Não abra quase toda mensagem com uma interjeição/afirmação de entusiasmo');
     expect(systemInstruction).toContain('nunca como reflexo automático em toda resposta');
   });
 
