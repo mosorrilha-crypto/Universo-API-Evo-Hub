@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { authLoginRateLimiter, authSessionRateLimiter } from '../middleware/rateLimit';
 import { clearFailedLogins, isLoginLocked, recordFailedLogin } from '../services/authLoginAttempts';
+import { FirebaseAdminNotConfiguredError, verifyGoogleIdToken } from '../services/firebaseAdmin';
 
 interface AuthRouterDeps {
   jwtSecret: string;
@@ -12,6 +13,30 @@ interface AuthRouterDeps {
 
 export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Router {
   const router = Router();
+
+  /**
+   * Compartilhado entre login por senha e login com Google: bloqueio de
+   * tenant (TASK-0070) + emissão do JWT. Extraído pra não duplicar essa
+   * checagem quando o segundo caminho de login foi adicionado.
+   */
+  async function issueSessionForOperator(operator: any) {
+    const { data: tenantRow, error: tenantError } = await supabase!
+      .from('tenants')
+      .select('is_active')
+      .eq('id', operator.tenant_id)
+      .maybeSingle();
+    if (tenantError) throw new Error('Falha ao verificar o status do tenant.');
+    if (tenantRow && tenantRow.is_active === false) {
+      throw new Error('Acesso bloqueado. Fale com o administrador do sistema.');
+    }
+
+    const token = jwt.sign(
+      { id: operator.id, tenantId: operator.tenant_id, role: operator.role },
+      jwtSecret,
+      { expiresIn: '24h' }
+    );
+    return { token, operator: { name: operator.name, email: operator.email, role: operator.role, tenantId: operator.tenant_id } };
+  }
 
   // Rota de Login de Operadores e Administradores com verificação de senha
   //
@@ -81,25 +106,66 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
       // tenant está bloqueado sem saber a senha de ninguém dele. Mensagem
       // diferente de propósito aqui (não é genericError): quem já tem senha
       // certa precisa saber que o problema é bloqueio, não credencial errada.
-      const { data: tenantRow, error: tenantError } = await supabase
-        .from('tenants')
-        .select('is_active')
-        .eq('id', operator.tenant_id)
-        .maybeSingle();
-      if (tenantError) throw new Error('Falha ao verificar o status do tenant.');
-      if (tenantRow && tenantRow.is_active === false) {
-        throw new Error('Acesso bloqueado. Fale com o administrador do sistema.');
-      }
-
-      const token = jwt.sign(
-        { id: operator.id, tenantId: operator.tenant_id, role: operator.role },
-        jwtSecret,
-        { expiresIn: '24h' }
-      );
-
-      res.json({ token, operator: { name: operator.name, email: operator.email, role: operator.role, tenantId: operator.tenant_id } });
+      const session = await issueSessionForOperator(operator);
+      res.json(session);
     } catch (e: any) {
       res.status(401).json({ error: e.message || 'Falha na autenticação' });
+    }
+  });
+
+  // Login com Google (TASK-0218) — o botão já existia no painel desde antes,
+  // mas só provava posse do e-mail via Firebase client-side sem nunca emitir
+  // um JWT de backend: rotas protegidas continuavam corretamente bloqueadas
+  // (401), então o botão parecia funcionar mas não abria nada de verdade.
+  //
+  // O frontend manda o ID token do Google (obtido via `user.getIdToken()`
+  // depois do `signInWithPopup` — ver firebase.ts/LoginModal.tsx), este
+  // endpoint verifica esse token contra a API do Google/Firebase (prova
+  // real de posse do e-mail, não confia em nada que o cliente afirma) e só
+  // então busca um operador cadastrado com aquele e-mail — exatamente a
+  // mesma política de acesso do login por senha (nunca cria operador novo
+  // automaticamente; um e-mail Google sem operador cadastrado é rejeitado).
+  router.post('/api/auth/login-google', authLoginRateLimiter, async (req, res) => {
+    const idToken = typeof req.body.idToken === 'string' ? req.body.idToken : '';
+
+    try {
+      if (!supabase) {
+        throw new Error('Supabase não está configurado. Configure SUPABASE_URL e SUPABASE_KEY no ambiente.');
+      }
+
+      let verified;
+      try {
+        verified = await verifyGoogleIdToken(idToken);
+      } catch (err) {
+        if (err instanceof FirebaseAdminNotConfiguredError) {
+          return res.status(503).json({ error: 'Login com Google não está configurado neste servidor.' });
+        }
+        throw new Error('Não foi possível verificar sua conta Google. Tente novamente.');
+      }
+
+      if (!verified.email || !verified.emailVerified) {
+        throw new Error('O e-mail da sua conta Google precisa estar verificado.');
+      }
+
+      const { data, error } = await supabase
+        .from('operators')
+        .select('*')
+        .ilike('email', verified.email.trim())
+        .maybeSingle();
+      const operator = data as any;
+
+      // Diferente do login por senha, não há como "adivinhar" um e-mail
+      // aqui — o Google já provou que o requisitante é dono exatamente
+      // desse endereço, então dizer que ele não está cadastrado não vaza
+      // nada que a pessoa já não soubesse sobre a própria conta.
+      if (error || !operator) {
+        throw new Error('Esta conta Google não está cadastrada como operador. Peça ao administrador para cadastrar seu e-mail.');
+      }
+
+      const session = await issueSessionForOperator(operator);
+      res.json(session);
+    } catch (e: any) {
+      res.status(401).json({ error: e.message || 'Falha na autenticação com Google.' });
     }
   });
 
