@@ -13,6 +13,18 @@
  *    provando que o problema é sintaxe interna do objeto (chave sem aspas),
  *    não só ruído ao redor do bloco JSON.
  *
+ * 4. Ainda no bloco, tenta consertar o caso em que o Gemini omite por
+ *    completo o nome da chave antes de um valor de array — não uma chave
+ *    sem aspas (camada 3), a chave inteira falta, ficando
+ *    `{"passed":false,["problema"],"suggestedFix":"..."}` em vez de
+ *    `{"passed":false,"issues":["problema"],"suggestedFix":"..."}`.
+ *    Achado real (03/09/2026, TASK-0236): esse exato padrão apareceu 3x
+ *    numa única rodada de avaliação, sempre com a mesma mensagem "Expected
+ *    double-quoted property name in JSON" — uma vírgula seguida direto de
+ *    `[` só pode ocorrer, dentro de um objeto JSON, quando falta o par
+ *    `"issues":` antes do array (nunca é JSON válido de outra forma), então
+ *    a reinserção é seguro o bastante para tentar antes de desistir.
+ *
  * Se nenhuma camada produzir JSON válido, relança o erro original — nunca
  * mascara uma falha real com um objeto vazio silencioso — mas anexa um
  * trecho do texto bruto que falhou à mensagem. Achado real (03/09/2026):
@@ -51,7 +63,12 @@ export function safeParseGeminiJson(text: string | undefined | null): unknown {
       try {
         return JSON.parse(repaired);
       } catch {
-        throw withRawTextSnippet(firstError, raw);
+        const withIssuesKey = repaired.replace(/,\s*\[/, ',"issues":[');
+        try {
+          return JSON.parse(withIssuesKey);
+        } catch {
+          throw withRawTextSnippet(firstError, raw);
+        }
       }
     }
   }

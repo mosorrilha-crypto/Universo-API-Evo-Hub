@@ -143,6 +143,8 @@ IMPORTANTE sobre o campo "suggestedFix": ele precisa seguir as MESMAS regras aci
 
 IMPORTANTE sobre a seção "RESPOSTA DO ATENDENTE A AVALIAR" abaixo: cada bolha está marcada só com "[BOLHA N]" pra você identificar onde uma termina e a outra começa — isso é só uma marcação de referência DESTA avaliação, o cliente NUNCA vê "[BOLHA 1]"/"[BOLHA 2]" nem número nenhum, cada bolha chega como uma mensagem de WhatsApp separada e comum. Achado real (03/09/2026): quando essa marcação era feita como "1. texto" (formato de lista numerada de verdade), o próprio avaliador reprovava a resposta alegando "usa formato de lista numerada" — um defeito que não existe na mensagem real, só na forma como ela foi mostrada aqui pra avaliação. Nunca reprove por causa da marcação "[BOLHA N]" em si — julgue somente o texto de cada bolha.
 
+IMPORTANTE sobre o campo "issues": escreva SÓ o veredito final, cada item numa frase curta e direta. NUNCA pense em voz alta dentro do array (nada de "Espere...", "Vamos revisar...", listar e descartar cada regra uma por uma) — isso não é o lugar pra deliberação, é o resultado já decidido. Achado real (03/09/2026): um "issues" chegou a conter um parágrafo inteiro de raciocínio (incluindo a conclusão de que a resposta estava correta) e mesmo assim o caso saiu marcado como reprovado — a deliberação bagunçou tanto o texto quanto o veredito. Decida primeiro, em silêncio, e só então escreva o resultado.
+
 Responda ESTRITAMENTE em JSON: {"passed":boolean,"issues":["problema encontrado, curto"],"suggestedFix":"como a resposta deveria ter sido, em texto corrido, só se passed=false, senão string vazia"}
 
 HISTÓRICO ANTERIOR:

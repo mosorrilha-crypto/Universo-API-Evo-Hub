@@ -31,6 +31,15 @@ describe('safeParseGeminiJson', () => {
     expect(safeParseGeminiJson(raw)).toEqual({ passed: false, issues: ['soou robótico'], suggestedFix: 'responda direto' });
   });
 
+  it('conserta a chave "issues" totalmente omitida antes do array (reprodução exata do erro real: vírgula seguida direto de "[")', () => {
+    const raw = '{"passed":false,["reapresentou mesmo já tendo o nome"],"suggestedFix":"oi, tudo bem?"}';
+    expect(safeParseGeminiJson(raw)).toEqual({
+      passed: false,
+      issues: ['reapresentou mesmo já tendo o nome'],
+      suggestedFix: 'oi, tudo bem?',
+    });
+  });
+
   it('relança o erro original quando não há nenhum bloco { no texto', () => {
     expect(() => safeParseGeminiJson('não gerei JSON nenhum dessa vez')).toThrow();
   });
