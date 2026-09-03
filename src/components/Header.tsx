@@ -19,6 +19,7 @@ import {
   Kanban,
   Layers,
   Link2,
+  Radio,
   ScrollText,
   LogOut,
   Menu,
@@ -105,15 +106,16 @@ export const Header: React.FC<HeaderProps> = ({
   const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.agenda;
   const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.financial;
   const canSeeSystemLogs = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.systemLogs);
+  const canSeeBroadcast = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.broadcast);
   const canSeeGrowth = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.growth;
   const canSeeAgentTools = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.agent;
   const canSeeCatalog = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.catalog;
   const canSeeQuality = hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.quality;
 
   const copy = isSpanish ? {
-    platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', systemLogs: 'Logs del sistema', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
+    platform: 'Central de operación por WhatsApp', subtitle: canSeeFinancial ? 'Atención, ventas, agenda, finanzas y conversiones en un solo lugar' : 'Atención, ventas, agenda y conversiones en un solo lugar', today: 'Hoy', conversations: 'Conversaciones', sales: 'Ventas', schedule: 'Agenda', financial: 'Finanzas', growth: 'Crecimiento', quality: 'Calidad del agente', systemLogs: 'Logs del sistema', broadcast: 'Envío Masivo', agentCatalog: 'Agente y catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Ingresar', signOut: 'Salir', activeCompany: 'Empresa activa', changeOperator: 'Cambiar operador', previous: 'Desplazar menú a la izquierda', next: 'Desplazar menú a la derecha', menu: 'Menú'
   } : {
-    platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', systemLogs: 'Logs do sistema', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
+    platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', systemLogs: 'Logs do sistema', broadcast: 'Disparo em Massa', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
   const primaryNavigation: NavigationItem[] = [
@@ -129,6 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
     ...(canSeeCatalog ? [{ id: 'catalog' as ActiveTab, label: copy.publicCatalog, icon: <Link2 className="w-4 h-4" /> }] : []),
     ...(canSeeQuality ? [{ id: 'quality' as ActiveTab, label: copy.quality, icon: <ShieldCheck className="w-4 h-4" />, accent: 'sky' as const }] : []),
     ...(canSeeSystemLogs ? [{ id: 'system_logs' as ActiveTab, label: copy.systemLogs, icon: <ScrollText className="w-4 h-4" />, accent: 'sky' as const }] : []),
+    ...(canSeeBroadcast ? [{ id: 'broadcast' as ActiveTab, label: copy.broadcast, icon: <Radio className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
   const saasNavigation: NavigationItem[] = canSeeSaasMaster ? [
     { id: 'saas', label: copy.companies, icon: <Layers className="w-4 h-4" /> },

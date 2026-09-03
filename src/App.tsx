@@ -21,6 +21,7 @@ import OperationsModuleFrame from './components/OperationsModuleFrame';
 import { CrmWorkspace } from './components/CrmWorkspace';
 import { EscalationsPanel } from './components/EscalationsPanel';
 import { SystemLogsPanel } from './components/SystemLogsPanel';
+import { BroadcastAdminPanel } from './components/BroadcastAdminPanel';
 import { AgendaWorkspace } from './components/AgendaWorkspace';
 import { FinancialWorkspace } from './components/FinancialWorkspace';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
@@ -235,6 +236,8 @@ export const App: React.FC = () => {
   // Recurso novo: SaaS Admin sempre audita; admins de tenant só acessam após
   // liberação explícita no Centro de Controle para a empresa ativa.
   const canSeeSystemLogs = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.systemLogs);
+  // Mesmo padrão de canSeeSystemLogs: TASK-0252, módulo opt-in por tenant.
+  const canSeeBroadcast = canSeeAdminTools && (hasRoleAtLeast(currentUser?.role, 'saas_admin') || tenantCapabilities.broadcast);
 
   // Volta pra Atendimento se o usuário logado (ou a troca de conta) não tem
   // mais permissão pra ver a aba em que estava — cobre re-login com outro
@@ -265,10 +268,11 @@ export const App: React.FC = () => {
       (activeTab === 'knowledge' && !canManageAgent) ||
       (activeTab === 'catalog' && !canSeeCatalog) ||
       (activeTab === 'quality' && !canSeeQuality) ||
-      (activeTab === 'system_logs' && !canSeeSystemLogs);
+      (activeTab === 'system_logs' && !canSeeSystemLogs) ||
+      (activeTab === 'broadcast' && !canSeeBroadcast);
     if (blocked) handleSetActiveTab('home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
+  }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, canSeeBroadcast, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
 
   // A decisão vem do contrato self-scoped do tenant e falha fechada. O estado
   // carrega o tenant de origem, evitando que uma troca de empresa mostre por
@@ -1691,6 +1695,12 @@ export const App: React.FC = () => {
               onArchive={(id) => void updateSystemIncident(id, 'archive')}
               onRestore={(id) => void updateSystemIncident(id, 'restore')}
             />
+          </OperationsModuleFrame>
+        )}
+
+        {activeTab === 'broadcast' && canSeeBroadcast && (
+          <OperationsModuleFrame title="Disparo em Massa" eyebrow="Marketing via WhatsApp" description="Campanhas de disparo com aquecimento guiado, deduplicação e integração com o Atendimento." accent="blue">
+            <BroadcastAdminPanel tenantName={activeTenant?.name} />
           </OperationsModuleFrame>
         )}
 
