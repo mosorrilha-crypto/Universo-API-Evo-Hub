@@ -134,6 +134,23 @@ interface AgentEvalRun {
   finishedAt?: string;
 }
 
+/** TASK-0249 — cada caso sintético de uma rodada (pergunta + resposta real + veredito), aprovado ou não — ver server/services/agentEvalRunCaseStore.ts. */
+interface AgentEvalRunCase {
+  id: string;
+  category: string;
+  question: string;
+  history?: { sender: 'lead' | 'agent'; text: string }[];
+  agent?: string;
+  bubbles?: string[];
+  passed: boolean;
+  safetyApproved?: boolean;
+  safetyReason?: string;
+  qualityIssues?: string[];
+  suggestedFix?: string;
+  error?: string;
+  createdAt: string;
+}
+
 interface QualityAuditCenterProps {
   onToast: (message: string) => void;
 }
@@ -330,6 +347,28 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [evalCount, setEvalCount] = useState(10);
   const [startingEval, setStartingEval] = useState(false);
   const [evalError, setEvalError] = useState<string | null>(null);
+  const [viewingRunId, setViewingRunId] = useState<string | null>(null);
+  const [runCases, setRunCases] = useState<AgentEvalRunCase[]>([]);
+  const [loadingRunCases, setLoadingRunCases] = useState(false);
+  const [runCasesError, setRunCasesError] = useState<string | null>(null);
+
+  /** TASK-0249 — pedido direto do dono do produto: ver a lista completa de pergunta+resposta de uma rodada, inclusive os casos APROVADOS, não só os que viraram achado de bug. */
+  const openRunCases = async (runId: string) => {
+    setViewingRunId(runId);
+    setRunCases([]);
+    setRunCasesError(null);
+    setLoadingRunCases(true);
+    try {
+      const response = await apiFetch(`/api/quality-audit/eval-runs/${encodeURIComponent(runId)}/cases`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível carregar os casos desta rodada.');
+      setRunCases(Array.isArray(data?.cases) ? data.cases : []);
+    } catch (error: any) {
+      setRunCasesError(error?.message || 'Não foi possível carregar os casos desta rodada.');
+    } finally {
+      setLoadingRunCases(false);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -741,23 +780,33 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             {evalError && <p className="text-xs text-rose-400 mt-2">{evalError}</p>}
             {evalRuns.length > 0 && (
               <div className="mt-4 space-y-2">
-                {evalRuns.slice(0, 5).map((run) => (
-                  <div key={run.id} className="flex items-center justify-between gap-3 p-2.5 rounded-panel border border-slate-800 text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {run.status === 'running' && <Clock3 className="w-3.5 h-3.5 text-amber-300 flex-shrink-0 animate-pulse" />}
-                      {run.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" />}
-                      {run.status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />}
-                      <span className="text-slate-300 truncate">
-                        {run.status === 'running'
-                          ? (isSpanish ? `Ejecutando: ${run.completedCount}/${run.requestedCount}` : `Rodando: ${run.completedCount}/${run.requestedCount}`)
-                          : run.status === 'completed'
-                          ? (isSpanish ? `${run.passCount}/${run.requestedCount} aprobaron, ${run.failCount} fallaron` : `${run.passCount}/${run.requestedCount} passaram, ${run.failCount} falharam`)
-                          : (isSpanish ? `Falló: ${run.error || 'error desconocido'}` : `Falhou: ${run.error || 'erro desconhecido'}`)}
-                      </span>
+                {evalRuns.slice(0, 5).map((run) => {
+                  const canViewCases = run.completedCount > 0;
+                  return (
+                    <div
+                      key={run.id}
+                      onClick={canViewCases ? () => openRunCases(run.id) : undefined}
+                      className={`flex items-center justify-between gap-3 p-2.5 rounded-panel border border-slate-800 text-xs ${canViewCases ? 'cursor-pointer hover:border-sky-400/40 hover:bg-slate-900/60 transition-colors' : ''}`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {run.status === 'running' && <Clock3 className="w-3.5 h-3.5 text-amber-300 flex-shrink-0 animate-pulse" />}
+                        {run.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" />}
+                        {run.status === 'failed' && <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />}
+                        <span className="text-slate-300 truncate">
+                          {run.status === 'running'
+                            ? (isSpanish ? `Ejecutando: ${run.completedCount}/${run.requestedCount}` : `Rodando: ${run.completedCount}/${run.requestedCount}`)
+                            : run.status === 'completed'
+                            ? (isSpanish ? `${run.passCount}/${run.requestedCount} aprobaron, ${run.failCount} fallaron` : `${run.passCount}/${run.requestedCount} passaram, ${run.failCount} falharam`)
+                            : (isSpanish ? `Falló: ${run.error || 'error desconocido'}` : `Falhou: ${run.error || 'erro desconhecido'}`)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {canViewCases && <span className="text-[10px] text-sky-300 underline underline-offset-2">{isSpanish ? 'Ver preguntas y respuestas' : 'Ver perguntas e respostas'}</span>}
+                        <span className="text-slate-500">{new Date(run.startedAt).toLocaleString(isSpanish ? 'es-PY' : 'pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
                     </div>
-                    <span className="text-slate-500 flex-shrink-0">{new Date(run.startedAt).toLocaleString(isSpanish ? 'es-PY' : 'pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -916,6 +965,54 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             )}
             <div className="mt-5"><label className="text-[10px] uppercase tracking-wider text-slate-500">Nota da revisão</label><textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} rows={3} placeholder="Explique a decisão para a próxima pessoa que consultar este item..." className="mt-1.5 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-sky-400/50" /></div>
             <div className="mt-5 pt-4 border-t border-slate-800"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Decisão administrativa</p><div className="grid grid-cols-2 gap-2"><button onClick={() => updateReview(selectedReview.id, 'approved')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 text-xs font-bold hover:bg-emerald-500/25"><Check className="w-3.5 h-3.5" /> Aprovar</button><button onClick={() => updateReview(selectedReview.id, 'testing')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-bold hover:bg-sky-500/25"><Wrench className="w-3.5 h-3.5" /> Enviar para teste</button><button onClick={() => updateReview(selectedReview.id, selectedReview.kind === 'bug' ? 'resolved' : 'rejected')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-rose-500/10 border border-rose-400/30 text-rose-200 text-xs font-bold hover:bg-rose-500/20"><ThumbsDown className="w-3.5 h-3.5" /> {selectedReview.kind === 'bug' ? 'Marcar resolvido' : 'Rejeitar'}</button><button onClick={() => updateReview(selectedReview.id, 'reopened')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-orange-500/10 border border-orange-400/30 text-orange-200 text-xs font-bold hover:bg-orange-500/20"><RotateCcw className="w-3.5 h-3.5" /> Reabrir</button></div></div>
+          </aside>
+        </div>
+      )}
+
+      {viewingRunId && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-end" onClick={() => setViewingRunId(null)}>
+          <aside onClick={(event) => event.stopPropagation()} className="h-full w-full max-w-2xl bg-slate-900 border-l border-slate-700 shadow-2xl overflow-y-auto p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">{isSpanish ? 'Evaluación automática' : 'Avaliação automática'}</p>
+                <h3 className="text-lg font-bold text-white mt-1">{isSpanish ? 'Preguntas y respuestas de esta ronda' : 'Perguntas e respostas desta rodada'}</h3>
+              </div>
+              <button onClick={() => setViewingRunId(null)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            {loadingRunCases ? (
+              <LoadingState />
+            ) : runCasesError ? (
+              <p className="text-xs text-rose-400 mt-4">{runCasesError}</p>
+            ) : runCases.length === 0 ? (
+              <p className="text-xs text-slate-500 mt-4">{isSpanish ? 'Ningún caso registrado para esta ronda.' : 'Nenhum caso registrado para esta rodada.'}</p>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {runCases.map((c) => (
+                  <div key={c.id} className={`rounded-panel border p-3.5 ${c.passed ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-rose-500/20 bg-rose-500/5'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      {c.passed ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />}
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${c.passed ? 'text-emerald-300' : 'text-rose-300'}`}>{c.passed ? (isSpanish ? 'Aprobado' : 'Aprovado') : (isSpanish ? 'Reprobado' : 'Reprovado')}</span>
+                      <span className="text-[10px] text-slate-500">· {c.category}{c.agent ? ` · ${c.agent}` : ''}</span>
+                    </div>
+                    <p className="text-xs text-slate-300 mb-2"><span className="font-semibold text-slate-400">{isSpanish ? 'Pregunta simulada: ' : 'Pergunta simulada: '}</span>{c.question}</p>
+                    {c.bubbles && c.bubbles.length > 0 && (
+                      <div className="rounded-control border border-slate-800 bg-slate-950/50 p-2.5 space-y-1">
+                        {c.bubbles.map((bubble, index) => (
+                          <p key={index} className="text-xs text-slate-300 whitespace-pre-wrap">{bubble}</p>
+                        ))}
+                      </div>
+                    )}
+                    {!c.passed && (c.safetyReason || (c.qualityIssues && c.qualityIssues.length > 0) || c.error) && (
+                      <div className="mt-2 text-[11px] text-rose-300/90 space-y-0.5">
+                        {c.safetyReason && <p><span className="font-semibold">{isSpanish ? 'Revisor de seguridad: ' : 'Revisor de segurança: '}</span>{c.safetyReason}</p>}
+                        {c.qualityIssues && c.qualityIssues.length > 0 && <p><span className="font-semibold">{isSpanish ? 'Calidad: ' : 'Qualidade: '}</span>{c.qualityIssues.join('; ')}</p>}
+                        {c.error && <p><span className="font-semibold">{isSpanish ? 'Error: ' : 'Erro: '}</span>{c.error}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </aside>
         </div>
       )}

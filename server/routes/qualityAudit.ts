@@ -16,6 +16,7 @@ import {
 } from '../services/qualityAuditStore';
 import { runAgentEvaluation } from '../services/agentEvalService';
 import { createAgentEvalRun, finishAgentEvalRun, listAgentEvalRuns, updateAgentEvalRunProgress } from '../services/agentEvalRunStore';
+import { recordAgentEvalRunCase, listAgentEvalRunCases } from '../services/agentEvalRunCaseStore';
 import { calculateControlledExperimentResult } from '../services/controlledExperimentResults';
 import {
   createControlledExperiment,
@@ -237,6 +238,31 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
           console.warn(`⚠️  [Avaliação automática] falha ao atualizar progresso do run ${run.id}:`, (err as Error)?.message || err);
         }
       },
+      // TASK-0249 — pedido direto do dono do produto: poder ver a lista
+      // completa de pergunta+resposta de uma rodada, inclusive os casos
+      // APROVADOS (não só os que viram achado em quality_reviews), pra
+      // conferir se o julgador acertou de verdade. onCaseResult já
+      // calculava tudo isso, só não estava conectado a nenhuma persistência
+      // nesta rota (só o CLI usava, pra dump em arquivo).
+      onCaseResult: (result) => {
+        recordAgentEvalRunCase({
+          runId: run.id,
+          tenantId,
+          category: result.category,
+          question: result.text,
+          history: result.history,
+          agent: result.agent,
+          bubbles: result.bubbles,
+          passed: Boolean(result.passed),
+          safetyApproved: result.safety?.approved,
+          safetyReason: result.safety?.reason,
+          qualityIssues: result.quality?.issues,
+          suggestedFix: result.quality?.suggestedFix,
+          error: result.error,
+        }).catch((err) => {
+          console.warn(`⚠️  [Avaliação automática] falha ao salvar caso do run ${run.id}:`, (err as Error)?.message || err);
+        });
+      },
     })
       .then(async (summary) => {
         await finishAgentEvalRun(run.id, { status: 'completed', repeatedPhraseCount: summary.repeatedPhrases.length });
@@ -254,6 +280,12 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
   router.get('/api/quality-audit/eval-runs', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const runs = await listAgentEvalRuns(tenantOf(req));
     res.json({ runs });
+  }));
+
+  /** TASK-0249 — lista pergunta+resposta+veredito de cada caso de uma rodada, aprovado ou não. */
+  router.get('/api/quality-audit/eval-runs/:runId/cases', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const cases = await listAgentEvalRunCases(tenantOf(req), req.params.runId);
+    res.json({ cases });
   }));
 
   /** Materializa na fila apenas candidatos recorrentes; não muda prompt, KB ou agente. */
