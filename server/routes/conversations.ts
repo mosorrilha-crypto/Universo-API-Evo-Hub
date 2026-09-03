@@ -18,7 +18,7 @@ import {
   markConversationRead,
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
-import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
+import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { sendBubbles, type OutboundChannel } from '../services/sendBubbles';
 import { resolveCredentialsForTenant, resolveCredentialsForConversation } from '../services/tenantResolver';
@@ -320,15 +320,22 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/conversations/:phone/context', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const [memoryResult, traceResult] = await Promise.allSettled([
+    const [memoryResult, traceResult, windowResult] = await Promise.allSettled([
       getContactAgentMemory(tenantId, phone),
       listAgentTurnTraces(tenantId, phone, 1),
+      getCustomerServiceWindowStatus(tenantId, phone),
     ]);
     const memory = memoryResult.status === 'fulfilled' ? memoryResult.value : null;
     const latestTrace = traceResult.status === 'fulfilled' ? traceResult.value[0] || null : null;
+    const windowStatus = windowResult.status === 'fulfilled' ? windowResult.value : null;
+    const hoursRemaining = windowStatus?.windowExpiresAt
+      ? Math.max(0, Math.round((new Date(windowStatus.windowExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60)))
+      : 0;
+
     const unavailable = {
       memory: memoryResult.status === 'rejected',
       trace: traceResult.status === 'rejected',
+      window: windowResult.status === 'rejected',
     };
     if (unavailable.memory || unavailable.trace) {
       console.warn(`⚠️  [Conversation Context] tenant=${tenantId} leitura parcial de contexto (memory=${unavailable.memory}, trace=${unavailable.trace}); painel continua em modo seguro.`);
@@ -337,6 +344,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({
       available: !unavailable.memory && !unavailable.trace,
       unavailable,
+      serviceWindow: windowStatus ? {
+        withinWindow: windowStatus.withinWindow,
+        hoursRemaining,
+        lastLeadMessageAt: windowStatus.lastLeadMessageAt,
+        windowExpiresAt: windowStatus.windowExpiresAt,
+      } : null,
       memory: memory ? {
         preferredLanguage: memory.preferred_language,
         preferredName: memory.preferred_name,
@@ -360,6 +373,120 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         outcome: latestTrace.outcome,
       } : null,
     });
+  }));
+
+  /**
+   * Lista modelos de mensagens aprovados (Meta WhatsApp Templates) para reabertura de conversas
+   * fora da janela de 24 horas.
+   */
+  router.get('/api/conversations/:phone/templates', authenticateToken, asyncHandler(async (_req: AuthenticatedRequest, res) => {
+    const defaultTemplates = [
+      {
+        id: 'teste_modelo',
+        name: 'teste_modelo',
+        category: 'MARKETING',
+        language: 'pt_BR',
+        bodyText: 'Oi {{1}}, testando o modelo de mensagem {{2}}. Teste dos modelos...',
+        variableExamples: ['Enzo S.', 'suporte'],
+        estimatedCostUsd: 0.0080,
+      },
+      {
+        id: 'promocao_servico',
+        name: 'promocao_servico',
+        category: 'MARKETING',
+        language: 'pt_BR',
+        bodyText: 'Oi {{1}}! Tem novidade na {{2}} com condição especial para você aproveitar essa semana!',
+        variableExamples: ['Enzo S.', 'Renov Estética'],
+        estimatedCostUsd: 0.0080,
+      },
+      {
+        id: 'lembrete_consulta',
+        name: 'lembrete_consulta',
+        category: 'UTILITY',
+        language: 'pt_BR',
+        bodyText: 'Olá {{1}}, tudo bem? Passando para lembrar da sua consulta na {{2}}.\n\nServiço: {{3}}\nSe precisar remarcar, é só responder por aqui.',
+        variableExamples: ['Enzo S.', 'Renov Estética', 'Limpeza de Pele'],
+        estimatedCostUsd: 0.0050,
+      },
+      {
+        id: 'hello_world',
+        name: 'hello_world',
+        category: 'UTILITY',
+        language: 'en_US',
+        bodyText: 'Welcome and congratulations! This message demonstrates your ability to send a WhatsApp template notification.',
+        variableExamples: [],
+        estimatedCostUsd: 0.0050,
+      },
+    ];
+
+    res.json({ templates: defaultTemplates });
+  }));
+
+  /**
+   * Envia um modelo aprovado de reabertura de conversa pelo WhatsApp.
+   */
+  router.post('/api/conversations/:phone/send-template', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { templateName, languageCode = 'pt_BR', parameters = [] } = req.body || {};
+    if (!templateName || typeof templateName !== 'string') {
+      return res.status(400).json({ error: 'Campo "templateName" é obrigatório.' });
+    }
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+
+    try {
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, phone);
+      const channel = await resolveCredentialsForConversation(
+        tenantId,
+        conversationPhoneNumberId,
+        { metaAccessToken, metaPhoneNumberId },
+        { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+      );
+
+      const paramsArray: string[] = Array.isArray(parameters) ? parameters.map(String) : [];
+      let realMessageId: string | undefined;
+
+      if (channel.provider === 'meta') {
+        const metaRes = await sendWhatsAppTemplateMessage(
+          channel.metaPhoneNumberId,
+          channel.metaAccessToken,
+          phone,
+          templateName,
+          languageCode,
+          paramsArray
+        );
+        realMessageId = metaRes.messageId;
+      } else {
+        const fallbackText = `[Modelo: ${templateName}] ${paramsArray.length ? paramsArray.join(' • ') : ''}`;
+        realMessageId = await sendEvolutionTextMessage(
+          channel.evolutionInstanceName,
+          channel.evolutionApiUrl,
+          channel.evolutionApiKey,
+          phone,
+          fallbackText
+        );
+      }
+
+      const formattedText = `[Modelo: ${templateName}] ${paramsArray.length ? paramsArray.join(' • ') : ''}`;
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        phone,
+        {
+          type: 'text',
+          text: formattedText,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        'operator',
+        undefined,
+        undefined,
+        realMessageId
+      );
+
+      await resolveOpenEscalationsAfterManualReply(tenantId, phone, { id: req.user?.id });
+      res.json({ success: true, conversation: conv, messageId: realMessageId });
+    } catch (err: any) {
+      console.error('❌ [Conversas] Falha ao enviar template oficial:', err.message);
+      res.status(502).json({ error: err.message });
+    }
   }));
 
   /**

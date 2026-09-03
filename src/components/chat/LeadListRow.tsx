@@ -106,6 +106,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
                 {lastMsg.type === 'image' && <ImageIcon className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 {lastMsg.type === 'file' && <FileText className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 <span className="truncate">
+                  {lastMsg.sender === 'agent' ? (lastMsg.sent_by === 'operator' ? 'Você: ' : 'Agente: ') : ''}
                   {lastMsg.type === 'audio'
                     ? 'Áudio do WhatsApp'
                     : lastMsg.type === 'image'
