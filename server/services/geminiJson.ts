@@ -14,7 +14,14 @@
  *    não só ruído ao redor do bloco JSON.
  *
  * Se nenhuma camada produzir JSON válido, relança o erro original — nunca
- * mascara uma falha real com um objeto vazio silencioso.
+ * mascara uma falha real com um objeto vazio silencioso — mas anexa um
+ * trecho do texto bruto que falhou à mensagem. Achado real (03/09/2026):
+ * mesmo depois da 3ª camada de recuperação, 2 de 15 casos numa rodada
+ * seguinte ainda quebraram com a MESMA mensagem de erro — sem o texto
+ * bruto nunca fica registrado em lugar nenhum (nem no banco, nem no log),
+ * então não dá pra diagnosticar QUAL malformação nova é essa. Isso resolve
+ * a falta de evidência pra próxima vez, mesmo sem resolver a causa ainda
+ * desconhecida.
  */
 export function safeParseGeminiJson(text: string | undefined | null): unknown {
   const raw = (text || '').trim();
@@ -23,7 +30,7 @@ export function safeParseGeminiJson(text: string | undefined | null): unknown {
     return JSON.parse(raw);
   } catch (firstError) {
     const start = raw.indexOf('{');
-    if (start === -1) throw firstError;
+    if (start === -1) throw withRawTextSnippet(firstError, raw);
     let candidate: string | null = null;
     let depth = 0;
     for (let i = start; i < raw.length; i++) {
@@ -36,7 +43,7 @@ export function safeParseGeminiJson(text: string | undefined | null): unknown {
         }
       }
     }
-    if (candidate === null) throw firstError;
+    if (candidate === null) throw withRawTextSnippet(firstError, raw);
     try {
       return JSON.parse(candidate);
     } catch {
@@ -44,8 +51,16 @@ export function safeParseGeminiJson(text: string | undefined | null): unknown {
       try {
         return JSON.parse(repaired);
       } catch {
-        throw firstError;
+        throw withRawTextSnippet(firstError, raw);
       }
     }
   }
+}
+
+const RAW_TEXT_SNIPPET_LENGTH = 300;
+
+function withRawTextSnippet(error: unknown, raw: string): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const snippet = raw.length > RAW_TEXT_SNIPPET_LENGTH ? `${raw.slice(0, RAW_TEXT_SNIPPET_LENGTH)}… [truncado]` : raw;
+  return new Error(`${message} — texto bruto recebido: ${JSON.stringify(snippet)}`);
 }
