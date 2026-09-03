@@ -248,11 +248,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // e nenhuma delas era separada por tenant — trocar de empresa no seletor
   // (saas_admin) e atualizar a página podia mostrar, por um instante,
   // contatos reais de OUTRO tenant (chave própria + por tenant corrige).
-  const whatsappLeadsCacheKey = (tenantId: string) => `saas_whatsapp_leads_${tenantId}`;
-  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis; historyLoaded?: boolean; historyLoading?: boolean; lastMessageId?: string })[]>(() => {
-    const saved = localStorage.getItem(whatsappLeadsCacheKey(activeTenant.id));
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Achado real de auditoria (CodeQL, "Clear text storage of sensitive
+  // information"): esse cache guardava nome, telefone e o histórico
+  // completo de mensagens de clientes reais em localStorage sem nenhuma
+  // criptografia. Servia só pra pintura instantânea (nenhum caminho de
+  // fallback real depende dele — ver fetchRealConversations), então a
+  // correção foi parar de gravar/ler em vez de tentar reduzir campos (o
+  // sink continuaria existindo) ou cifrar no cliente (a chave ficaria no
+  // próprio JS, não protege de verdade). Lista começa vazia e é populada
+  // pelo fetch real (/api/conversations) a cada carregamento/troca de tenant.
+  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis; historyLoaded?: boolean; historyLoading?: boolean; lastMessageId?: string })[]>([]);
+  // Purga ativa, uma vez por montagem: navegadores que já usaram o painel
+  // antes desta correção podem ter PII de cliente em texto puro gravada de
+  // uma sessão anterior — sem isso, ela ficaria lá indefinidamente, já que
+  // parar de escrever não apaga o que já foi escrito. Varre todos os
+  // tenants (não só o ativo), não só o do logout (clearCachedTenantScopedData
+  // em App.tsx continua existindo, mas só roda no logout).
+  useEffect(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('saas_whatsapp_leads_')) localStorage.removeItem(key);
+    }
+  }, []);
   type PanelLead = (typeof leads)[number];
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
   // No mobile (abaixo do breakpoint lg), lista e conversa não cabem lado a
@@ -1279,11 +1295,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // telefone contra o valor guardado de um tenant diferente.
     lastMessageIdRef.current = new Map();
     activeLeadPhoneRef.current = null;
-    // Troca de tenant: carrega o cache do tenant novo (ou começa vazio) na
-    // hora, em vez de deixar a lista do tenant anterior visível até
-    // fetchRealConversations() terminar logo abaixo.
-    const cachedForTenant = localStorage.getItem(whatsappLeadsCacheKey(requestTenantId));
-    setLeads(cachedForTenant ? JSON.parse(cachedForTenant) : []);
+    // Troca de tenant: zera a lista na hora (o cache em localStorage foi
+    // removido, ver achado de auditoria acima) — fica vazia até
+    // fetchRealConversations() terminar logo abaixo, em vez de arriscar
+    // mostrar a lista do tenant anterior.
+    setLeads([]);
 
     const fetchRealConversations = async () => {
       try {
@@ -2165,7 +2181,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     const remaining = leads.filter((l) => l.id !== leadId);
     setLeads(remaining);
-    localStorage.setItem(whatsappLeadsCacheKey(activeTenant.id), JSON.stringify(remaining));
     if (onDeleteLead) {
       onDeleteLead(leadId);
     }
@@ -2825,7 +2840,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     setLeads((prev) => {
       const updated = [newLeadItem, ...prev];
-      localStorage.setItem(whatsappLeadsCacheKey(activeTenant.id), JSON.stringify(updated));
       return updated;
     });
     // Propaga pro state do App.tsx (usado pelo CRM/Financeiro/Atribuição) —
