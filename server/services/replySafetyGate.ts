@@ -104,8 +104,19 @@ function pushesBooking(text: string): boolean {
   return /\b(agendamos|agendar|agenda|reservamos|reservar|turno|disponibilidad para|fecha disponible|que dia te queda)\b/i.test(normalize(text));
 }
 
+/**
+ * Achado real (03/09/2026, avaliação sintética, TASK-0238): o padrão antigo
+ * usava um curinga `se[a-z]*na` pra pegar "seña"/"sena" (sinal de pagamento
+ * em espanhol, sem acento depois do `normalize()`), mas isso também batia
+ * em qualquer palavra "se...na" — inclusive "semana" (s-e-m-a-n-a), uma das
+ * palavras mais comuns em espanhol/português. Resultado: qualquer mensagem
+ * mencionando "semana" (ex: "tem horário pra semana que vem?") era tratada
+ * como contendo dado de pagamento sensível e escalada pra revisão humana à
+ * toa. Trocado pelo padrão específico "sena" (sem curinga), igual ao já
+ * usado e testado em `escalationStore.ts`'s `isPaymentRelated`.
+ */
 function isPaymentOrSensitive(text: string): boolean {
-  return /\b(pago|pague|transferencia|transferir|comprobante|comprovante|deposito|se[a-z]*na|tarjeta|cartao|cedula|documento|contrase[ñn]a|senha)\b/i.test(normalize(text));
+  return /\b(pago|pague|transferencia|transferir|comprobante|comprovante|deposito|sena|tarjeta|cartao|cedula|documento|contrasena|senha)\b/i.test(normalize(text));
 }
 
 /**
