@@ -3582,7 +3582,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         ao vivo
                       </span>
                     </div>
-                    <p className="text-[11px] font-normal text-zinc-400 truncate">
+                    <p className="text-[11px] font-normal text-slate-400 truncate">
                       {selectedLead.phone} • {selectedLead.messages?.length || 0} mensagens
                     </p>
                   </div>
@@ -4612,13 +4612,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   return (
                     <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
                       {isWindowOpen ? (
-                        <div className="flex items-center gap-2 text-zinc-300">
+                        <div className="flex items-center gap-2 text-slate-300">
                           <span className="flex items-center gap-1.5 font-bold text-emerald-400">
                             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                             aberta - faltam {hoursRemaining}h
                           </span>
-                          <span className="text-zinc-500 hidden sm:inline">•</span>
-                          <span className="text-zinc-400 hidden sm:inline">
+                          <span className="text-slate-500 hidden sm:inline">•</span>
+                          <span className="text-slate-400 hidden sm:inline">
                             O agente pode responder normalmente. A janela fecha {hoursRemaining}h depois de agora, se o cliente não escrever de novo.
                           </span>
                         </div>
@@ -4902,7 +4902,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
                 {/* Aviso de Assunção Humana de Controle (Referência 1) */}
                 <div className="px-3 pt-1.5 pb-0.5">
-                  <p className="text-[10px] text-zinc-400 flex items-center gap-1.5">
+                  <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80 shrink-0" />
                     Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.
                   </p>
