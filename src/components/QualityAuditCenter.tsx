@@ -870,8 +870,40 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
             <div className="flex items-start justify-between gap-4"><div className="flex items-start gap-3"><div className="w-9 h-9 rounded-control bg-slate-800 flex items-center justify-center">{kindIcon(selectedReview.kind)}</div><div><p className="text-[10px] uppercase tracking-wider text-slate-500">{KIND_LABELS[selectedReview.kind]}</p><h3 className="text-lg font-bold text-white mt-1">{selectedReview.title}</h3></div></div><button onClick={() => setSelectedReviewId(null)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button></div>
             <div className="flex flex-wrap items-center gap-2 mt-4"><span className={`px-2 py-1 rounded-pill border text-[10px] font-bold ${STATUS_CLASSES[selectedReview.status]}`}>{STATUS_LABELS[selectedReview.status]}</span><span className="text-[10px] text-slate-500">Criado em {formatDate(selectedReview.created_at)}</span>{selectedReview.kind === 'ai_suggestion' && <span className="text-[10px] text-sky-300">Confiança: {confidenceLabel(selectedReview.confidence)}</span>}</div>
             <div className="mt-5 rounded-panel border border-slate-800 bg-slate-950/50 p-4"><p className="text-xs leading-relaxed text-slate-300 whitespace-pre-wrap">{selectedReview.description}</p></div>
-            {(selectedReview.original_value || selectedReview.corrected_value) && <div className="grid sm:grid-cols-2 gap-3 mt-3"><ValueBlock label="Sugestão original" value={selectedReview.original_value || '—'} tone="rose" /><ValueBlock label="Resultado corrigido" value={selectedReview.corrected_value || '—'} tone="emerald" /></div>}
-            {Object.keys(selectedReview.context || {}).length > 0 && <div className="mt-3"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Contexto registrado</p><pre className="text-[10px] text-slate-400 whitespace-pre-wrap break-words bg-slate-950 border border-slate-800 rounded-control p-3">{JSON.stringify(selectedReview.context, null, 2)}</pre></div>}
+            {(() => {
+              const ctx = selectedReview.context || {};
+              const isSyntheticEval = ctx.source === 'synthetic_eval';
+              const syntheticQuestion = isSyntheticEval && typeof ctx.question === 'string' ? ctx.question : null;
+              const syntheticHistory = isSyntheticEval && Array.isArray(ctx.history) ? (ctx.history as Array<{ sender?: string; text?: string }>) : null;
+              if (isSyntheticEval) {
+                return (
+                  <div className="mt-3 space-y-3">
+                    {syntheticHistory && syntheticHistory.length > 0 && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Histórico simulado antes desta pergunta</p>
+                        <div className="rounded-panel border border-slate-800 bg-slate-950/50 p-3 space-y-1.5">
+                          {syntheticHistory.map((turn, index) => (
+                            <p key={index} className="text-xs text-slate-400"><span className="font-semibold text-slate-300">{turn.sender === 'agent' ? 'Atendente: ' : 'Cliente: '}</span>{turn.text}</p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {syntheticQuestion && <ValueBlock label="Pergunta simulada (cliente sintético)" value={syntheticQuestion} tone="rose" />}
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <ValueBlock label="Resposta real que a IA deu" value={selectedReview.original_value || '—'} tone="rose" />
+                      <ValueBlock label="Como deveria ter respondido" value={selectedReview.corrected_value || 'Não há sugestão específica pra este caso.'} tone="emerald" />
+                    </div>
+                  </div>
+                );
+              }
+              return (selectedReview.original_value || selectedReview.corrected_value) ? <div className="grid sm:grid-cols-2 gap-3 mt-3"><ValueBlock label="Sugestão original" value={selectedReview.original_value || '—'} tone="rose" /><ValueBlock label="Resultado corrigido" value={selectedReview.corrected_value || '—'} tone="emerald" /></div> : null;
+            })()}
+            {Object.keys(selectedReview.context || {}).length > 0 && (
+              <details className="mt-3">
+                <summary className="text-[10px] uppercase tracking-wider text-slate-500 cursor-pointer select-none">Ver dados técnicos registrados</summary>
+                <pre className="mt-1.5 text-[10px] text-slate-400 whitespace-pre-wrap break-words bg-slate-950 border border-slate-800 rounded-control p-3">{JSON.stringify(selectedReview.context, null, 2)}</pre>
+              </details>
+            )}
             <div className="mt-5"><label className="text-[10px] uppercase tracking-wider text-slate-500">Nota da revisão</label><textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} rows={3} placeholder="Explique a decisão para a próxima pessoa que consultar este item..." className="mt-1.5 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-sky-400/50" /></div>
             <div className="mt-5 pt-4 border-t border-slate-800"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Decisão administrativa</p><div className="grid grid-cols-2 gap-2"><button onClick={() => updateReview(selectedReview.id, 'approved')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 text-xs font-bold hover:bg-emerald-500/25"><Check className="w-3.5 h-3.5" /> Aprovar</button><button onClick={() => updateReview(selectedReview.id, 'testing')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-bold hover:bg-sky-500/25"><Wrench className="w-3.5 h-3.5" /> Enviar para teste</button><button onClick={() => updateReview(selectedReview.id, selectedReview.kind === 'bug' ? 'resolved' : 'rejected')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-rose-500/10 border border-rose-400/30 text-rose-200 text-xs font-bold hover:bg-rose-500/20"><ThumbsDown className="w-3.5 h-3.5" /> {selectedReview.kind === 'bug' ? 'Marcar resolvido' : 'Rejeitar'}</button><button onClick={() => updateReview(selectedReview.id, 'reopened')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-orange-500/10 border border-orange-400/30 text-orange-200 text-xs font-bold hover:bg-orange-500/20"><RotateCcw className="w-3.5 h-3.5" /> Reabrir</button></div></div>
           </aside>
