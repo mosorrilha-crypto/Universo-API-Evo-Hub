@@ -212,7 +212,15 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border border-sky-500/25 bg-slate-950/65">
+    // TASK-0247 (pedido direto, 03/09/2026, print do mobile no tema claro):
+    // `bg-slate-950/65` cai na auditoria geral de -950 (index.css), que
+    // mapeia pra `var(--surface-sunken)` — certo pra um "poço" recuado
+    // dentro de um card (ex: input, bloco de código), mas errado aqui: este
+    // é o painel PRINCIPAL da Ficha, deveria ficar branco igual aos cards
+    // vizinhos (`--surface-panel`), não cinza-amarelado. `contact-context-detail`
+    // dá a especificidade extra (2 classes) pra vencer a regra geral sem
+    // precisar mexer nela (ela está certa pros outros usos de -950).
+    <section className="contact-context-detail overflow-hidden rounded-xl border border-sky-500/25 bg-slate-950/65">
       <div className="flex items-start justify-between gap-3 border-b border-sky-500/15 p-3">
         <div className="min-w-0">
           <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-300"><Bot className="h-3.5 w-3.5" /> {isSpanish ? 'Contexto supervisado' : 'Contexto supervisionado'}</span>
