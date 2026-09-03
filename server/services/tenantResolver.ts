@@ -220,6 +220,37 @@ export async function resolveMetaCredentialsForTenant(
   return shared;
 }
 
+export interface MetaTemplateCredentials {
+  accessToken: string;
+  wabaId: string;
+}
+
+/**
+ * Resolve o `waba_id` (WhatsApp Business Account) + token real do tenant,
+ * pra listar/enviar templates de mensagem aprovados de verdade na conta dele
+ * (GET/POST via Graph API — ver listApprovedMetaMessageTemplates em
+ * metaSend.ts). Sem credencial compartilhada de fallback aqui de propósito:
+ * um `waba_id` é específico de cada negócio — cair num WABA compartilhado
+ * listaria/enviaria templates de OUTRO tenant, quebrando isolamento
+ * multi-tenant. `null` quando o tenant não tem WABA cadastrado ainda.
+ */
+export async function resolveMetaTemplateCredentialsForTenant(tenantId: string): Promise<MetaTemplateCredentials | null> {
+  try {
+    const db = getPlatformDb();
+    const { data } = await db
+      .from('tenant_meta_credentials')
+      .select('access_token, waba_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    const accessToken = maybeDecrypt(data?.access_token);
+    if (!accessToken || !data?.waba_id) return null;
+    return { accessToken, wabaId: data.waba_id };
+  } catch (err) {
+    console.warn('⚠️  [Tenant] Falha ao resolver credencial de template Meta do tenant:', (err as Error).message);
+    return null;
+  }
+}
+
 /**
  * Busca completa: resolve qual provedor e quais credenciais usar para um tenant específico.
  * Tenta Evolution primeiro, depois Meta (específica), e cai na Meta compartilhada se nada existir.

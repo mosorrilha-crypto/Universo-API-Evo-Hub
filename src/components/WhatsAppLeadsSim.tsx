@@ -18,6 +18,9 @@ import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { ContractModal } from './contracts/ContractModal';
+import { ReopenConversationModal } from './owner-panel/ReopenConversationModal';
+import { ConversationContextSidebar } from './owner-panel/ConversationContextSidebar';
+import type { ContactProfileData } from './owner-panel/ownerPanelTypes';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
   Play,
@@ -28,6 +31,7 @@ import {
   Send,
   AlertCircle,
   RefreshCw,
+  Lock,
   Image as ImageIcon,
   Calendar as CalendarIcon,
   CalendarPlus,
@@ -312,10 +316,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread'>('all');
-  // O painel auxiliar continua disponível pelo cabeçalho, mas não ocupa uma
-  // terceira coluna por padrão: a referência canônica coloca a IA no rascunho
-  // revisável e deixa o contexto expandível dentro da conversa.
-  const [showRightPanel, setShowRightPanel] = useState(false);
+  // Painel lateral de contexto do contato (Referência 1: 3 colunas ativas no desktop)
+  const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
+  const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis'>('profile');
+  const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
+  // Se o tenant ativo tem WABA (WhatsApp Business Account) configurado —
+  // usado pra bloquear "Reabrir a conversa" já na página, antes de abrir o
+  // modal, quando não há como enviar nenhum modelo de verdade (achado real
+  // de auditoria: o botão continuava sempre clicável mesmo sem WABA, e o
+  // aviso só aparecia depois de abrir o modal). Cacheado por tenant: a
+  // disponibilidade de WABA depende da conta do tenant, não da conversa.
+  const [reopenAvailability, setReopenAvailability] = useState<{ tenantId: string; wabaConfigured: boolean } | null>(null);
 
   // Item 2 do checklist visual (issue #100): flash breve na linha da lista
   // quando chega mensagem nova do cliente — mesmo em conversa que não está
@@ -1702,6 +1713,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [refreshContactContext]);
 
   const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
+
+  // Checa 1x por tenant se há WABA configurado, pra já bloquear "Reabrir a
+  // conversa" na página quando não há (ver GET /api/conversations/:phone/templates
+  // em conversations.ts — reason: 'waba_not_configured'). Falha de rede não
+  // marca nada (evita bloquear a página por causa de instabilidade
+  // passageira; o modal ainda mostra o estado real e permite tentar de novo).
+  useEffect(() => {
+    const tenantId = activeTenant?.id;
+    const phone = selectedLead?.phone;
+    const isRealConversation = Boolean((selectedLead as any)?.isReal);
+    if (!tenantId || !phone || !isRealConversation) return;
+    if (reopenAvailability?.tenantId === tenantId) return;
+    let cancelled = false;
+    apiFetch(`/api/conversations/${encodeURIComponent(phone)}/templates`)
+      .then((res) => res.json().catch(() => ({})))
+      .then((data) => {
+        if (cancelled) return;
+        setReopenAvailability({ tenantId, wabaConfigured: data?.reason !== 'waba_not_configured' });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal, reopenAvailability?.tenantId]);
+
+  const isReopenBlockedByWaba = reopenAvailability?.tenantId === activeTenant?.id && reopenAvailability.wabaConfigured === false;
 
   const handleSaveContactMemory = React.useCallback(async (patch: Partial<OperatorMemoryEditPayload>) => {
     const phone = selectedLead?.phone;
@@ -3661,8 +3696,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       status "online" na mesma linha) — escala mais perto do
                       app de verdade, hierarquia mais clara. */}
                   <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
-                    <span className="text-[11px] font-normal text-emerald-400">• online</span>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
+                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-700/50 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        ao vivo
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-normal text-zinc-400 truncate">
+                      {selectedLead.phone} • {selectedLead.messages?.length || 0} mensagens
+                    </p>
                   </div>
                 </div>
 
@@ -4207,9 +4250,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     const timeFooter = (
                       <span
                         className={`float-right ml-2 mt-0.5 inline-flex items-center gap-1 text-[9px] whitespace-nowrap select-none ${
-                          isLead ? 'text-slate-400' : 'text-emerald-200'
+                          isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-amber-200' : 'text-emerald-200'
                         }`}
                       >
+                        {msg.sentBy === 'operator' && (
+                          <span className="font-extrabold tracking-wider text-amber-300 mr-1 uppercase">
+                            ESCRITA POR VOCÊ
+                          </span>
+                        )}
                         {msg.timestamp}
                         {!isLead && (msg.sendFailed ? (
                           <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
@@ -4327,7 +4375,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             isLead || isMediaBubble
                               ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'
-                                ? 'bg-[#004080] text-white shadow-blue-950/40'
+                                ? 'bg-[#2e261f] text-amber-50 border border-amber-600/40 shadow-amber-950/40'
                                 : 'bg-[#005c4b] text-white shadow-emerald-950/40'
                           }`}
                         >
@@ -4343,9 +4391,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="px-2.5 pt-2.5 pb-2 space-y-1">
                               {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. Áudio/vídeo mostram esse rótulo dentro do próprio cartão cinza (ver mediaSenderLabel), não aqui. */}
                               {hasSenderLabel && (
-                                <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide opacity-70">
-                                  {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5" /> : <UserCheck className="w-2.5 h-2.5" />}
-                                  {msg.sentBy === 'ai' ? 'IA' : 'Operador'}
+                                <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide">
+                                  {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5 text-emerald-400" /> : <UserCheck className="w-2.5 h-2.5 text-amber-400" />}
+                                  <span className={msg.sentBy === 'operator' ? 'text-amber-400' : 'text-emerald-400'}>
+                                    {msg.sentBy === 'ai' ? 'Atendente' : 'Você (equipe)'}
+                                  </span>
                                 </div>
                               )}
 
@@ -4649,6 +4699,50 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
+                {/* Status da Janela de 24h da Meta (Referência 1 e Referência 2) */}
+                {selectedLead && (() => {
+                  const serviceWindow = visibleContactContext?.serviceWindow;
+                  const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
+                  const hoursRemaining = serviceWindow?.hoursRemaining ?? 24;
+
+                  return (
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
+                      {isWindowOpen ? (
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <span className="flex items-center gap-1.5 font-bold text-emerald-400">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                            aberta - faltam {hoursRemaining}h
+                          </span>
+                          <span className="text-zinc-500 hidden sm:inline">•</span>
+                          <span className="text-zinc-400 hidden sm:inline">
+                            O agente pode responder normalmente. A janela fecha {hoursRemaining}h depois de agora, se o cliente não escrever de novo.
+                          </span>
+                        </div>
+                      ) : isReopenBlockedByWaba ? (
+                        <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Fale com o suporte para configurar a conta oficial do WhatsApp Business (WABA) desta empresa.">
+                          <Lock className="w-3.5 h-3.5 shrink-0" />
+                          <span>Janela de 24h fechada. Esta empresa ainda não tem WhatsApp Business (WABA) configurado — não é possível reabrir a conversa. Fale com o suporte.</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-1.5 text-amber-400 font-semibold">
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Janela de 24 horas fechou. Só é permitido enviar modelo aprovado.</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsReopenModalOpen(true)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            Reabrir a conversa
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Reply Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido acima do campo de texto */}
                 {replyingTo && (
                   <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-emerald-500 rounded-lg px-3 py-1.5">
@@ -4902,6 +4996,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   )}
                 </form>
                 )}
+                {/* Aviso de Assunção Humana de Controle (Referência 1) */}
+                <div className="px-3 pt-1.5 pb-0.5">
+                  <p className="text-[10px] text-zinc-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80 shrink-0" />
+                    Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.
+                  </p>
+                </div>
               </div>
             </>
           ) : (
@@ -4912,53 +5013,95 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
 
         {/* ========================================== */}
-        {/* COLUMN 3: Painel auxiliar opcional — contexto e inteligência sob demanda */}
+        {/* COLUMN 3: Painel contextual do contato e IA (Referência 1) */}
         {/* ========================================== */}
         {showRightPanel && (
-          // Achado real em produção: essa coluna nunca teve o toggle
-          // hidden/flex por mobileThreadOpen que as colunas 1 e 2 têm — no
-          // mobile (grid-cols-1) ela sempre empilhava atrás da lista/thread
-          // visível, e virou sobreposição visual real depois que o frame
-          // ganhou altura fixa (h-[85dvh]). Escondida no mobile — o
-          // equivalente lá é o painel deslizante controlado por
-          // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
-          // cabeçalho da conversa.
-          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/45 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
-            {/* Achado real, 29/08/2026 (pedido do dono do produto): "Auto IA"
-                morava num painel genérico de Ferramentas — é uma
-                configuração de análise automática da conversa, faz mais
-                sentido aqui dentro da própria Ficha IA. Deixado discreto de
-                propósito (sem fundo/borda): cada análise automática é uma
-                chamada real ao Gemini (custo de token), e a maioria dos
-                operadores deve preferir o botão "Analisar Conversa
-                Completa" (sob demanda) em vez de deixar isso ligado. */}
-            <label
-              className="inline-flex items-center gap-1.5 self-start cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
-              title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
-            >
-              <input
-                type="checkbox"
-                checked={autoAnalyze}
-                onChange={(e) => setAutoAnalyze(e.target.checked)}
-                className="sr-only peer"
+          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/45 bg-[#111b21] flex-col overflow-y-auto scrollbar-thin">
+            {/* Seletor de visualização: Ficha do Contato vs Análise IA */}
+            <div className="flex border-b border-slate-800 bg-[#0f171d] px-3 pt-2 gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('profile')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
+                  rightPanelTab === 'profile'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                Ficha do Contato
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('analysis')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
+                  rightPanelTab === 'analysis'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                Análise IA
+              </button>
+            </div>
+
+            {rightPanelTab === 'profile' ? (
+              <ConversationContextSidebar
+                contact={selectedLead ? {
+                  name: selectedLead.name,
+                  phone: selectedLead.phone,
+                  interest: selectedLead.interest || visibleContactContext?.memory?.serviceInterest || undefined,
+                  hasBooked: Boolean(paymentAppointment),
+                  firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
+                  notes: visibleContactContext?.memory?.conversationSummary || undefined,
+                  funnelStage: {
+                    name: paymentAppointment ? 'Horário já passou' : (selectedLead.fullAnalysis?.stage || 'Em Qualificação'),
+                    currentStep: paymentAppointment ? 5 : 3,
+                    totalSteps: 5,
+                  },
+                  upcomingAppointments: upcomingEvents
+                    .filter((ev) => ev.phone === selectedLead.phone)
+                    .map((ev) => ({
+                      id: ev.id,
+                      date: ev.date || 'Hoje',
+                      time: ev.time || '12:00',
+                      title: ev.title || 'Consulta',
+                      status: 'scheduled',
+                    })),
+                } : null}
+                agentStatus={selectedLead?.aiBlockedAt ? 'paused' : 'active'}
+                onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
+                onClose={() => setShowRightPanel(false)}
               />
-              <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
-              <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
-            </label>
-            <ConversationAnalysisPanel
-              analysis={selectedLead?.fullAnalysis}
-              isLoading={isAnalyzingConversation}
-              onReanalyze={() => selectedLead && handleAnalyzeConversation(selectedLead)}
-              onDraftSuggestedReply={handleDraftSuggestedReply}
-              leadName={selectedLead?.name || 'Lead'}
-              onSendCAPIEvent={handleDirectCAPI}
-              onGenerateReplyFromHint={handleGenerateReplyFromHint}
-              onAskAi={handleAskAi}
-              contactContext={visibleContactContext}
-              isContactContextLoading={isContactContextLoading}
-              onRefreshContactContext={() => void refreshContactContext()}
-              onSaveContactMemory={handleSaveContactMemory}
-            />
+            ) : (
+              <div className="p-2.5 space-y-2.5">
+                <label
+                  className="inline-flex items-center gap-1.5 self-start cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
+                  title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise)'
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoAnalyze}
+                    onChange={(e) => setAutoAnalyze(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
+                  <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
+                </label>
+                <ConversationAnalysisPanel
+                  analysis={selectedLead?.fullAnalysis}
+                  isLoading={isAnalyzingConversation}
+                  onReanalyze={() => selectedLead && handleAnalyzeConversation(selectedLead)}
+                  onDraftSuggestedReply={handleDraftSuggestedReply}
+                  leadName={selectedLead?.name || 'Lead'}
+                  onSendCAPIEvent={handleDirectCAPI}
+                  onGenerateReplyFromHint={handleGenerateReplyFromHint}
+                  onAskAi={handleAskAi}
+                  contactContext={visibleContactContext}
+                  isContactContextLoading={isContactContextLoading}
+                  onRefreshContactContext={() => void refreshContactContext()}
+                  onSaveContactMemory={handleSaveContactMemory}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -5238,6 +5381,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onDisconnectCalendar={handleDisconnectGoogleCalendar}
         backupSheetUrl={backupSheetUrl}
       />
+
+      {selectedLead && (
+        <ReopenConversationModal
+          isOpen={isReopenModalOpen}
+          onClose={() => setIsReopenModalOpen(false)}
+          phone={selectedLead.phone}
+          contactName={selectedLead.name}
+          businessName={activeTenant.name}
+          suggestedService={visibleContactContext?.memory?.serviceInterest || undefined}
+          onTemplateSent={() => {
+            void refreshContactContext();
+            if (selectedLead && (selectedLead as any).isReal) {
+              void loadRealConversationHistory(selectedLead.phone, selectedLead.id);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

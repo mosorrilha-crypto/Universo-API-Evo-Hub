@@ -18,10 +18,10 @@ import {
   markConversationRead,
 } from '../services/conversationStore';
 import { addLabel, removeLabel, listAllTenantLabels, listAllTenantLabelsWithUsage, renameLabelForTenant, deleteLabelForTenant } from '../services/conversationLabelStore';
-import { sendWhatsAppTextMessage, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
+import { sendWhatsAppTextMessage, sendWhatsAppTemplateMessage, listApprovedMetaMessageTemplates, uploadWhatsAppMedia, sendWhatsAppMediaMessage, sendWhatsAppAudioMessage, isGeoRestrictedError } from '../services/metaSend';
 import { sendEvolutionTextMessage, sendEvolutionMediaMessage, sendEvolutionVoiceMessage, showEvolutionTyping, sendEvolutionStatus } from '../services/evolutionSend';
 import { sendBubbles, type OutboundChannel } from '../services/sendBubbles';
-import { resolveCredentialsForTenant, resolveCredentialsForConversation } from '../services/tenantResolver';
+import { resolveCredentialsForTenant, resolveCredentialsForConversation, resolveMetaTemplateCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import {
   getKnowledgeBase,
@@ -322,15 +322,22 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.get('/api/conversations/:phone/context', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const phone = req.params.phone;
-    const [memoryResult, traceResult] = await Promise.allSettled([
+    const [memoryResult, traceResult, windowResult] = await Promise.allSettled([
       getContactAgentMemory(tenantId, phone),
       listAgentTurnTraces(tenantId, phone, 1),
+      getCustomerServiceWindowStatus(tenantId, phone),
     ]);
     const memory = memoryResult.status === 'fulfilled' ? memoryResult.value : null;
     const latestTrace = traceResult.status === 'fulfilled' ? traceResult.value[0] || null : null;
+    const windowStatus = windowResult.status === 'fulfilled' ? windowResult.value : null;
+    const hoursRemaining = windowStatus?.windowExpiresAt
+      ? Math.max(0, Math.round((new Date(windowStatus.windowExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60)))
+      : 0;
+
     const unavailable = {
       memory: memoryResult.status === 'rejected',
       trace: traceResult.status === 'rejected',
+      window: windowResult.status === 'rejected',
     };
     if (unavailable.memory || unavailable.trace) {
       console.warn(`⚠️  [Conversation Context] tenant=${tenantId} leitura parcial de contexto (memory=${unavailable.memory}, trace=${unavailable.trace}); painel continua em modo seguro.`);
@@ -339,6 +346,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({
       available: !unavailable.memory && !unavailable.trace,
       unavailable,
+      serviceWindow: windowStatus ? {
+        withinWindow: windowStatus.withinWindow,
+        hoursRemaining,
+        lastLeadMessageAt: windowStatus.lastLeadMessageAt,
+        windowExpiresAt: windowStatus.windowExpiresAt,
+      } : null,
       memory: memory ? {
         preferredLanguage: memory.preferred_language,
         preferredName: memory.preferred_name,
@@ -362,6 +375,102 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         outcome: latestTrace.outcome,
       } : null,
     });
+  }));
+
+  /**
+   * Lista modelos de mensagens aprovados (Meta WhatsApp Templates) para reabertura de conversas
+   * fora da janela de 24 horas.
+   *
+   * Achado real (auditoria desta feature): a versão original desta rota
+   * devolvia 4 templates FICTÍCIOS hardcoded (nomes/preço inventados) pra
+   * qualquer tenant — a Meta rejeitaria o envio de verdade, porque esses
+   * templates nunca existiram na conta real de ninguém, e nada isolava por
+   * tenant (todo mundo via a mesma lista fixa). Agora busca de verdade na
+   * conta WhatsApp Business (WABA) real do tenant via Graph API
+   * (listApprovedMetaMessageTemplates). Sem WABA cadastrado (ou provider
+   * Evolution, que não tem esse conceito) devolve lista vazia com o motivo —
+   * nunca inventa dado de negócio.
+   */
+  router.get('/api/conversations/:phone/templates', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const credentials = await resolveMetaTemplateCredentialsForTenant(tenantId);
+    if (!credentials) {
+      return res.json({ templates: [], reason: 'waba_not_configured' });
+    }
+    try {
+      const templates = await listApprovedMetaMessageTemplates(credentials.wabaId, credentials.accessToken);
+      res.json({ templates });
+    } catch (err: any) {
+      console.error(`❌ [Conversas] Falha ao listar templates aprovados (tenant=${tenantId}):`, err.message);
+      res.status(502).json({ templates: [], error: err.message });
+    }
+  }));
+
+  /**
+   * Envia um modelo aprovado de reabertura de conversa pelo WhatsApp.
+   */
+  router.post('/api/conversations/:phone/send-template', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { templateName, languageCode = 'pt_BR', parameters = [] } = req.body || {};
+    if (!templateName || typeof templateName !== 'string') {
+      return res.status(400).json({ error: 'Campo "templateName" é obrigatório.' });
+    }
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+
+    try {
+      const conversationPhoneNumberId = await getConversationPhoneNumberId(tenantId, phone);
+      const channel = await resolveCredentialsForConversation(
+        tenantId,
+        conversationPhoneNumberId,
+        { metaAccessToken, metaPhoneNumberId },
+        { evolutionApiUrl, evolutionApiKey, evolutionInstanceName }
+      );
+
+      const paramsArray: string[] = Array.isArray(parameters) ? parameters.map(String) : [];
+      let realMessageId: string | undefined;
+
+      if (channel.provider === 'meta') {
+        const metaRes = await sendWhatsAppTemplateMessage(
+          channel.metaPhoneNumberId,
+          channel.metaAccessToken,
+          phone,
+          templateName,
+          languageCode,
+          paramsArray
+        );
+        realMessageId = metaRes.messageId;
+      } else {
+        const fallbackText = `[Modelo: ${templateName}] ${paramsArray.length ? paramsArray.join(' • ') : ''}`;
+        realMessageId = await sendEvolutionTextMessage(
+          channel.evolutionInstanceName,
+          channel.evolutionApiUrl,
+          channel.evolutionApiKey,
+          phone,
+          fallbackText
+        );
+      }
+
+      const formattedText = `[Modelo: ${templateName}] ${paramsArray.length ? paramsArray.join(' • ') : ''}`;
+      const conv = await recordOutgoingMessage(
+        tenantId,
+        phone,
+        {
+          type: 'text',
+          text: formattedText,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        },
+        'operator',
+        undefined,
+        undefined,
+        realMessageId
+      );
+
+      await resolveOpenEscalationsAfterManualReply(tenantId, phone, { id: req.user?.id });
+      res.json({ success: true, conversation: conv, messageId: realMessageId });
+    } catch (err: any) {
+      console.error('❌ [Conversas] Falha ao enviar template oficial:', err.message);
+      res.status(502).json({ error: err.message });
+    }
   }));
 
   /**

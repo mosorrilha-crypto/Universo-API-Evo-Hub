@@ -450,6 +450,12 @@ export interface ContactAgentContext {
     needsHumanConfirmation: boolean;
     outcome: string | null;
   } | null;
+  serviceWindow?: {
+    withinWindow: boolean;
+    hoursRemaining: number;
+    lastLeadMessageAt: string | null;
+    windowExpiresAt: string | null;
+  } | null;
 }
 
 export interface LeadInfo {

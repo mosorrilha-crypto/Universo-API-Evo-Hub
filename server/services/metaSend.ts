@@ -411,3 +411,63 @@ export async function sendWhatsAppAudioMessage(
 
   return mediaId;
 }
+
+export interface MetaMessageTemplate {
+  id: string;
+  name: string;
+  category: string;
+  language: string;
+  bodyText: string;
+  headerText?: string;
+  footerText?: string;
+  /** Exemplo de valor pra cada variável {{1}}, {{2}}... — vem do próprio cadastro do template na Meta, quando existir. */
+  variableExamples?: string[];
+}
+
+/**
+ * Lista os templates de mensagem APROVADOS da conta WhatsApp Business (WABA)
+ * real do tenant — nunca uma lista fixa/inventada (achado real, TASK Central
+ * de Operação: a versão anterior desta rota devolvia 4 templates fictícios
+ * hardcoded pra qualquer tenant, com nomes/preço chutados — a Meta rejeitaria
+ * o envio real porque esses templates nunca existiram na conta de verdade).
+ * Endpoint oficial: GET /{whatsapp-business-account-id}/message_templates.
+ * Referência: https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates
+ */
+export async function listApprovedMetaMessageTemplates(
+  wabaId: string | undefined,
+  accessToken: string | undefined
+): Promise<MetaMessageTemplate[]> {
+  if (!wabaId || !accessToken) return [];
+
+  const res = await fetch(
+    `https://graph.facebook.com/v23.0/${wabaId}/message_templates?fields=name,status,category,language,components&limit=100`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) {
+    await throwMetaError(res, 'Falha ao listar templates aprovados (Meta Cloud API)');
+  }
+  const data = await res.json();
+  const items: any[] = Array.isArray(data?.data) ? data.data : [];
+
+  return items
+    .filter((item) => item.status === 'APPROVED')
+    .map((item): MetaMessageTemplate => {
+      const components: any[] = Array.isArray(item.components) ? item.components : [];
+      const bodyComponent = components.find((c) => c.type === 'BODY');
+      const headerComponent = components.find((c) => c.type === 'HEADER' && c.format === 'TEXT');
+      const footerComponent = components.find((c) => c.type === 'FOOTER');
+      return {
+        id: item.id || item.name,
+        name: item.name,
+        category: item.category,
+        language: item.language,
+        bodyText: bodyComponent?.text || '',
+        headerText: headerComponent?.text,
+        footerText: footerComponent?.text,
+        variableExamples: bodyComponent?.example?.body_text?.[0],
+      };
+    })
+    // Sem corpo de texto (só imagem/vídeo de header, ou formato que ainda não
+    // suportamos aqui) não dá pra usar neste fluxo de reabertura de conversa.
+    .filter((t) => t.bodyText);
+}
