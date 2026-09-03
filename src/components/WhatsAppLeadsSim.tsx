@@ -4209,11 +4209,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     const timeFooter = (
                       <span
                         className={`float-right ml-2 mt-0.5 inline-flex items-center gap-1 text-[9px] whitespace-nowrap select-none ${
-                          isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-amber-200' : 'text-emerald-200'
+                          isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-200'
                         }`}
                       >
                         {msg.sentBy === 'operator' && (
-                          <span className="font-extrabold tracking-wider text-amber-300 mr-1 uppercase">
+                          <span className="font-extrabold tracking-wider text-slate-300 mr-1 uppercase">
                             ESCRITA POR VOCÊ
                           </span>
                         )}
@@ -4341,7 +4341,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             isLead || isMediaBubble
                               ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'
-                                ? 'bg-[#2e261f] text-amber-50 border border-amber-600/40 shadow-amber-950/40'
+                                ? 'bg-[#334155] text-slate-100 border border-slate-400/40 shadow-slate-950/40'
                                 : 'bg-[#005c4b] text-white shadow-emerald-950/40'
                           }`}
                         >
@@ -4358,8 +4358,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. Áudio/vídeo mostram esse rótulo dentro do próprio cartão cinza (ver mediaSenderLabel), não aqui. */}
                               {hasSenderLabel && (
                                 <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide">
-                                  {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5 text-emerald-400" /> : <UserCheck className="w-2.5 h-2.5 text-amber-400" />}
-                                  <span className={msg.sentBy === 'operator' ? 'text-amber-400' : 'text-emerald-400'}>
+                                  {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5 text-emerald-400" /> : <UserCheck className="w-2.5 h-2.5 text-slate-300" />}
+                                  <span className={msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-400'}>
                                     {msg.sentBy === 'ai' ? 'Atendente' : 'Você (equipe)'}
                                   </span>
                                 </div>
