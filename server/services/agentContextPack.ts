@@ -1,6 +1,7 @@
 import type { TrackedAppointment } from './appointmentStore';
 import type { Escalation } from './escalationStore';
 import type { ContactAgentMemory, ContactAgentMemoryPatch, ContactMemoryOpenLoop } from './contactAgentMemoryStore';
+import type { AgentKnowledgeBase } from './knowledgeBaseStore';
 import { getAppointmentForPhone } from './appointmentStore';
 import { getContactAgentMemory } from './contactAgentMemoryStore';
 import { getOpenEscalationForPhone } from './escalationStore';
@@ -36,6 +37,14 @@ export interface DeriveContactMemoryInput {
   awaitingCustomerChoice?: string;
   needsHumanConfirmation: boolean;
   liveState: AgentContextPack['liveState'];
+  /** TASK-0246: catálogo real do tenant, pra `inferServiceInterest` casar o
+      texto do lead contra produtos/categorias de verdade em vez de uma
+      lista fixa de 3 categorias hardcoded pra estética (achado real numa
+      auditoria: `serviceInterest` nunca detectava nada fora de "pestañas/
+      cejas/labios", quebrado pra qualquer tenant de outro segmento, ex:
+      Clic Piscinas). Opcional — sem catálogo (tenant ainda sem produtos
+      cadastrados), cai no fallback antigo (ver `inferServiceInterest`). */
+  knowledgeBase?: AgentKnowledgeBase | null;
 }
 
 function compactText(value: string | null | undefined, maxLength = 180): string | null {
@@ -164,8 +173,48 @@ function detectExplicitLanguage(text: string): string | undefined {
   return undefined;
 }
 
-function inferServiceInterest(text: string): string | undefined {
+/**
+ * TASK-0246 (achado real de auditoria, 03/09/2026): antes disso,
+ * `inferServiceInterest` só reconhecia 3 categorias hardcoded de estética
+ * (pestañas/cejas/labios) — funcionava só por coincidência pro tenant da
+ * Monique e nunca detectava nada pra qualquer outro segmento (ex: Clic
+ * Piscinas, tenant real de limpeza de piscina, sem nenhuma menção a
+ * "pestaña" nunca vai bater). Agora casa o texto do lead contra o catálogo
+ * REAL do tenant — primeiro por categoria (termo mais genérico, mais
+ * chance de bater com uma menção casual do cliente), depois por nome
+ * comercial/apelido do produto (mais específico).
+ */
+function inferServiceInterestFromCatalog(normalizedText: string, kb: AgentKnowledgeBase | null | undefined): string | undefined {
+  const products = (kb?.products || []).filter((p) => p.active !== false);
+  if (!products.length) return undefined;
+  const norm = (value: string) => value.trim().toLocaleLowerCase('pt-BR');
+
+  const categories = Array.from(new Set(
+    products.map((p) => p.category).filter((c): c is string => !!c && c.trim().length >= 3)
+  ));
+  for (const category of categories) {
+    if (normalizedText.includes(norm(category))) return category;
+  }
+
+  for (const product of products) {
+    const candidates = [product.name, ...(product.aliases || [])];
+    for (const candidate of candidates) {
+      const normalizedCandidate = norm(candidate);
+      // Exige pelo menos 4 caracteres — evita falso positivo com sigla
+      // curta demais casando com qualquer trecho aleatório do texto.
+      if (normalizedCandidate.length >= 4 && normalizedText.includes(normalizedCandidate)) return product.name;
+    }
+  }
+  return undefined;
+}
+
+function inferServiceInterest(text: string, kb?: AgentKnowledgeBase | null): string | undefined {
   const normalized = text.toLocaleLowerCase('pt-BR');
+  const fromCatalog = inferServiceInterestFromCatalog(normalized, kb);
+  if (fromCatalog) return fromCatalog;
+  // Fallback legado — só entra em ação quando o tenant ainda não tem
+  // catálogo cadastrado ou o texto não bateu com nenhum produto/categoria
+  // real; mantido como rede de segurança, não mais como caminho principal.
   if (/(pestañ|lash|extens[õo]es)/.test(normalized)) return 'pestañas/extensiones';
   if (/(ceja|sobrancelha|brow|microblading|micropigment)/.test(normalized)) return 'cejas/sobrancelhas';
   if (/(labio|lábio|lip)/.test(normalized)) return 'lábios';
@@ -211,7 +260,7 @@ function deriveNextBestAction(input: DeriveContactMemoryInput): string | undefin
  * agenda/pagamento/escalonamento para facts_confirmed.
  */
 export function deriveContactMemoryPatch(input: DeriveContactMemoryInput): ContactAgentMemoryPatch {
-  const serviceInterest = input.existingMemory?.service_interest || inferServiceInterest(input.text);
+  const serviceInterest = input.existingMemory?.service_interest || inferServiceInterest(input.text, input.knowledgeBase);
   const nextBestAction = deriveNextBestAction(input);
   const conversationSummary = [
     serviceInterest ? `Interesse: ${serviceInterest}.` : null,
