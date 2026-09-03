@@ -4,8 +4,9 @@ import { withGeminiRetry } from '../gemini';
 import { formatKnowledgeBaseForPrompt, getRuntimeKnowledgeBase, type AgentKnowledgeBase } from './knowledgeBaseStore';
 import { getTenantSegment } from './tenantProfileStore';
 import { generateAutoReplyForText, type AgentType } from './autoReply';
-import { reviewAutoReplyBeforeSend, type ReplySafetyVerdict } from './replySafetyGate';
+import { reviewAutoReplyBeforeSend, PAYMENT_SENSITIVE_ESCALATION_REASON, type ReplySafetyVerdict } from './replySafetyGate';
 import { createQualityReview } from './qualityAuditStore';
+import { safeParseGeminiJson } from './geminiJson';
 
 /**
  * TASK-0203 — pedido direto do dono do produto: usar um "robô" pra gerar
@@ -109,7 +110,7 @@ export async function generateSyntheticEvalQuestions(ai: GoogleGenAI, kb: AgentK
       contents: prompt,
       config: { responseMimeType: 'application/json' },
     }));
-    const parsed = parseGeneratedCases(JSON.parse(response.text || '{}'));
+    const parsed = parseGeneratedCases(safeParseGeminiJson(response.text));
     if (!parsed.length) break; // evita loop infinito se o modelo devolver vazio repetidamente
     cases.push(...parsed);
   }
@@ -138,7 +139,9 @@ Reprove se encontrar QUALQUER um destes problemas reais (acontecidos de verdade 
 6. Ignorar uma pergunta direta e específica da última mensagem do cliente.
 7. Misturar dois idiomas na mesma frase (nunca português dentro de uma frase em espanhol ou vice-versa).
 
-Responda ESTRITAMENTE em JSON: {"passed":boolean,"issues":["problema encontrado, curto"],"suggestedFix":"como a resposta deveria ter sido, só se passed=false, senão string vazia"}
+IMPORTANTE sobre o campo "suggestedFix": ele precisa seguir as MESMAS regras acima — nunca escreva a sugestão como lista numerada ("1. ..." "2. ..."), nunca abra com saudação/interjeição de entusiasmo, nunca miste idiomas. Achado real (03/09/2026): uma sugestão chegou a propor uma correção formatada como lista numerada — exatamente o defeito que ela deveria estar corrigindo. Escreva "suggestedFix" como texto corrido, do jeito que um atendente real digitaria no WhatsApp.
+
+Responda ESTRITAMENTE em JSON: {"passed":boolean,"issues":["problema encontrado, curto"],"suggestedFix":"como a resposta deveria ter sido, em texto corrido, só se passed=false, senão string vazia"}
 
 HISTÓRICO ANTERIOR:
 ${history || '[sem histórico — primeiro contato]'}
@@ -159,6 +162,25 @@ export function parseJudgeVerdict(raw: unknown): QualityJudgeVerdict {
   return { passed: passed && issues.length === 0, issues, suggestedFix };
 }
 
+/**
+ * Exportado pra teste direto. Achado real (03/09/2026): o bloqueio por
+ * "pagamento ou dado sensível" (replySafetyGate.ts) é uma regra dura,
+ * deliberadamente cega ao conteúdo do rascunho — dispara sempre que a
+ * MENSAGEM DO CLIENTE cita algo como comprovante/seña/pagamento, exigindo
+ * revisão humana antes de qualquer confirmação (ver "Fluxo de pagamento" na
+ * Camada 1). Isso é o comportamento CORRETO e desejado em produção, não um
+ * bug do agente — mas a avaliação automática registrava esses casos como
+ * "falha em caso sintético" mesmo quando o rascunho em si já estava bom
+ * (quality.passed), poluindo a Central de Qualidade com "achados" que na
+ * verdade são o gate de segurança funcionando como projetado. Só conta como
+ * aprovado por escalonamento correto quando a qualidade do texto também
+ * está ok — se o texto tiver outro problema real, ainda reprova.
+ */
+export function isPassingEvalCase(safety: ReplySafetyVerdict, quality: QualityJudgeVerdict): boolean {
+  const isExpectedPaymentEscalation = !safety.approved && safety.source === 'rules' && safety.reason === PAYMENT_SENSITIVE_ESCALATION_REASON && quality.passed;
+  return (safety.approved || isExpectedPaymentEscalation) && quality.passed;
+}
+
 export async function judgeAgentReplyQuality(ai: GoogleGenAI, input: { customerMessage: string; history?: { sender: string; text: string }[]; bubbles: string[] }): Promise<QualityJudgeVerdict> {
   const prompt = buildJudgePrompt(input);
   const response = await withGeminiRetry(() => ai.models.generateContent({
@@ -166,7 +188,7 @@ export async function judgeAgentReplyQuality(ai: GoogleGenAI, input: { customerM
     contents: prompt,
     config: { responseMimeType: 'application/json' },
   }));
-  return parseJudgeVerdict(JSON.parse(response.text || '{}'));
+  return parseJudgeVerdict(safeParseGeminiJson(response.text));
 }
 
 /**
@@ -315,7 +337,7 @@ export async function runAgentEvaluation(options: {
       continue;
     }
 
-    const isPassed = safety.approved && quality.passed;
+    const isPassed = isPassingEvalCase(safety, quality);
     if (isPassed) {
       passed++;
       bubblesForRepetitionCheck.push({ bubbles });
