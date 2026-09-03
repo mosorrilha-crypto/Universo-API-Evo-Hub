@@ -12,11 +12,16 @@ const MAX_CLICK_MESSAGE_LENGTH = 500;
  * Não aceita tenant_id em query/body e nunca retorna a Base de Conhecimento
  * completa, porque ela contém regras internas do agente.
  */
-export function createPublicCatalogRouter(): Router {
+export interface PublicCatalogRouterConfig {
+  supabaseUrl: string | undefined;
+  supabaseKey: string | undefined;
+}
+
+export function createPublicCatalogRouter(config: PublicCatalogRouterConfig): Router {
   const router = Router();
 
   router.get('/api/public/catalog/:slug', publicCatalogRateLimiter, asyncHandler(async (req: Request<{ slug: string }>, res) => {
-    const catalog = await getPublicCatalogBySlug(req.params.slug);
+    const catalog = await getPublicCatalogBySlug(req.params.slug, config);
     if (!catalog) return res.status(404).json({ error: 'Catálogo não encontrado.' });
 
     res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
