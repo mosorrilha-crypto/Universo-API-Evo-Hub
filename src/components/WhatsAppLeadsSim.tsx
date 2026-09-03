@@ -4359,7 +4359,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   {timeFooter}
                                 </p>
                               )}
-                              {msg.text?.includes('Não foi possível transcrever') && (selectedLead as any)?.isReal && (
+                              {/* Achado real (03/09/2026, TASK-0245): o botão só aparecia pro
+                                  texto de falha explícita ("Não foi possível transcrever"), mas o
+                                  bug real (TASK-0244, worker de transcrição sem contexto de tenant)
+                                  deixava mensagens travadas pra sempre nos placeholders "Transcrevendo
+                                  áudio..."/"Áudio enviado" — nenhum dos dois batia com a condição,
+                                  então quem tinha áudio antigo travado não via nenhum jeito de
+                                  reprocessar pelo painel. */}
+                              {(msg.text?.includes('Não foi possível transcrever') || msg.text === '🎤 Transcrevendo áudio...' || msg.text === '🎤 Áudio enviado') && (selectedLead as any)?.isReal && (
                                 <button
                                   type="button"
                                   onClick={() => handleRetryTranscription(msg)}
