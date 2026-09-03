@@ -174,7 +174,7 @@ async function claimSequence(startCandidate: number): Promise<number> {
 }
 
 function buildTaskRecord(taskId: string, description: string, agent: string, startedAt: string) {
-  return `# ${taskId} — ${description}\n\n- **Iniciado em:** ${startedAt}\n- **Agente/plataforma:** ${agent}\n- **Issue central:** [#290](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/290)\n- **Status:** em andamento\n\n## Objetivo\n\n${description}\n\n## Atualizações\n\nRegistre aqui decisões relevantes, arquivos alterados e bloqueios durante a execução.\n\n## Encerramento\n\nAo concluir, atualize o status, informe os commits e as validações na issue #290 usando o identificador **${taskId}**.\n\n### Modelo de atualização na #290\n\n\`\`\`markdown\n### ${taskId} — ${agent} — ${startedAt}\n\n**Tarefa concluída:** descreva o resultado.\n\n**Arquivos/commits:** informe os links.\n\n**Validação:** informe testes, build ou revisão manual.\n\n**Pendente ou risco:** informe o que ainda precisa de confirmação.\n\`\`\`\n`;
+  return `# ${taskId} — ${description}\n\n- **Iniciado em:** ${startedAt}\n- **Agente/plataforma:** ${agent}\n- **Issue central:** [#504](https://github.com/mosorrilha-crypto/Universo-API-Evo-Hub/issues/504)\n- **Status:** em andamento\n\n## Objetivo\n\n${description}\n\n## Atualizações\n\nRegistre aqui decisões relevantes, arquivos alterados e bloqueios durante a execução.\n\n## Encerramento\n\nAo concluir, atualize o status, informe os commits e as validações na issue #504 usando o identificador **${taskId}**.\n\n### Modelo de atualização na #504\n\n\`\`\`markdown\n### ${taskId} — ${agent} — ${startedAt}\n\n**Tarefa concluída:** descreva o resultado.\n\n**Arquivos/commits:** informe os links.\n\n**Validação:** informe testes, build ou revisão manual.\n\n**Pendente ou risco:** informe o que ainda precisa de confirmação.\n\`\`\`\n`;
 }
 
 async function main() {
@@ -197,9 +197,9 @@ async function main() {
     console.log(`Registro: ${path.relative(root, taskPath)}`);
     console.log(`Reservado no remote: refs/heads/${CLAIM_REF_PREFIX}/${String(sequence).padStart(4, '0')} (garante que nenhuma outra sessão gere este mesmo número)`);
     console.log('\nPróximos passos:');
-    console.log('1. Leia a issue #290 antes de continuar.');
+    console.log('1. Leia a issue #504 antes de continuar.');
     console.log(`2. Trabalhe usando o identificador ${taskId}.`);
-    console.log('3. Ao finalizar, registre resultado, commits, validações e pendências na issue #290.');
+    console.log('3. Ao finalizar, registre resultado, commits, validações e pendências na issue #504.');
     console.log('4. Inclua o arquivo de registro no commit da tarefa para compartilhar a sequência com outros agentes.');
   } finally {
     await lockHandle.close();

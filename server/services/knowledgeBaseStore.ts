@@ -11,13 +11,28 @@
  */
 import { getDb, getPlatformDb } from './db';
 
-/** Comparação visual real de um procedimento, mantida inline como as fotos de exemplo da Base de Conhecimento. */
+/**
+ * Comparação visual real de um procedimento. TASK-0218 — a foto passou a
+ * viver no Storage (mesmo padrão já usado por vídeo, ver
+ * knowledgeBaseImageStore.ts): `beforeImageId`/`afterImageId` é a referência
+ * nova, `beforeImageBase64`/`afterImageBase64` continuam aceitos como
+ * fallback de leitura pra registro legado ainda não migrado (nunca
+ * produzidos por um upload novo) — ver resolveKnowledgeBaseImageSource.
+ */
 export interface BeforeAfterPair {
   id: string;
-  beforeImageBase64: string;
+  beforeImageId?: string;
   beforeImageMimeType?: string;
-  afterImageBase64: string;
+  beforeImageFileName?: string;
+  beforeImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  beforeImageBase64?: string;
+  afterImageId?: string;
   afterImageMimeType?: string;
+  afterImageFileName?: string;
+  afterImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  afterImageBase64?: string;
   caption?: string;
 }
 
@@ -34,9 +49,19 @@ export interface ProductVariant {
   code: string;
   /** Explicação comercial própria da variação (efeito, acabamento ou diferença), usada no catálogo público e no contexto do agente. */
   description?: string;
-  /** Foto exclusiva desta variação, usada quando a cliente escolhe um efeito/modelo específico. */
-  exampleImageBase64?: string;
+  /**
+   * Foto exclusiva desta variação, usada quando a cliente escolhe um
+   * efeito/modelo específico. TASK-0218 — `exampleImageId` é a referência no
+   * Storage (mesmo padrão de exampleVideoId abaixo); `exampleImageBase64`
+   * continua aceito só como fallback de leitura pra registro legado ainda
+   * não migrado.
+   */
+  exampleImageId?: string;
   exampleImageMimeType?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  exampleImageBase64?: string;
   /** Vídeo exclusivo desta variação, armazenado fora do JSON da Base de Conhecimento. */
   exampleVideoId?: string;
   exampleVideoMimeType?: string;
@@ -92,15 +117,27 @@ export interface AgentProduct {
    * de" ou "sob consulta").
    */
   variants?: ProductVariant[];
-  /** Foto de exemplo do serviço (data URI base64), pro operador/agente enviar quando o lead perguntar sobre esse serviço específico. */
-  exampleImageBase64?: string;
-  exampleImageMimeType?: string;
   /**
-   * Vídeo de exemplo do serviço — ao contrário da foto (inline base64
-   * acima), o binário fica no Storage (server/services/knowledgeBaseVideoStore.ts,
-   * bucket "app-data", prefixo kb-video/{tenantId}/{videoId}); aqui só a
-   * referência. Pedido real do dono do produto: vídeos geralmente de até
-   * ~1 minuto, ainda mais persuasivo que foto pra mostrar o procedimento.
+   * Foto de exemplo do serviço, pro operador/agente enviar quando o lead
+   * perguntar sobre esse serviço específico. TASK-0218 — o binário passou a
+   * viver no Storage (server/services/knowledgeBaseImageStore.ts, bucket
+   * "app-data", prefixo kb-image/{tenantId}/{imageId}), mesmo padrão do
+   * vídeo abaixo; `exampleImageId` é a referência nova, `exampleImageBase64`
+   * continua aceito só como fallback de leitura pra registro legado ainda
+   * não migrado (nunca produzido por upload novo).
+   */
+  exampleImageId?: string;
+  exampleImageMimeType?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  exampleImageBase64?: string;
+  /**
+   * Vídeo de exemplo do serviço — o binário fica no Storage
+   * (server/services/knowledgeBaseVideoStore.ts, bucket "app-data", prefixo
+   * kb-video/{tenantId}/{videoId}); aqui só a referência. Pedido real do
+   * dono do produto: vídeos geralmente de até ~1 minuto, ainda mais
+   * persuasivo que foto pra mostrar o procedimento.
    */
   exampleVideoId?: string;
   exampleVideoMimeType?: string;
@@ -296,6 +333,34 @@ export function collectReferencedVideoIds(kb: AgentKnowledgeBase | null): Set<st
   return ids;
 }
 
+/**
+ * TASK-0218 — mesmo papel de collectReferencedVideoIds acima, pra `imageId`
+ * (Storage, knowledgeBaseImageStore.ts): só apaga uma imagem do Storage
+ * depois que a troca foi salva de fato, nunca no momento do upload. Cobre
+ * também `beforeAfter` (antes/depois), que não existe pra vídeo.
+ */
+export function collectReferencedImageIds(kb: AgentKnowledgeBase | null): Set<string> {
+  const ids = new Set<string>();
+  const addBeforeAfter = (pairs: BeforeAfterPair[] | undefined) => {
+    for (const pair of pairs || []) {
+      if (pair.beforeImageId) ids.add(pair.beforeImageId);
+      if (pair.afterImageId) ids.add(pair.afterImageId);
+    }
+  };
+  for (const product of kb?.products || []) {
+    if (product.exampleImageId) ids.add(product.exampleImageId);
+    addBeforeAfter(product.beforeAfter);
+    for (const variant of product.variants || []) {
+      if (variant.exampleImageId) ids.add(variant.exampleImageId);
+      addBeforeAfter(variant.beforeAfter);
+    }
+  }
+  for (const block of kb?.firstContactBlocks || []) {
+    if (block.imageId) ids.add(block.imageId);
+  }
+  return ids;
+}
+
 export type FirstContactBlockType = 'text' | 'image' | 'video' | 'file';
 
 /**
@@ -312,9 +377,13 @@ export interface FirstContactBlock {
   type: FirstContactBlockType;
   /** Só pra type === 'text'. */
   text?: string;
-  /** Só pra type === 'image' — inline (data URI base64), mesmo padrão de AgentProduct.exampleImageBase64. */
-  imageBase64?: string;
+  /** Só pra type === 'image' — TASK-0218: Storage (knowledgeBaseImageStore.ts), aqui só a referência, mesmo padrão de AgentProduct.exampleImageId. */
+  imageId?: string;
   imageMimeType?: string;
+  imageFileName?: string;
+  imageSizeBytes?: number;
+  /** @deprecated legado — não produzido por upload novo, só lido como fallback enquanto o registro não foi migrado. */
+  imageBase64?: string;
   /** Só pra type === 'video' — Storage (knowledgeBaseVideoStore.ts), aqui só a referência, mesmo padrão de AgentProduct.exampleVideoId. */
   videoId?: string;
   videoMimeType?: string;
