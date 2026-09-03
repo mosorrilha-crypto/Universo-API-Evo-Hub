@@ -5104,8 +5104,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       </div>
 
       {/* Ficha IA no mobile — painel deslizante por cima da conversa (a
-          coluna 3 fica hidden abaixo do breakpoint lg). Mesmo componente e
-          mesmas props do painel de desktop acima, só a apresentação muda. */}
+          coluna 3 fica hidden abaixo do breakpoint lg).
+
+          TASK-0251 (achado real, 03/09/2026, print do celular): o
+          comentário antigo aqui dizia "mesmo componente e mesmas props do
+          painel de desktop acima, só a apresentação muda" — não era
+          verdade. No desktop a coluna 3 tem DUAS abas de verdade
+          ("Ficha do Contato" → `ConversationContextSidebar`, perfil/etapa
+          do funil/agendamentos; "Análise IA" → `ConversationAnalysisPanel`,
+          que embute o "Contexto Supervisionado"/`ContactContextPanel` como
+          sub-seção). A gaveta mobile só reproduzia o conteúdo da aba
+          "Análise IA" — a aba "Ficha do Contato" (`ConversationContextSidebar`)
+          nunca tinha sido incluída aqui, então não tinha como abrir no
+          celular de jeito nenhum. Reaproveita a MESMA `rightPanelTab` do
+          desktop (estado único, compartilhado) — trocar de aba aqui ou lá
+          reflete no mesmo lugar quando a tela cresce. */}
       {mobileAnalysisOpen && mobileThreadOpen && selectedLead && (
         <div
           className="atendimento-analysis-drawer lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
@@ -5124,6 +5137,62 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
+            {/* TASK-0251: mesmo seletor de abas do desktop ("Ficha do
+                Contato" / "Análise IA"), reaproveitando `rightPanelTab`. */}
+            <div className="flex border-b border-slate-800 bg-[#0f171d] px-3 pt-2 gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('profile')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
+                  rightPanelTab === 'profile'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                Ficha do Contato
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('analysis')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
+                  rightPanelTab === 'analysis'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                Análise IA
+              </button>
+            </div>
+            {rightPanelTab === 'profile' ? (
+              <ConversationContextSidebar
+                contact={{
+                  name: selectedLead.name,
+                  phone: selectedLead.phone,
+                  interest: selectedLead.interest || visibleContactContext?.memory?.serviceInterest || undefined,
+                  hasBooked: Boolean(paymentAppointment),
+                  firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
+                  notes: visibleContactContext?.memory?.conversationSummary || undefined,
+                  funnelStage: {
+                    name: paymentAppointment ? 'Horário já passou' : (selectedLead.fullAnalysis?.stage || 'Em Qualificação'),
+                    currentStep: paymentAppointment ? 5 : 3,
+                    totalSteps: 5,
+                  },
+                  upcomingAppointments: upcomingEvents
+                    .filter((ev) => ev.phone === selectedLead.phone)
+                    .map((ev) => ({
+                      id: ev.id,
+                      date: ev.date || 'Hoje',
+                      time: ev.time || '12:00',
+                      title: ev.title || 'Consulta',
+                      status: 'scheduled',
+                    })),
+                }}
+                agentStatus={(selectedLead as any)?.aiBlockedAt ? 'paused' : 'active'}
+                onToggleAgentStatus={() => handleUpdateConversationState(selectedLead.id, { aiBlocked: !(selectedLead as any).aiBlockedAt })}
+                onClose={() => setMobileAnalysisOpen(false)}
+                isMobile
+              />
+            ) : (
             <div className="p-3 space-y-3 overflow-y-auto">
               {/* Auto IA — mesmo toggle da coluna de desktop (ver comentário
                   lá acima), reaproveitado aqui na gaveta mobile. */}
@@ -5155,6 +5224,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onSaveContactMemory={handleSaveContactMemory}
               />
             </div>
+            )}
           </div>
         </div>
       )}

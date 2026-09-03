@@ -94,7 +94,7 @@ describe('contraste global de botões no tema claro', () => {
   });
 
   it('mantém texto branco nas bolhas de mensagem enviada (operador/IA) que ficam com fundo escuro de propósito no claro', () => {
-    expect(css).toContain("html[data-theme='light'] [class*='bg-[#1f4287]'].text-white");
+    expect(css).toContain("html[data-theme='light'] [class*='bg-[#2e261f]'].text-white");
     expect(css).toContain("html[data-theme='light'] [class*='bg-[#005c4b]'].text-white");
   });
 });

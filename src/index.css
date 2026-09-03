@@ -3411,15 +3411,34 @@ html[data-theme='clean'] [class*='bg-[#0f191e]'] {
    propósito o fundo escuro original (azul/verde) mesmo no claro — mas a
    regra genérica `.text-white` acima escurece o texto igual, deixando texto
    escuro sobre fundo escuro quase ilegível. Restaura branco só nessas duas
-   bolhas específicas, sem tocar no resto do `.text-white` do painel. */
-html[data-theme='light'] [class*='bg-[#1f4287]'].text-white,
+   bolhas específicas, sem tocar no resto do `.text-white` do painel.
+
+   TASK-0251 (achado real, 03/09/2026, print do mobile em tema claro): a
+   bolha "VOCÊ (EQUIPE)" (mensagem manual do operador, WhatsAppLeadsSim.tsx)
+   ficou marrom-escuro (`bg-[#2e261f]`) com texto `text-amber-50` — a regra
+   acima nunca cobriu essa cor (referenciava `bg-[#1f4287]`, que não existe
+   mais em nenhum componente — resquício de uma paleta anterior). Sem essa
+   proteção, a auditoria geral de `.text-amber-50` (mais abaixo neste
+   arquivo) escurecia o texto pro tom usado em card branco, deixando a
+   bolha com uma combinação marrom+laranja destoante, em vez de manter o
+   mesmo padrão "bolha enviada guarda a cor original, com texto sempre
+   claro" já usado pra IA/paciente. Corrigido: `bg-[#1f4287]` trocado por
+   `bg-[#2e261f]` (a cor real usada hoje) e a preservação de texto passa a
+   cobrir `.text-amber-50` também (valor original do Tailwind, #FFFBEB),
+   não só `.text-white`. */
+html[data-theme='light'] [class*='bg-[#2e261f]'].text-white,
 html[data-theme='light'] [class*='bg-[#005c4b]'].text-white {
   color: #ffffff !important;
 }
 
-html[data-theme='clean'] [class*='bg-[#1f4287]'].text-white,
+html[data-theme='clean'] [class*='bg-[#2e261f]'].text-white,
 html[data-theme='clean'] [class*='bg-[#005c4b]'].text-white {
   color: #ffffff !important;
+}
+
+html[data-theme='light'] [class*='bg-[#2e261f]'].text-amber-50,
+html[data-theme='clean'] [class*='bg-[#2e261f]'].text-amber-50 {
+  color: #FFFBEB !important;
 }
 
 
