@@ -1354,10 +1354,17 @@ export const App: React.FC = () => {
           MESMA faixa lateral aparece na lista de conversas também, ao redor
           da barra de abas inferior (.atendimento-bottom-nav, que tem seu
           próprio fundo --surface-panel) — por isso a condição não depende
-          mais de `isMobileWhatsAppThreadOpen`, só da aba ativa. Só as
-          bordas laterais são zeradas (ver regra no index.css) — o vertical
-          continua igual, pra não desalinhar o cálculo de altura da
-          TASK-0162 (que cancela exatamente 1.5rem de padding vertical). */}
+          mais de `isMobileWhatsAppThreadOpen`, só da aba ativa.
+
+          TASK-0221 (03/09/2026): o zeramento que até aqui só cobria
+          mobile/tablet (padding lateral sempre, padding vertical só abaixo
+          de `lg`) passou a valer em qualquer largura — `.app-main.app-main
+          --atendimento` no index.css agora também zera `max-width` (a
+          classe utilitária `max-w-7xl` acima é herdada por TODAS as abas,
+          mas some pro Atendimento) e todo o padding, inclusive em `lg`, a
+          pedido direto do dono do produto pra ocupar 100% da tela também
+          em desktop, sem cartão flutuante nem faixas de fundo nas
+          laterais. */}
       <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' ? ' app-main--atendimento' : ''}`}>
         
         {/* Toast Alert */}
@@ -1453,8 +1460,17 @@ export const App: React.FC = () => {
             (`lg:p-8` = 2rem de cada lado = 4rem no total) já que ele
             continua existindo ali. O `.atendimento-chat-shell` (WhatsAppLeadsSim)
             passou de altura fixa pra `lg:flex-1 lg:min-h-0`, dividindo esse
-            espaço já correto via flexbox em vez de mais um número mágico. */}
-        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px))] lg:h-[calc(100dvh-var(--atendimento-header-h,0px)-4rem)]' : 'hidden'}>
+            espaço já correto via flexbox em vez de mais um número mágico.
+
+            Achado real, 03/09/2026 (TASK-0221): o "respiro" de `lg:p-8` em
+            `.app-main` (que motivava a subtração extra de `4rem` só em `lg`,
+            acima) foi removido — `.app-main.app-main--atendimento` agora
+            zera padding em qualquer largura (index.css), pedido direto do
+            dono do produto pra página ocupar 100% da tela em desktop
+            também, sem cartão flutuante. Sem mais padding pra cancelar, a
+            mesma fórmula da TASK-0162 (sem a subtração extra) já serve pra
+            qualquer largura — removida a variante `lg:` diferente. */}
+        {canSeeConversations && <div className={activeTab === 'whatsapp' ? 'flex flex-col h-[calc(100dvh-var(--atendimento-header-h,0px))]' : 'hidden'}>
           <AtendimentoWorkspaceFrame>
           <WhatsAppLeadsSim
             key={activeTenant.id}

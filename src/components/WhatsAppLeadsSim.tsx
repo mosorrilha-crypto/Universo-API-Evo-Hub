@@ -3067,6 +3067,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           só uma borda fina embaixo) — integrada à página, não mais um
           "widget" à parte. */}
       <div className="flex-shrink-0 hidden lg:block bg-[#111b21] border-b border-slate-800/30 px-3 py-2">
+        {/* Pedido direto do dono do produto (03/09/2026, print a 100% de
+            zoom no desktop): "mesma experiência de utilização do WhatsApp" —
+            os 3 botões abaixo trocaram de pílula com texto ao lado do ícone
+            pra ícone em cima + rótulo pequeno embaixo, mesma linguagem
+            visual já usada na `.atendimento-bottom-nav` mobile (só que aqui
+            cada botão é `flex-col` isolado, não a classe CSS mobile, que é
+            pensada pra 4 itens esticados em largura total). */}
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -3089,13 +3096,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {onGoToEscalations && (
             <button
               onClick={onGoToEscalations}
-              className="hidden lg:flex flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-[var(--pending-surface)] hover:brightness-110 text-[var(--pending)] border border-[var(--pending)]/50 items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+              className="hidden lg:flex relative flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[var(--pending)] hover:bg-[var(--pending-surface)] transition-all cursor-pointer whitespace-nowrap"
               title={t('pending')}
             >
-              <AlertTriangle className="w-3.5 h-3.5 text-[var(--pending)]" />
-              <span>{t('pending')}</span>
+              <AlertTriangle className="w-5 h-5" />
+              <span className="text-[11px] font-medium leading-none">{t('pending')}</span>
               {escalationsPendingCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
+                <span className="absolute top-0 right-1.5 px-1 py-0.5 rounded-full text-[9px] leading-none bg-red-500 text-white font-bold">
                   {escalationsPendingCount}
                 </span>
               )}
@@ -3123,14 +3130,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           <button
             onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
             title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-            className={`hidden lg:flex flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
+            className={`hidden lg:flex flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap ${
               googleCalendarConnected
-                ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
-                : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                ? 'text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
             }`}
           >
-            <CalendarIcon className="w-3.5 h-3.5" />
-            <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
+            <CalendarIcon className="w-5 h-5" />
+            <span className="text-[11px] font-medium leading-none">{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
           </button>
 
           {/* Configurações pontuais e ações secundárias — "Ferramentas"
@@ -3143,14 +3150,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             type="button"
             onClick={() => setIsToolbarSettingsOpen((v) => !v)}
             title="Configurações e ações secundárias"
-            className={`hidden lg:flex flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
+            className={`hidden lg:flex flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap ${
               isToolbarSettingsOpen
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+                ? 'text-emerald-300 bg-emerald-500/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Ferramentas</span>
+            <Settings className="w-5 h-5" />
+            <span className="text-[11px] font-medium leading-none">Ferramentas</span>
           </button>
         </div>
 
@@ -3324,8 +3331,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           de ferramentas via flexbox (mesma técnica já usada no mobile logo
           acima, só que agora também em `lg`), sem depender de nenhuma
           constante chutada. Precisa de `App.tsx` também não escapar mais
-          pra `lg:block lg:h-auto` no wrapper do Atendimento — ver lá. */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 min-h-[560px] lg:min-h-0 lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
+          pra `lg:block lg:h-auto` no wrapper do Atendimento — ver lá.
+
+          TASK-0221 (pedido direto, 03/09/2026): a borda/cantos
+          arredondados/sombra que só existiam a partir de `lg`
+          (`lg:border lg:rounded-2xl lg:shadow-lg`) davam à shell a cara de
+          "cartão flutuante" no meio da tela — exatamente o que o dono do
+          produto pediu pra tirar, comparando com o WhatsApp Web (edge to
+          edge em qualquer largura). Removidas — a shell fica sempre
+          `border-0 rounded-none shadow-none`, igual ao mobile, agora
+          também em desktop. */}
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 min-h-[560px] lg:min-h-0">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
