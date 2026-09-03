@@ -1,6 +1,10 @@
 import type { GoogleGenAI } from '@google/genai';
 import { withGeminiRetry } from '../gemini';
 import { callGroqJsonCompletion } from './groqClient';
+import { safeParseGeminiJson } from './geminiJson';
+
+/** Exportado pra `agentEvalService.ts` reconhecer este bloqueio específico como escalonamento correto (regra dura, não um julgamento de conteúdo), não uma falha de qualidade do rascunho. */
+export const PAYMENT_SENSITIVE_ESCALATION_REASON = 'A mensagem contém pagamento ou dado sensível e exige conferência humana antes de qualquer retorno.';
 
 export type ReplySafetySource = 'rules' | 'groq-reviewer' | 'gemini-reviewer' | 'unavailable';
 
@@ -161,7 +165,7 @@ function ruleVerdict(input: ReplySafetyInput): ReplySafetyVerdict | null {
     return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta tenta conduzir para agenda após uma pergunta somente informativa.' };
   }
   if (isPaymentOrSensitive(input.customerMessage)) {
-    return { approved: false, source: 'rules', severity: 'high', reason: 'A mensagem contém pagamento ou dado sensível e exige conferência humana antes de qualquer retorno.' };
+    return { approved: false, source: 'rules', severity: 'high', reason: PAYMENT_SENSITIVE_ESCALATION_REASON };
   }
   return null;
 }
@@ -271,7 +275,7 @@ export async function generateCorrectedReplySuggestion(
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0 },
       }), 12_000);
-      const suggestion = parseReplySuggestion(JSON.parse(response.text || '{}'), 'gemini-suggestion');
+      const suggestion = parseReplySuggestion(safeParseGeminiJson(response.text), 'gemini-suggestion');
       if (matchesCustomerLanguage(input.customerMessage, suggestion.text)) return suggestion;
       console.warn('⚠️ [Sugestão supervisionada] Gemini trocou o idioma da cliente na sugestão — bloqueio permanece.');
     } catch (error: any) {
@@ -348,7 +352,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0 },
       }), 12_000);
-      return parseReviewerDecision(JSON.parse(response.text || '{}'), 'gemini-reviewer');
+      return parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer');
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Gemini indisponível: ${error?.message || error}`);
     }

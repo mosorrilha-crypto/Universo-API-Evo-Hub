@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { findRepeatedPhrasesAcrossResponses, parseGeneratedCases, parseJudgeVerdict } from '../agentEvalService';
+import { findRepeatedPhrasesAcrossResponses, isPassingEvalCase, parseGeneratedCases, parseJudgeVerdict } from '../agentEvalService';
+import { PAYMENT_SENSITIVE_ESCALATION_REASON, type ReplySafetyVerdict } from '../replySafetyGate';
 
 describe('parseGeneratedCases', () => {
   it('extrai casos válidos e descarta itens sem categoria ou texto', () => {
@@ -58,6 +59,35 @@ describe('parseJudgeVerdict', () => {
 
   it('trata entrada malformada como reprovado sem issues, sem lançar', () => {
     expect(parseJudgeVerdict(null)).toEqual({ passed: false, issues: [], suggestedFix: undefined });
+  });
+});
+
+describe('isPassingEvalCase', () => {
+  const approvedSafety: ReplySafetyVerdict = { approved: true, source: 'rules', severity: 'low', reason: 'ok' };
+  const passingQuality = { passed: true, issues: [] };
+  const failingQuality = { passed: false, issues: ['soou robótico'] };
+
+  it('aprova quando o revisor de segurança aprova e a qualidade passa', () => {
+    expect(isPassingEvalCase(approvedSafety, passingQuality)).toBe(true);
+  });
+
+  it('reprova quando o revisor de segurança aprova mas a qualidade falha', () => {
+    expect(isPassingEvalCase(approvedSafety, failingQuality)).toBe(false);
+  });
+
+  it('trata o bloqueio duro de pagamento/dado sensível como escalonamento correto, não bug, quando o texto em si está ok', () => {
+    const paymentBlock: ReplySafetyVerdict = { approved: false, source: 'rules', severity: 'high', reason: PAYMENT_SENSITIVE_ESCALATION_REASON };
+    expect(isPassingEvalCase(paymentBlock, passingQuality)).toBe(true);
+  });
+
+  it('ainda reprova um bloqueio de pagamento se o texto em si também tiver um problema real de qualidade', () => {
+    const paymentBlock: ReplySafetyVerdict = { approved: false, source: 'rules', severity: 'high', reason: PAYMENT_SENSITIVE_ESCALATION_REASON };
+    expect(isPassingEvalCase(paymentBlock, failingQuality)).toBe(false);
+  });
+
+  it('reprova outros bloqueios de segurança normalmente (não é uma isenção geral pra "source: rules")', () => {
+    const otherRuleBlock: ReplySafetyVerdict = { approved: false, source: 'rules', severity: 'high', reason: 'A resposta repete literalmente uma mensagem já enviada pelo agente.' };
+    expect(isPassingEvalCase(otherRuleBlock, passingQuality)).toBe(false);
   });
 });
 
