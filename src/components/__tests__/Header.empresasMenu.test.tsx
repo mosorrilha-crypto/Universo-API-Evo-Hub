@@ -48,6 +48,7 @@ const fullyEnabledCapabilities: TenantNavigationCapabilities = {
   catalog: true,
   quality: true,
   systemLogs: true,
+  broadcast: true,
 };
 
 function renderHeader(
@@ -133,6 +134,7 @@ describe('grupos de navegação no desktop', () => {
       'Catálogo público',
       'Qualidade do agente',
       'Logs do sistema',
+      'Disparo em Massa',
     ]);
   });
 

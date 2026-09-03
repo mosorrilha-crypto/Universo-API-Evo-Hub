@@ -9,10 +9,11 @@ import { BroadcastDocumentation } from './BroadcastDocumentation';
 
 /**
  * Painel de Disparo em Massa (broadcast/marketing) via WhatsApp — TASK-0171.
- * Só saas_admin. Opera sobre o tenant atualmente selecionado no seletor
- * global do painel (Header.tsx já define o X-Tenant-Id anexado por
- * apiFetch) — não tem seletor de tenant próprio, pra não duplicar/desalinhar
- * com o seletor que já existe.
+ * Módulo com liga/desliga por tenant (feature `marketing.broadcast`,
+ * TASK-0252) — mínimo admin do próprio tenant, ou saas_admin. Um saas_admin
+ * opera sobre o tenant selecionado no seletor global (Header.tsx define o
+ * X-Tenant-Id anexado por apiFetch); um admin de tenant normal opera sempre
+ * sobre o próprio tenant, resolvido pelo backend via JWT.
  */
 
 interface BroadcastNumber {
@@ -764,8 +765,8 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
           <h2 className="text-base font-bold text-white">Listas de contatos (CSV)</h2>
           <p className="text-[11px] text-slate-500">CSV precisa de uma coluna "phone" (obrigatória) e opcionalmente "name" — qualquer outra coluna vira variável do template. Máximo de 10.000 linhas por arquivo.</p>
-          <div className="flex items-end gap-3">
-            <div className="flex-1">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-[160px]">
               <label className="block text-xs font-semibold text-slate-300 mb-1">Nome da lista</label>
               <input value={newListName} onChange={(e) => setNewListName(e.target.value)} placeholder="Ex.: Inscritos Corrida ELAS 2026" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
             </div>
@@ -777,8 +778,8 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
           </div>
           <div className="border-t border-slate-800 pt-4 space-y-2">
             <h3 className="text-xs font-bold text-slate-200">Ou criar a partir de um segmento (dados reais do sistema, sem CSV)</h3>
-            <div className="flex items-end gap-3">
-              <div className="flex-1">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[160px]">
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Nome da lista</label>
                 <input value={segmentListName} onChange={(e) => setSegmentListName(e.target.value)} placeholder="Ex.: Leads conhecidos" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
               </div>
@@ -980,8 +981,8 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
                           <button onClick={() => handleChangeCampaignStatus('draft')} className="text-[11px] text-slate-400 hover:text-slate-200 font-semibold cursor-pointer">Voltar pra rascunho</button>
                         </>
                       ) : (
-                        <div className="flex items-end gap-2">
-                          <div className="flex-1">
+                        <div className="flex flex-wrap items-end gap-2">
+                          <div className="flex-1 min-w-[160px]">
                             <label className="block text-[10px] text-slate-500 mb-1">Data e hora de início</label>
                             <input type="datetime-local" value={scheduleForm.scheduledAt} onChange={(e) => setScheduleForm({ ...scheduleForm, scheduledAt: e.target.value })} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white" />
                           </div>

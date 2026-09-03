@@ -1,9 +1,12 @@
 /**
- * Disparo em massa (broadcast/marketing) via WhatsApp — TASK-0171. Painel
- * só de `saas_admin`, escopado por tenant via `resolveTenantId(req)` (usa
- * o `X-Tenant-Id` que o painel já manda quando saas_admin troca de tenant —
- * nenhuma rota aceita tenantId do body/query, mesma regra do resto do
- * sistema). Ver `docs/task-registry/TASK-0171.md` pro raciocínio completo.
+ * Disparo em massa (broadcast/marketing) via WhatsApp — TASK-0171. Módulo
+ * com liga/desliga por tenant (feature `marketing.broadcast`, TASK-0252) —
+ * papel mínimo `admin` do próprio tenant, ou `saas_admin`. Escopado por
+ * tenant via `resolveTenantId(req)` (pra `saas_admin` usa o `X-Tenant-Id`
+ * que o painel já manda quando troca de tenant; pra qualquer outro papel
+ * é sempre o tenantId do próprio JWT — nenhuma rota aceita tenantId do
+ * body/query, mesma regra do resto do sistema). Ver
+ * `docs/task-registry/TASK-0171.md` pro raciocínio completo original.
  */
 import { Router, type RequestHandler } from 'express';
 import { requireRole } from '../middleware/rbac';
@@ -90,15 +93,15 @@ function serializeNumber(number: Awaited<ReturnType<typeof getBroadcastNumber>>)
 
 export function createBroadcastRouter({ authenticateToken, triggerImmediateBroadcastTick }: BroadcastRouterDeps): Router {
   const router = Router();
-  const requireSaasAdmin = requireRole('saas_admin');
+  const requireBroadcastAdmin = requireRole('admin');
 
   // ── Números ──────────────────────────────────────────────────────────
-  router.get('/api/admin/broadcast-numbers', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-numbers', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const numbers = await listBroadcastNumbers(tenantOf(req));
     res.json({ numbers: numbers.map(serializeNumber) });
   }));
 
-  router.post('/api/admin/broadcast-numbers', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/broadcast-numbers', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { label, phoneNumberId, wabaId, accessToken, perMinuteCap, dailyCap, minGapSeconds } = req.body || {};
     if (typeof label !== 'string' || !label.trim()) return res.status(400).json({ error: 'Campo "label" é obrigatório.' });
     if (typeof phoneNumberId !== 'string' || !phoneNumberId.trim()) return res.status(400).json({ error: 'Campo "phoneNumberId" é obrigatório.' });
@@ -114,7 +117,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     res.status(201).json({ number: serializeNumber(number) });
   }));
 
-  router.patch('/api/admin/broadcast-numbers/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/admin/broadcast-numbers/:id', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { label, wabaId, accessToken, status, qualityRating, perMinuteCap, dailyCap, minGapSeconds } = req.body || {};
     if (status !== undefined && !NUMBER_STATUSES.includes(status)) {
       return res.status(400).json({ error: `Campo "status" precisa ser um de: ${NUMBER_STATUSES.join(', ')}.` });
@@ -129,18 +132,18 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     res.json({ number: serializeNumber(number) });
   }));
 
-  router.delete('/api/admin/broadcast-numbers/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/admin/broadcast-numbers/:id', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteBroadcastNumber(tenantOf(req), req.params.id);
     res.json({ success: true });
   }));
 
   // ── Templates ────────────────────────────────────────────────────────
-  router.get('/api/admin/broadcast-templates', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-templates', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const templates = await listBroadcastTemplates(tenantOf(req));
     res.json({ templates });
   }));
 
-  router.post('/api/admin/broadcast-templates', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/broadcast-templates', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, language, category, headerType, bodyVariableLabels, bodyText, headerImageBase64, footerText } = req.body || {};
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
     if (typeof language !== 'string' || !language.trim()) return res.status(400).json({ error: 'Campo "language" é obrigatório.' });
@@ -166,7 +169,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     res.status(201).json({ template });
   }));
 
-  router.patch('/api/admin/broadcast-templates/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/admin/broadcast-templates/:id', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, language, category, headerType, bodyVariableLabels, bodyText, headerImageBase64, footerText } = req.body || {};
     if (category !== undefined && !TEMPLATE_CATEGORIES.includes(category)) {
       return res.status(400).json({ error: `Campo "category" precisa ser um de: ${TEMPLATE_CATEGORIES.join(', ')}.` });
@@ -184,7 +187,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     res.json({ template });
   }));
 
-  router.delete('/api/admin/broadcast-templates/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/admin/broadcast-templates/:id', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteBroadcastTemplate(tenantOf(req), req.params.id);
     res.json({ success: true });
   }));
@@ -192,7 +195,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   // Só um teste de upload (confirma que a imagem é aceita pela Meta antes de
   // salvar) — o media_id real de disparo é sempre gerado de novo por
   // campanha, a partir do header_image_base64 já persistido no template.
-  router.post('/api/admin/broadcast-templates/:id/header-image', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/broadcast-templates/:id/header-image', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { imageBase64, broadcastNumberId } = req.body || {};
     if (typeof imageBase64 !== 'string' || !imageBase64.startsWith('data:image/')) {
       return res.status(400).json({ error: 'Campo "imageBase64" precisa ser uma data URI de imagem.' });
@@ -210,12 +213,12 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   }));
 
   // ── Listas de contatos ───────────────────────────────────────────────
-  router.get('/api/admin/broadcast-contact-lists', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-contact-lists', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const lists = await listContactLists(tenantOf(req));
     res.json({ lists });
   }));
 
-  router.post('/api/admin/broadcast-contact-lists', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/broadcast-contact-lists', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, filename, csvBase64 } = req.body || {};
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
     if (typeof csvBase64 !== 'string' || !csvBase64) return res.status(400).json({ error: 'Campo "csvBase64" é obrigatório.' });
@@ -233,7 +236,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   // evento": o sistema não tem essa entidade, e inventar uma fabricaria
   // dado de negócio que não existe (mesma regra do agente de IA).
   const CONTACT_LIST_SEGMENTS: ContactListSegment[] = ['known_leads', 'has_appointment'];
-  router.post('/api/admin/broadcast-contact-lists/from-segment', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/broadcast-contact-lists/from-segment', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { name, segment } = req.body || {};
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
     if (!CONTACT_LIST_SEGMENTS.includes(segment)) {
@@ -247,20 +250,20 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     }
   }));
 
-  router.get('/api/admin/broadcast-contact-lists/:id/contacts', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-contact-lists/:id/contacts', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const result = await getContactListContacts(tenantOf(req), req.params.id, { limit, offset });
     res.json(result);
   }));
 
-  router.delete('/api/admin/broadcast-contact-lists/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.delete('/api/admin/broadcast-contact-lists/:id', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     await deleteContactList(tenantOf(req), req.params.id);
     res.json({ success: true });
   }));
 
   // ── Campanhas ────────────────────────────────────────────────────────
-  router.get('/api/admin/broadcast-campaigns/preview-allocation', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-campaigns/preview-allocation', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const contactListId = String(req.query.contactListId || '');
     const dedupeWindowDays = Number(req.query.dedupeWindowDays) || 3;
     if (!contactListId) return res.status(400).json({ error: 'Parâmetro "contactListId" é obrigatório.' });
@@ -268,12 +271,12 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     res.json({ preview });
   }));
 
-  router.get('/api/admin/broadcast-campaigns', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-campaigns', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const campaigns = await listCampaigns(tenantOf(req));
     res.json({ campaigns });
   }));
 
-  router.post('/api/admin/broadcast-campaigns', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/broadcast-campaigns', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const {
       name, templateId, extraTemplateIds, contactListId, dedupeWindowDays, consentConfirmed,
       numberAllocations, includeExistingContacts, includeRecentDuplicates,
@@ -315,7 +318,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     }
   }));
 
-  router.get('/api/admin/broadcast-campaigns/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-campaigns/:id', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const campaign = await getCampaign(tenantId, req.params.id);
     if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
@@ -327,7 +330,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     res.json({ campaign, numberAllocations, templateLinks, counts: counts.total, countsByNumber: counts.byNumber });
   }));
 
-  router.patch('/api/admin/broadcast-campaigns/:id', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.patch('/api/admin/broadcast-campaigns/:id', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status, scheduledAt, sendWindowStart, sendWindowEnd, sendWindowTimezone } = req.body || {};
     const validStatuses: BroadcastCampaignStatus[] = ['draft', 'scheduled', 'running', 'paused', 'completed', 'canceled'];
     if (status !== undefined && !validStatuses.includes(status)) {
@@ -371,7 +374,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     }
   }));
 
-  router.get('/api/admin/broadcast-campaigns/:id/recipients', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.get('/api/admin/broadcast-campaigns/:id/recipients', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { status, broadcastNumberId, sentFrom, sentTo } = req.query;
     if (status !== undefined && !RECIPIENT_STATUSES.includes(status as BroadcastRecipientStatus)) {
       return res.status(400).json({ error: `Parâmetro "status" precisa ser um de: ${RECIPIENT_STATUSES.join(', ')}.` });
@@ -392,7 +395,7 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   // Dispara o template real pro admin_alert_phone do tenant — pega erro de
   // nome/idioma/quantidade de variáveis do template ANTES do disparo real
   // pra lista inteira (ver plano da feature, "Envio de Teste").
-  router.post('/api/admin/broadcast-campaigns/:id/test-send', authenticateToken, requireSaasAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
+  router.post('/api/admin/broadcast-campaigns/:id/test-send', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const campaign = await getCampaign(tenantId, req.params.id);
     if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
