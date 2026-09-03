@@ -3331,6 +3331,18 @@ html[data-theme='clean'] .bg-slate-950\/90 {
   background-color: var(--surface-sunken) !important;
 }
 
+/* TASK-0247 (pedido direto, 03/09/2026, print real do mobile em tema
+   claro): a Ficha do Contato (`ContactContextPanel.tsx`, variant="detail")
+   usa `bg-slate-950/65` como fundo do painel PRINCIPAL, mas a regra geral
+   logo acima mapeia essa família pra `var(--surface-sunken)` — certo pra
+   um "poço" recuado dentro de um card, errado aqui (o painel principal
+   deveria ficar branco igual aos cards vizinhos da Ficha IA, não
+   cinza-amarelado). `.contact-context-detail` (2 classes) vence a regra
+   geral (1 classe) sem precisar mudar o comportamento padrão de -950 pros
+   outros usos legítimos dele. */
+html[data-theme='light'] .contact-context-detail.bg-slate-950\/65 { background-color: var(--surface-panel) !important; }
+html[data-theme='clean'] .contact-context-detail.bg-slate-950\/65 { background-color: var(--surface-panel) !important; }
+
 html[data-theme='light'] .border-slate-700,
 html[data-theme='light'] .border-slate-700\/50,
 html[data-theme='light'] .border-slate-700\/60,
