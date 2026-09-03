@@ -16,6 +16,13 @@ export interface MetaTemplateVariable {
   currentValue: string;
 }
 
+/**
+ * Espelha server/services/metaSend.ts (MetaMessageTemplate) — só templates
+ * de verdade, buscados na conta WhatsApp Business (WABA) real do tenant via
+ * GET /api/conversations/:phone/templates. Sem `estimatedCostUsd`: a Meta
+ * não devolve preço nesse endpoint, e um valor chutado aqui já causou um
+ * achado real de auditoria (custo fictício mostrado como se fosse real).
+ */
 export interface ApprovedMetaTemplate {
   id: string;
   name: string;
@@ -25,7 +32,6 @@ export interface ApprovedMetaTemplate {
   headerText?: string;
   footerText?: string;
   variableExamples?: string[];
-  estimatedCostUsd: number;
 }
 
 export interface ServiceWindowStatus {

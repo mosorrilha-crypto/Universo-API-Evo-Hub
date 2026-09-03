@@ -5352,6 +5352,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           onClose={() => setIsReopenModalOpen(false)}
           phone={selectedLead.phone}
           contactName={selectedLead.name}
+          businessName={activeTenant.name}
           suggestedService={visibleContactContext?.memory?.serviceInterest || undefined}
           onTemplateSent={() => {
             void refreshContactContext();
