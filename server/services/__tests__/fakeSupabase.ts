@@ -140,6 +140,7 @@ function buildConversationListSummaries(tables: Tables): Row[] {
       .filter((message) => message.tenant_id === conversation.tenant_id && message.conversation_id === conversation.id)
       .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id)));
     const last = conversationMessages[0];
+    const lastLeadMessage = conversationMessages.find((message) => message.sender === 'lead');
     const unreadCount = conversationMessages.filter((message) =>
       message.sender === 'lead' && String(message.created_at) > String(conversation.last_read_at || '')
     ).length;
@@ -155,6 +156,7 @@ function buildConversationListSummaries(tables: Tables): Row[] {
       last_message_reactions: last?.reactions || null,
       last_message_sent_by: last?.sent_by || null,
       unread_count: unreadCount,
+      last_lead_message_at: lastLeadMessage?.created_at || null,
     };
   });
 }

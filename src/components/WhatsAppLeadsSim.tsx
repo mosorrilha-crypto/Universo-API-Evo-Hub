@@ -248,11 +248,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // e nenhuma delas era separada por tenant — trocar de empresa no seletor
   // (saas_admin) e atualizar a página podia mostrar, por um instante,
   // contatos reais de OUTRO tenant (chave própria + por tenant corrige).
-  const whatsappLeadsCacheKey = (tenantId: string) => `saas_whatsapp_leads_${tenantId}`;
-  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis; historyLoaded?: boolean; historyLoading?: boolean; lastMessageId?: string })[]>(() => {
-    const saved = localStorage.getItem(whatsappLeadsCacheKey(activeTenant.id));
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Achado real de auditoria (CodeQL, "Clear text storage of sensitive
+  // information"): esse cache guardava nome, telefone e o histórico
+  // completo de mensagens de clientes reais em localStorage sem nenhuma
+  // criptografia. Servia só pra pintura instantânea (nenhum caminho de
+  // fallback real depende dele — ver fetchRealConversations), então a
+  // correção foi parar de gravar/ler em vez de tentar reduzir campos (o
+  // sink continuaria existindo) ou cifrar no cliente (a chave ficaria no
+  // próprio JS, não protege de verdade). Lista começa vazia e é populada
+  // pelo fetch real (/api/conversations) a cada carregamento/troca de tenant.
+  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis; historyLoaded?: boolean; historyLoading?: boolean; lastMessageId?: string })[]>([]);
+  // Purga ativa, uma vez por montagem: navegadores que já usaram o painel
+  // antes desta correção podem ter PII de cliente em texto puro gravada de
+  // uma sessão anterior — sem isso, ela ficaria lá indefinidamente, já que
+  // parar de escrever não apaga o que já foi escrito. Varre todos os
+  // tenants (não só o ativo), não só o do logout (clearCachedTenantScopedData
+  // em App.tsx continua existindo, mas só roda no logout).
+  useEffect(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('saas_whatsapp_leads_')) localStorage.removeItem(key);
+    }
+  }, []);
   type PanelLead = (typeof leads)[number];
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
   // No mobile (abaixo do breakpoint lg), lista e conversa não cabem lado a
@@ -315,7 +331,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread'>('all');
+  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'window_closed'>('all');
   // Painel lateral de contexto do contato (Referência 1: 3 colunas ativas no desktop)
   const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
   const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis'>('profile');
@@ -1279,11 +1295,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // telefone contra o valor guardado de um tenant diferente.
     lastMessageIdRef.current = new Map();
     activeLeadPhoneRef.current = null;
-    // Troca de tenant: carrega o cache do tenant novo (ou começa vazio) na
-    // hora, em vez de deixar a lista do tenant anterior visível até
-    // fetchRealConversations() terminar logo abaixo.
-    const cachedForTenant = localStorage.getItem(whatsappLeadsCacheKey(requestTenantId));
-    setLeads(cachedForTenant ? JSON.parse(cachedForTenant) : []);
+    // Troca de tenant: zera a lista na hora (o cache em localStorage foi
+    // removido, ver achado de auditoria acima) — fica vazia até
+    // fetchRealConversations() terminar logo abaixo, em vez de arriscar
+    // mostrar a lista do tenant anterior.
+    setLeads([]);
 
     const fetchRealConversations = async () => {
       try {
@@ -1294,7 +1310,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         if (!response.ok || cancelled) return;
         const data = await response.json();
         if (cancelled || activeTenantIdRef.current !== requestTenantId) return;
-        const realConversations: { phone: string; name?: string; messages?: ChatMessage[]; lastMessageId?: string; lastMessageSender?: ChatMessage['sender']; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adHeadline?: string; adGreetingMatchedAt?: string; unreadCount: number }[] = data.conversations || [];
+        const realConversations: { phone: string; name?: string; messages?: ChatMessage[]; lastMessageId?: string; lastMessageSender?: ChatMessage['sender']; updatedAt: string; geoRestriction?: { detectedAt: string; country: string; reason: string }; labels?: string[]; archivedAt?: string; pinnedAt?: string; muted?: boolean; manuallyUnread?: boolean; aiBlockedAt?: string; adHeadline?: string; adGreetingMatchedAt?: string; unreadCount: number; lastLeadMessageAt?: string; phoneNumberId?: string | null }[] = data.conversations || [];
 
         // Ids que ganharam mensagem nova de CLIENTE nesta rodada (não conta
         // mensagem enviada pelo próprio operador/IA, nem a primeira carga —
@@ -1379,6 +1395,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               adHeadline: conv.adHeadline,
               adGreetingMatchedAt: conv.adGreetingMatchedAt,
               unreadCount: conv.unreadCount ?? 0,
+              lastLeadMessageAt: conv.lastLeadMessageAt,
+              phoneNumberId: conv.phoneNumberId ?? null,
             } as any);
           }
           return Array.from(byId.values());
@@ -1721,7 +1739,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     const tenantId = activeTenant?.id;
     const phone = selectedLead?.phone;
     const isRealConversation = Boolean((selectedLead as any)?.isReal);
-    if (!tenantId || !phone || !isRealConversation) return;
+    // Só faz sentido no canal Meta — é o único com a restrição de
+    // template/WABA fora da janela de 24h (ver aviso provider-aware acima).
+    const isMetaChannel = Boolean((selectedLead as any)?.phoneNumberId);
+    if (!tenantId || !phone || !isRealConversation || !isMetaChannel) return;
     if (reopenAvailability?.tenantId === tenantId) return;
     let cancelled = false;
     apiFetch(`/api/conversations/${encodeURIComponent(phone)}/templates`)
@@ -1732,7 +1753,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal, reopenAvailability?.tenantId]);
+  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal, (selectedLead as any)?.phoneNumberId, reopenAvailability?.tenantId]);
 
   const isReopenBlockedByWaba = reopenAvailability?.tenantId === activeTenant?.id && reopenAvailability.wabaConfigured === false;
 
@@ -1997,6 +2018,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
   const unreadLeadsCount = leads.filter((lead) => getUnreadCount(lead) > 0).length;
 
+  // TASK-0243 — janela de 24h desde a última mensagem do LEAD (não da
+  // conversa em geral). `undefined` quando o lead nunca escreveu (conversa
+  // criada manualmente/via anúncio antes de qualquer resposta) — trata como
+  // fechada, igual getCustomerServiceWindowStatus no backend. Só é
+  // tecnicamente uma restrição de envio no canal Meta (phoneNumberId
+  // presente); em Evolution/Instagram é só informativo (ver aviso na faixa
+  // de status da conversa, mais abaixo).
+  const CUSTOMER_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+  const isWithin24hWindow = (lead: LeadInfo): boolean => {
+    const lastLeadMessageAt = (lead as any).lastLeadMessageAt;
+    if (!lastLeadMessageAt) return false;
+    return Date.now() - new Date(lastLeadMessageAt).getTime() < CUSTOMER_SERVICE_WINDOW_MS;
+  };
+  const windowClosedLeadsCount = leads.filter((lead) => (lead as any).isReal && !isWithin24hWindow(lead)).length;
+
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
     .filter((lead) => {
@@ -2017,6 +2053,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       if (activeTabFilter === 'unread') {
         return getUnreadCount(lead) > 0;
+      }
+      if (activeTabFilter === 'window_closed') {
+        return Boolean((lead as any).isReal) && !isWithin24hWindow(lead);
       }
       return true;
     })
@@ -2142,7 +2181,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     const remaining = leads.filter((l) => l.id !== leadId);
     setLeads(remaining);
-    localStorage.setItem(whatsappLeadsCacheKey(activeTenant.id), JSON.stringify(remaining));
     if (onDeleteLead) {
       onDeleteLead(leadId);
     }
@@ -2612,6 +2650,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     setInputMessage(replyText);
   };
 
+  // Evolution não tem conceito de template (diferente do fluxo Meta em
+  // operatorFollowUpService.ts) — o texto já sai pronto, sem placeholder,
+  // pro operador revisar/editar antes do envio de texto livre normal.
+  const buildReengagementDraft = (leadName: string, tenantName: string): string =>
+    `Oi ${leadName}! Aqui é a equipe da ${tenantName}, ainda estamos por aqui pra te ajudar 😊 Responde essa mensagem quando puder!`;
+
+  // Preenche o compositor com sugestão de retomada — sem modal de
+  // template como na Meta, só um rascunho pra revisão humana.
+  const handleDraftReengagementMessage = (lead: LeadInfo) => {
+    if (!activeTenant?.name) return;
+    handleDraftSuggestedReply(buildReengagementDraft(lead.name, activeTenant.name));
+    composerTextareaRef.current?.focus();
+  };
+
   // Simulate sending an Audio Note from Lead or Agent
   const handleSendAudioNote = async (promptText?: string) => {
     if (!selectedLead) return;
@@ -2788,7 +2840,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     setLeads((prev) => {
       const updated = [newLeadItem, ...prev];
-      localStorage.setItem(whatsappLeadsCacheKey(activeTenant.id), JSON.stringify(updated));
       return updated;
     });
     // Propaga pro state do App.tsx (usado pelo CRM/Financeiro/Atribuição) —
@@ -3362,6 +3413,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 }`}
               >
                 {t('unread')} ({unreadLeadsCount})
+              </button>
+              <button
+                onClick={() => setActiveTabFilter('window_closed')}
+                title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                  activeTabFilter === 'window_closed'
+                    ? 'bg-emerald-500 text-slate-950 font-bold'
+                    : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                Fora das 24h ({windowClosedLeadsCount})
               </button>
 
               {/* Status — só aparece pra números conectados via Evolution API
@@ -4610,11 +4672,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
-                {/* Status da Janela de 24h da Meta (Referência 1 e Referência 2) */}
+                {/* Status da Janela de 24h — a restrição de "só modelo aprovado"
+                    é uma regra da API oficial da Meta, não existe no canal
+                    Evolution (Baileys/QR code) nem no Instagram DM. Achado
+                    real de auditoria: esta faixa tratava qualquer canal como
+                    se tivesse a mesma restrição, mostrando "precisa de WABA"
+                    até pra conversas Evolution que nunca tiveram (nem
+                    precisam de) WABA nenhum. `phoneNumberId` só é preenchido
+                    em conversas do canal Meta (ver conversationStore.ts) —
+                    é o sinal que já existe pra distinguir os dois casos. */}
                 {selectedLead && (() => {
                   const serviceWindow = visibleContactContext?.serviceWindow;
                   const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
                   const hoursRemaining = serviceWindow?.hoursRemaining ?? 24;
+                  const isMetaChannel = Boolean((selectedLead as any).phoneNumberId);
 
                   return (
                     <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
@@ -4628,6 +4699,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           <span className="text-slate-400 hidden sm:inline">
                             O agente pode responder normalmente. A janela fecha {hoursRemaining}h depois de agora, se o cliente não escrever de novo.
                           </span>
+                        </div>
+                      ) : !isMetaChannel ? (
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-1.5 text-amber-400/90 font-semibold" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDraftReengagementMessage(selectedLead)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            Sugerir mensagem de retomada
+                          </button>
                         </div>
                       ) : isReopenBlockedByWaba ? (
                         <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Fale com o suporte para configurar a conta oficial do WhatsApp Business (WABA) desta empresa.">
