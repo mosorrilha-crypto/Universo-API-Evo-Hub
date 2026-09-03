@@ -171,9 +171,19 @@ export interface LeadAttribution {
 /** Par comparativo real, sempre com foto anterior e posterior do mesmo procedimento. */
 export interface BeforeAfterPair {
   id: string;
-  beforeImageBase64: string;
+  /** Foto "antes" no Storage (server/services/knowledgeBaseImageStore.ts) — preferida sobre beforeImageBase64 quando presente. */
+  beforeImageId?: string;
+  beforeImageFileName?: string;
+  beforeImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver beforeImageId. */
+  beforeImageBase64?: string;
   beforeImageMimeType?: string;
-  afterImageBase64: string;
+  /** Foto "depois" no Storage — preferida sobre afterImageBase64 quando presente. */
+  afterImageId?: string;
+  afterImageFileName?: string;
+  afterImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver afterImageId. */
+  afterImageBase64?: string;
   afterImageMimeType?: string;
   /** Contexto opcional e não identificável do resultado, como técnica ou efeito. */
   caption?: string;
@@ -185,7 +195,11 @@ export interface ProductVariant {
   code: string;
   /** Explica o benefício, efeito ou diferença desta variação específica, sem repetir a descrição geral da família. */
   description?: string;
-  /** Foto exclusiva da variação, usada no catálogo e no envio manual quando o cliente pede exatamente este efeito/modelo. */
+  /** Foto exclusiva da variação, usada no catálogo e no envio manual quando o cliente pede exatamente este efeito/modelo. Storage (knowledgeBaseImageStore.ts) — preferida sobre exampleImageBase64 quando presente. */
+  exampleImageId?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver exampleImageId. */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
   /** Vídeo exclusivo da variação; o binário permanece no Storage e a KB guarda somente a referência. */
@@ -222,15 +236,17 @@ export interface AgentProduct {
   category?: string;
   /** Tamanhos/modelos dessa família, cada um com preço próprio (ver server/services/knowledgeBaseStore.ts). */
   variants?: ProductVariant[];
+  /** Foto de exemplo no Storage (server/services/knowledgeBaseImageStore.ts) — preferida sobre exampleImageBase64 quando presente. */
+  exampleImageId?: string;
+  exampleImageFileName?: string;
+  exampleImageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver exampleImageId. Causou o incidente real de produção documentado em App.tsx (base64 de imagem estourando a cota de localStorage). */
   exampleImageBase64?: string;
   exampleImageMimeType?: string;
   /**
-   * Vídeo de exemplo do serviço — diferente da foto (exampleImageBase64,
-   * guardada inline como base64), o vídeo fica no Storage do backend
+   * Vídeo de exemplo do serviço — o vídeo fica no Storage do backend
    * (server/services/knowledgeBaseVideoStore.ts) e aqui só guarda a
-   * referência (id opaco), pra nunca repetir o incidente real de produção
-   * documentado em App.tsx (base64 de imagem já estourou a cota de
-   * localStorage — vídeo inline seria dramaticamente pior).
+   * referência (id opaco).
    */
   exampleVideoId?: string;
   exampleVideoMimeType?: string;
@@ -267,6 +283,11 @@ export interface FirstContactBlock {
   id: string;
   type: FirstContactBlockType;
   text?: string;
+  /** Imagem do bloco no Storage (server/services/knowledgeBaseImageStore.ts) — preferida sobre imageBase64 quando presente. */
+  imageId?: string;
+  imageFileName?: string;
+  imageSizeBytes?: number;
+  /** @deprecated legado; não deve ser produzido por novos uploads — ver imageId. */
   imageBase64?: string;
   imageMimeType?: string;
   videoId?: string;
@@ -428,6 +449,12 @@ export interface ContactAgentContext {
     toolSummaries: string[];
     needsHumanConfirmation: boolean;
     outcome: string | null;
+  } | null;
+  serviceWindow?: {
+    withinWindow: boolean;
+    hoursRemaining: number;
+    lastLeadMessageAt: string | null;
+    windowExpiresAt: string | null;
   } | null;
 }
 

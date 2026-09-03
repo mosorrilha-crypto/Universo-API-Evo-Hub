@@ -17,6 +17,7 @@ import {
   revokeTenantFeatureOverride,
 } from '../services/featureEntitlementService';
 import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
+import { decryptSecret, encryptSecret } from '../services/tokenCrypto';
 
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
@@ -137,7 +138,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (phoneNumberId && accessToken) {
       const { error: credError } = await db()
         .from('tenant_meta_credentials')
-        .insert({ tenant_id: tenant.id, phone_number_id: phoneNumberId, access_token: accessToken, waba_id: wabaId || null, mode: mode || 'shared' });
+        .insert({ tenant_id: tenant.id, phone_number_id: phoneNumberId, access_token: encryptSecret(accessToken), waba_id: wabaId || null, mode: mode || 'shared' });
       if (credError) {
         return res.status(201).json({ tenant, warning: `Tenant criado, mas falha ao gravar credenciais do WhatsApp: ${credError.message}` });
       }
@@ -556,8 +557,8 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
 
     const { error: credError } =
       persist === 'insert'
-        ? await db().from('tenant_evolution_credentials').insert({ tenant_id: tenantId, instance_name: instanceName, api_url: evolutionApiUrl, api_key: instanceApiKey })
-        : await db().from('tenant_evolution_credentials').update({ instance_name: instanceName, api_key: instanceApiKey }).eq('tenant_id', tenantId);
+        ? await db().from('tenant_evolution_credentials').insert({ tenant_id: tenantId, instance_name: instanceName, api_url: evolutionApiUrl, api_key: encryptSecret(instanceApiKey) })
+        : await db().from('tenant_evolution_credentials').update({ instance_name: instanceName, api_key: encryptSecret(instanceApiKey) }).eq('tenant_id', tenantId);
     if (credError) {
       throw new Error(`Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}`);
     }
@@ -644,6 +645,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (existingCredError) return res.status(500).json({ error: existingCredError.message });
     if (existingCred) {
+      existingCred.api_key = decryptSecret(existingCred.api_key);
       assertValidHttpUrl(existingCred.api_url);
       try {
         const result = await reconnectExistingInstance(existingCred as any);
@@ -697,7 +699,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
 
     const { error: credError } = await db()
       .from('tenant_evolution_credentials')
-      .insert({ tenant_id: tenant.id, instance_name: instanceName, api_url: evolutionApiUrl, api_key: instanceApiKey });
+      .insert({ tenant_id: tenant.id, instance_name: instanceName, api_url: evolutionApiUrl, api_key: encryptSecret(instanceApiKey) });
     if (credError) {
       return res.status(500).json({ error: `Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}` });
     }
@@ -733,6 +735,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    cred.api_key = decryptSecret(cred.api_key);
     assertValidHttpUrl(cred.api_url);
 
     try {
@@ -764,6 +767,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    cred.api_key = decryptSecret(cred.api_key);
     assertValidHttpUrl(cred.api_url);
 
     try {
@@ -813,6 +817,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
     if (credError) return res.status(500).json({ error: credError.message });
     if (!cred) return res.status(404).json({ error: 'Esse tenant ainda não tem instância Evolution criada.' });
+    cred.api_key = decryptSecret(cred.api_key);
     assertValidHttpUrl(cred.api_url);
 
     const apiBase = cred.api_url.replace(/\/$/, '');
@@ -918,7 +923,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     // Campo em branco no formulário nunca apaga um token já salvo — só troca
     // de verdade quando o admin digita um valor novo (ver comentário do GET
     // acima sobre nunca devolver o token em texto puro).
-    if (capiAccessToken) update.capi_access_token = capiAccessToken;
+    if (capiAccessToken) update.capi_access_token = encryptSecret(capiAccessToken);
 
     const { error: upsertError } = await db()
       .from('tenant_meta_credentials')
@@ -1003,7 +1008,8 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
       .maybeSingle();
 
     const finalInstagramAccountId: string | undefined = instagramAccountId?.trim() || existing?.instagram_account_id;
-    const finalAccessToken: string | undefined = accessToken?.trim() || existing?.access_token;
+    const trimmedAccessToken: string | undefined = accessToken?.trim();
+    const finalAccessToken: string | undefined = trimmedAccessToken ? encryptSecret(trimmedAccessToken) : existing?.access_token;
     if (!finalInstagramAccountId || !finalAccessToken) {
       return res.status(400).json({ error: 'ID da conta Instagram e access token são obrigatórios.' });
     }

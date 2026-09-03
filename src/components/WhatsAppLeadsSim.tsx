@@ -18,6 +18,9 @@ import { StatusModal } from './status/StatusModal';
 import { UpcomingEventsPanel, type UpcomingEvent } from './calendar/UpcomingEventsPanel';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 import { ContractModal } from './contracts/ContractModal';
+import { ReopenConversationModal } from './owner-panel/ReopenConversationModal';
+import { ConversationContextSidebar } from './owner-panel/ConversationContextSidebar';
+import type { ContactProfileData } from './owner-panel/ownerPanelTypes';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
   Play,
@@ -28,6 +31,7 @@ import {
   Send,
   AlertCircle,
   RefreshCw,
+  Lock,
   Image as ImageIcon,
   Calendar as CalendarIcon,
   CalendarPlus,
@@ -312,10 +316,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread'>('all');
-  // O painel auxiliar continua disponível pelo cabeçalho, mas não ocupa uma
-  // terceira coluna por padrão: a referência canônica coloca a IA no rascunho
-  // revisável e deixa o contexto expandível dentro da conversa.
-  const [showRightPanel, setShowRightPanel] = useState(false);
+  // Painel lateral de contexto do contato (Referência 1: 3 colunas ativas no desktop)
+  const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
+  const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis'>('profile');
+  const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
+  // Se o tenant ativo tem WABA (WhatsApp Business Account) configurado —
+  // usado pra bloquear "Reabrir a conversa" já na página, antes de abrir o
+  // modal, quando não há como enviar nenhum modelo de verdade (achado real
+  // de auditoria: o botão continuava sempre clicável mesmo sem WABA, e o
+  // aviso só aparecia depois de abrir o modal). Cacheado por tenant: a
+  // disponibilidade de WABA depende da conta do tenant, não da conversa.
+  const [reopenAvailability, setReopenAvailability] = useState<{ tenantId: string; wabaConfigured: boolean } | null>(null);
 
   // Item 2 do checklist visual (issue #100): flash breve na linha da lista
   // quando chega mensagem nova do cliente — mesmo em conversa que não está
@@ -1703,6 +1714,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
 
+  // Checa 1x por tenant se há WABA configurado, pra já bloquear "Reabrir a
+  // conversa" na página quando não há (ver GET /api/conversations/:phone/templates
+  // em conversations.ts — reason: 'waba_not_configured'). Falha de rede não
+  // marca nada (evita bloquear a página por causa de instabilidade
+  // passageira; o modal ainda mostra o estado real e permite tentar de novo).
+  useEffect(() => {
+    const tenantId = activeTenant?.id;
+    const phone = selectedLead?.phone;
+    const isRealConversation = Boolean((selectedLead as any)?.isReal);
+    if (!tenantId || !phone || !isRealConversation) return;
+    if (reopenAvailability?.tenantId === tenantId) return;
+    let cancelled = false;
+    apiFetch(`/api/conversations/${encodeURIComponent(phone)}/templates`)
+      .then((res) => res.json().catch(() => ({})))
+      .then((data) => {
+        if (cancelled) return;
+        setReopenAvailability({ tenantId, wabaConfigured: data?.reason !== 'waba_not_configured' });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal, reopenAvailability?.tenantId]);
+
+  const isReopenBlockedByWaba = reopenAvailability?.tenantId === activeTenant?.id && reopenAvailability.wabaConfigured === false;
+
   const handleSaveContactMemory = React.useCallback(async (patch: Partial<OperatorMemoryEditPayload>) => {
     const phone = selectedLead?.phone;
     if (!phone || !(selectedLead as any)?.isReal) throw new Error('Selecione uma conversa real para corrigir a memória.');
@@ -2988,17 +3023,57 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
           Achado real, 29/08/2026 (pedido do dono do produto com print,
           "ficou um espaço no top" comparando com o WhatsApp real): todo
-          botão desta fileira já é `hidden sm:flex`/`hidden lg:flex` ou fica
-          dentro do `hidden sm:contents` logo abaixo — no mobile, com o
-          painel de Ferramentas fechado (estado padrão), este cartão inteiro
+          botão desta fileira já é `hidden lg:flex` ou fica dentro do
+          `hidden sm:contents` logo abaixo — no mobile/tablet, com o painel
+          de Ferramentas fechado (estado padrão), este cartão inteiro
           renderizava vazio (só padding/borda/sombra), empurrando a conversa
-          pra baixo à toa. Escondido no mobile especificamente quando não há
-          nada pra mostrar; continua visível quando o painel de Ferramentas
-          está aberto (mobileThreadOpen usa a mesma `isToolbarSettingsOpen`
-          — é o destino real da aba inferior "Ferramentas", TASK-0147) e
-          sempre visível a partir de `sm` (tablet/desktop), onde a fileira
-          já tem conteúdo de verdade. */}
-      <div className={`relative p-3 rounded-card bg-[var(--surface-panel)] border border-[var(--line-subtle)] shadow-xl shadow-slate-950/25 space-y-2.5${isToolbarSettingsOpen ? '' : ' hidden sm:block'}`}>
+          pra baixo à toa. Escondido especificamente quando não há nada pra
+          mostrar; continua visível quando o painel de Ferramentas está
+          aberto (mobileThreadOpen usa a mesma `isToolbarSettingsOpen` — é o
+          destino real da aba inferior "Ferramentas", TASK-0147) e sempre
+          visível a partir de `lg` (desktop de verdade), onde a fileira já
+          tem conteúdo de verdade.
+
+          TASK-0212 (pedido direto, 01/09/2026, achado real ao investigar um
+          2º print): o gate original era `sm:block` (640px+, sem teto) — na
+          faixa de tablet (640–1023px) essa caixa E a `.atendimento-bottom-
+          nav` (`lg:hidden`) ficavam visíveis AO MESMO TEMPO, duplicando os
+          mesmos 3 botões (Pendências/Agenda/Ferramentas, mesmos handlers
+          dos dois lados). Trocado pra `lg:block` — agora cada faixa de
+          largura tem exatamente UMA barra dona: abaixo de `lg` só a
+          bottom-nav, a partir de `lg` só esta caixa. `lg:max-w-xs` (já
+          adicionado antes) mantém ela estreita e alinhada à esquerda, mais
+          perto da largura da coluna 1 (lista de conversas) do que esticada
+          por cima da conversa aberta também. */}
+      {/* TASK-0212: achado real ao revisar esta condição — o "isToolbarSettingsOpen
+          ? '' : hidden ..." antigo forçava esta caixa a ficar visível abaixo
+          do breakpoint sempre que o painel de Ferramentas era aberto, mas
+          TODO botão/conteúdo de dentro dela (inclusive o painel expandido)
+          já é `lg:`-only — resultado: abaixo de `lg`, com Ferramentas
+          aberta, esta caixa renderizava vazia (só padding/borda/sombra),
+          exatamente o bug que o comentário de 29/08 dizia já ter corrigido
+          (na época só cobria a faixa abaixo de `sm`; o gate `lg` desta
+          tarefa alargaria o mesmo bug pra 640–1023px se a condição não
+          fosse simplificada). Removida a exceção — abaixo de `lg` o estado
+          "Ferramentas aberta" é 100% coberto pela gaveta (`lg:hidden`, mais
+          abaixo), que já tem seu próprio cabeçalho + botão de fechar.
+
+          TASK-0213 (pedido direto, 02/09/2026): "não quero isso como um
+          módulo, quero ele integrado à página igual o cabeçalho" — tirado
+          o visual de cartão flutuante (rounded-card/border/shadow/bg
+          própria/max-w-xs, que fazia ela parecer uma caixinha separada boiando
+          sobre a lista) e trocado pelo mesmo estilo flush já usado na faixa
+          "Status do agente" logo abaixo (fundo sólido igual ao da coluna,
+          só uma borda fina embaixo) — integrada à página, não mais um
+          "widget" à parte. */}
+      <div className="flex-shrink-0 hidden lg:block bg-[#111b21] border-b border-slate-800/30 px-3 py-2">
+        {/* Pedido direto do dono do produto (03/09/2026, print a 100% de
+            zoom no desktop): "mesma experiência de utilização do WhatsApp" —
+            os 3 botões abaixo trocaram de pílula com texto ao lado do ícone
+            pra ícone em cima + rótulo pequeno embaixo, mesma linguagem
+            visual já usada na `.atendimento-bottom-nav` mobile (só que aqui
+            cada botão é `flex-col` isolado, não a classe CSS mobile, que é
+            pensada pra 4 itens esticados em largura total). */}
         {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
             só repetia informação já visível na aba ativa logo acima
             (Header.tsx) e no cabeçalho da página — removido por completo
@@ -3006,45 +3081,40 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             de verdade abaixo. */}
         <div ref={toolbarRef} className="flex items-center gap-2 overflow-x-auto scrollbar-thin -mx-1 px-1 pb-0.5">
           {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
-              direto daqui, sem precisar navegar até a barra de abas do topo
-              (Header.tsx já tem a aba "Escalonamentos" com o mesmo contador,
-              esta é só uma segunda entrada mais rápida). No mobile esse
-              atalho passou pra barra inferior estilo WhatsApp (ícone
-              "Pendências", 28/08/2026) — some daqui só abaixo de sm. */}
+              direto daqui. Achado real ao revisar este comentário (TASK-0212,
+              01/09/2026): ele dizia que "Header.tsx já tem a aba
+              Escalonamentos com o mesmo contador" — checado agora, isso NÃO
+              é verdade, `Header.tsx` não tem nenhuma referência a
+              'escalations' — este botão (junto com o item "Pendências" da
+              `.atendimento-bottom-nav`) é a ÚNICA rota da UI pra
+              `activeTab === 'escalations'`. Corrigido aqui pra não repetir a
+              afirmação errada. No mobile/tablet esse atalho já existe na
+              barra inferior estilo WhatsApp (ícone "Pendências", 28/08/2026)
+              — some daqui abaixo de `lg` (era `sm`, achado real do 2º print
+              desta tarefa: as duas barras ficavam visíveis ao mesmo tempo
+              entre 640–1023px, duplicando o mesmo botão). */}
           {onGoToEscalations && (
             <button
               onClick={onGoToEscalations}
-              className="hidden sm:flex flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium bg-[var(--pending-surface)] hover:brightness-110 text-[var(--pending)] border border-[var(--pending)]/50 items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+              className="hidden lg:flex relative flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[var(--pending)] hover:bg-[var(--pending-surface)] transition-all cursor-pointer whitespace-nowrap"
               title={t('pending')}
             >
-              <AlertTriangle className="w-3.5 h-3.5 text-[var(--pending)]" />
-              <span>{t('pending')}</span>
+              <AlertTriangle className="w-5 h-5" />
+              <span className="text-[11px] font-medium leading-none">{t('pending')}</span>
               {escalationsPendingCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white font-bold">
+                <span className="absolute top-0 right-1.5 px-1 py-0.5 rounded-full text-[9px] leading-none bg-red-500 text-white font-bold">
                   {escalationsPendingCount}
                 </span>
               )}
             </button>
           )}
 
-          {/* Toggle Right Panel — só desktop (lg+). No mobile a coluna 3 já
-              fica hidden por CSS (ver PR #70) e o painel real é o drawer
-              deslizante (mobileAnalysisOpen, ícone ⓘ no cabeçalho da
-              conversa) — sem este `hidden lg:flex`, este botão ficava visível
-              e clicável no mobile sem produzir NENHUM efeito visual, porque
-              alterna showRightPanel (que só controla classes lg:col-span-*),
-              confundindo quem tentava abrir a Ficha IA por aqui. */}
-          <button
-            onClick={() => setShowRightPanel(!showRightPanel)}
-            className={`hidden lg:flex flex-shrink-0 px-3 py-1.5 rounded-xl border text-xs font-semibold items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-              showRightPanel
-                ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
-                : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
-            <span>{showRightPanel ? 'Fechar ficha' : 'Abrir ficha'}</span>
-          </button>
+          {/* "Abrir ficha" saiu daqui (TASK-0212, 01/09/2026, pedido direto —
+              print comparando com o WhatsApp Web): a Ficha IA só faz sentido
+              com uma conversa aberta, mas esta fileira fica visível mesmo
+              sem nenhum lead selecionado. Botão equivalente agora mora no
+              cabeçalho da conversa aberta, junto dos outros ícones que já
+              são exclusivos dela (ver render do `.atendimento-thread`). */}
 
           {/* Status e Arquivadas saíram desta fileira (14/08/2026, pedido
               direto): moveram pra dentro da caixa de conversas, na fileira
@@ -3054,50 +3124,52 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {/* Modo "somente anúncios" e Gatilhos saíram desta fileira
               (29/08/2026, pedido do dono do produto) — viraram ícones na
               faixa "Status do agente", acima da lista (ver mais abaixo).
-              Agenda continua aqui só a partir de sm — no mobile o mesmo
-              atalho já existe como ícone próprio na barra inferior. */}
+              Agenda continua aqui só a partir de `lg` (era `sm` — mesmo
+              achado do 2º print da TASK-0212: duplicava com o ícone próprio
+              da barra inferior entre 640–1023px). */}
           <button
             onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
             title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-            className={`hidden sm:flex flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
+            className={`hidden lg:flex flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap ${
               googleCalendarConnected
-                ? 'bg-[var(--surface-raised)] border-[var(--action)] text-[var(--text-primary)]'
-                : 'bg-transparent border-[var(--line-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                ? 'text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
             }`}
           >
-            <CalendarIcon className="w-3.5 h-3.5" />
-            <span>{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
+            <CalendarIcon className="w-5 h-5" />
+            <span className="text-[11px] font-medium leading-none">{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
           </button>
 
           {/* Configurações pontuais e ações secundárias — "Ferramentas"
               (renomeado de "Mais opções", 28/08/2026, pra combinar com o
-              nome real do WhatsApp). No mobile o gatilho passou pra barra
-              inferior (ícone "Ferramentas"); some daqui abaixo de sm, mas o
+              nome real do WhatsApp). No mobile/tablet o gatilho já existe na
+              barra inferior (ícone "Ferramentas"); some daqui abaixo de
+              `lg` (era `sm` — mesmo achado do 2º print da TASK-0212), mas o
               painel que ele abre (isToolbarSettingsOpen) continua o mesmo. */}
           <button
             type="button"
             onClick={() => setIsToolbarSettingsOpen((v) => !v)}
             title="Configurações e ações secundárias"
-            className={`hidden sm:flex flex-shrink-0 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap ${
+            className={`hidden lg:flex flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap ${
               isToolbarSettingsOpen
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white'
+                ? 'text-emerald-300 bg-emerald-500/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Ferramentas</span>
+            <Settings className="w-5 h-5" />
+            <span className="text-[11px] font-medium leading-none">Ferramentas</span>
           </button>
         </div>
 
         {/* Achado real, 29/08/2026 (pedido do dono do produto): esse painel
             empurrava a lista inteira pra baixo no mobile ao abrir
             "Ferramentas" — inline só faz sentido no desktop (onde o botão
-            que abre isso, logo acima, também só existe a partir de sm). No
-            mobile o mesmo conteúdo (toolbarSettingsBody, extraído antes do
-            "return" deste componente) vira uma gaveta, ver mais abaixo perto
-            do drawer da Ficha IA. */}
+            que abre isso, logo acima, agora só existe a partir de `lg`,
+            TASK-0212). No mobile/tablet o mesmo conteúdo (toolbarSettingsBody,
+            extraído antes do "return" deste componente) vira uma gaveta, ver
+            mais abaixo perto do drawer da Ficha IA. */}
         {isToolbarSettingsOpen && (
-          <div className="hidden sm:flex w-full flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
+          <div className="hidden lg:flex w-full flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
             {toolbarSettingsBody}
           </div>
         )}
@@ -3240,10 +3312,36 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           que herdar, incluindo o `h-full` da TASK-0158), essa cadeia de
           flexbox elimina o chute de vez: o frame sempre ocupa exatamente o
           que sobrar do chrome visível, sem precisar saber de antemão quanto
-          esse chrome mede. Em `lg` (desktop) mantém o cálculo fixo
-          original, que já funcionava (`lg:flex-none` evita que o
-          `flex-1` do mobile dispute espaço com a altura fixa). */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 lg:flex-none lg:h-[calc(100dvh-154px)] min-h-[560px] lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
+          esse chrome mede.
+
+          TASK-0212 (pedido direto, 01/09/2026, achado real): o cálculo fixo
+          de `lg` (`lg:h-[calc(100dvh-154px)]`) NÃO "já funcionava" como o
+          comentário acima dizia — 154px foi chutado uma vez (commit
+          `de470b5`, 23/08) e nunca soube que a shell é IRMÃ de outro
+          conteúdo (a caixa de ferramentas logo acima, ~60-70px) dentro do
+          MESMO fluxo de documento, nem que o `.app-main` tem padding
+          próprio (`lg:p-8` = 32px de cada lado) fora do que "154px" cobria.
+          Resultado: a soma de tudo (Header + padding + caixa de ferramentas
+          + a própria altura fixa da shell) ultrapassava `100dvh`, gerando
+          uma barra de rolagem no documento inteiro — pedido direto pra
+          eliminar ("otimizar pra ficar em apenas uma página", comparando
+          com o WhatsApp Web, que não rola a página, só painéis internos).
+          Trocado `lg:flex-none lg:h-[calc(100dvh-154px)]` por `lg:flex-1
+          lg:min-h-0` — a shell agora divide o espaço de verdade com a caixa
+          de ferramentas via flexbox (mesma técnica já usada no mobile logo
+          acima, só que agora também em `lg`), sem depender de nenhuma
+          constante chutada. Precisa de `App.tsx` também não escapar mais
+          pra `lg:block lg:h-auto` no wrapper do Atendimento — ver lá.
+
+          TASK-0221 (pedido direto, 03/09/2026): a borda/cantos
+          arredondados/sombra que só existiam a partir de `lg`
+          (`lg:border lg:rounded-2xl lg:shadow-lg`) davam à shell a cara de
+          "cartão flutuante" no meio da tela — exatamente o que o dono do
+          produto pediu pra tirar, comparando com o WhatsApp Web (edge to
+          edge em qualquer largura). Removidas — a shell fica sempre
+          `border-0 rounded-none shadow-none`, igual ao mobile, agora
+          também em desktop. */}
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 min-h-[560px] lg:min-h-0">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
@@ -3497,13 +3595,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               que é o lugar que realmente faz sentido — a Ficha IA é sobre UM
               contato específico, não faz sentido abrir sem antes escolher
               qual. */}
-          <nav className="atendimento-bottom-nav lg:hidden" aria-label="Navegação do Atendimento">
+          {/* TASK-0213 (achado real, 02/09/2026, print do dono do produto):
+              esta barra continuava aparecendo em telas de desktop de verdade
+              (≥1024px) junto com a caixa de ferramentas, exatamente a
+              duplicação que a TASK-0212 devia ter eliminado. Causa raiz: a
+              regra crua `.atendimento-bottom-nav { display: flex }` no
+              index.css não está dentro de nenhum `@layer` — no Tailwind v4,
+              CSS fora de `@layer` sempre vence sobre utilitários (que vivem
+              dentro de `@layer utilities`), não importa a ordem no bundle
+              nem a especificidade. `lg:hidden` sozinho nunca teve chance
+              contra isso. Mesmo padrão de bug e mesma correção já usada na
+              TASK-0159 pro `.atendimento-workspace__header` (`!important`
+              via `lg:!hidden`).
+
+              TASK-0216 (pedido direto, 02/09/2026, novo print): ícones
+              22px->24px (w-6 h-6), acompanhando o bump de escala do CSS
+              (`.atendimento-bottom-nav__item` no index.css) — ainda
+              parecia pequena/desproporcional perto do resto da UI. */}
+          <nav className="atendimento-bottom-nav lg:!hidden" aria-label="Navegação do Atendimento">
             <button
               type="button"
               onClick={() => { setSearchQuery(''); setActiveTabFilter('all'); }}
               className="atendimento-bottom-nav__item is-active"
             >
-              <MessageCircle className="w-[22px] h-[22px]" />
+              <MessageCircle className="w-6 h-6" />
               <span>Conversas</span>
             </button>
             <button
@@ -3512,7 +3627,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               disabled={!onGoToEscalations}
               className="atendimento-bottom-nav__item"
             >
-              <AlertTriangle className="w-[22px] h-[22px]" />
+              <AlertTriangle className="w-6 h-6" />
               <span>Pendências</span>
               {escalationsPendingCount > 0 && (
                 <span className="atendimento-bottom-nav__badge">{escalationsPendingCount}</span>
@@ -3523,7 +3638,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
               className="atendimento-bottom-nav__item"
             >
-              <CalendarIcon className="w-[22px] h-[22px]" />
+              <CalendarIcon className="w-6 h-6" />
               <span>Agenda</span>
             </button>
             <button
@@ -3531,7 +3646,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               onClick={() => setIsToolbarSettingsOpen((v) => !v)}
               className={`atendimento-bottom-nav__item${isToolbarSettingsOpen ? ' is-active' : ''}`}
             >
-              <Settings className="w-[22px] h-[22px]" />
+              <Settings className="w-6 h-6" />
               <span>Ferramentas</span>
             </button>
           </nav>
@@ -3597,8 +3712,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       status "online" na mesma linha) — escala mais perto do
                       app de verdade, hierarquia mais clara. */}
                   <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
-                    <span className="text-[11px] font-normal text-emerald-400">• online</span>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
+                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-700/50 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        ao vivo
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-normal text-zinc-400 truncate">
+                      {selectedLead.phone} • {selectedLead.messages?.length || 0} mensagens
+                    </p>
                   </div>
                 </div>
 
@@ -3678,6 +3801,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     title="Transferir pro WhatsApp pessoal do operador"
                   >
                     <Phone className="w-[18px] h-[18px]" />
+                  </button>
+
+                  {/* TASK-0212 (pedido direto, 01/09/2026, print comparando
+                      com o WhatsApp Web): a Ficha IA só faz sentido com uma
+                      conversa aberta, mas o botão "Abrir ficha" vivia numa
+                      barra de ferramentas genérica, sempre visível mesmo
+                      sem nenhum lead selecionado. Mudou pra cá, junto dos
+                      outros ícones que já são exclusivos da conversa aberta
+                      — mesma posição no mobile (IdCard) e no desktop agora,
+                      em vez de dois lugares diferentes pra abrir a mesma
+                      coisa. */}
+                  <button
+                    onClick={() => setShowRightPanel(!showRightPanel)}
+                    className={`hidden lg:flex p-2 rounded-lg transition-colors cursor-pointer ${showRightPanel ? 'text-emerald-400 bg-[#2a3942]' : 'text-slate-300 hover:bg-[#2a3942]'}`}
+                    title={showRightPanel ? 'Fechar Ficha IA' : 'Abrir Ficha IA'}
+                  >
+                    {showRightPanel ? <PanelRightClose className="w-[18px] h-[18px]" /> : <PanelRightOpen className="w-[18px] h-[18px]" />}
                   </button>
 
                   {/* Achado ao vivo: as ações da conversa (bloquear IA pra
@@ -4126,9 +4266,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     const timeFooter = (
                       <span
                         className={`float-right ml-2 mt-0.5 inline-flex items-center gap-1 text-[9px] whitespace-nowrap select-none ${
-                          isLead ? 'text-slate-400' : 'text-emerald-200'
+                          isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-amber-200' : 'text-emerald-200'
                         }`}
                       >
+                        {msg.sentBy === 'operator' && (
+                          <span className="font-extrabold tracking-wider text-amber-300 mr-1 uppercase">
+                            ESCRITA POR VOCÊ
+                          </span>
+                        )}
                         {msg.timestamp}
                         {!isLead && (msg.sendFailed ? (
                           <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
@@ -4246,7 +4391,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             isLead || isMediaBubble
                               ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'
-                                ? 'bg-[#004080] text-white shadow-blue-950/40'
+                                ? 'bg-[#2e261f] text-amber-50 border border-amber-600/40 shadow-amber-950/40'
                                 : 'bg-[#005c4b] text-white shadow-emerald-950/40'
                           }`}
                         >
@@ -4262,9 +4407,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="px-2.5 pt-2.5 pb-2 space-y-1">
                               {/* Distingue resposta automática da IA de mensagem digitada manualmente pelo operador — cor de balão sozinha pode não bastar (daltonismo, print em P&B), então reforça com ícone+texto. Ver issue #126. Áudio/vídeo mostram esse rótulo dentro do próprio cartão cinza (ver mediaSenderLabel), não aqui. */}
                               {hasSenderLabel && (
-                                <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide opacity-70">
-                                  {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5" /> : <UserCheck className="w-2.5 h-2.5" />}
-                                  {msg.sentBy === 'ai' ? 'IA' : 'Operador'}
+                                <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide">
+                                  {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5 text-emerald-400" /> : <UserCheck className="w-2.5 h-2.5 text-amber-400" />}
+                                  <span className={msg.sentBy === 'operator' ? 'text-amber-400' : 'text-emerald-400'}>
+                                    {msg.sentBy === 'ai' ? 'Atendente' : 'Você (equipe)'}
+                                  </span>
                                 </div>
                               )}
 
@@ -4568,6 +4715,50 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
+                {/* Status da Janela de 24h da Meta (Referência 1 e Referência 2) */}
+                {selectedLead && (() => {
+                  const serviceWindow = visibleContactContext?.serviceWindow;
+                  const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
+                  const hoursRemaining = serviceWindow?.hoursRemaining ?? 24;
+
+                  return (
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
+                      {isWindowOpen ? (
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <span className="flex items-center gap-1.5 font-bold text-emerald-400">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                            aberta - faltam {hoursRemaining}h
+                          </span>
+                          <span className="text-zinc-500 hidden sm:inline">•</span>
+                          <span className="text-zinc-400 hidden sm:inline">
+                            O agente pode responder normalmente. A janela fecha {hoursRemaining}h depois de agora, se o cliente não escrever de novo.
+                          </span>
+                        </div>
+                      ) : isReopenBlockedByWaba ? (
+                        <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Fale com o suporte para configurar a conta oficial do WhatsApp Business (WABA) desta empresa.">
+                          <Lock className="w-3.5 h-3.5 shrink-0" />
+                          <span>Janela de 24h fechada. Esta empresa ainda não tem WhatsApp Business (WABA) configurado — não é possível reabrir a conversa. Fale com o suporte.</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-1.5 text-amber-400 font-semibold">
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Janela de 24 horas fechou. Só é permitido enviar modelo aprovado.</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsReopenModalOpen(true)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            Reabrir a conversa
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Reply Preview Bar — mesma ideia do WhatsApp: mostra o que está sendo respondido acima do campo de texto */}
                 {replyingTo && (
                   <div className="flex items-center justify-between bg-[#111b21] border-l-4 border-emerald-500 rounded-lg px-3 py-1.5">
@@ -4821,6 +5012,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   )}
                 </form>
                 )}
+                {/* Aviso de Assunção Humana de Controle (Referência 1) */}
+                <div className="px-3 pt-1.5 pb-0.5">
+                  <p className="text-[10px] text-zinc-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80 shrink-0" />
+                    Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.
+                  </p>
+                </div>
               </div>
             </>
           ) : (
@@ -4831,53 +5029,95 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
 
         {/* ========================================== */}
-        {/* COLUMN 3: Painel auxiliar opcional — contexto e inteligência sob demanda */}
+        {/* COLUMN 3: Painel contextual do contato e IA (Referência 1) */}
         {/* ========================================== */}
         {showRightPanel && (
-          // Achado real em produção: essa coluna nunca teve o toggle
-          // hidden/flex por mobileThreadOpen que as colunas 1 e 2 têm — no
-          // mobile (grid-cols-1) ela sempre empilhava atrás da lista/thread
-          // visível, e virou sobreposição visual real depois que o frame
-          // ganhou altura fixa (h-[85dvh]). Escondida no mobile — o
-          // equivalente lá é o painel deslizante controlado por
-          // mobileAnalysisOpen, logo abaixo, aberto pelo ícone (i) no
-          // cabeçalho da conversa.
-          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/45 bg-[#111b21] flex-col p-2.5 space-y-2.5 overflow-y-auto scrollbar-thin">
-            {/* Achado real, 29/08/2026 (pedido do dono do produto): "Auto IA"
-                morava num painel genérico de Ferramentas — é uma
-                configuração de análise automática da conversa, faz mais
-                sentido aqui dentro da própria Ficha IA. Deixado discreto de
-                propósito (sem fundo/borda): cada análise automática é uma
-                chamada real ao Gemini (custo de token), e a maioria dos
-                operadores deve preferir o botão "Analisar Conversa
-                Completa" (sob demanda) em vez de deixar isso ligado. */}
-            <label
-              className="inline-flex items-center gap-1.5 self-start cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
-              title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise) — prefira o botão "Analisar Conversa Completa" pra analisar só quando precisar'
-            >
-              <input
-                type="checkbox"
-                checked={autoAnalyze}
-                onChange={(e) => setAutoAnalyze(e.target.checked)}
-                className="sr-only peer"
+          <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/45 bg-[#111b21] flex-col overflow-y-auto scrollbar-thin">
+            {/* Seletor de visualização: Ficha do Contato vs Análise IA */}
+            <div className="flex border-b border-slate-800 bg-[#0f171d] px-3 pt-2 gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('profile')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
+                  rightPanelTab === 'profile'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                Ficha do Contato
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('analysis')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer ${
+                  rightPanelTab === 'analysis'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                Análise IA
+              </button>
+            </div>
+
+            {rightPanelTab === 'profile' ? (
+              <ConversationContextSidebar
+                contact={selectedLead ? {
+                  name: selectedLead.name,
+                  phone: selectedLead.phone,
+                  interest: selectedLead.interest || visibleContactContext?.memory?.serviceInterest || undefined,
+                  hasBooked: Boolean(paymentAppointment),
+                  firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
+                  notes: visibleContactContext?.memory?.conversationSummary || undefined,
+                  funnelStage: {
+                    name: paymentAppointment ? 'Horário já passou' : (selectedLead.fullAnalysis?.stage || 'Em Qualificação'),
+                    currentStep: paymentAppointment ? 5 : 3,
+                    totalSteps: 5,
+                  },
+                  upcomingAppointments: upcomingEvents
+                    .filter((ev) => ev.phone === selectedLead.phone)
+                    .map((ev) => ({
+                      id: ev.id,
+                      date: ev.date || 'Hoje',
+                      time: ev.time || '12:00',
+                      title: ev.title || 'Consulta',
+                      status: 'scheduled',
+                    })),
+                } : null}
+                agentStatus={selectedLead?.aiBlockedAt ? 'paused' : 'active'}
+                onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
+                onClose={() => setShowRightPanel(false)}
               />
-              <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
-              <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
-            </label>
-            <ConversationAnalysisPanel
-              analysis={selectedLead?.fullAnalysis}
-              isLoading={isAnalyzingConversation}
-              onReanalyze={() => selectedLead && handleAnalyzeConversation(selectedLead)}
-              onDraftSuggestedReply={handleDraftSuggestedReply}
-              leadName={selectedLead?.name || 'Lead'}
-              onSendCAPIEvent={handleDirectCAPI}
-              onGenerateReplyFromHint={handleGenerateReplyFromHint}
-              onAskAi={handleAskAi}
-              contactContext={visibleContactContext}
-              isContactContextLoading={isContactContextLoading}
-              onRefreshContactContext={() => void refreshContactContext()}
-              onSaveContactMemory={handleSaveContactMemory}
-            />
+            ) : (
+              <div className="p-2.5 space-y-2.5">
+                <label
+                  className="inline-flex items-center gap-1.5 self-start cursor-pointer text-slate-500 hover:text-slate-400 transition-colors"
+                  title='Analisar automaticamente a cada mensagem nova (consome tokens do Gemini a cada análise)'
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoAnalyze}
+                    onChange={(e) => setAutoAnalyze(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="relative w-6 h-3.5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-slate-400 after:border after:border-slate-500 after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-emerald-600/70 peer-checked:after:bg-white" />
+                  <span className="text-[10px]">Analisar automaticamente a cada mensagem</span>
+                </label>
+                <ConversationAnalysisPanel
+                  analysis={selectedLead?.fullAnalysis}
+                  isLoading={isAnalyzingConversation}
+                  onReanalyze={() => selectedLead && handleAnalyzeConversation(selectedLead)}
+                  onDraftSuggestedReply={handleDraftSuggestedReply}
+                  leadName={selectedLead?.name || 'Lead'}
+                  onSendCAPIEvent={handleDirectCAPI}
+                  onGenerateReplyFromHint={handleGenerateReplyFromHint}
+                  onAskAi={handleAskAi}
+                  contactContext={visibleContactContext}
+                  isContactContextLoading={isContactContextLoading}
+                  onRefreshContactContext={() => void refreshContactContext()}
+                  onSaveContactMemory={handleSaveContactMemory}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -5157,6 +5397,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onDisconnectCalendar={handleDisconnectGoogleCalendar}
         backupSheetUrl={backupSheetUrl}
       />
+
+      {selectedLead && (
+        <ReopenConversationModal
+          isOpen={isReopenModalOpen}
+          onClose={() => setIsReopenModalOpen(false)}
+          phone={selectedLead.phone}
+          contactName={selectedLead.name}
+          businessName={activeTenant.name}
+          suggestedService={visibleContactContext?.memory?.serviceInterest || undefined}
+          onTemplateSent={() => {
+            void refreshContactContext();
+            if (selectedLead && (selectedLead as any).isReal) {
+              void loadRealConversationHistory(selectedLead.phone, selectedLead.id);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

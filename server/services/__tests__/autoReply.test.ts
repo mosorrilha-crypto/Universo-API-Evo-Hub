@@ -19,6 +19,15 @@ const PRODUCT_WITH_VIDEO = { name: 'Efecto Volumen Brasileño', price: 'Gs 200.0
 const getKnowledgeBase = vi.fn(async () => ({ products: [PRODUCT_WITH_PHOTO, PRODUCT_WITH_VIDEO] }));
 const getKnowledgeBaseVideo = vi.fn(async () => ({ buffer: Buffer.from('fake-video-bytes'), contentType: 'video/mp4' }));
 const saveMediaImage = vi.fn(async (..._args: any[]) => undefined);
+// TASK-0218: mesmo contrato real de resolveKnowledgeBaseImageBinary (Storage
+// se tiver imageId, senão fallback pro Base64 legado), mas sem fetch() de
+// verdade — os testes abaixo sobrescrevem essa implementação default quando
+// precisam simular Storage encontrado/não encontrado.
+const resolveKnowledgeBaseImageBinary = vi.fn(async (_url?: string, _key?: string, _tenantId?: string, imageId?: string, mimeType?: string, legacyBase64?: string) => {
+  if (imageId) return { buffer: Buffer.from('fake-storage-image-bytes'), mimeType: mimeType || 'image/jpeg' };
+  if (legacyBase64) return { buffer: Buffer.from(legacyBase64.replace(/^data:[^;]+;base64,/, ''), 'base64'), mimeType: mimeType || 'image/jpeg' };
+  return null;
+});
 // null = sem override salvo pelo saas_admin — cai no DEFAULT_GLOBAL_LAYER hardcoded, que é o que os testes abaixo verificam.
 const getGlobalPromptLayerOverride = vi.fn(async () => null as string | null);
 // undefined = nenhum agendamento rastreado pra este telefone — o gate de
@@ -42,6 +51,7 @@ vi.mock('../appointmentStore', () => ({
   confirmPayment: vi.fn(async () => undefined),
 }));
 vi.mock('../knowledgeBaseVideoStore', () => ({ getKnowledgeBaseVideo }));
+vi.mock('../knowledgeBaseImageStore', () => ({ resolveKnowledgeBaseImageBinary }));
 vi.mock('../mediaImageStore', () => ({ saveMediaImage }));
 vi.mock('../globalPromptStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../globalPromptStore')>();
@@ -574,6 +584,54 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(savedMimeType).toBe('image/jpeg');
     expect(typeof savedBase64).toBe('string');
     expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
+  });
+
+  // TASK-0218: mesma foto, mas migrada pro Storage (exampleImageId em vez de
+  // exampleImageBase64) — o binário deve vir de resolveKnowledgeBaseImageBinary,
+  // nunca do campo Base64 legado (que nem existe mais nesse fixture).
+  it('envia a foto real via Storage quando o produto já tem exampleImageId (migrado)', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    saveMediaImage.mockClear();
+    resolveKnowledgeBaseImageBinary.mockClear();
+    getKnowledgeBase.mockResolvedValueOnce({
+      products: [{ name: 'Microlips', price: 'Gs 500.000', exampleImageId: 'image-storage-1', exampleImageMimeType: 'image/png' }],
+    } as any);
+    const { ai } = makeFakeAiWithPhotoTool(true);
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(result).not.toBeNull();
+    expect(resolveKnowledgeBaseImageBinary).toHaveBeenCalledWith(
+      'https://fake.supabase.co', 'fake-key', 'tenant-a', 'image-storage-1', 'image/png', undefined, 'runMidiaTool:enviar_foto_exemplo'
+    );
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/png', expect.stringContaining('Microlips'));
+    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+  });
+
+  // TASK-0218: imageId cadastrado mas o arquivo sumiu/nunca foi migrado de
+  // verdade no Storage — não pode travar o fluxo nem enviar nada quebrado.
+  it('avisa que a foto não foi encontrada no Storage sem travar, quando resolveKnowledgeBaseImageBinary devolve null', async () => {
+    uploadWhatsAppMedia.mockClear();
+    resolveKnowledgeBaseImageBinary.mockClear();
+    resolveKnowledgeBaseImageBinary.mockResolvedValueOnce(null);
+    getKnowledgeBase.mockResolvedValueOnce({
+      products: [{ name: 'Microlips', price: 'Gs 500.000', exampleImageId: 'image-storage-missing' }],
+    } as any);
+    const { ai, calls } = makeFakeAiWithPhotoTool(true);
+
+    const result = await generateAutoReplyForText(
+      'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined, undefined,
+      '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
+    );
+
+    expect(result).not.toBeNull();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    const specialistContent: string = calls[calls.length - 1].contents[0].text;
+    expect(specialistContent).toContain('não foi encontrado no Storage');
   });
 
   it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {

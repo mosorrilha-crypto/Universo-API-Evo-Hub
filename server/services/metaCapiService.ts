@@ -7,6 +7,7 @@
  */
 import crypto from 'crypto';
 import { getDb } from './db';
+import { decryptSecret } from './tokenCrypto';
 
 const META_GRAPH_VERSION = 'v21.0';
 
@@ -34,7 +35,7 @@ async function getTenantCapiCredentials(tenantId: string): Promise<TenantCapiCre
     .eq('tenant_id', tenantId)
     .maybeSingle();
   if (!data?.capi_dataset_id || !data?.capi_access_token || !data?.capi_page_id) return null;
-  return { datasetId: data.capi_dataset_id, accessToken: data.capi_access_token, pageId: data.capi_page_id };
+  return { datasetId: data.capi_dataset_id, accessToken: decryptSecret(data.capi_access_token), pageId: data.capi_page_id };
 }
 
 /**

@@ -16,6 +16,7 @@ import { createPreReservation, updatePreReservationStatus } from './preReservati
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
 import { sendEvolutionMediaMessage } from './evolutionSend';
 import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
+import { resolveKnowledgeBaseImageBinary } from './knowledgeBaseImageStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
 import { resolveEffectiveGlobalLayer } from './tenantPromptLayerStore';
 import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
@@ -1613,7 +1614,7 @@ async function runMidiaTool(
   groqApiKey?: string
 ): Promise<{ actionsSummary: string[] }> {
   const kb = await getRuntimeKnowledgeBaseForReply(tenantId);
-  const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageBase64 || p.variants?.some((variant) => variant.exampleImageBase64));
+  const productsWithPhoto = (kb?.products || []).filter((p) => p.exampleImageId || p.exampleImageBase64 || p.variants?.some((variant) => variant.exampleImageId || variant.exampleImageBase64));
   const productsWithVideo = (kb?.products || []).filter((p) => p.exampleVideoId || p.variants?.some((variant) => variant.exampleVideoId));
   if (!productsWithPhoto.length && !productsWithVideo.length) return { actionsSummary: [] };
 
@@ -1758,9 +1759,9 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     }
   }
 
-  const photoMedia = matched?.variant?.exampleImageBase64 ? matched.variant : matched?.product?.exampleImageBase64 ? matched.product : undefined;
-  const photoName = matched?.variant?.exampleImageBase64 ? matched.variant.code : matched?.product?.name;
-  if (!photoMedia?.exampleImageBase64 || !photoName) {
+  const photoMedia = matched?.variant?.exampleImageId || matched?.variant?.exampleImageBase64 ? matched.variant : matched?.product?.exampleImageId || matched?.product?.exampleImageBase64 ? matched.product : undefined;
+  const photoName = matched?.variant?.exampleImageId || matched?.variant?.exampleImageBase64 ? matched.variant.code : matched?.product?.name;
+  if ((!photoMedia?.exampleImageId && !photoMedia?.exampleImageBase64) || !photoName) {
     console.warn(`⚠️  [runMidiaTool] enviar_foto_exemplo: "${nomeProduto}" não bateu com nenhum produto com foto cadastrada (tenant=${tenantId}). Catálogo com foto: [${productsWithPhoto.map((p) => p.name).join(', ')}]`);
     // Mesmo achado do bloco de vídeo acima — nome_produto pode ser uma
     // categoria genérica ("Pestañas") em vez do nome exato de um produto do
@@ -1774,9 +1775,26 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     return { actionsSummary: [`Já enviou a foto de exemplo de "${photoName}" há pouco nesta conversa (veja o histórico) — NÃO reenvie e não diga que vai mandar de novo, a menos que a cliente peça explicitamente outra vez.`] };
   }
 
+  // TASK-0218: resolve o binário via Storage (exampleImageId) com fallback
+  // pro Base64 legado inline — ver resolveKnowledgeBaseImageStore.ts pro
+  // contrato de compatibilidade completo.
+  const resolvedPhoto = await resolveKnowledgeBaseImageBinary(
+    mediaConfig.supabaseUrl,
+    mediaConfig.supabaseKey,
+    tenantId,
+    photoMedia.exampleImageId,
+    photoMedia.exampleImageMimeType,
+    photoMedia.exampleImageBase64,
+    'runMidiaTool:enviar_foto_exemplo'
+  );
+  if (!resolvedPhoto) {
+    return { actionsSummary: [`Tentou enviar foto de "${photoName}" mas o arquivo não foi encontrado no Storage.`] };
+  }
+
   try {
-    const mimeType = photoMedia.exampleImageMimeType || 'image/jpeg';
+    const mimeType = resolvedPhoto.mimeType;
     const filename = `${photoName}.jpg`;
+    const photoBase64 = resolvedPhoto.buffer.toString('base64');
 
     if (mediaConfig.provider === 'evolution') {
       await sendEvolutionMediaMessage(
@@ -1784,14 +1802,13 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
         mediaConfig.evolutionApiUrl,
         mediaConfig.evolutionApiKey,
         phone,
-        photoMedia.exampleImageBase64,
+        photoBase64,
         mimeType,
         filename,
         photoName
       );
     } else {
-      const mediaBuffer = Buffer.from(photoMedia.exampleImageBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
-      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, mediaBuffer, mimeType, filename);
+      const mediaId = await uploadWhatsAppMedia(mediaConfig.phoneNumberId, mediaConfig.accessToken, resolvedPhoto.buffer, mimeType, filename);
       await sendWhatsAppMediaMessage(mediaConfig.phoneNumberId, mediaConfig.accessToken, phone, mediaId, mimeType, photoName);
     }
 
@@ -1803,7 +1820,7 @@ Só decida enviar_foto_exemplo ou enviar_video_exemplo se o cliente pediu explic
     // MANUAL (POST /send-example-photo em conversations.ts) já fazia isso
     // certo; só o envio automático da própria IA (aqui) ficou pra trás.
     const photoMessageId = `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, photoMessageId, photoMedia.exampleImageBase64, mimeType);
+    await saveMediaImage(mediaConfig.supabaseUrl, mediaConfig.supabaseKey, photoMessageId, photoBase64, mimeType);
     await recordOutgoingMessage(tenantId, phone, {
       type: 'image',
       text: `📷 Foto de exemplo: ${photoName}`,

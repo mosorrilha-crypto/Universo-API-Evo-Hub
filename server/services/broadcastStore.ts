@@ -11,6 +11,8 @@ import { getDb, getPlatformDb } from './db';
 import { parseContactsCsv } from './csvParse';
 import { uploadWhatsAppMedia } from './metaSend';
 import { isValidTimeOfDay, isValidTimezone } from './sendWindow';
+import { listAllAppointments } from './appointmentStore';
+import { decryptSecret, encryptSecret } from './tokenCrypto';
 
 function stripDataUriPrefix(base64: string): string {
   return base64.replace(/^data:[^;]+;base64,/, '');
@@ -46,7 +48,7 @@ function mapNumberRow(row: any): BroadcastNumber {
     label: row.label,
     phoneNumberId: row.phone_number_id,
     wabaId: row.waba_id ?? null,
-    accessToken: row.access_token ?? null,
+    accessToken: row.access_token ? decryptSecret(row.access_token) : null,
     status: row.status,
     warmupProgressDays: row.warmup_progress_days ?? 0,
     warmupLastAdvancedOn: row.warmup_last_advanced_on ?? null,
@@ -92,7 +94,7 @@ export async function createBroadcastNumber(tenantId: string, input: CreateBroad
       label: input.label,
       phone_number_id: input.phoneNumberId,
       waba_id: input.wabaId || null,
-      access_token: input.accessToken || null,
+      access_token: input.accessToken ? encryptSecret(input.accessToken) : null,
       status: 'warming',
       warmup_progress_days: 0,
       warmup_last_advanced_on: null,
@@ -123,7 +125,7 @@ export async function updateBroadcastNumber(tenantId: string, id: string, patch:
   const update: Record<string, any> = { updated_at: new Date().toISOString() };
   if (patch.label !== undefined) update.label = patch.label;
   if (patch.wabaId !== undefined) update.waba_id = patch.wabaId;
-  if (patch.accessToken !== undefined && patch.accessToken !== '') update.access_token = patch.accessToken;
+  if (patch.accessToken !== undefined && patch.accessToken !== '') update.access_token = encryptSecret(patch.accessToken);
   if (patch.status !== undefined) update.status = patch.status;
   if (patch.qualityRating !== undefined) update.quality_rating = patch.qualityRating;
   if (patch.perMinuteCap !== undefined) update.per_minute_cap = patch.perMinuteCap;
@@ -284,11 +286,14 @@ export async function deleteBroadcastTemplate(tenantId: string, id: string): Pro
 
 // ─── Listas de contatos ─────────────────────────────────────────────────
 
+export type ContactListSource = 'csv' | 'segment_known_leads' | 'segment_has_appointment';
+
 export interface BroadcastContactList {
   id: string;
   tenantId: string;
   name: string;
   sourceFilename: string | null;
+  source: ContactListSource;
   contactCount: number;
   createdBy: string | null;
   createdAt: string;
@@ -310,6 +315,7 @@ function mapContactListRow(row: any): BroadcastContactList {
     tenantId: row.tenant_id,
     name: row.name,
     sourceFilename: row.source_filename ?? null,
+    source: row.source || 'csv',
     contactCount: row.contact_count ?? 0,
     createdBy: row.created_by ?? null,
     createdAt: row.created_at,
@@ -350,7 +356,7 @@ export async function importContactList(
   const db = getDb();
   const { data: listRow, error: listError } = await db
     .from('broadcast_contact_lists')
-    .insert({ tenant_id: tenantId, name, source_filename: sourceFilename || null, contact_count: contacts.length, created_by: createdBy })
+    .insert({ tenant_id: tenantId, name, source_filename: sourceFilename || null, source: 'csv', contact_count: contacts.length, created_by: createdBy })
     .select('*')
     .single();
   if (listError) throw listError;
@@ -366,6 +372,71 @@ export async function importContactList(
   if (contactsError) throw contactsError;
 
   return { list: mapContactListRow(listRow), imported: contacts.length, duplicatesIgnored };
+}
+
+export type ContactListSegment = 'known_leads' | 'has_appointment';
+
+/**
+ * Monta uma lista de contatos a partir de dados reais já existentes no
+ * sistema, sem precisar de CSV externo:
+ * - `known_leads`: qualquer telefone que já tem uma `conversations` pra
+ *   esse tenant (já é lead/já conversou pelo menos uma vez).
+ * - `has_appointment`: telefones com um `eventId` real no Google Calendar
+ *   em `appointments` (agendamento confirmado, não uma reserva provisória
+ *   ainda sem evento — ver appointmentStore.ts).
+ * "Já se inscreveu em um evento" (a pergunta original que motivou esse
+ * item do backlog) não vira um 3º segmento aqui: o sistema não tem
+ * nenhuma entidade de "inscrição em evento" — inventar uma sem um caso de
+ * uso real por trás violaria a mesma regra de "nunca fabricar dado de
+ * negócio" que já vale pro conteúdo do agente.
+ */
+export async function createContactListFromSegment(
+  tenantId: string,
+  name: string,
+  segment: ContactListSegment,
+  createdBy: string | null
+): Promise<ImportContactListResult> {
+  const db = getDb();
+  let pairs: Array<{ phone: string; name: string | null }>;
+
+  if (segment === 'known_leads') {
+    const { data, error } = await db.from('conversations').select('phone, name').eq('tenant_id', tenantId);
+    if (error) throw error;
+    pairs = (data || []).map((row: any) => ({ phone: row.phone, name: row.name ?? null }));
+  } else {
+    const appointments = await listAllAppointments(tenantId);
+    pairs = appointments.filter((a) => !!a.eventId).map((a) => ({ phone: a.phone, name: null }));
+  }
+
+  const seen = new Set<string>();
+  const uniquePairs = pairs.filter((p) => {
+    if (seen.has(p.phone)) return false;
+    seen.add(p.phone);
+    return true;
+  });
+  if (!uniquePairs.length) {
+    throw new Error('Nenhum contato encontrado nesse segmento — a lista ficaria vazia.');
+  }
+
+  const source: ContactListSource = segment === 'known_leads' ? 'segment_known_leads' : 'segment_has_appointment';
+  const { data: listRow, error: listError } = await db
+    .from('broadcast_contact_lists')
+    .insert({ tenant_id: tenantId, name, source_filename: null, source, contact_count: uniquePairs.length, created_by: createdBy })
+    .select('*')
+    .single();
+  if (listError) throw listError;
+
+  const contactRows = uniquePairs.map((p) => ({
+    tenant_id: tenantId,
+    list_id: listRow.id,
+    phone: p.phone,
+    name: p.name,
+    variables: {},
+  }));
+  const { error: contactsError } = await db.from('broadcast_contacts').insert(contactRows);
+  if (contactsError) throw contactsError;
+
+  return { list: mapContactListRow(listRow), imported: uniquePairs.length, duplicatesIgnored: 0 };
 }
 
 export async function listContactLists(tenantId: string): Promise<BroadcastContactList[]> {
@@ -545,6 +616,7 @@ export interface BroadcastCampaignRecipient {
   tenantId: string;
   contactId: string;
   broadcastNumberId: string | null;
+  templateId: string | null;
   conversationId: string | null;
   phone: string;
   status: BroadcastRecipientStatus;
@@ -561,6 +633,7 @@ function mapRecipientRow(row: any): BroadcastCampaignRecipient {
     tenantId: row.tenant_id,
     contactId: row.contact_id,
     broadcastNumberId: row.broadcast_number_id ?? null,
+    templateId: row.template_id ?? null,
     conversationId: row.conversation_id ?? null,
     phone: row.phone,
     status: row.status,
@@ -579,6 +652,14 @@ export interface NumberAllocationInput {
 export interface CreateCampaignInput {
   name: string;
   templateId: string;
+  /**
+   * Templates equivalentes adicionais (mesma mensagem reescrita, já
+   * aprovados na Meta) — quando presente, o job alterna entre o
+   * `templateId` principal e esses por destinatário (round-robin), em vez
+   * de mandar o texto idêntico pra lista inteira. Vazio/omitido = mesmo
+   * comportamento de sempre (1 template só).
+   */
+  extraTemplateIds?: string[];
   contactListId: string;
   dedupeWindowDays: number;
   consentConfirmed: boolean;
@@ -641,6 +722,15 @@ export async function createCampaign(tenantId: string, input: CreateCampaignInpu
     if (error) throw error;
   }
 
+  // Templates da campanha: o principal (sempre) + variações extras, sem
+  // duplicar. Um só template = comportamento idêntico a antes desta
+  // feature existir (variableTemplateIds sempre tem length 1 nesse caso).
+  const variationTemplateIds = Array.from(new Set([input.templateId, ...(input.extraTemplateIds || [])]));
+  for (const templateId of variationTemplateIds) {
+    const { error } = await db.from('broadcast_campaign_templates').insert({ campaign_id: campaignId, template_id: templateId });
+    if (error) throw error;
+  }
+
   const recipientRows: Record<string, any>[] = [];
   const toSendContacts: BroadcastContact[] = [];
   for (const contact of contacts) {
@@ -667,9 +757,15 @@ export async function createCampaign(tenantId: string, input: CreateCampaignInpu
     toSendContacts.push(contact);
   }
 
-  // Divide os contatos que vão receber em blocos sequenciais do tamanho de
-  // cada allocation_count, na ordem em que os números foram escolhidos —
-  // simples e previsível, não round-robin (ver plano da feature).
+  // Divisão entre NÚMEROS: blocos sequenciais do tamanho de cada
+  // allocation_count, na ordem escolhida (ver plano da feature — não é
+  // round-robin). Divisão entre TEMPLATES: essa sim é round-robin, e é
+  // ortogonal à divisão de números — um índice global crescente por
+  // destinatário que vai receber de verdade, independente de qual número
+  // ele caiu.
+  let templateCursor = 0;
+  const nextTemplateId = () => variationTemplateIds[templateCursor++ % variationTemplateIds.length];
+
   let cursor = 0;
   for (const alloc of input.numberAllocations) {
     const block = toSendContacts.slice(cursor, cursor + alloc.count);
@@ -680,6 +776,7 @@ export async function createCampaign(tenantId: string, input: CreateCampaignInpu
         campaign_id: campaignId,
         contact_id: contact.id,
         broadcast_number_id: alloc.broadcastNumberId,
+        template_id: nextTemplateId(),
         phone: contact.phone,
         status: 'pending',
       });
@@ -696,6 +793,7 @@ export async function createCampaign(tenantId: string, input: CreateCampaignInpu
         campaign_id: campaignId,
         contact_id: contact.id,
         broadcast_number_id: lastAlloc.broadcastNumberId,
+        template_id: nextTemplateId(),
         phone: contact.phone,
         status: 'pending',
       });
@@ -752,6 +850,46 @@ export async function listCampaignNumbersWithDetails(tenantId: string, campaignI
   return allocations
     .map((alloc) => ({ ...alloc, number: byId.get(alloc.broadcastNumberId)! }))
     .filter((entry) => entry.number);
+}
+
+export interface CampaignTemplateLink {
+  id: string;
+  templateId: string;
+  headerMediaId: string | null;
+}
+
+/** Templates vinculados à campanha (o principal + variações), cru — sem juntar com broadcast_templates. */
+export async function listCampaignTemplateLinks(campaignId: string): Promise<CampaignTemplateLink[]> {
+  const db = getDb();
+  const { data, error } = await db.from('broadcast_campaign_templates').select('*').eq('campaign_id', campaignId);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({ id: row.id, templateId: row.template_id, headerMediaId: row.header_media_id ?? null }));
+}
+
+export interface CampaignTemplateWithDetails extends CampaignTemplateLink {
+  template: BroadcastTemplate;
+}
+
+/** Usado pelo job — junta broadcast_campaign_templates com o template de verdade (nome/idioma/variáveis/cabeçalho). */
+export async function listCampaignTemplatesWithDetails(tenantId: string, campaignId: string): Promise<CampaignTemplateWithDetails[]> {
+  const links = await listCampaignTemplateLinks(campaignId);
+  if (!links.length) return [];
+  const templateIds = links.map((l) => l.templateId);
+  const db = getDb();
+  const { data, error } = await db.from('broadcast_templates').select('*').eq('tenant_id', tenantId).in('id', templateIds);
+  if (error) throw error;
+  const byId = new Map((data || []).map((row: any) => [row.id, mapTemplateRow(row)]));
+  return links.map((link) => ({ ...link, template: byId.get(link.templateId)! })).filter((entry) => entry.template);
+}
+
+export async function setCampaignTemplateHeaderMediaId(campaignId: string, templateId: string, mediaId: string): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('broadcast_campaign_templates')
+    .update({ header_media_id: mediaId })
+    .eq('campaign_id', campaignId)
+    .eq('template_id', templateId);
+  if (error) throw error;
 }
 
 export interface CampaignRecipientCounts {
@@ -937,32 +1075,48 @@ export async function setCampaignHeaderMediaId(tenantId: string, campaignId: str
 
 /**
  * Transição pra `running` de verdade — engloba a validação de status normal
- * e, na 1ª vez que a campanha roda com um template de cabeçalho de imagem,
- * o upload fresco do `header_media_id` (reaproveitado por todo destinatário
- * de qualquer número da campanha). Antes esse upload só acontecia dentro da
- * rota PATCH; extraído pra cá porque o job de envio também precisa fazer a
- * mesma coisa ao promover sozinho uma campanha `scheduled` na hora marcada
- * — sem isso, uma campanha agendada com imagem de cabeçalho começaria a
- * rodar sem nunca ter feito o upload.
+ * e, na 1ª vez que a campanha roda, o upload fresco do `header_media_id` de
+ * CADA template vinculado que usa cabeçalho de imagem (uma campanha pode ter
+ * mais de um template — ver variação de template). Antes esse upload só
+ * acontecia dentro da rota PATCH; extraído pra cá porque o job de envio
+ * também precisa fazer a mesma coisa ao promover sozinho uma campanha
+ * `scheduled` na hora marcada — sem isso, uma campanha agendada com imagem
+ * de cabeçalho começaria a rodar sem nunca ter feito o upload. Idempotente:
+ * chamado de novo (ex.: retomar de `paused`) não refaz upload já feito.
  */
 export async function transitionCampaignToRunning(tenantId: string, campaignId: string): Promise<BroadcastCampaign> {
   let campaign = await updateCampaignStatus(tenantId, campaignId, 'running');
-  if (campaign.headerMediaId) return campaign;
 
-  const template = await getBroadcastTemplate(tenantId, campaign.templateId);
-  if (template?.headerType !== 'image') return campaign;
-  if (!template.headerImageBase64) {
-    throw new Error('Este template usa cabeçalho de imagem, mas nenhuma imagem foi salva nele ainda.');
-  }
+  // Campanhas criadas antes desta tabela existir não têm nenhum link — cai
+  // pro comportamento antigo (só o template principal da campanha).
+  let links = await listCampaignTemplateLinks(campaignId);
+  if (!links.length) links = [{ id: '', templateId: campaign.templateId, headerMediaId: campaign.headerMediaId }];
+
   const allocations = await listCampaignNumberAllocations(tenantId, campaignId);
   const firstNumber = allocations[0] ? await getBroadcastNumber(tenantId, allocations[0].broadcastNumberId) : null;
-  if (!firstNumber) throw new Error('Número de disparo da campanha não encontrado.');
 
-  const mimeMatch = template.headerImageBase64.match(/^data:([^;]+);base64,/);
-  const buffer = Buffer.from(stripDataUriPrefix(template.headerImageBase64), 'base64');
-  const mediaId = await uploadWhatsAppMedia(firstNumber.phoneNumberId, firstNumber.accessToken || undefined, buffer, mimeMatch?.[1] || 'image/jpeg', 'header.jpg');
-  await setCampaignHeaderMediaId(tenantId, campaignId, mediaId);
-  campaign = { ...campaign, headerMediaId: mediaId };
+  for (const link of links) {
+    if (link.headerMediaId) {
+      if (link.templateId === campaign.templateId && !campaign.headerMediaId) campaign = { ...campaign, headerMediaId: link.headerMediaId };
+      continue;
+    }
+    const template = await getBroadcastTemplate(tenantId, link.templateId);
+    if (template?.headerType !== 'image') continue;
+    if (!template.headerImageBase64) {
+      throw new Error(`O template "${template.name}" usa cabeçalho de imagem, mas nenhuma imagem foi salva nele ainda.`);
+    }
+    if (!firstNumber) throw new Error('Número de disparo da campanha não encontrado.');
+
+    const mimeMatch = template.headerImageBase64.match(/^data:([^;]+);base64,/);
+    const buffer = Buffer.from(stripDataUriPrefix(template.headerImageBase64), 'base64');
+    const mediaId = await uploadWhatsAppMedia(firstNumber.phoneNumberId, firstNumber.accessToken || undefined, buffer, mimeMatch?.[1] || 'image/jpeg', 'header.jpg');
+    if (link.id) await setCampaignTemplateHeaderMediaId(campaignId, link.templateId, mediaId);
+    if (link.templateId === campaign.templateId) {
+      await setCampaignHeaderMediaId(tenantId, campaignId, mediaId);
+      campaign = { ...campaign, headerMediaId: mediaId };
+    }
+  }
+
   return campaign;
 }
 

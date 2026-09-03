@@ -1,5 +1,6 @@
 import { getPlatformDb } from './db';
 import { buildCatalogThumbnail } from './catalogImageThumbnail';
+import { resolveKnowledgeBaseImageBinary } from './knowledgeBaseImageStore';
 import {
   resolveProductPrice,
   resolveProductPriceAmount,
@@ -91,10 +92,28 @@ function normalizeSlug(slug: string): string | null {
   return /^[a-z0-9][a-z0-9-]{0,79}$/.test(normalized) ? normalized : null;
 }
 
-async function publicBeforeAfterPair(pair: BeforeAfterPair): Promise<PublicBeforeAfterPair | null> {
+/** Credenciais do Storage + tenant, pra resolver a foto original (Storage ou fallback legado) antes de comprimir. */
+export interface CatalogImageContext {
+  supabaseUrl: string | undefined;
+  supabaseKey: string | undefined;
+  tenantId: string;
+}
+
+/** TASK-0218: busca o binário original (Storage se tiver `*ImageId`, senão o Base64 legado) e comprime — nunca expõe a foto original, sempre a miniatura. */
+async function resolveThumbnail(
+  ctx: CatalogImageContext,
+  imageId: string | undefined,
+  mimeType: string | undefined,
+  legacyBase64: string | undefined
+): Promise<string | undefined> {
+  const resolved = await resolveKnowledgeBaseImageBinary(ctx.supabaseUrl, ctx.supabaseKey, ctx.tenantId, imageId, mimeType, legacyBase64, 'publicCatalogStore:thumbnail');
+  return buildCatalogThumbnail(resolved?.buffer);
+}
+
+async function publicBeforeAfterPair(ctx: CatalogImageContext, pair: BeforeAfterPair): Promise<PublicBeforeAfterPair | null> {
   const [beforeImageUrl, afterImageUrl] = await Promise.all([
-    buildCatalogThumbnail(pair.beforeImageBase64),
-    buildCatalogThumbnail(pair.afterImageBase64),
+    resolveThumbnail(ctx, pair.beforeImageId, pair.beforeImageMimeType, pair.beforeImageBase64),
+    resolveThumbnail(ctx, pair.afterImageId, pair.afterImageMimeType, pair.afterImageBase64),
   ]);
   if (!beforeImageUrl || !afterImageUrl) return null;
   return {
@@ -105,22 +124,22 @@ async function publicBeforeAfterPair(pair: BeforeAfterPair): Promise<PublicBefor
   };
 }
 
-async function publicBeforeAfterPairs(pairs?: BeforeAfterPair[]): Promise<PublicBeforeAfterPair[] | undefined> {
+async function publicBeforeAfterPairs(ctx: CatalogImageContext, pairs?: BeforeAfterPair[]): Promise<PublicBeforeAfterPair[] | undefined> {
   if (!pairs?.length) return undefined;
-  const converted = await Promise.all(pairs.map(publicBeforeAfterPair));
+  const converted = await Promise.all(pairs.map((pair) => publicBeforeAfterPair(ctx, pair)));
   const valid = converted.filter((pair): pair is PublicBeforeAfterPair => pair !== null);
   return valid.length ? valid : undefined;
 }
 
-async function publicVariant(variant: ProductVariant): Promise<PublicCatalogVariant> {
+async function publicVariant(ctx: CatalogImageContext, variant: ProductVariant): Promise<PublicCatalogVariant> {
   const currentPrice = resolveVariantPrice(variant);
   const amount = resolveVariantPriceAmount(variant);
   return {
     code: variant.code,
     description: variant.description?.trim() || undefined,
-    imageUrl: await buildCatalogThumbnail(variant.exampleImageBase64),
+    imageUrl: await resolveThumbnail(ctx, variant.exampleImageId, variant.exampleImageMimeType, variant.exampleImageBase64),
     whatsappMessage: variant.whatsappMessage?.trim() || undefined,
-    beforeAfter: await publicBeforeAfterPairs(variant.beforeAfter),
+    beforeAfter: await publicBeforeAfterPairs(ctx, variant.beforeAfter),
     dimensions: variant.dimensions,
     litros: variant.litros,
     price: currentPrice,
@@ -129,7 +148,7 @@ async function publicVariant(variant: ProductVariant): Promise<PublicCatalogVari
   };
 }
 
-export async function toPublicCatalogProduct(product: AgentProduct, tenantCurrency: string): Promise<PublicCatalogProduct> {
+export async function toPublicCatalogProduct(product: AgentProduct, tenantCurrency: string, ctx: CatalogImageContext): Promise<PublicCatalogProduct> {
   const currentPrice = resolveProductPrice(product);
   const amount = resolveProductPriceAmount(product);
   return {
@@ -140,16 +159,18 @@ export async function toPublicCatalogProduct(product: AgentProduct, tenantCurren
     priceAmount: amount > 0 ? amount : undefined,
     currency: product.currency || tenantCurrency,
     durationMinutes: product.durationMinutes,
-    variants: product.variants ? await Promise.all(product.variants.map(publicVariant)) : undefined,
-    imageUrl: await buildCatalogThumbnail(product.exampleImageBase64),
-    beforeAfter: await publicBeforeAfterPairs(product.beforeAfter),
+    variants: product.variants ? await Promise.all(product.variants.map((variant) => publicVariant(ctx, variant))) : undefined,
+    imageUrl: await resolveThumbnail(ctx, product.exampleImageId, product.exampleImageMimeType, product.exampleImageBase64),
+    beforeAfter: await publicBeforeAfterPairs(ctx, product.beforeAfter),
   };
 }
 
 export async function toPublicCatalog(
-  tenant: { name: string; slug: string; currency: string; locale: string },
+  tenant: { id: string; name: string; slug: string; currency: string; locale: string },
   products: AgentProduct[],
+  storage: { supabaseUrl: string | undefined; supabaseKey: string | undefined },
 ): Promise<PublicCatalog> {
+  const ctx: CatalogImageContext = { supabaseUrl: storage.supabaseUrl, supabaseKey: storage.supabaseKey, tenantId: tenant.id };
   return {
     tenant: {
       name: tenant.name,
@@ -163,12 +184,12 @@ export async function toPublicCatalog(
     products: await Promise.all(
       products
         .filter((product) => product.active !== false)
-        .map((product) => toPublicCatalogProduct(product, tenant.currency)),
+        .map((product) => toPublicCatalogProduct(product, tenant.currency, ctx)),
     ),
   };
 }
 
-export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalog | null> {
+export async function getPublicCatalogBySlug(slug: string, storage: { supabaseUrl: string | undefined; supabaseKey: string | undefined }): Promise<PublicCatalog | null> {
   const normalizedSlug = normalizeSlug(slug);
   if (!normalizedSlug) return null;
 
@@ -188,7 +209,7 @@ export async function getPublicCatalogBySlug(slug: string): Promise<PublicCatalo
   const knowledgeBase = runtimeKnowledgeBase.knowledgeBase;
   if (!knowledgeBase) return null;
 
-  const catalog = await toPublicCatalog(tenant, knowledgeBase.products || []);
+  const catalog = await toPublicCatalog(tenant, knowledgeBase.products || [], storage);
   catalog.contact = {
     whatsappNumber: tenant.public_whatsapp_phone || undefined,
     instagramUrl: tenant.public_instagram_url || undefined,

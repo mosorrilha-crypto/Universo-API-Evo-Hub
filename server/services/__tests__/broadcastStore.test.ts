@@ -20,10 +20,13 @@ import {
   updateBroadcastNumber,
   createBroadcastTemplate,
   importContactList,
+  createContactListFromSegment,
   previewCampaignAllocation,
   createCampaign,
   getCampaignCounts,
   listCampaignNumberAllocations,
+  listCampaignTemplateLinks,
+  listCampaignTemplatesWithDetails,
   updateCampaignStatus,
   updateCampaignSchedule,
   transitionCampaignToRunning,
@@ -34,6 +37,7 @@ const TENANT_A = '11111111-1111-1111-1111-111111111111';
 
 beforeEach(() => {
   initDb(createFakeSupabase());
+  vi.mocked(uploadWhatsAppMedia).mockClear();
 });
 
 describe('broadcastNumbers CRUD', () => {
@@ -334,5 +338,96 @@ describe('listScheduledCampaignsDueToStart', () => {
     expect(dueIds).toContain(due.id);
     expect(dueIds).not.toContain(future.id);
     expect(dueIds).not.toContain(draft.id);
+  });
+});
+
+describe('createContactListFromSegment', () => {
+  it('segmento "known_leads" usa telefones que já têm conversation nesse tenant', async () => {
+    await getDb().from('conversations').insert([
+      { tenant_id: TENANT_A, phone: '595981111111', name: 'Já é lead' },
+      { tenant_id: TENANT_A, phone: '595982222222', name: 'Outro lead' },
+    ]);
+    const result = await createContactListFromSegment(TENANT_A, 'Leads conhecidos', 'known_leads', null);
+    expect(result.imported).toBe(2);
+    expect(result.list.source).toBe('segment_known_leads');
+    const contacts = await getDb().from('broadcast_contacts').select('*').eq('list_id', result.list.id);
+    expect((contacts.data || []).map((c: any) => c.phone).sort()).toEqual(['595981111111', '595982222222']);
+  });
+
+  it('segmento "has_appointment" só pega quem tem eventId real (não reservas provisórias)', async () => {
+    await getDb().from('appointments').insert([
+      { tenant_id: TENANT_A, phone: '595983333333', event_id: 'evt-real-1', summary: 'Corte', start_iso: '2026-09-05T10:00:00', end_iso: '2026-09-05T10:30:00', created_at: new Date().toISOString() },
+      { tenant_id: TENANT_A, phone: '595984444444', event_id: null, summary: 'Reserva sem evento', start_iso: '2026-09-06T10:00:00', end_iso: '2026-09-06T10:30:00', created_at: new Date().toISOString() },
+    ]);
+    const result = await createContactListFromSegment(TENANT_A, 'Já agendaram', 'has_appointment', null);
+    expect(result.imported).toBe(1);
+    expect(result.list.source).toBe('segment_has_appointment');
+    const contacts = await getDb().from('broadcast_contacts').select('*').eq('list_id', result.list.id);
+    expect((contacts.data || [])[0].phone).toBe('595983333333');
+  });
+
+  it('lança erro claro quando o segmento não encontra nenhum contato', async () => {
+    await expect(createContactListFromSegment(TENANT_A, 'Vazia', 'known_leads', null)).rejects.toThrow(/nenhum contato/i);
+  });
+});
+
+describe('variação de template numa campanha', () => {
+  async function setupTwoTemplatesAndNumber() {
+    const templateA = await createBroadcastTemplate(TENANT_A, { name: 'tpl_a', language: 'pt_BR', category: 'marketing', headerType: 'none', bodyVariableLabels: ['nome'] });
+    const templateB = await createBroadcastTemplate(TENANT_A, { name: 'tpl_b', language: 'pt_BR', category: 'marketing', headerType: 'none', bodyVariableLabels: ['nome'] });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1', accessToken: 'tok' });
+    return { templateA, templateB, number };
+  }
+
+  it('createCampaign com extraTemplateIds vincula os 2 templates e alterna round-robin entre os destinatários', async () => {
+    const { templateA, templateB, number } = await setupTwoTemplatesAndNumber();
+    const csvRows = Array.from({ length: 4 }, (_, i) => `59598${String(i).padStart(7, '0')},Contato ${i}`).join('\n');
+    const list = await importList('Lista', `phone,name\n${csvRows}`);
+
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'Campanha variada', templateId: templateA.id, extraTemplateIds: [templateB.id], contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 4 }], createdBy: null,
+    });
+
+    const links = await listCampaignTemplateLinks(campaign.id);
+    expect(links.map((l) => l.templateId).sort()).toEqual([templateA.id, templateB.id].sort());
+
+    const { data: recipients } = await getDb().from('broadcast_campaign_recipients').select('*').eq('campaign_id', campaign.id).eq('status', 'pending');
+    const templateIdsUsed = (recipients || []).map((r: any) => r.template_id);
+    expect(templateIdsUsed.filter((id: string) => id === templateA.id)).toHaveLength(2);
+    expect(templateIdsUsed.filter((id: string) => id === templateB.id)).toHaveLength(2);
+  });
+
+  it('sem extraTemplateIds, todos os destinatários recebem o template principal (comportamento antigo preservado)', async () => {
+    const { templateA, number } = await setupTwoTemplatesAndNumber();
+    const list = await importList('Lista', 'phone,name\n595981111111,A\n595982222222,B');
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'Campanha simples', templateId: templateA.id, contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 2 }], createdBy: null,
+    });
+    const { data: recipients } = await getDb().from('broadcast_campaign_recipients').select('*').eq('campaign_id', campaign.id);
+    expect((recipients || []).every((r: any) => r.template_id === templateA.id)).toBe(true);
+  });
+
+  it('transitionCampaignToRunning faz upload de header por template (cada um com sua própria imagem)', async () => {
+    const templateImgA = await createBroadcastTemplate(TENANT_A, {
+      name: 'tpl_img_a', language: 'pt_BR', category: 'marketing', headerType: 'image', bodyVariableLabels: [], headerImageBase64: 'data:image/jpeg;base64,QQ==',
+    });
+    const templateImgB = await createBroadcastTemplate(TENANT_A, {
+      name: 'tpl_img_b', language: 'pt_BR', category: 'marketing', headerType: 'image', bodyVariableLabels: [], headerImageBase64: 'data:image/jpeg;base64,Qg==',
+    });
+    const number = await createBroadcastNumber(TENANT_A, { label: 'N1', phoneNumberId: 'pnid-1', accessToken: 'tok' });
+    const list = await importList('Lista', 'phone,name\n595981111111,A\n595982222222,B');
+    const campaign = await createCampaign(TENANT_A, {
+      name: 'Campanha com 2 imagens', templateId: templateImgA.id, extraTemplateIds: [templateImgB.id], contactListId: list.list.id, dedupeWindowDays: 3,
+      consentConfirmed: true, numberAllocations: [{ broadcastNumberId: number.id, count: 2 }], createdBy: null,
+    });
+
+    const running = await transitionCampaignToRunning(TENANT_A, campaign.id);
+    expect(running.headerMediaId).toBe('media-id-test');
+    expect(uploadWhatsAppMedia).toHaveBeenCalledTimes(2);
+
+    const templatesWithDetails = await listCampaignTemplatesWithDetails(TENANT_A, campaign.id);
+    expect(templatesWithDetails.every((t) => t.headerMediaId === 'media-id-test')).toBe(true);
   });
 });
