@@ -38,4 +38,8 @@ describe('safeParseGeminiJson', () => {
   it('relança o erro original quando o JSON está truncado/cortado (nenhuma camada de recuperação consegue consertar)', () => {
     expect(() => safeParseGeminiJson('{"passed": true, "issues": ["texto cortado no meio')).toThrow();
   });
+
+  it('anexa um trecho do texto bruto à mensagem de erro, pra dar pra diagnosticar uma malformação nova sem log nenhum salvo em outro lugar', () => {
+    expect(() => safeParseGeminiJson('não gerei JSON nenhum dessa vez')).toThrow(/texto bruto recebido.*não gerei JSON nenhum dessa vez/s);
+  });
 });

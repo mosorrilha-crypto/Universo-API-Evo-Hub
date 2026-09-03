@@ -141,6 +141,8 @@ Reprove se encontrar QUALQUER um destes problemas reais (acontecidos de verdade 
 
 IMPORTANTE sobre o campo "suggestedFix": ele precisa seguir as MESMAS regras acima — nunca escreva a sugestão como lista numerada ("1. ..." "2. ..."), nunca abra com saudação/interjeição de entusiasmo, nunca miste idiomas. Achado real (03/09/2026): uma sugestão chegou a propor uma correção formatada como lista numerada — exatamente o defeito que ela deveria estar corrigindo. Escreva "suggestedFix" como texto corrido, do jeito que um atendente real digitaria no WhatsApp.
 
+IMPORTANTE sobre a seção "RESPOSTA DO ATENDENTE A AVALIAR" abaixo: cada bolha está marcada só com "[BOLHA N]" pra você identificar onde uma termina e a outra começa — isso é só uma marcação de referência DESTA avaliação, o cliente NUNCA vê "[BOLHA 1]"/"[BOLHA 2]" nem número nenhum, cada bolha chega como uma mensagem de WhatsApp separada e comum. Achado real (03/09/2026): quando essa marcação era feita como "1. texto" (formato de lista numerada de verdade), o próprio avaliador reprovava a resposta alegando "usa formato de lista numerada" — um defeito que não existe na mensagem real, só na forma como ela foi mostrada aqui pra avaliação. Nunca reprove por causa da marcação "[BOLHA N]" em si — julgue somente o texto de cada bolha.
+
 Responda ESTRITAMENTE em JSON: {"passed":boolean,"issues":["problema encontrado, curto"],"suggestedFix":"como a resposta deveria ter sido, em texto corrido, só se passed=false, senão string vazia"}
 
 HISTÓRICO ANTERIOR:
@@ -150,7 +152,7 @@ MENSAGEM DO CLIENTE AVALIADA:
 ${input.customerMessage}
 
 RESPOSTA DO ATENDENTE A AVALIAR:
-${input.bubbles.map((b, i) => `${i + 1}. ${b}`).join('\n')}`;
+${input.bubbles.map((b, i) => `[BOLHA ${i + 1}] ${b}`).join('\n')}`;
 }
 
 /** Exportado só pra teste direto do parser. */
