@@ -320,6 +320,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
   const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis'>('profile');
   const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
+  // Se o tenant ativo tem WABA (WhatsApp Business Account) configurado —
+  // usado pra bloquear "Reabrir a conversa" já na página, antes de abrir o
+  // modal, quando não há como enviar nenhum modelo de verdade (achado real
+  // de auditoria: o botão continuava sempre clicável mesmo sem WABA, e o
+  // aviso só aparecia depois de abrir o modal). Cacheado por tenant: a
+  // disponibilidade de WABA depende da conta do tenant, não da conversa.
+  const [reopenAvailability, setReopenAvailability] = useState<{ tenantId: string; wabaConfigured: boolean } | null>(null);
 
   // Item 2 do checklist visual (issue #100): flash breve na linha da lista
   // quando chega mensagem nova do cliente — mesmo em conversa que não está
@@ -1706,6 +1713,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [refreshContactContext]);
 
   const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
+
+  // Checa 1x por tenant se há WABA configurado, pra já bloquear "Reabrir a
+  // conversa" na página quando não há (ver GET /api/conversations/:phone/templates
+  // em conversations.ts — reason: 'waba_not_configured'). Falha de rede não
+  // marca nada (evita bloquear a página por causa de instabilidade
+  // passageira; o modal ainda mostra o estado real e permite tentar de novo).
+  useEffect(() => {
+    const tenantId = activeTenant?.id;
+    const phone = selectedLead?.phone;
+    const isRealConversation = Boolean((selectedLead as any)?.isReal);
+    if (!tenantId || !phone || !isRealConversation) return;
+    if (reopenAvailability?.tenantId === tenantId) return;
+    let cancelled = false;
+    apiFetch(`/api/conversations/${encodeURIComponent(phone)}/templates`)
+      .then((res) => res.json().catch(() => ({})))
+      .then((data) => {
+        if (cancelled) return;
+        setReopenAvailability({ tenantId, wabaConfigured: data?.reason !== 'waba_not_configured' });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal, reopenAvailability?.tenantId]);
+
+  const isReopenBlockedByWaba = reopenAvailability?.tenantId === activeTenant?.id && reopenAvailability.wabaConfigured === false;
 
   const handleSaveContactMemory = React.useCallback(async (patch: Partial<OperatorMemoryEditPayload>) => {
     const phone = selectedLead?.phone;
@@ -4686,6 +4717,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           <span className="text-zinc-400 hidden sm:inline">
                             O agente pode responder normalmente. A janela fecha {hoursRemaining}h depois de agora, se o cliente não escrever de novo.
                           </span>
+                        </div>
+                      ) : isReopenBlockedByWaba ? (
+                        <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Fale com o suporte para configurar a conta oficial do WhatsApp Business (WABA) desta empresa.">
+                          <Lock className="w-3.5 h-3.5 shrink-0" />
+                          <span>Janela de 24h fechada. Esta empresa ainda não tem WhatsApp Business (WABA) configurado — não é possível reabrir a conversa. Fale com o suporte.</span>
                         </div>
                       ) : (
                         <div className="flex items-center justify-between w-full">

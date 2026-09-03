@@ -16,6 +16,11 @@ export const ConversationMessageBubble: React.FC<ConversationMessageBubbleProps>
   onRetry,
 }) => {
   const [isPlayingAudio, setIsPlayingAudio] = React.useState(false);
+  // Duração/posição real do <audio>, não um valor fixo — achado real de
+  // auditoria: mostrava "0:15" pra qualquer áudio e a barra de progresso era
+  // uma transição CSS de 3s fixa, sem relação com o áudio de verdade.
+  const [audioDurationSec, setAudioDurationSec] = React.useState<number | null>(null);
+  const [audioCurrentSec, setAudioCurrentSec] = React.useState(0);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
   const isUser = message.sender === 'user' || message.sender === 'lead';
@@ -23,15 +28,41 @@ export const ConversationMessageBubble: React.FC<ConversationMessageBubbleProps>
   const isOperator = isAgent && message.sent_by === 'operator';
   const isSystem = message.sender === 'system';
 
-  // Toggle áudio
-  const togglePlayAudio = (audioUrl?: string) => {
-    if (!audioUrl) return;
-    if (!audioRef.current) {
-      audioRef.current = new Audio(audioUrl);
-      audioRef.current.onended = () => setIsPlayingAudio(false);
-      audioRef.current.onerror = () => setIsPlayingAudio(false);
-    }
+  const formatAudioTime = (totalSeconds: number) => {
+    const safeSeconds = Number.isFinite(totalSeconds) && totalSeconds >= 0 ? totalSeconds : 0;
+    const minutes = Math.floor(safeSeconds / 60);
+    const seconds = Math.floor(safeSeconds % 60);
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  };
 
+  // Pré-carrega metadata (duração real) assim que a mensagem de áudio
+  // aparece, sem esperar o clique em play — evita mostrar "--:--" à toa.
+  React.useEffect(() => {
+    if (message.type !== 'audio' || !message.mediaUrl) return;
+    const audio = new Audio(message.mediaUrl);
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => {
+      if (Number.isFinite(audio.duration)) setAudioDurationSec(audio.duration);
+    };
+    audio.ontimeupdate = () => setAudioCurrentSec(audio.currentTime);
+    audio.onended = () => {
+      setIsPlayingAudio(false);
+      setAudioCurrentSec(0);
+    };
+    audio.onerror = () => setIsPlayingAudio(false);
+    audioRef.current = audio;
+    setAudioDurationSec(null);
+    setAudioCurrentSec(0);
+    setIsPlayingAudio(false);
+
+    return () => {
+      audio.pause();
+      audioRef.current = null;
+    };
+  }, [message.type, message.mediaUrl]);
+
+  const togglePlayAudio = (audioUrl?: string) => {
+    if (!audioUrl || !audioRef.current) return;
     if (isPlayingAudio) {
       audioRef.current.pause();
       setIsPlayingAudio(false);
@@ -39,14 +70,6 @@ export const ConversationMessageBubble: React.FC<ConversationMessageBubbleProps>
       audioRef.current.play().then(() => setIsPlayingAudio(true)).catch(() => setIsPlayingAudio(false));
     }
   };
-
-  React.useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-    };
-  }, []);
 
   if (isSystem) {
     return (
@@ -126,9 +149,16 @@ export const ConversationMessageBubble: React.FC<ConversationMessageBubbleProps>
                 {isPlayingAudio ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
               </button>
               <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
-                <div className={`h-full bg-emerald-400 transition-all ${isPlayingAudio ? 'w-full duration-3000' : 'w-1/3'}`} />
+                <div
+                  className="h-full bg-emerald-400"
+                  style={{
+                    width: audioDurationSec ? `${Math.min(100, (audioCurrentSec / audioDurationSec) * 100)}%` : '0%',
+                  }}
+                />
               </div>
-              <span className="text-[11px] text-zinc-400">0:15</span>
+              <span className="text-[11px] text-zinc-400">
+                {audioDurationSec ? formatAudioTime(isPlayingAudio ? audioCurrentSec : audioDurationSec) : '--:--'}
+              </span>
             </div>
 
             {/* Transcrição de áudio se existir */}
