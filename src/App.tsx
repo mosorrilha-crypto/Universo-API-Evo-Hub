@@ -1333,6 +1333,7 @@ export const App: React.FC = () => {
         onSelectTenant={handleSelectTenant}
                 capabilities={tenantCapabilities}
         canAccessSaasAdmin={canSeeSaasMaster}
+        escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
       />
       </div>
       {activeTab !== 'whatsapp' && canSeeConversations && (
