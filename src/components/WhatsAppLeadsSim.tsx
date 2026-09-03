@@ -3331,8 +3331,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           de ferramentas via flexbox (mesma técnica já usada no mobile logo
           acima, só que agora também em `lg`), sem depender de nenhuma
           constante chutada. Precisa de `App.tsx` também não escapar mais
-          pra `lg:block lg:h-auto` no wrapper do Atendimento — ver lá. */}
-      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 min-h-[560px] lg:min-h-0 lg:border lg:border-slate-800/60 lg:rounded-2xl lg:shadow-lg">
+          pra `lg:block lg:h-auto` no wrapper do Atendimento — ver lá.
+
+          TASK-0221 (pedido direto, 03/09/2026): a borda/cantos
+          arredondados/sombra que só existiam a partir de `lg`
+          (`lg:border lg:rounded-2xl lg:shadow-lg`) davam à shell a cara de
+          "cartão flutuante" no meio da tela — exatamente o que o dono do
+          produto pediu pra tirar, comparando com o WhatsApp Web (edge to
+          edge em qualquer largura). Removidas — a shell fica sempre
+          `border-0 rounded-none shadow-none`, igual ao mobile, agora
+          também em desktop. */}
+      <div className="atendimento-chat-shell relative bg-[#111b21] border-0 rounded-none shadow-none overflow-hidden grid grid-cols-1 lg:grid-cols-12 flex-1 min-h-[560px] lg:min-h-0">
 
         {/* ========================================== */}
         {/* COLUMN 1: Fila de conversas — 3/12 quando o painel auxiliar está fechado */}
