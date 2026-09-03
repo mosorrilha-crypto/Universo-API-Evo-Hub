@@ -1011,8 +1011,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if (isNearBottom) setNewMessagesWhileAway(0);
   };
 
-  /** Barra de controles reais (Ativo/Restrito/Pausado, Calendar, Auto IA) — o ícone "Config" da barra lateral estilo WhatsApp Web rola até aqui, em vez de fingir uma tela de configurações que não existe. */
-  const toolbarRef = React.useRef<HTMLDivElement>(null);
   // Achado real testando com o Lucas em produção ("dá pra otimizar as
   // caixas de ferramenta"): a barra de controles tinha 7-8 botões numa
   // linha só, quebrando em 3-4 linhas no mobile. Ações de configuração
@@ -3006,174 +3004,39 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // sendo flex-col, o chat-shell (último filho, `flex-1 min-h-0`) passa
     // a ocupar de verdade o espaço que sobra depois da barra de controles
     // acima dele.
-    <div className="atendimento-conversations space-y-4 max-w-7xl mx-auto animate-page-enter flex flex-col flex-1 min-h-0">
-      {/* Controls Bar — achado real em produção: as duas barras acima disso
-          (seletor "Ambiente" produção/sandbox e o card "Instância Online" /
-          "Motor: Z-API Managed" / "Failover Ativo" / botões "Número Real &
-          API" e "Ver QR Code") eram inteiramente decorativas — vinham de
-          campos mock do Tenant local (nunca sincronizados com o backend
-          real), o alerta do próprio modal de config já admitia "esta tela
-          ainda NÃO envia a configuração pro servidor", e o QR Code era um
-          padrão de quadrados fixo, nunca gerado de verdade (a geração real
-          já existe em server/routes/admin.ts, Epic 4.6, sem UI ligada a
-          ela ainda). Removidas — poluíam a tela com informação falsa sobre
-          o estado da conexão real (que é sempre a resolvida pelo JWT/
-          phone_number_id no backend, nunca essa seleção local). "Limpar
-          Testes" era o único botão real desse trecho — preservado abaixo.
-
-          Achado real, 29/08/2026 (pedido do dono do produto com print,
-          "ficou um espaço no top" comparando com o WhatsApp real): todo
-          botão desta fileira já é `hidden lg:flex` ou fica dentro do
-          `hidden sm:contents` logo abaixo — no mobile/tablet, com o painel
-          de Ferramentas fechado (estado padrão), este cartão inteiro
-          renderizava vazio (só padding/borda/sombra), empurrando a conversa
-          pra baixo à toa. Escondido especificamente quando não há nada pra
-          mostrar; continua visível quando o painel de Ferramentas está
-          aberto (mobileThreadOpen usa a mesma `isToolbarSettingsOpen` — é o
-          destino real da aba inferior "Ferramentas", TASK-0147) e sempre
-          visível a partir de `lg` (desktop de verdade), onde a fileira já
-          tem conteúdo de verdade.
-
-          TASK-0212 (pedido direto, 01/09/2026, achado real ao investigar um
-          2º print): o gate original era `sm:block` (640px+, sem teto) — na
-          faixa de tablet (640–1023px) essa caixa E a `.atendimento-bottom-
-          nav` (`lg:hidden`) ficavam visíveis AO MESMO TEMPO, duplicando os
-          mesmos 3 botões (Pendências/Agenda/Ferramentas, mesmos handlers
-          dos dois lados). Trocado pra `lg:block` — agora cada faixa de
-          largura tem exatamente UMA barra dona: abaixo de `lg` só a
-          bottom-nav, a partir de `lg` só esta caixa. `lg:max-w-xs` (já
-          adicionado antes) mantém ela estreita e alinhada à esquerda, mais
-          perto da largura da coluna 1 (lista de conversas) do que esticada
-          por cima da conversa aberta também. */}
-      {/* TASK-0212: achado real ao revisar esta condição — o "isToolbarSettingsOpen
-          ? '' : hidden ..." antigo forçava esta caixa a ficar visível abaixo
-          do breakpoint sempre que o painel de Ferramentas era aberto, mas
-          TODO botão/conteúdo de dentro dela (inclusive o painel expandido)
-          já é `lg:`-only — resultado: abaixo de `lg`, com Ferramentas
-          aberta, esta caixa renderizava vazia (só padding/borda/sombra),
-          exatamente o bug que o comentário de 29/08 dizia já ter corrigido
-          (na época só cobria a faixa abaixo de `sm`; o gate `lg` desta
-          tarefa alargaria o mesmo bug pra 640–1023px se a condição não
-          fosse simplificada). Removida a exceção — abaixo de `lg` o estado
-          "Ferramentas aberta" é 100% coberto pela gaveta (`lg:hidden`, mais
-          abaixo), que já tem seu próprio cabeçalho + botão de fechar.
-
-          TASK-0213 (pedido direto, 02/09/2026): "não quero isso como um
-          módulo, quero ele integrado à página igual o cabeçalho" — tirado
-          o visual de cartão flutuante (rounded-card/border/shadow/bg
-          própria/max-w-xs, que fazia ela parecer uma caixinha separada boiando
-          sobre a lista) e trocado pelo mesmo estilo flush já usado na faixa
-          "Status do agente" logo abaixo (fundo sólido igual ao da coluna,
-          só uma borda fina embaixo) — integrada à página, não mais um
-          "widget" à parte. */}
-      <div className="flex-shrink-0 hidden lg:block bg-[#111b21] border-b border-slate-800/30 px-3 py-2">
-        {/* Pedido direto do dono do produto (03/09/2026, print a 100% de
-            zoom no desktop): "mesma experiência de utilização do WhatsApp" —
-            os 3 botões abaixo trocaram de pílula com texto ao lado do ícone
-            pra ícone em cima + rótulo pequeno embaixo, mesma linguagem
-            visual já usada na `.atendimento-bottom-nav` mobile (só que aqui
-            cada botão é `flex-col` isolado, não a classe CSS mobile, que é
-            pensada pra 4 itens esticados em largura total). */}
-        {/* Achado real: o bloco de título (ícone+"WhatsApp"+nome do tenant)
-            só repetia informação já visível na aba ativa logo acima
-            (Header.tsx) e no cabeçalho da página — removido por completo
-            pra a caixa ficar mais estreita, sobrando só a fileira de ações
-            de verdade abaixo. */}
-        <div ref={toolbarRef} className="flex items-center gap-2 overflow-x-auto scrollbar-thin -mx-1 px-1 pb-0.5">
-          {/* Atalho pra Escalonamentos — pedido real do operador: ter acesso
-              direto daqui. Achado real ao revisar este comentário (TASK-0212,
-              01/09/2026): ele dizia que "Header.tsx já tem a aba
-              Escalonamentos com o mesmo contador" — checado agora, isso NÃO
-              é verdade, `Header.tsx` não tem nenhuma referência a
-              'escalations' — este botão (junto com o item "Pendências" da
-              `.atendimento-bottom-nav`) é a ÚNICA rota da UI pra
-              `activeTab === 'escalations'`. Corrigido aqui pra não repetir a
-              afirmação errada. No mobile/tablet esse atalho já existe na
-              barra inferior estilo WhatsApp (ícone "Pendências", 28/08/2026)
-              — some daqui abaixo de `lg` (era `sm`, achado real do 2º print
-              desta tarefa: as duas barras ficavam visíveis ao mesmo tempo
-              entre 640–1023px, duplicando o mesmo botão). */}
-          {onGoToEscalations && (
-            <button
-              onClick={onGoToEscalations}
-              className="hidden lg:flex relative flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-[var(--pending)] hover:bg-[var(--pending-surface)] transition-all cursor-pointer whitespace-nowrap"
-              title={t('pending')}
-            >
-              <AlertTriangle className="w-5 h-5" />
-              <span className="text-[11px] font-medium leading-none">{t('pending')}</span>
-              {escalationsPendingCount > 0 && (
-                <span className="absolute top-0 right-1.5 px-1 py-0.5 rounded-full text-[9px] leading-none bg-red-500 text-white font-bold">
-                  {escalationsPendingCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {/* "Abrir ficha" saiu daqui (TASK-0212, 01/09/2026, pedido direto —
-              print comparando com o WhatsApp Web): a Ficha IA só faz sentido
-              com uma conversa aberta, mas esta fileira fica visível mesmo
-              sem nenhum lead selecionado. Botão equivalente agora mora no
-              cabeçalho da conversa aberta, junto dos outros ícones que já
-              são exclusivos dela (ver render do `.atendimento-thread`). */}
-
-          {/* Status e Arquivadas saíram desta fileira (14/08/2026, pedido
-              direto): moveram pra dentro da caixa de conversas, na fileira
-              de filtros ao lado de "Tudo"/"Não lidos" — mais perto de onde
-              afetam (a lista de conversas), sem duplicar espaço aqui. */}
-
-          {/* Modo "somente anúncios" e Gatilhos saíram desta fileira
-              (29/08/2026, pedido do dono do produto) — viraram ícones na
-              faixa "Status do agente", acima da lista (ver mais abaixo).
-              Agenda continua aqui só a partir de `lg` (era `sm` — mesmo
-              achado do 2º print da TASK-0212: duplicava com o ícone próprio
-              da barra inferior entre 640–1023px). */}
-          <button
-            onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
-            title={googleCalendarConnected ? 'Ver agenda — o que já está marcado' : 'Conectar Google Calendar (necessário pro agente agendar de verdade)'}
-            className={`hidden lg:flex flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap ${
-              googleCalendarConnected
-                ? 'text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
-            }`}
-          >
-            <CalendarIcon className="w-5 h-5" />
-            <span className="text-[11px] font-medium leading-none">{googleCalendarConnected === null ? '…' : googleCalendarConnected ? t('schedule') : t('organizeSchedule')}</span>
-          </button>
-
-          {/* Configurações pontuais e ações secundárias — "Ferramentas"
-              (renomeado de "Mais opções", 28/08/2026, pra combinar com o
-              nome real do WhatsApp). No mobile/tablet o gatilho já existe na
-              barra inferior (ícone "Ferramentas"); some daqui abaixo de
-              `lg` (era `sm` — mesmo achado do 2º print da TASK-0212), mas o
-              painel que ele abre (isToolbarSettingsOpen) continua o mesmo. */}
-          <button
-            type="button"
-            onClick={() => setIsToolbarSettingsOpen((v) => !v)}
-            title="Configurações e ações secundárias"
-            className={`hidden lg:flex flex-shrink-0 flex-col items-center gap-0.5 px-3 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap ${
-              isToolbarSettingsOpen
-                ? 'text-emerald-300 bg-emerald-500/20'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Settings className="w-5 h-5" />
-            <span className="text-[11px] font-medium leading-none">Ferramentas</span>
-          </button>
-        </div>
-
-        {/* Achado real, 29/08/2026 (pedido do dono do produto): esse painel
-            empurrava a lista inteira pra baixo no mobile ao abrir
-            "Ferramentas" — inline só faz sentido no desktop (onde o botão
-            que abre isso, logo acima, agora só existe a partir de `lg`,
-            TASK-0212). No mobile/tablet o mesmo conteúdo (toolbarSettingsBody,
-            extraído antes do "return" deste componente) vira uma gaveta, ver
-            mais abaixo perto do drawer da Ficha IA. */}
-        {isToolbarSettingsOpen && (
-          <div className="hidden lg:flex w-full flex-wrap items-center gap-2.5 pt-3 mt-1 border-t border-emerald-500/20">
-            {toolbarSettingsBody}
-          </div>
-        )}
-      </div>
+    //
+    // TASK-0225 (achado real, 03/09/2026): este `max-w-7xl mx-auto` era um
+    // teto de largura RESQUÍCIO que a TASK-0222 ("Atendimento borda a
+    // borda em desktop") não pegou — ela só zerou o padding/max-width do
+    // `.app-main` por fora e a borda/cantos do `.atendimento-chat-shell`,
+    // mas este wrapper interno continuava capando a área de conversa em
+    // 1280px e centralizando com `mx-auto`. Resultado real reportado pelo
+    // dono do produto: em monitor mais largo que isso, o FUNDO da página
+    // ia até a borda (TASK-0222 funcionando), mas a conversa em si ficava
+    // presa numa "janelinha" de 1280px flutuando no meio de um vão vazio
+    // — "a caixa está muito estreita ... e a janela muito pequena".
+    // Removido — a área de conversa agora estica de verdade até onde o
+    // `.app-main` já permite.
+    <div className="atendimento-conversations space-y-4 animate-page-enter flex flex-col flex-1 min-h-0">
+      {/* TASK-0225 (pedido direto, 03/09/2026): a barra de ferramentas
+          exclusiva de desktop (Pendências/Agenda/Ferramentas, `hidden
+          lg:block`, histórico completo nas TASK-0212/0213/0221) foi
+          removida — o dono do produto apontou que "Ferramentas" só tinha
+          UM item de verdade (o toggle de notificação push) e pediu pra
+          excluir a barra inteira. As 3 ações migraram:
+          - Pendências (escalonamento) → ícone com badge no `Header.tsx`,
+            ao lado do seletor de idioma (sempre visível, qualquer aba,
+            não depende de conversa aberta).
+          - Agenda (atalho rápido pra ver/conectar Google Calendar) → sem
+            substituto próprio; "unificar as agendas" — a aba "Agenda"
+            completa que já existe no menu superior do Header cobre a
+            necessidade.
+          - Ferramentas (toggle "Ativar notificações", `handleTogglePush`)
+            → item novo dentro do menu ⋮ do cabeçalho da conversa aberta
+            (ver `isHeaderMenuOpen` mais abaixo).
+          Mobile/tablet não muda em nada — a `.atendimento-bottom-nav`
+          mantém seus próprios ícones de Pendências/Agenda/Ferramentas
+          (com a gaveta que reaproveita `toolbarSettingsBody`), intocados. */}
 
       {/* Error Alert */}
       {errorMsg && (
@@ -3878,6 +3741,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Phone className="w-3.5 h-3.5" />
                               <span>Abrir no WhatsApp</span>
                             </button>
+                            {/* TASK-0225: "Ativar notificações" (push do PWA
+                                do atendente, issue #159) mudou de casa — vinha
+                                da barra de ferramentas exclusiva de desktop
+                                que foi removida (só tinha esse item). Mesma
+                                lógica (`handleTogglePush`/`pushEnabled`/
+                                `pushBusy`), agora dentro deste menu — que já é
+                                visível em qualquer largura (sem `hidden
+                                lg:*`), então funciona igual em mobile e
+                                desktop. */}
+                            <button
+                              onClick={() => { void handleTogglePush(); setIsHeaderMenuOpen(false); }}
+                              disabled={pushBusy}
+                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
+                              title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
+                            >
+                              {pushEnabled ? <Bell className="w-3.5 h-3.5 text-emerald-300" /> : <BellOff className="w-3.5 h-3.5" />}
+                              <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
+                            </button>
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
@@ -4386,8 +4267,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </div>
                         )}
 
+                        {/* TASK-0225: `lg:max-w-2xl` some com o teto real da
+                            coluna de conversa (removido acima, era um
+                            `max-w-7xl` residual) — sem um teto absoluto, um
+                            balão de mensagem curta esticaria até 85% de uma
+                            coluna agora bem mais larga em monitores grandes,
+                            prejudicando leitura. `max-w-[85%]` continua
+                            sendo a regra em qualquer largura menor que isso. */}
                         <div
-                          className={`max-w-[85%] rounded-xl shadow-sm text-sm relative overflow-hidden ${isLead ? 'rounded-tl-none' : 'rounded-tr-none'} ${
+                          className={`max-w-[85%] lg:max-w-2xl rounded-xl shadow-sm text-sm relative overflow-hidden ${isLead ? 'rounded-tl-none' : 'rounded-tr-none'} ${
                             isLead || isMediaBubble
                               ? 'bg-[#202c33] text-[#e9edef]'
                               : msg.sentBy === 'operator'

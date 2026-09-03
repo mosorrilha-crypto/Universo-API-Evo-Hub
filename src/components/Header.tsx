@@ -8,6 +8,7 @@ import { hasRoleAtLeast } from '../lib/roles';
 import type { TenantNavigationCapabilities } from '../lib/tenantCapabilities';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import {
+  AlertTriangle,
   Brain,
   CalendarDays,
   CheckCircle2,
@@ -46,6 +47,10 @@ interface HeaderProps {
   capabilities: TenantNavigationCapabilities;
   /** Confirmação vinda do servidor; impede que perfil antigo do navegador libere Empresas. */
   canAccessSaasAdmin?: boolean;
+  /** TASK-0225: contagem de escalonamentos pendentes, pro ícone de
+      Pendências ao lado do seletor de idioma (desktop) — mesma expressão
+      já calculada em App.tsx pra WhatsAppLeadsSim. */
+  escalationsPendingCount?: number;
 }
 
 type NavigationItem = { id: ActiveTab; label: string; icon: React.ReactNode; accent?: 'emerald' | 'sky' | 'amber' };
@@ -66,6 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectTenant,
   capabilities,
   canAccessSaasAdmin,
+  escalationsPendingCount = 0,
 }) => {
   const { language, setLanguage, theme, setTheme } = useAppPreferences();
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -254,8 +260,21 @@ export const Header: React.FC<HeaderProps> = ({
   // menu não registrava. env(safe-area-inset-top) é 0 em navegador normal
   // (não muda nada fora de PWA em tela cheia/notch), então esse padding só
   // entra em ação exatamente no caso que quebrava.
+  // TASK-0226 (achado real, 03/09/2026, pedido direto): este wrapper
+  // sempre teve `mx-auto max-w-7xl` fixo, sem saber que a TASK-0222/0225
+  // tornaram o conteúdo do Atendimento borda a borda (zera padding/
+  // max-width em `.app-main--atendimento`, só quando `activeTab ===
+  // 'whatsapp'`) — resultado real reportado: em monitor largo, o
+  // cabeçalho e a fileira de abas ficavam presos e centralizados em
+  // 1280px enquanto a conversa abaixo já esticava até a borda ("o
+  // cabeçalho e o menu não estão estendendo junto"). Sem teto só quando
+  // a aba ativa é Atendimento — nas outras abas (Vendas/Agenda/
+  // Financeiro/etc.), o conteúdo abaixo continua capado em `max-w-7xl`
+  // (não mudou), então o cabeçalho precisa continuar capado igual, senão
+  // o mesmo desalinhamento apareceria ao contrário nessas telas.
+  const headerInnerClassName = activeTab === 'whatsapp' ? 'px-4 sm:px-6 lg:px-8' : 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8';
   return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div className={headerInnerClassName}>
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">
         {/* Escala aumentada (pedido real, 01/09/2026, com print comparando lado a lado com o WhatsApp Business real): o logo+nome ficava bem menor que o wordmark "WhatsApp" do app real, mesma proporção do ajuste já feito na conversa aberta (TASK-0164). */}
         <div className="flex min-w-0 items-center gap-2"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-5 h-5" /></div><span className="truncate text-lg font-bold text-white">Universo</span></div>
@@ -347,7 +366,10 @@ export const Header: React.FC<HeaderProps> = ({
       )}
       <div className="hidden items-center justify-between gap-5 py-4 md:flex">
         <div className="flex min-w-0 items-center gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-inner"><MessageSquare className="w-5 h-5" /></div><div className="min-w-0"><h1 className="truncate text-xl font-bold tracking-tight text-white">{copy.platform}</h1><p className="truncate text-xs text-slate-400">{copy.subtitle}</p></div></div>
-        <div className="flex shrink-0 items-center gap-2"><div className="flex items-center gap-0.5 rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label="Idioma"><button type="button" onClick={() => setLanguage('pt')} className={`rounded-md px-2 py-1 text-[10px] font-bold transition-colors ${language === 'pt' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>PT</button><button type="button" onClick={() => setLanguage('es')} className={`rounded-md px-2 py-1 text-[10px] font-bold transition-colors ${language === 'es' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>ES</button></div><button type="button" onClick={toggleTheme} className="rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white" title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button>{currentUser ? <div className="relative" ref={profileMenuRef}><button type="button" onClick={() => currentUser.role === 'saas_admin' ? setIsProfileMenuOpen((value) => !value) : onOpenLoginModal()} className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/90 p-1.5 pl-2.5 text-left text-slate-200 transition-colors hover:bg-slate-800"><img src={currentUser.avatar} alt={currentUser.name} className="h-7 w-7 rounded-full border border-emerald-500/50 object-cover" /><span className="hidden max-w-28 truncate text-xs font-bold text-white lg:block">{currentUser.name}</span><ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isProfileMenuOpen ? 'rotate-180' : ''}`} /></button>{currentUser.role === 'saas_admin' && isProfileMenuOpen && <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-2xl"><p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{copy.activeCompany}</p><div className="max-h-56 space-y-1 overflow-y-auto">{tenants.map((tenant) => <button key={tenant.id} type="button" onClick={() => { onSelectTenant(tenant); setIsProfileMenuOpen(false); }} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${tenant.id === activeTenant.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}><span className="truncate">{tenant.name}</span>{tenant.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />}</button>)}</div><button type="button" onClick={() => { setIsProfileMenuOpen(false); onOpenLoginModal(); }} className="mt-2 w-full border-t border-slate-800 px-2.5 pt-2 text-left text-xs font-medium text-slate-300 hover:text-white">{copy.changeOperator}</button></div>}</div> : <button type="button" onClick={onOpenLoginModal} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-emerald-400"><User className="w-4 h-4" />{copy.signIn}</button>}{currentUser && <button type="button" onClick={onLogout} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300" title={copy.signOut}><LogOut className="w-4 h-4" /></button>}</div>
+        <div className="flex shrink-0 items-center gap-2">{/* TASK-0225: ícone de Pendências (escalonamento), pedido direto do dono do produto — "coloca do lado do seletor de idioma". Antes vivia só na barra de ferramentas exclusiva de desktop do Atendimento (removida na mesma tarefa) e na `.atendimento-bottom-nav` mobile; aqui fica sempre visível, em qualquer aba, sem depender de ter uma conversa aberta. Mesmo gate de capability (`canSeeConversations`, já calculado acima) que decide se a aba "Conversas" aparece no menu. */}{canSeeConversations && <button type="button" onClick={() => setActiveTab('escalations')} className="relative rounded-lg border border-slate-700 bg-slate-950 p-2 text-[var(--pending)] transition-colors hover:bg-slate-800" title="Pendências">
+          <AlertTriangle className="w-4 h-4" />
+          {escalationsPendingCount > 0 && <span className="absolute -top-1 -right-1 min-w-[1.1rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[1.1rem] text-white">{escalationsPendingCount}</span>}
+        </button>}<div className="flex items-center gap-0.5 rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label="Idioma"><button type="button" onClick={() => setLanguage('pt')} className={`rounded-md px-2 py-1 text-[10px] font-bold transition-colors ${language === 'pt' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>PT</button><button type="button" onClick={() => setLanguage('es')} className={`rounded-md px-2 py-1 text-[10px] font-bold transition-colors ${language === 'es' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>ES</button></div><button type="button" onClick={toggleTheme} className="rounded-lg border border-slate-700 bg-slate-950 p-2 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white" title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}>{theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button>{currentUser ? <div className="relative" ref={profileMenuRef}><button type="button" onClick={() => currentUser.role === 'saas_admin' ? setIsProfileMenuOpen((value) => !value) : onOpenLoginModal()} className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/90 p-1.5 pl-2.5 text-left text-slate-200 transition-colors hover:bg-slate-800"><img src={currentUser.avatar} alt={currentUser.name} className="h-7 w-7 rounded-full border border-emerald-500/50 object-cover" /><span className="hidden max-w-28 truncate text-xs font-bold text-white lg:block">{currentUser.name}</span><ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isProfileMenuOpen ? 'rotate-180' : ''}`} /></button>{currentUser.role === 'saas_admin' && isProfileMenuOpen && <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-2xl"><p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{copy.activeCompany}</p><div className="max-h-56 space-y-1 overflow-y-auto">{tenants.map((tenant) => <button key={tenant.id} type="button" onClick={() => { onSelectTenant(tenant); setIsProfileMenuOpen(false); }} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${tenant.id === activeTenant.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}><span className="truncate">{tenant.name}</span>{tenant.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />}</button>)}</div><button type="button" onClick={() => { setIsProfileMenuOpen(false); onOpenLoginModal(); }} className="mt-2 w-full border-t border-slate-800 px-2.5 pt-2 text-left text-xs font-medium text-slate-300 hover:text-white">{copy.changeOperator}</button></div>}</div> : <button type="button" onClick={onOpenLoginModal} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-emerald-400"><User className="w-4 h-4" />{copy.signIn}</button>}{currentUser && <button type="button" onClick={onLogout} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300" title={copy.signOut}><LogOut className="w-4 h-4" /></button>}</div>
       </div>
       {/* TASK-0212 (pedido direto, 01/09/2026, print comparando com o
           WhatsApp Web): esta fileira inteira (Escuro/Claro/Azul/Limpo)
