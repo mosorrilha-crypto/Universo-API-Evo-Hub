@@ -392,6 +392,47 @@ const PRESET_TEMPLATES: { name: string; icon: string; desc: string; data: Partia
   }
 ];
 
+/**
+ * TASK-0218: preview de uma imagem da Base de Conhecimento que já migrou pro
+ * Storage — a rota (`GET /api/knowledge-base/images/:imageId`) exige o JWT
+ * no header `Authorization`, que um `<img src="...">` direto nunca envia, por
+ * isso busca via `apiFetch` (mesmo wrapper usado pro resto do painel) e
+ * converte pra Object URL local. `imageId` ausente cai pro `fallbackSrc`
+ * (Base64 legado inline, sem fetch nenhum). Cada instância gerencia seu
+ * próprio Object URL e revoga no unmount/troca de imageId — nunca vaza.
+ */
+const KnowledgeBaseImagePreview: React.FC<{ imageId?: string; fallbackSrc?: string; alt: string; className?: string }> = ({ imageId, fallbackSrc, alt, className }) => {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!imageId) {
+      setObjectUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setObjectUrl(null);
+    apiFetch(`/api/knowledge-base/images/${encodeURIComponent(imageId)}`)
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((blob) => {
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setObjectUrl(createdUrl);
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn('Falha ao carregar preview da imagem:', err);
+      });
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [imageId]);
+
+  const src = imageId ? objectUrl : fallbackSrc;
+  if (!src) return null;
+  return <img src={src} alt={alt} className={className} />;
+};
+
 interface BeforeAfterEditorProps {
   label: string;
   pairs?: BeforeAfterPair[];
@@ -400,14 +441,15 @@ interface BeforeAfterEditorProps {
 
 const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onChange }) => {
   const comparisons = pairs || [];
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const addPair = () => onChange([...comparisons, {
     id: `before-after-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    beforeImageBase64: '',
-    afterImageBase64: '',
   }]);
   const removePair = (id: string) => onChange(comparisons.filter((pair) => pair.id !== id));
   const updatePair = (id: string, patch: Partial<BeforeAfterPair>) => onChange(comparisons.map((pair) => pair.id === id ? { ...pair, ...patch } : pair));
-  const uploadImage = (id: string, side: 'before' | 'after', event: React.ChangeEvent<HTMLInputElement>) => {
+  // TASK-0218: sobe pro Storage do backend na hora (mesmo padrão já usado
+  // pro vídeo) — só a referência (id) fica no formData, nunca mais Base64.
+  const uploadImage = async (id: string, side: 'before' | 'after', event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -415,15 +457,38 @@ const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onC
       alert('Selecione uma imagem para a comparação.');
       return;
     }
-    if (file.size > 4 * 1024 * 1024) {
-      alert('Cada imagem da comparação pode ter no máximo 4 MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Cada imagem da comparação pode ter no máximo 5 MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => updatePair(id, side === 'before'
-      ? { beforeImageBase64: String(reader.result), beforeImageMimeType: file.type }
-      : { afterImageBase64: String(reader.result), afterImageMimeType: file.type });
-    reader.readAsDataURL(file);
+    const uploadKey = `${id}:${side}`;
+    setUploadingKey(uploadKey);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
+      updatePair(id, side === 'before'
+        ? { beforeImageId: imageId, beforeImageMimeType: mimeType, beforeImageFileName: fileName, beforeImageSizeBytes: sizeBytes, beforeImageBase64: undefined }
+        : { afterImageId: imageId, afterImageMimeType: mimeType, afterImageFileName: fileName, afterImageSizeBytes: sizeBytes, afterImageBase64: undefined });
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem da comparação:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingKey(null);
+    }
   };
 
   return (
@@ -442,12 +507,21 @@ const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onC
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             {(['before', 'after'] as const).map((side) => {
-              const image = side === 'before' ? pair.beforeImageBase64 : pair.afterImageBase64;
+              const imageId = side === 'before' ? pair.beforeImageId : pair.afterImageId;
+              const fallbackSrc = side === 'before' ? pair.beforeImageBase64 : pair.afterImageBase64;
+              const hasImage = !!imageId || !!fallbackSrc;
+              const isUploading = uploadingKey === `${pair.id}:${side}`;
               return (
                 <label key={side} className="group relative flex min-h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-md border border-dashed border-slate-700 bg-slate-900 text-[9px] font-medium text-slate-400 hover:border-violet-400/60 hover:text-violet-200">
-                  {image ? <img src={image} alt={side === 'before' ? 'Antes' : 'Depois'} className="absolute inset-0 h-full w-full object-cover" /> : <><ImageIcon className="mb-1 h-3.5 w-3.5" />{side === 'before' ? 'Foto do antes' : 'Foto do depois'}</>}
-                  {image && <span className="relative z-10 rounded bg-slate-950/80 px-1.5 py-0.5">Trocar {side === 'before' ? 'antes' : 'depois'}</span>}
-                  <input type="file" accept="image/*" className="hidden" onChange={(event) => uploadImage(pair.id, side, event)} />
+                  {isUploading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : hasImage ? (
+                    <KnowledgeBaseImagePreview imageId={imageId} fallbackSrc={fallbackSrc} alt={side === 'before' ? 'Antes' : 'Depois'} className="absolute inset-0 h-full w-full object-cover" />
+                  ) : (
+                    <><ImageIcon className="mb-1 h-3.5 w-3.5" />{side === 'before' ? 'Foto do antes' : 'Foto do depois'}</>
+                  )}
+                  {hasImage && !isUploading && <span className="relative z-10 rounded bg-slate-950/80 px-1.5 py-0.5">Trocar {side === 'before' ? 'antes' : 'depois'}</span>}
+                  <input type="file" accept="image/*" className="hidden" disabled={isUploading} onChange={(event) => uploadImage(pair.id, side, event)} />
                 </label>
               );
             })}
@@ -1033,7 +1107,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const productStats = useMemo(() => {
     const active = formData.products.filter((p) => p.active !== false).length;
     const withVariants = formData.products.filter((p) => !!p.variants?.length).length;
-    const withMedia = formData.products.filter((p) => !!p.exampleImageBase64 || !!p.exampleVideoId).length;
+    const withMedia = formData.products.filter((p) => !!p.exampleImageId || !!p.exampleImageBase64 || !!p.exampleVideoId).length;
     return { active, withVariants, withMedia, pending: knowledgeAudit.actionableProductIds.size };
   }, [formData.products, knowledgeAudit.actionableProductIds]);
 
@@ -1124,39 +1198,94 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     }));
   };
 
-  const handleProductImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  // Mesmo limite real da Meta Cloud API pra mensagem de imagem (MAX_IMAGE_BYTES em knowledgeBaseImageStore.ts).
+  const MAX_IMAGE_INPUT_SIZE_MB = 5;
+  const [uploadingImageForId, setUploadingImageForId] = useState<string | null>(null);
+
+  // TASK-0218: sobe pro Storage do backend na hora (mesmo padrão do vídeo,
+  // handleProductVideoUpload) — só a referência (exampleImageId) fica no
+  // formData local, nunca mais Base64 inline (era a causa raiz confirmada do
+  // estouro de egress documentado em TASK-0074/0075).
+  const handleProductImageChange = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result);
+    if (!file.type.startsWith('image/')) {
+      alert(`Arquivo não é uma imagem (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Imagem maior que ${MAX_IMAGE_INPUT_SIZE_MB}MB. Comprima antes de enviar.`);
+      return;
+    }
+    setUploadingImageForId(id);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
       setFormData((prev) => ({
         ...prev,
-        products: prev.products.map((p) => (p.id === id ? { ...p, exampleImageBase64: base64, exampleImageMimeType: file.type } : p)),
+        products: prev.products.map((p) =>
+          p.id === id ? { ...p, exampleImageId: imageId, exampleImageMimeType: mimeType, exampleImageFileName: fileName, exampleImageSizeBytes: sizeBytes, exampleImageBase64: undefined } : p
+        ),
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingImageForId(null);
+    }
   };
 
-  const handleVariantImageChange = (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVariantImageChange = async (productId: string, index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result);
+    if (!file.type.startsWith('image/')) {
+      alert(`Arquivo não é uma imagem (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Imagem maior que ${MAX_IMAGE_INPUT_SIZE_MB}MB. Comprima antes de enviar.`);
+      return;
+    }
+    const uploadKey = `variant:${productId}:${index}`;
+    setUploadingImageForId(uploadKey);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
       setFormData((prev) => ({
         ...prev,
         products: prev.products.map((product) => product.id !== productId || !product.variants ? product : {
           ...product,
           variants: product.variants.map((variant, variantIndex) => variantIndex === index
-            ? { ...variant, exampleImageBase64: base64, exampleImageMimeType: file.type }
+            ? { ...variant, exampleImageId: imageId, exampleImageMimeType: mimeType, exampleImageFileName: fileName, exampleImageSizeBytes: sizeBytes, exampleImageBase64: undefined }
             : variant),
         }),
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem da variação:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingImageForId(null);
+    }
   };
 
   const handleProductBeforeAfterChange = (productId: string, pairs: BeforeAfterPair[]) => {
@@ -1346,16 +1475,42 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
   const handleFirstContactBlockTextChange = (id: string, value: string) => updateFirstContactBlock(id, { text: value });
 
-  const handleFirstContactBlockImageChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFirstContactBlockImageChange = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => updateFirstContactBlock(id, { imageBase64: String(reader.result), imageMimeType: file.type });
-    reader.readAsDataURL(file);
+    if (!file.type.startsWith('image/')) {
+      alert(`Arquivo não é uma imagem (${file.type || 'formato desconhecido'}).`);
+      return;
+    }
+    if (file.size > MAX_IMAGE_INPUT_SIZE_MB * 1024 * 1024) {
+      alert(`Imagem maior que ${MAX_IMAGE_INPUT_SIZE_MB}MB. Comprima antes de enviar.`);
+      return;
+    }
+    setUploadingImageForId(id);
+    try {
+      const base64 = await fileToBase64Local(file);
+      const res = await apiFetch('/api/knowledge-base/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}) as any);
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const { imageId, mimeType, fileName, sizeBytes } = await res.json();
+      updateFirstContactBlock(id, { imageId, imageMimeType: mimeType, imageFileName: fileName, imageSizeBytes: sizeBytes, imageBase64: undefined });
+    } catch (err: any) {
+      console.error('Falha ao enviar imagem:', err);
+      alert(`Não foi possível enviar a imagem: ${err.message || 'tente novamente'}.`);
+    } finally {
+      setUploadingImageForId(null);
+    }
   };
 
-  const handleFirstContactBlockImageRemove = (id: string) => updateFirstContactBlock(id, { imageBase64: undefined, imageMimeType: undefined });
+  const handleFirstContactBlockImageRemove = (id: string) =>
+    updateFirstContactBlock(id, { imageId: undefined, imageMimeType: undefined, imageFileName: undefined, imageSizeBytes: undefined, imageBase64: undefined });
 
   const handleFirstContactBlockVideoUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2776,10 +2931,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-400/60"
                         />
                         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 p-2">
-                          {variant.exampleImageBase64 && <img src={variant.exampleImageBase64} alt={`Foto de ${variant.code || 'variação'}`} className="h-9 w-9 rounded-md border border-slate-700 object-cover" />}
+                          {(variant.exampleImageId || variant.exampleImageBase64) && (
+                            <KnowledgeBaseImagePreview imageId={variant.exampleImageId} fallbackSrc={variant.exampleImageBase64} alt={`Foto de ${variant.code || 'variação'}`} className="h-9 w-9 rounded-md border border-slate-700 object-cover" />
+                          )}
                           <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-sky-300 hover:text-sky-200">
-                            <ImageIcon className="h-3 w-3" /> {variant.exampleImageBase64 ? 'Trocar foto' : 'Foto desta variação'}
-                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleVariantImageChange(prod.id, vIndex, e)} />
+                            <ImageIcon className="h-3 w-3" /> {uploadingImageForId === `variant:${prod.id}:${vIndex}` ? 'Enviando foto…' : (variant.exampleImageId || variant.exampleImageBase64) ? 'Trocar foto' : 'Foto desta variação'}
+                            <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === `variant:${prod.id}:${vIndex}`} onChange={(e) => handleVariantImageChange(prod.id, vIndex, e)} />
                           </label>
                           <label className="inline-flex cursor-pointer items-center gap-1 text-[9px] font-semibold text-emerald-300 hover:text-emerald-200">
                             <Video className="h-3 w-3" /> {uploadingVideoForId === `variant:${prod.id}:${vIndex}` ? 'Enviando vídeo…' : variant.exampleVideoId ? 'Trocar vídeo' : 'Vídeo desta variação'}
@@ -2835,14 +2992,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
                     </div>
                   </div>}
                   <div className="flex items-center gap-2 pt-1">
-                    {prod.exampleImageBase64 ? (
-                      <img src={prod.exampleImageBase64} alt={prod.name} className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
+                    {uploadingImageForId === prod.id ? (
+                      <div className="w-10 h-10 rounded-lg border border-slate-700 flex items-center justify-center text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                    ) : (prod.exampleImageId || prod.exampleImageBase64) ? (
+                      <KnowledgeBaseImagePreview imageId={prod.exampleImageId} fallbackSrc={prod.exampleImageBase64} alt={prod.name} className="w-10 h-10 rounded-lg object-cover border border-slate-700" />
                     ) : (
                       <div className="w-10 h-10 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px]">sem foto</div>
                     )}
                     <label className="text-[10px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
-                      {prod.exampleImageBase64 ? 'Trocar foto' : 'Adicionar foto de exemplo'}
-                      <input type="file" accept="image/*" className="hidden" onChange={(e) => handleProductImageChange(prod.id, e)} />
+                      {uploadingImageForId === prod.id ? 'Enviando foto…' : (prod.exampleImageId || prod.exampleImageBase64) ? 'Trocar foto' : 'Adicionar foto de exemplo'}
+                      <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === prod.id} onChange={(e) => handleProductImageChange(prod.id, e)} />
                     </label>
                   </div>
                   <div className="flex items-center gap-2 pt-1">
@@ -3211,17 +3370,19 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
                       {block.type === 'image' && (
                         <div className="flex items-center gap-3">
-                          {block.imageBase64 ? (
-                            <img src={block.imageBase64} alt="Bloco de imagem" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
+                          {uploadingImageForId === block.id ? (
+                            <div className="w-14 h-14 rounded-lg border border-slate-700 flex items-center justify-center text-slate-400"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                          ) : (block.imageId || block.imageBase64) ? (
+                            <KnowledgeBaseImagePreview imageId={block.imageId} fallbackSrc={block.imageBase64} alt="Bloco de imagem" className="w-14 h-14 rounded-lg object-cover border border-slate-700" />
                           ) : (
                             <div className="w-14 h-14 rounded-lg border border-dashed border-slate-700 flex items-center justify-center text-slate-600 text-[9px] text-center">sem imagem</div>
                           )}
                           <div className="flex flex-col gap-1.5">
                             <label className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer font-semibold">
-                              {block.imageBase64 ? 'Trocar imagem' : 'Adicionar imagem'}
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFirstContactBlockImageChange(block.id, e)} />
+                              {uploadingImageForId === block.id ? 'Enviando…' : (block.imageId || block.imageBase64) ? 'Trocar imagem' : 'Adicionar imagem'}
+                              <input type="file" accept="image/*" className="hidden" disabled={uploadingImageForId === block.id} onChange={(e) => handleFirstContactBlockImageChange(block.id, e)} />
                             </label>
-                            {block.imageBase64 && (
+                            {(block.imageId || block.imageBase64) && (
                               <button
                                 type="button"
                                 onClick={() => handleFirstContactBlockImageRemove(block.id)}

@@ -117,7 +117,7 @@ async function startServer() {
 
   // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
   // slug e só publica tenants explicitamente habilitados na migration 0042.
-  app.use(createPublicCatalogRouter());
+  app.use(createPublicCatalogRouter({ supabaseUrl: config.supabaseUrl, supabaseKey: config.supabaseKey }));
   app.use(createCommercialOfferRouter());
 
   app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));

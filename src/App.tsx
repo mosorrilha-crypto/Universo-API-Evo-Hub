@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
+import {
   ActiveTab,
   Tenant,
   UserProfile,
@@ -12,6 +12,7 @@ import {
   EscalationInfo,
   SystemIncidentInfo
 } from './types';
+import { stripLegacyImageBase64FromProduct } from './lib/knowledgeBaseImageCache';
 import { Header } from './components/Header';
 import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
@@ -671,15 +672,22 @@ export const App: React.FC = () => {
     safeSetLocalStorage(transactionsCacheKey(activeTenant.id), JSON.stringify(transactions));
   }, [transactions, activeTenant.id]);
 
-  // As fotos de exemplo (`exampleImageBase64`, Epic 4.5.2) são o que estoura
-  // a cota — e não precisam estar no cache: são carregadas de novo, completas,
+  // As fotos de exemplo em Base64 legado (Epic 4.5.2) são o que estoura a
+  // cota — e não precisam estar no cache: são carregadas de novo, completas,
   // do backend real logo abaixo (GET /api/knowledge-base) toda vez que a
   // página abre. O cache existe só pra evitar a tela vazia entre o primeiro
-  // render e essa busca terminar, não pra guardar imagem nenhuma.
+  // render e essa busca terminar, não pra guardar imagem nenhuma. Fotos já
+  // migradas pro Storage (`exampleImageId` etc.) são ids curtos — seguras
+  // pro cache, ficam.
   useEffect(() => {
     const cacheableKb = {
       ...knowledgeBase,
-      products: knowledgeBase.products.map(({ exampleImageBase64, exampleImageMimeType, ...rest }) => rest),
+      products: knowledgeBase.products.map(stripLegacyImageBase64FromProduct),
+      firstContactBlocks: knowledgeBase.firstContactBlocks?.map((block) => {
+        if (block.type !== 'image') return block;
+        const { imageBase64, ...rest } = block;
+        return rest;
+      }),
     };
     safeSetLocalStorage(kbCacheKey(activeTenant.id), JSON.stringify(cacheableKb));
   }, [knowledgeBase, activeTenant.id]);
