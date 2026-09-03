@@ -19,6 +19,57 @@ pagamento/CRM. **Está em produção com um tenant pagante real** (um studio de 
 mensagens reais de clientes — qualquer mudança no caminho mensagem/agendamento/pagamento exige
 cuidado extra (ver `CLAUDE.md` na raiz pra convenções de código e comandos).
 
+## Mapa visual (onboarding)
+
+`docs/mapa-do-projeto/index.html` é uma versão navegável no navegador do
+conteúdo deste guia — diagramas de fluxo por área (mensagem, agenda/
+financeiro, CRM/qualidade, marketing/catálogo, administração/alertas),
+glossário do que cada arquivo do repositório representa, tabela de estado
+real por área, pendências marcadas dentro do próprio fluxo, e (desde
+02/09/2026, TASK-0215) uma seção 09 de **fluxo geral unificado** mostrando
+como as cinco áreas se conectam entre si — pensada pra quem está começando
+a se orientar no projeto. Abra localmente no navegador
+(`file://.../docs/mapa-do-projeto/index.html`); não é servido pela
+aplicação.
+
+Também existe publicado como página web em:
+**https://claude.ai/code/artifact/b7a564a3-024a-4b15-848a-c1323fbc1f4a**
+— mesmo conteúdo do arquivo acima, mas acessível por link sem precisar
+clonar o repositório. É um Claude Artifact vinculado à conta do dono do
+produto, já com compartilhamento habilitado (qualquer um com o link
+consegue abrir, não precisa estar logado na mesma conta).
+
+Desde 02/09/2026 (TASK-0219) também existe uma segunda cópia hospedada
+independentemente no Render, pra outros analistas acessarem sem depender
+de conta/link do Claude:
+**https://universo-mapa-arquitetura.onrender.com**
+— servida como Static Site a partir de `docs/mapa-do-projeto/site/index.html`,
+uma cópia derivada (não a mesma fonte do Artifact acima) com o Mermaid
+carregado via CDN e inicializado no carregamento, já que a renderização de
+diagrama do arquivo original depende de injeção feita pelo próprio Artifact
+na hora de publicar — fora dele, os `<pre class="mermaid">` apareceriam como
+texto cru. Hoje aponta pra branch `claude/gestor-refinamento-atendimento-mwu1a7`
+(auto-deploy a cada commit nela), não pra `main` — reapontar pro Render se/quando
+essa branch for mesclada e apagada. **Ao editar o mapa, atualize as três coisas
+na mesma tarefa:** o arquivo fonte, a cópia standalone em `site/index.html`
+(ou regenere-a) e republique o Artifact — do contrário os três ficam
+desatualizados entre si sem aviso.
+
+**Regra pras próximas sessões:** hoje todo editor deste repositório é uma
+sessão de Claude, então editar o arquivo sem republicar o link é
+considerado tarefa incompleta, não um passo opcional separado. Sempre que
+mudar `docs/mapa-do-projeto/index.html` por uma mudança estrutural real do
+projeto (nova fase concluída, gap fechado, feature nova — o mesmo gatilho
+que já vale pra este guia), na mesma tarefa: (1) edite o arquivo local,
+(2) republique o Artifact **na mesma URL acima** (nunca crie um artefato
+novo pra isso — perde o link já compartilhado), (3) valide lint/testes/
+build antes de commitar. É um **snapshot mantido manualmente, atualizado
+por último em 02/09/2026** (inclui o PR #587/TASK-0208-0209 e a seção de
+fluxo geral unificado + pendência do Microsoft Clarity, TASK-0215) — se ninguém
+seguir esse passo, o link fica com conteúdo desatualizado mesmo com o
+arquivo do repositório já correto. Este arquivo (`GUIA-DO-PROJETO.md`)
+continua sendo a fonte de verdade em caso de conflito entre os dois.
+
 ## Arquitetura em uma tela
 
 ```
