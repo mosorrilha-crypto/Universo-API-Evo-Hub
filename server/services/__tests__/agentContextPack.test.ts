@@ -75,4 +75,72 @@ describe('Agent Context Pack', () => {
     expect(patch.factsConfirmed).toBeUndefined();
     expect(patch.nextBestAction).toContain('revisão humana do pagamento');
   });
+
+  // TASK-0246: inferServiceInterest passou a casar contra o catálogo real
+  // do tenant em vez de uma lista fixa de 3 categorias de estética
+  // (achado real: nunca detectava nada pra um tenant de outro segmento).
+  it('detecta o interesse pela categoria do catálogo real do tenant, mesmo fora do vocabulário de estética', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: null,
+      agent: 'triagem',
+      text: 'Vocês fazem limpeza de piscina residencial?',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      knowledgeBase: {
+        products: [
+          { name: 'Manutenção mensal', price: 'sob consulta', category: 'Limpeza de piscina' },
+          { name: 'Troca de areia do filtro', price: 'sob consulta' },
+        ],
+      } as any,
+    });
+
+    expect(patch.serviceInterest).toBe('Limpeza de piscina');
+  });
+
+  it('detecta o interesse pelo nome/apelido do produto quando não há categoria batendo', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: null,
+      agent: 'triagem',
+      text: 'Queria saber o valor do Combo Full Face',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      knowledgeBase: {
+        products: [
+          { name: 'Design de sobrancelhas premium', aliases: ['Combo Full Face'], price: 'sob consulta' },
+        ],
+      } as any,
+    });
+
+    expect(patch.serviceInterest).toBe('Design de sobrancelhas premium');
+  });
+
+  it('ignora produto pausado (active: false) na inferência de interesse', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: null,
+      agent: 'triagem',
+      text: 'Vocês fazem retoque?',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      knowledgeBase: {
+        products: [
+          { name: 'Retoque', price: 'sob consulta', category: 'Retoque', active: false },
+        ],
+      } as any,
+    });
+
+    expect(patch.serviceInterest).toBeUndefined();
+  });
+
+  it('cai no fallback legado de estética quando o tenant não tem catálogo cadastrado', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: null,
+      agent: 'triagem',
+      text: 'Quiero preguntar por mis pestañas.',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      knowledgeBase: null,
+    });
+
+    expect(patch.serviceInterest).toBe('pestañas/extensiones');
+  });
 });

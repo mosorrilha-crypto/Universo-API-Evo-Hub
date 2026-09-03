@@ -3494,6 +3494,48 @@ html[data-theme='clean'] .bg-rose-950\/80,
 html[data-theme='clean'] .bg-red-950\/40,
 html[data-theme='clean'] .bg-red-950\/60 { background-color: #FEF2F2 !important; }
 
+/* TASK-0246 (pedido direto, 03/09/2026): `ContactContextPanel.tsx` ("Ficha
+   do Contato", adicionada um dia antes desta correção) usa variantes
+   -500/-600 cruas de sky/amber/rose que nunca tinham entrado nesta
+   auditoria (que até aqui só cobria a família -950 e alguns -400) — em
+   claro/limpo elas ficavam com o tom escuro original (badge/borda
+   praticamente invisível ou destoando do resto do painel já alinhado ao
+   tema). Mesmos valores já usados pras variantes -950/-400 equivalentes
+   dessas mesmas cores, pra manter consistência com o resto do app — não
+   inclui `bg-sky-600`/`hover:bg-sky-500`/`focus:border-sky-500` (botão
+   sólido com texto branco fixo e anel de foco: legíveis em qualquer tema
+   sem remapear). */
+html[data-theme='light'] .bg-amber-500\/10 { background-color: #FFF4D8 !important; }
+html[data-theme='clean'] .bg-amber-500\/10 { background-color: #FFFBEB !important; }
+
+html[data-theme='light'] .bg-sky-500\/10,
+html[data-theme='light'] .bg-sky-500\/20 { background-color: #E7F4F6 !important; }
+html[data-theme='clean'] .bg-sky-500\/10,
+html[data-theme='clean'] .bg-sky-500\/20 { background-color: #F0F9FF !important; }
+
+html[data-theme='light'] .border-amber-500\/20,
+html[data-theme='light'] .border-amber-500\/25 { border-color: #E6BB58 !important; }
+html[data-theme='clean'] .border-amber-500\/20,
+html[data-theme='clean'] .border-amber-500\/25 { border-color: #F59E0B !important; }
+
+html[data-theme='light'] .border-sky-500,
+html[data-theme='light'] .border-sky-500\/15,
+html[data-theme='light'] .border-sky-500\/25 { border-color: #9BCFD6 !important; }
+html[data-theme='clean'] .border-sky-500,
+html[data-theme='clean'] .border-sky-500\/15,
+html[data-theme='clean'] .border-sky-500\/25 { border-color: #60A5FA !important; }
+
+html[data-theme='light'] .border-rose-500\/30 { border-color: #E6B8AC !important; }
+html[data-theme='clean'] .border-rose-500\/30 { border-color: #FCA5A5 !important; }
+
+html[data-theme='light'] .text-amber-100\/80,
+html[data-theme='light'] .text-amber-100\/85 { color: #825300 !important; }
+html[data-theme='clean'] .text-amber-100\/80,
+html[data-theme='clean'] .text-amber-100\/85 { color: #B45309 !important; }
+
+html[data-theme='light'] .text-sky-300\/70 { color: #0D718A !important; }
+html[data-theme='clean'] .text-sky-300\/70 { color: #0369A1 !important; }
+
 /*
  * TASK-0051 — linguagem de superfícies em degradê.
  * O degradê é reservado aos headers e painéis principais; controles, tabelas,

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { parseMetaWebhookPayload, parseEvolutionWebhookPayload, parseInstagramWebhookPayload, friendlyLabelForOtherType, type ParsedIncomingMessage } from '../services/webhookParsers';
 import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
-import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched, updateMessageText } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, executeApprovedMediaAction, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
@@ -13,7 +13,8 @@ import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaS
 import { showEvolutionTyping } from '../services/evolutionSend';
 import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
-import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getRuntimeKnowledgeBase, getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
@@ -540,13 +541,35 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
               } else if (msg.type === 'audio' || msg.type === 'image') {
                 const placeholderText = msg.type === 'audio' ? '🎤 Áudio enviado' : '📷 Imagem enviada';
                 await recordOutgoingMessage(tenantId, msg.from, { type: msg.type, text: placeholderText, timestamp: nowLabel }, 'operator', undefined, undefined, msg.messageId);
+                const isAudio = msg.type === 'audio';
                 downloadEvolutionMedia(
                   { id: msg.messageId, remoteJid: `${msg.from}@s.whatsapp.net` },
                   resolvedTenant.evolutionInstanceName,
                   resolvedTenant.evolutionApiUrl,
                   resolvedTenant.evolutionApiKey
                 )
-                  .then((downloaded) => saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType))
+                  .then(async (downloaded) => {
+                    await saveMediaImage(supabaseUrl, supabaseKey, msg.messageId, downloaded.base64, downloaded.mimeType);
+                    // Achado real de produção (03/09/2026): áudio mandado
+                    // DIRETO do celular (fora do painel) nunca era
+                    // transcrito — só o placeholder fixo "🎤 Áudio enviado"
+                    // ficava salvo pra sempre, diferente do áudio enviado
+                    // pelo painel (/send-media em conversations.ts, que já
+                    // transcreve) e do áudio recebido do cliente
+                    // (transcriptionQueue.ts). Mesmo mecanismo dos outros
+                    // dois casos, aplicado aqui.
+                    if (!isAudio) return;
+                    try {
+                      const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, downloaded.base64, downloaded.mimeType, {
+                        leadName: msg.contactName,
+                        customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+                      });
+                      const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+                      await updateMessageText(tenantId, msg.from, msg.messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
+                    } catch (transcriptionError: any) {
+                      console.warn(`⚠️  [Eco de envio] Falha ao transcrever áudio mandado direto do celular (${msg.from}):`, transcriptionError?.message || transcriptionError);
+                    }
+                  })
                   .catch((err) => console.warn(`❌ [Eco de envio] Falha ao baixar mídia mandada direto do celular (${msg.from}):`, err.message));
               }
               console.log(`📱 [Eco de envio] tenant=${tenantId} mensagem mandada direto do celular (fora do painel) pra ${msg.from} — gravada como operador.`);
