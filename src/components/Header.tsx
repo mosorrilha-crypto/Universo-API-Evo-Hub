@@ -272,7 +272,10 @@ export const Header: React.FC<HeaderProps> = ({
   // Financeiro/etc.), o conteúdo abaixo continua capado em `max-w-7xl`
   // (não mudou), então o cabeçalho precisa continuar capado igual, senão
   // o mesmo desalinhamento apareceria ao contrário nessas telas.
-  const headerInnerClassName = activeTab === 'whatsapp' ? 'px-4 sm:px-6 lg:px-8' : 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8';
+  //
+  // TASK-0231 (03/09/2026): mesma lógica estendida pra "Qualidade da IA"
+  // (`app-main--quality`, index.css) — agora também borda a borda.
+  const headerInnerClassName = activeTab === 'whatsapp' || activeTab === 'quality' ? 'px-4 sm:px-6 lg:px-8' : 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8';
   return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
     <div className={headerInnerClassName}>
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">

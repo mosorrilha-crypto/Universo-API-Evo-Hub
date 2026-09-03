@@ -1365,8 +1365,19 @@ export const App: React.FC = () => {
           mas some pro Atendimento) e todo o padding, inclusive em `lg`, a
           pedido direto do dono do produto pra ocupar 100% da tela também
           em desktop, sem cartão flutuante nem faixas de fundo nas
-          laterais. */}
-      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' ? ' app-main--atendimento' : ''}`}>
+          laterais.
+
+          TASK-0231 (pedido direto, 03/09/2026): mesmo tratamento
+          estendido pra aba "Qualidade da IA" — `.app-main--quality` reusa
+          a MESMA regra CSS de `.app-main--atendimento` (index.css, `.app-
+          main.app-main--atendimento, .app-main.app-main--quality { max-
+          width: none; padding: 0; }`), zerando padding/max-width só
+          nessa aba. `OperationsModuleFrame` (que envolve o conteúdo desta
+          aba) já tem seu próprio card com padding/borda/cantos
+          arredondados — não depende do padding do `.app-main` pra ter
+          respiro, então zerar aqui é seguro (mesma lógica já validada no
+          Atendimento). */}
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' ? ' app-main--atendimento' : activeTab === 'quality' ? ' app-main--quality' : ''}`}>
         
         {/* Toast Alert */}
         {toastMsg && (

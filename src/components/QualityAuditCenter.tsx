@@ -597,8 +597,18 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
     return <AgentContextUsageDocumentation onBack={() => setShowUsageDocumentation(false)} />;
   }
 
+  // TASK-0231 (pedido direto, 03/09/2026): esta seção usava a classe
+  // `quality-workspace--clear` (index.css), que forçava cores fixas
+  // "claras" com `!important` INDEPENDENTE do tema selecionado — achado
+  // real ao investigar um print: a página sempre aparecia clara/branca em
+  // qualquer um dos 4 temas (dark/light/blue/clean), porque essa regra
+  // sobrescrevia o sistema de temas já existente (que já remapeia
+  // corretamente `bg-slate-900`/`text-white`/`text-slate-400`/etc. pra
+  // cada tema, usado pelo resto do app). Removida — a página agora herda
+  // o mesmo sistema de temas já usado em todo o resto do painel, em vez
+  // de uma paleta fixa própria.
   return (
-    <section className="quality-workspace quality-workspace--clear space-y-5 animate-fade-in">
+    <section className="quality-workspace space-y-5 animate-fade-in">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-sky-300 text-xs font-semibold uppercase tracking-[0.18em]">
