@@ -91,6 +91,28 @@ export async function finishAgentEvalRun(runId: string, outcome: { status: 'comp
   if (error) throw error;
 }
 
+const ORPHANED_RUN_ERROR = 'Processo do servidor reiniciado (deploy) no meio da rodada — nunca teria como completar sozinha.';
+
+/**
+ * Achado real (03/09/2026): a rodada roda em background dentro do processo
+ * Node que recebeu o POST (`runAgentEvaluation`, chamado por
+ * `server/routes/qualityAudit.ts`) — se um deploy reinicia o processo no
+ * meio da rodada, a linha fica presa em "running" pra sempre, porque
+ * nenhum outro processo sabe que ela existe pra terminar. Chamado uma vez
+ * na subida do servidor (`server.ts`): qualquer linha "running" já
+ * existente nesse momento é, por definição, órfã (este processo acabou de
+ * começar, não pode ter uma rodada sua própria ainda em andamento).
+ */
+export async function reconcileOrphanedAgentEvalRuns(): Promise<number> {
+  const { data, error } = await getDb()
+    .from('agent_eval_runs')
+    .update({ status: 'failed', error: ORPHANED_RUN_ERROR, finished_at: new Date().toISOString() })
+    .eq('status', 'running')
+    .select('id');
+  if (error) throw error;
+  return (data || []).length;
+}
+
 export async function listAgentEvalRuns(tenantId: string, limit = 20): Promise<AgentEvalRun[]> {
   const { data, error } = await getDb().from('agent_eval_runs')
     .select('*')
