@@ -58,7 +58,7 @@ vi.mock('../globalPromptStore', async (importOriginal) => {
   return { ...actual, getGlobalPromptLayerOverride };
 });
 
-const { generateAutoReplyForText } = await import('../autoReply');
+const { generateAutoReplyForText, executeApprovedMediaAction } = await import('../autoReply');
 
 const KB_MARKER = 'Retoque Gs 150.000 — MARCADOR-DE-BASE-DE-CONHECIMENTO';
 const SPECIALIST_REPLY = { phase: 'informacao', bubbles: ['Oi! O retoque sai Gs 150.000.'], needsHumanConfirmation: false };
@@ -558,7 +558,15 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     return { ai, calls };
   }
 
-  it('envia a foto real via Meta quando o modelo decide chamar a ferramenta', async () => {
+  // TASK-0241: o envio de verdade (upload + sendMediaMessage + gravação) foi
+  // adiado pra DEPOIS da aprovação do revisor pré-envio (executeApprovedMediaAction,
+  // chamado por webhooks.ts) — achado real de produção: enviar a mídia
+  // durante a própria geração do rascunho deixava a foto/vídeo sair mesmo
+  // quando o texto que a acompanhava era bloqueado depois, entregando uma
+  // mídia solta sem contexto nenhum pro cliente. generateAutoReplyForText
+  // agora só PLANEJA o envio (deferredMediaAction), nunca chama as funções
+  // de envio real diretamente.
+  it('planeja o envio da foto real via Meta (não envia ainda) quando o modelo decide chamar a ferramenta', async () => {
     uploadWhatsAppMedia.mockClear();
     sendWhatsAppMediaMessage.mockClear();
     recordOutgoingMessage.mockClear();
@@ -571,25 +579,19 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     );
 
     expect(result).not.toBeNull();
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
-    expect(recordOutgoingMessage).toHaveBeenCalled();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(recordOutgoingMessage).not.toHaveBeenCalled();
+    expect(saveMediaImage).not.toHaveBeenCalled();
 
-    // Achado real em produção (Monique, 29/08/2026): a foto abria no
-    // WhatsApp real do lead mas o painel mostrava "Imagem indisponível" pra
-    // sempre — só a mensagem de texto era gravada, o binário nunca ia pro
-    // mediaImageStore (o vídeo já tinha esse fix, a foto ficou pra trás).
-    expect(saveMediaImage).toHaveBeenCalledTimes(1);
-    const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
-    expect(savedMimeType).toBe('image/jpeg');
-    expect(typeof savedBase64).toBe('string');
-    expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips', mimeType: 'image/jpeg' });
+    expect(result?.deferredMediaAction?.buffer).toBeInstanceOf(Buffer);
   });
 
   // TASK-0218: mesma foto, mas migrada pro Storage (exampleImageId em vez de
   // exampleImageBase64) — o binário deve vir de resolveKnowledgeBaseImageBinary,
   // nunca do campo Base64 legado (que nem existe mais nesse fixture).
-  it('envia a foto real via Storage quando o produto já tem exampleImageId (migrado)', async () => {
+  it('resolve a foto real via Storage (planeja o envio) quando o produto já tem exampleImageId (migrado)', async () => {
     uploadWhatsAppMedia.mockClear();
     sendWhatsAppMediaMessage.mockClear();
     saveMediaImage.mockClear();
@@ -608,8 +610,9 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(resolveKnowledgeBaseImageBinary).toHaveBeenCalledWith(
       'https://fake.supabase.co', 'fake-key', 'tenant-a', 'image-storage-1', 'image/png', undefined, 'runMidiaTool:enviar_foto_exemplo'
     );
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/png', expect.stringContaining('Microlips'));
-    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(saveMediaImage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips', mimeType: 'image/png' });
   });
 
   // TASK-0218: imageId cadastrado mas o arquivo sumiu/nunca foi migrado de
@@ -687,8 +690,9 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     );
 
     expect(result).not.toBeNull();
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'image/jpeg', expect.stringContaining('Microlips'));
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips' });
   });
 
   // Achado real em produção (Monique, 20/08/2026): cliente perguntou "Tiene
@@ -844,17 +848,59 @@ describe('generateAutoReplyForText — ferramenta de envio de foto (Epic 4.5.2)'
     expect(specialistContent).toContain('Já enviou a foto de exemplo de "Microlips" há pouco');
   });
 
-  it('envia normalmente quando o histórico não tem nenhum envio recente dessa foto', async () => {
+  it('planeja o envio normalmente quando o histórico não tem nenhum envio recente dessa foto', async () => {
     uploadWhatsAppMedia.mockClear();
     const { ai } = makeFakeAiWithPhotoTool(true);
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'tem foto do microlips?', 'Cliente', undefined,
       [{ sender: 'lead', text: 'oi, vi o anúncio' }],
       '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }
     );
 
-    expect(uploadWhatsAppMedia).toHaveBeenCalled();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'foto', mediaName: 'Microlips' });
+  });
+});
+
+describe('executeApprovedMediaAction (TASK-0241)', () => {
+  // Achado real de produção que motivou esta função existir: a foto/vídeo
+  // não pode mais sair durante a geração do rascunho — só depois que o
+  // texto que a acompanha for aprovado pelo revisor pré-envio. Esta função é
+  // o único lugar que ainda chama upload/envio de verdade.
+  it('envia a mídia planejada via Meta, salva o binário e grava a mensagem, só quando chamada explicitamente', async () => {
+    uploadWhatsAppMedia.mockClear();
+    sendWhatsAppMediaMessage.mockClear();
+    recordOutgoingMessage.mockClear();
+    saveMediaImage.mockClear();
+
+    const action = { kind: 'foto' as const, mediaName: 'Microlips', marker: '📷 Foto de exemplo: Microlips', buffer: Buffer.from('foto-bytes'), mimeType: 'image/jpeg', filename: 'Microlips.jpg' };
+    const result = await executeApprovedMediaAction('tenant-a', '595981234567', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }, action);
+
+    expect(result.sent).toBe(true);
+    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', action.buffer, 'image/jpeg', 'Microlips.jpg');
+    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'image/jpeg', 'Microlips');
+    expect(saveMediaImage).toHaveBeenCalledTimes(1);
+    expect(recordOutgoingMessage).toHaveBeenCalledWith(
+      'tenant-a', '595981234567',
+      expect.objectContaining({ type: 'image', text: '📷 Foto de exemplo: Microlips' }),
+      'ai', undefined, undefined, expect.any(String),
+    );
+  });
+
+  it('não envia nada e devolve sent:false quando não há ação pendente', async () => {
+    uploadWhatsAppMedia.mockClear();
+    const result = await executeApprovedMediaAction('tenant-a', '595981234567', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }, undefined);
+    expect(result.sent).toBe(false);
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+  });
+
+  it('devolve sent:false com o erro quando o envio falha, sem travar', async () => {
+    uploadWhatsAppMedia.mockRejectedValueOnce(new Error('Meta rejeitou o upload'));
+    const action = { kind: 'foto' as const, mediaName: 'Microlips', marker: '📷 Foto de exemplo: Microlips', buffer: Buffer.from('foto-bytes'), mimeType: 'image/jpeg', filename: 'Microlips.jpg' };
+    const result = await executeApprovedMediaAction('tenant-a', '595981234567', { phoneNumberId: 'pn-1', accessToken: 'tok-1' }, action);
+    expect(result.sent).toBe(false);
+    expect(result.error).toBe('Meta rejeitou o upload');
   });
 });
 
@@ -876,7 +922,9 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
     return { ai, calls };
   }
 
-  it('envia o vídeo real via Meta (busca o binário no Storage) quando o modelo decide chamar a ferramenta', async () => {
+  // TASK-0241: envio de verdade adiado pra depois da aprovação do revisor —
+  // ver mesmo achado no bloco de foto acima.
+  it('planeja o envio do vídeo real via Meta (busca o binário no Storage, não envia ainda) quando o modelo decide chamar a ferramenta', async () => {
     uploadWhatsAppMedia.mockClear();
     sendWhatsAppMediaMessage.mockClear();
     recordOutgoingMessage.mockClear();
@@ -891,18 +939,13 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
 
     expect(result).not.toBeNull();
     expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-a', 'video-1');
-    expect(uploadWhatsAppMedia).toHaveBeenCalledWith('pn-1', 'tok-1', expect.any(Buffer), 'video/mp4', 'volumen.mp4');
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', 'Efecto Volumen Brasileño');
-    expect(recordOutgoingMessage).toHaveBeenCalled();
+    expect(uploadWhatsAppMedia).not.toHaveBeenCalled();
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(recordOutgoingMessage).not.toHaveBeenCalled();
+    expect(saveMediaImage).not.toHaveBeenCalled();
 
-    // Achado real (15/08/2026, Clic Piscinas): o vídeo abria no WhatsApp real
-    // do lead mas nunca no painel — salva o binário sob o MESMO id da
-    // mensagem gravada, pro painel conseguir tocar de volta (GET /api/media/:messageId).
-    expect(saveMediaImage).toHaveBeenCalledTimes(1);
-    const [, , savedMessageId, savedBase64, savedMimeType] = saveMediaImage.mock.calls[0];
-    expect(savedBase64).toBe(Buffer.from('fake-video-bytes').toString('base64'));
-    expect(savedMimeType).toBe('video/mp4');
-    expect(recordOutgoingMessage.mock.calls[0][6]).toBe(savedMessageId);
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'video', mediaName: 'Efecto Volumen Brasileño', mimeType: 'video/mp4', filename: 'volumen.mp4' });
+    expect(result?.deferredMediaAction?.buffer.toString()).toBe('fake-video-bytes');
   });
 
   it('acha o produto mesmo quando o Gemini devolve o nome com caixa/espaçamento diferente do catálogo (achado real em produção: match exato falhava silenciosamente)', async () => {
@@ -923,13 +966,14 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
       },
     } as unknown as GoogleGenAI;
 
-    await generateAutoReplyForText(
+    const result = await generateAutoReplyForText(
       'tenant-a', ai, 'tem vídeo?', 'Cliente', undefined, undefined,
       '595981234567', undefined, 'beauty_studio', { phoneNumberId: 'pn-1', accessToken: 'tok-1', supabaseUrl: 'https://fake.supabase.co', supabaseKey: 'fake-key' }
     );
 
     expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-a', 'video-1');
-    expect(sendWhatsAppMediaMessage).toHaveBeenCalledWith('pn-1', 'tok-1', '595981234567', 'media-id-123', 'video/mp4', 'Efecto Volumen Brasileño');
+    expect(sendWhatsAppMediaMessage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'video', mediaName: 'Efecto Volumen Brasileño' });
   });
 
   it('não manda nada quando o modelo decide não chamar a ferramenta', async () => {
@@ -957,10 +1001,9 @@ describe('generateAutoReplyForText — ferramenta de envio de vídeo (paridade c
 
     expect(result).not.toBeNull();
     expect(getKnowledgeBaseVideo).toHaveBeenCalledWith('https://fake.supabase.co', 'fake-key', 'tenant-piscinas', 'video-1');
-    expect(sendEvolutionMediaMessage).toHaveBeenCalledWith(
-      'inst-1', 'https://evo.example.com', 'evo-key', '595981234567',
-      Buffer.from('fake-video-bytes').toString('base64'), 'video/mp4', 'volumen.mp4', 'Efecto Volumen Brasileño'
-    );
+    expect(sendEvolutionMediaMessage).not.toHaveBeenCalled();
+    expect(result?.deferredMediaAction).toMatchObject({ kind: 'video', mediaName: 'Efecto Volumen Brasileño', mimeType: 'video/mp4', filename: 'volumen.mp4' });
+    expect(result?.deferredMediaAction?.buffer.toString('base64')).toBe(Buffer.from('fake-video-bytes').toString('base64'));
   });
 
   // Mesma barreira do teste equivalente de foto (TASK-0170) — paridade

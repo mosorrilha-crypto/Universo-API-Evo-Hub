@@ -5,7 +5,7 @@ import { markProcessedIfNew, unmarkProcessed } from '../services/idempotency';
 import { enqueueTranscriptionJob } from '../services/transcriptionQueue';
 import { recordIncomingMessage, recordOutgoingMessage, getConversation, markGeoRestricted, attachAdReferralIfMissing, updateConversationState, setConversationNameIfMissing, updateConversationInterest, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from '../services/conversationStore';
 import { emitAiReplyStatus } from '../services/conversationEvents';
-import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
+import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, executeApprovedMediaAction, generateAutoReplyForText, getNowLocalNaive } from '../services/autoReply';
 import { localNaiveToUtcIso } from '../services/googleCalendar';
 import { markPendingFollowUp, clearPendingFollowUp } from '../services/pendingFollowUpStore';
 import { sendBubbles } from '../services/sendBubbles';
@@ -347,6 +347,20 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
           await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
+        }
+        // TASK-0241: a foto/vídeo (quando runMidiaTool decidiu mandar uma)
+        // só é enviada de verdade agora, DEPOIS do revisor pré-envio já ter
+        // aprovado o texto — nunca antes. Achado real de produção: antes
+        // desta correção, a mídia saía imediatamente durante a geração do
+        // rascunho, então um bloqueio do revisor (por qualquer motivo,
+        // mesmo sem relação com a mídia) deixava o cliente com uma foto/
+        // vídeo solto, sem nenhum texto explicando ou respondendo o que ele
+        // realmente perguntou.
+        if (result.deferredMediaAction) {
+          const mediaExecution = await executeApprovedMediaAction(tenantId, phone, mediaConfig, result.deferredMediaAction);
+          if (!mediaExecution.sent) {
+            console.warn(`⚠️ [Mídia pós-revisão] tenant=${tenantId} falha ao enviar ${result.deferredMediaAction.kind} de "${result.deferredMediaAction.mediaName}" pra ${phone}: ${mediaExecution.error || 'motivo desconhecido'}`);
+          }
         }
         try {
           await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
