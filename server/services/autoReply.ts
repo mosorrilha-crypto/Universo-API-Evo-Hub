@@ -2231,6 +2231,13 @@ export async function generateAutoReplyForText(
         escalation: contextPack.liveState.escalation,
         escalationAvailable: contextPack.liveState.escalationAvailable,
       });
+      // TASK-0246: catálogo real do tenant, pra deriveContactMemoryPatch
+      // casar o texto do lead contra produtos/categorias de verdade em vez
+      // da lista fixa de estética que existia antes (ver inferServiceInterest
+      // em agentContextPack.ts). Mesmo padrão já usado em outros pontos
+      // deste arquivo (getRuntimeKnowledgeBaseForReply busca de novo onde
+      // precisa, sem propagar o objeto por todos os parâmetros da função).
+      const kbForMemory = await getRuntimeKnowledgeBaseForReply(tenantId).catch(() => null);
       const memoryPatch = deriveContactMemoryPatch({
         existingMemory: contextPack.memory,
         agent,
@@ -2240,6 +2247,7 @@ export async function generateAutoReplyForText(
         awaitingCustomerChoice: specialist.awaitingCustomerChoice,
         needsHumanConfirmation,
         liveState: finalContextPack.liveState,
+        knowledgeBase: kbForMemory,
       });
       const traceOutcome = stopAutoReply
         ? 'auto_reply_blocked'
