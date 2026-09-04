@@ -350,9 +350,8 @@ const paidTrafficKnowledgeBase = {
 
   servicePortfolio: {
     anchorServices: [
-      { name: 'Microlips', price: 500000, currency: 'PYG', durationMinutes: 120, angle: 'Cor natural e definição sem depender tanto do batom', funnelStage: 'Consideração e conversão' },
-      { name: 'Microshading', price: 500000, currency: 'PYG', durationMinutes: 120, angle: 'Efeito de cejas maquiadas com acabamento personalizado', funnelStage: 'Consideração e conversão' },
-      { name: 'Pelo a Pelo', price: 500000, currency: 'PYG', durationMinutes: 120, angle: 'Traços hiper-realistas que imitam pelinhos', funnelStage: 'Consideração e conversão' }
+      { name: 'Microlips', price: 550000, currency: 'PYG', durationMinutes: 120, angle: 'Cor natural e definição sem depender tanto do batom', funnelStage: 'Consideração e conversão' }, // ★ preço real 550.000 confirmado na Base de Conhecimento em 04/09/2026, corrige 500.000
+      { name: 'Microshading', price: 550000, currency: 'PYG', durationMinutes: 120, angle: 'Efeito de cejas maquiadas com acabamento personalizado', funnelStage: 'Consideração e conversão' } // ★ preço real 550.000 confirmado na Base de Conhecimento em 04/09/2026, corrige 500.000; 'Pelo a Pelo' não existe mais como item separado no catálogo (04/09/2026) — a técnica pelo-a-pelo está coberta por este item
     ],
     lashServices: [
       { name: 'Lash Lift', price: 140000, currency: 'PYG', durationMinutes: 90, angle: 'Curvatura das próprias pestañas, sem extensões' },
@@ -384,7 +383,12 @@ const paidTrafficKnowledgeBase = {
     ],
     currentPriceRule: `
       As promoções de julho de 2026 terminaram em 31/07/2026.
-      O valor regular de Microlips, Microshading e Pelo a Pelo é Gs 500.000.
+      O valor regular de Microlips e Microshading é Gs 550.000 (corrigido em
+      04/09/2026 — o valor de Gs 500.000 registrado antes ficou desatualizado
+      depois de um reajuste real de preço não refletido neste documento; ver
+      registro de decisões em ESTRATEGIA-TRAFEGO-MONIQUE.md). 'Pelo a Pelo'
+      não existe mais como item separado no catálogo — a técnica está coberta
+      pelo item Microshading.
     `,
     // ★ v2 — o problema não é só "não criar anúncio novo com preço velho".
     expiredPromotionAudit: `
