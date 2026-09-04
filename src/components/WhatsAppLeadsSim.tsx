@@ -3578,13 +3578,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 {t('unread')} ({unreadLeadsCount})
               </button>
+              {/* TASK-0279 (pedido direto, 04/09/2026): "Fora das 24h" não é
+                  mais importante que conversas dentro da janela que
+                  precisam de atenção (essas já ganham destaque de verdade
+                  na seção "ESPERANDO HÁ MAIS DE 30 MIN" da própria lista,
+                  em vermelho/laranja) — rebaixado de pill igual a
+                  Tudo/Não lidos pra estilo secundário/discreto, sem
+                  competir visualmente com o que precisa de atenção agora. */}
               <button
                 onClick={() => setActiveTabFilter('window_closed')}
                 title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap cursor-pointer border ${
                   activeTabFilter === 'window_closed'
-                    ? 'bg-emerald-500 text-slate-950 font-bold'
-                    : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
+                    ? 'border-slate-500 text-slate-200 bg-transparent'
+                    : 'border-slate-700/70 text-slate-500 hover:text-slate-300 bg-transparent'
                 }`}
               >
                 Fora das 24h ({windowClosedLeadsCount})
@@ -3651,9 +3658,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             {filteredLeads.length > 0 ? (
               waitingGroups.map((group) => group.leads.length > 0 && (
                 <section key={group.id} aria-label={waitingGroupMeta[group.id].label}>
-                  <div className={`px-3 py-2 text-[10px] font-bold tracking-[0.11em] ${waitingGroupMeta[group.id].className}`}>
-                    {waitingGroupMeta[group.id].label} · {group.leads.length}
-                  </div>
+                  {/* TASK-0279 (pedido direto, 04/09/2026: "essa barrinha de
+                      aguardando clientes não é muito útil") — a barra
+                      "AGUARDANDO CLIENTE" some; sem ação/urgência pra
+                      sinalizar (é só "esperando o lead responder"), a
+                      etiqueta só ocupava espaço. As barras de espera real
+                      (mais de 30min / até 30min) continuam, pois essas sim
+                      indicam algo que precisa de atenção agora. */}
+                  {group.id !== 'awaitingClient' && (
+                    <div className={`px-3 py-2 text-[10px] font-bold tracking-[0.11em] ${waitingGroupMeta[group.id].className}`}>
+                      {waitingGroupMeta[group.id].label} · {group.leads.length}
+                    </div>
+                  )}
                   {group.leads.map((lead) => renderLeadRow(lead))}
                 </section>
               ))
