@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
-import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
@@ -36,6 +35,7 @@ import {
   Calendar as CalendarIcon,
   CalendarPlus,
   FileText,
+  MapPin,
   Mic,
   Volume2,
   Paperclip,
@@ -761,46 +761,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   useEffect(() => { fetchGoogleCalendarStatus(); }, []);
-
-  // Push notification do PWA do atendente (issue #159) — segundo canal de
-  // alerta pro operador (escalação nova, agente pausado com lead sem
-  // resposta), além do WhatsApp template já existente. `null` = ainda
-  // verificando se já existe assinatura salva no navegador; `false` cobre
-  // tanto "nunca ativou" quanto "navegador não suporta" (a mensagem de erro
-  // específica só aparece se o operador tentar ativar).
-  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
-  const [pushBusy, setPushBusy] = useState(false);
-
-  useEffect(() => {
-    getExistingPushSubscription()
-      .then((sub) => setPushEnabled(!!sub))
-      .catch(() => setPushEnabled(false));
-  }, []);
-
-  const handleTogglePush = async () => {
-    // Achado real em produção: o aviso de erro (setErrorMsg) nunca se
-    // limpava sozinho — se uma tentativa falhasse, o banner laranja ficava
-    // preso na tela pra sempre, mesmo numa tentativa seguinte bem-sucedida,
-    // fazendo parecer que continuava falhando quando na verdade já tinha
-    // ativado. Limpa aqui no início de cada tentativa nova.
-    setErrorMsg(null);
-    setPushBusy(true);
-    try {
-      if (pushEnabled) {
-        await disablePushNotifications();
-        setPushEnabled(false);
-      } else {
-        const result = await enablePushNotifications();
-        if (result.success) {
-          setPushEnabled(true);
-        } else {
-          setErrorMsg(result.error || 'Não foi possível ativar notificações agora.');
-        }
-      }
-    } finally {
-      setPushBusy(false);
-    }
-  };
 
   const handleConnectGoogleCalendar = async () => {
     try {
@@ -2794,16 +2754,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Send a new Text Message to the chat
-  const handleSendTextMessage = async (e?: React.FormEvent) => {
+  // `overrideText` (TASK-0284) — pra mandar um texto pronto (ex: link de
+  // localização fixa do negócio, ver tile "Localização" no menu de anexos)
+  // sem passar pela caixa de digitação: `setInputMessage` é assíncrono, então
+  // chamar `setInputMessage(texto)` seguido de `handleSendTextMessage()` na
+  // mesma função enviaria o valor ANTIGO de `inputMessage` (closure velho),
+  // não o texto recém-setado. Sem override, comportamento idêntico a antes.
+  const handleSendTextMessage = async (e?: React.FormEvent, overrideText?: string) => {
     if (e) e.preventDefault();
-    if (!inputMessage.trim() || !selectedLead) return;
+    const text = overrideText ?? inputMessage.trim();
+    if (!text || !selectedLead) return;
 
-    const replyToMessageId = replyingTo?.id;
+    const replyToMessageId = overrideText ? undefined : replyingTo?.id;
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       sender: senderRole,
       type: 'text',
-      text: inputMessage.trim(),
+      text,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       replyToMessageId,
     };
@@ -2814,7 +2781,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     };
 
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
-    setInputMessage('');
+    if (!overrideText) setInputMessage('');
     setReplyingTo(null);
 
     if (senderRole === 'agent' && (selectedLead as any).isReal) {
@@ -3501,9 +3468,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       </div>
 
-      {/* Push notification do PWA do atendente (issue #159) — pra não
-          depender só de estar olhando o painel pra perceber escalação
-          nova ou agente pausado com lead sem resposta. */}
+      {/* Notificações push do PWA do atendente saíram daqui (TASK-0284,
+          pedido direto): não são uma ação desta conversa/gaveta, são
+          configuração de conta — agora vivem só no Header global (mesmo
+          lugar em qualquer aba, não só dentro do Atendimento). */}
       <div className="grid w-full grid-cols-4 gap-3 pt-1">
         {renderToolTile({
           key: 'ads-only',
@@ -3518,14 +3486,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           label: 'Gatilhos',
           onClick: openAdTriggersModal,
           badge: adTriggerMessages.length || undefined,
-        })}
-        {renderToolTile({
-          key: 'push',
-          icon: pushEnabled ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />,
-          label: pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Notificações',
-          active: pushEnabled,
-          disabled: pushBusy,
-          onClick: handleTogglePush,
         })}
       </div>
     </>
@@ -4481,7 +4441,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               recortar os cantos — por isso a rolagem vive
                               num `<div>` filho, não no mesmo elemento). */}
                           <div className="mobile-header-context-menu absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
-                          <div className="max-h-[70vh] overflow-y-auto">
+                          <div className="no-scrollbar max-h-[70vh] overflow-y-auto">
                             {(selectedLead as any)?.isReal && !paymentAppointment && (
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsManualAppointmentModalOpen(true); }}
@@ -4510,24 +4470,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Phone className="w-3.5 h-3.5" />
                               <span>Abrir no WhatsApp</span>
                             </button>
-                            {/* TASK-0225: "Ativar notificações" (push do PWA
-                                do atendente, issue #159) mudou de casa — vinha
-                                da barra de ferramentas exclusiva de desktop
-                                que foi removida (só tinha esse item). Mesma
-                                lógica (`handleTogglePush`/`pushEnabled`/
-                                `pushBusy`), agora dentro deste menu — que já é
-                                visível em qualquer largura (sem `hidden
-                                lg:*`), então funciona igual em mobile e
-                                desktop. */}
-                            <button
-                              onClick={() => { void handleTogglePush(); setIsHeaderMenuOpen(false); }}
-                              disabled={pushBusy}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
-                              title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-                            >
-                              {pushEnabled ? <Bell className="w-3.5 h-3.5 text-emerald-300" /> : <BellOff className="w-3.5 h-3.5" />}
-                              <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-                            </button>
+                            {/* TASK-0284 (pedido direto, com print do menu ⋮
+                                real do WhatsApp, compacto e sem item de
+                                configuração de conta): "Ativar notificações"
+                                (push do PWA do atendente) saiu daqui — não é
+                                uma ação desta conversa, é configuração de
+                                conta. Mora agora só no Header global (ver
+                                Header.tsx, usePushNotifications), visível em
+                                qualquer aba. */}
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
@@ -4593,12 +4543,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Mail className="w-3.5 h-3.5" />
                               <span>{isManuallyUnread ? (isSpanish ? 'Marcar como leída' : 'Marcar como lida') : (isSpanish ? 'Marcar como no leída' : 'Marcar como não lida')}</span>
                             </button>
+                            {/* TASK-0284 (pedido direto): rótulo trocado de
+                                "Ativar/Silenciar notificações" (genérico,
+                                colidia em texto com o toggle de push do PWA
+                                que morava logo acima antes de sair daqui)
+                                pra deixar claro que silencia só ESTA
+                                conversa, não notificações do app inteiro. */}
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-                              <span>{isMuted ? (isSpanish ? 'Activar notificaciones' : 'Ativar notificações') : (isSpanish ? 'Silenciar notificaciones' : 'Silenciar notificações')}</span>
+                              <span>{isMuted ? (isSpanish ? 'Reactivar notificaciones de esta conversación' : 'Reativar notificações desta conversa') : (isSpanish ? 'Silenciar esta conversación' : 'Silenciar esta conversa')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setIsHeaderMenuOpen(false); setMobileThreadOpen(false); }}
@@ -5543,14 +5499,56 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               colisão visual com o botão flutuante "ir pro
                               fim da conversa" relatada no print. */}
                           <div className="absolute bottom-full right-0 mb-2 z-50 w-72 max-h-80 overflow-y-auto bg-[#233138] border border-slate-700 rounded-2xl shadow-2xl p-3 origin-bottom-right animate-pop-in">
+                            {/* Documento/Fotos separados (pedido direto,
+                                04/09/2026): eram um tile só ("Documento ou
+                                foto"); viraram dois, igual ao WhatsApp real
+                                (Documento vs Câmera/Galeria) — o `accept` do
+                                input real muda conforme o tile tocado, pra
+                                o seletor nativo já abrir focado no tipo
+                                certo. Localização manda o link fixo do
+                                Google Maps já configurado na Base de
+                                Conhecimento (`knowledgeBase.locationMapsUrl`
+                                — mesmo link que o próprio agente já manda
+                                quando o cliente pergunta o endereço, ver
+                                knowledgeBaseStore.ts) — nunca inventa um
+                                endereço, só aparece quando o tenant
+                                configurou. */}
                             <div className="grid grid-cols-3 gap-3">
                               {renderToolTile({
-                                key: 'attach-file',
-                                icon: <Paperclip className="h-5 w-5" />,
-                                label: isSpanish ? 'Documento o foto' : 'Documento ou foto',
+                                key: 'attach-document',
+                                icon: <FileText className="h-5 w-5" />,
+                                label: isSpanish ? 'Documento' : 'Documento',
                                 onClick: () => {
                                   setShowAttachMenu(false);
-                                  (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
+                                  if ((selectedLead as any).isReal && fileInputRef.current) {
+                                    fileInputRef.current.accept = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf';
+                                    fileInputRef.current.click();
+                                  } else {
+                                    handleSendSampleFile();
+                                  }
+                                },
+                              })}
+                              {renderToolTile({
+                                key: 'attach-photo',
+                                icon: <ImageIcon className="h-5 w-5" />,
+                                label: isSpanish ? 'Fotos' : 'Fotos',
+                                onClick: () => {
+                                  setShowAttachMenu(false);
+                                  if ((selectedLead as any).isReal && fileInputRef.current) {
+                                    fileInputRef.current.accept = 'image/*';
+                                    fileInputRef.current.click();
+                                  } else {
+                                    handleSendSampleFile();
+                                  }
+                                },
+                              })}
+                              {knowledgeBase.locationMapsUrl && renderToolTile({
+                                key: 'attach-location',
+                                icon: <MapPin className="h-5 w-5" />,
+                                label: isSpanish ? 'Ubicación' : 'Localização',
+                                onClick: () => {
+                                  setShowAttachMenu(false);
+                                  void handleSendTextMessage(undefined, knowledgeBase.locationMapsUrl);
                                 },
                               })}
                             </div>

@@ -1369,6 +1369,7 @@ export const App: React.FC = () => {
         canAccessSaasAdmin={canSeeSaasMaster}
         escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
         onOpenChangePasswordModal={() => setIsChangePasswordModalOpen(true)}
+        onToast={showToast}
       />
       </div>
       {activeTab !== 'whatsapp' && canSeeConversations && (
