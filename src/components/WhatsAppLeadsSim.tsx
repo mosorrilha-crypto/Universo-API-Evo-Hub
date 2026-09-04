@@ -4391,7 +4391,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
-                {(selectedLead as any).historyLoading ? (
+                {/* TASK-0276 (achado real, "a cada nova mensagem a página
+                    inteira pisca"): toda mensagem SSE da conversa aberta
+                    chama loadRealConversationHistory, que liga
+                    historyLoading=true antes do fetch e desliga depois —
+                    esse loading trocava a lista INTEIRA de mensagens já
+                    renderizadas por este placeholder, mesmo já tendo
+                    histórico carregado, só pra reaparecer 1 chamada de rede
+                    depois com o mesmo conteúdo (mais a mensagem nova). Cada
+                    mensagem recebida virava um blank-e-repopula visível. Só
+                    mostra o placeholder na primeira carga real (sem
+                    histórico ainda) — um refresh silencioso de uma conversa
+                    já carregada nunca mais esconde o que já está na tela. */}
+                {(selectedLead as any).historyLoading && !(selectedLead as any).historyLoaded ? (
                   <div className="flex min-h-32 items-center justify-center text-xs text-slate-500">
                     {isSpanish ? 'Cargando el historial completo de esta conversación...' : 'Carregando histórico completo desta conversa...'}
                   </div>
