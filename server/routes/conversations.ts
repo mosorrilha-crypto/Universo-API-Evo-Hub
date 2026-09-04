@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import {
   listConversations,
   getConversation,
+  getConversationMessagesPage,
   getConversationPhoneNumberId,
   updateMessageText,
   recordOutgoingMessage,
@@ -527,6 +528,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const conv = await getConversation(tenantOf(req), req.params.phone);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
     res.json({ conversation: conv });
+  }));
+
+  /**
+   * TASK-0280 (pedido direto, 04/09/2026, "não precisa carregar tudo só as
+   * últimas msg... antigas vai sendo carregada conforme o usuário vai
+   * rolando"): página de mensagens em vez do histórico inteiro — usada pelo
+   * painel ao abrir uma conversa (sem `before`/`after`, as mais recentes) e
+   * ao rolar pra cima (`before`, mensagens anteriores a esse timestamp) ou
+   * quando chega mensagem nova via SSE numa conversa já aberta (`after`, só
+   * o que é mais novo que o já carregado — evita rebuscar tudo de novo a
+   * cada mensagem). `limit` no máximo 100, padrão 30.
+   */
+  router.get('/api/conversations/:phone/messages', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const limitParam = Number.parseInt(String(req.query.limit ?? ''), 10);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 30;
+    const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+    const after = typeof req.query.after === 'string' ? req.query.after : undefined;
+    const page = await getConversationMessagesPage(tenantOf(req), req.params.phone, {
+      limit,
+      beforeTimestamp: before,
+      afterTimestamp: after,
+    });
+    res.json(page);
   }));
 
   // Marca a conversa como lida — chamado quando o operador abre a conversa

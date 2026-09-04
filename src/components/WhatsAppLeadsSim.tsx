@@ -287,7 +287,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // sink continuaria existindo) ou cifrar no cliente (a chave ficaria no
   // próprio JS, não protege de verdade). Lista começa vazia e é populada
   // pelo fetch real (/api/conversations) a cada carregamento/troca de tenant.
-  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis; historyLoaded?: boolean; historyLoading?: boolean; lastMessageId?: string })[]>([]);
+  const [leads, setLeads] = useState<(LeadInfo & {
+    textContent: string;
+    messages: ChatMessage[];
+    result?: TranscriptionResult;
+    fullAnalysis?: FullConversationAnalysis;
+    historyLoaded?: boolean;
+    historyLoading?: boolean;
+    lastMessageId?: string;
+    /** TASK-0280 — timestamp ISO (não formatado) da mensagem mais antiga já carregada, usado como cursor pra buscar a página anterior ao rolar pra cima. `undefined` quando ainda não sabemos (nada carregado) ou quando não há mais nada antes (oldestLoadedIsFirstEver=true). */
+    oldestLoadedMessageTimestamp?: string;
+    /** TASK-0280 — timestamp ISO da mensagem mais nova já carregada, usado como cursor pra buscar só o que chegou de novo (SSE) sem reler a página inteira. */
+    newestLoadedMessageTimestamp?: string;
+    /** TASK-0280 — false quando a página mais antiga já carregada é o começo real da conversa (não precisa mais tentar buscar mensagens anteriores). undefined = ainda não sabemos. */
+    hasMoreOlderMessages?: boolean;
+    /** TASK-0280 — true enquanto busca a página anterior (rolagem pro topo), separado de historyLoading (que é só a carga inicial). */
+    loadingOlderMessages?: boolean;
+  })[]>([]);
   // Purga ativa, uma vez por montagem: navegadores que já usaram o painel
   // antes desta correção podem ter PII de cliente em texto puro gravada de
   // uma sessão anterior — sem isso, ela ficaria lá indefinidamente, já que
@@ -1058,6 +1074,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     shouldAutoScrollRef.current = isNearBottom;
     setIsAtLatestMessage(isNearBottom);
     if (isNearBottom) setNewMessagesWhileAway(0);
+    // TASK-0280 — rolar perto do topo busca a página anterior de mensagens
+    // (igual ao WhatsApp real), em vez de já ter carregado o histórico
+    // inteiro na abertura da conversa.
+    if (container.scrollTop <= 120 && selectedLead && (selectedLead as any).isReal) {
+      void loadOlderMessages(selectedLead.phone, selectedLead.id);
+    }
   };
 
   // Achado real testando com o Lucas em produção ("dá pra otimizar as
@@ -1278,27 +1300,41 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const activeLeadPhoneRef = useRef<string | null>(null);
   const fetchConversationsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRequestsInFlightRef = useRef<Set<string>>(new Set());
+  const olderMessagesRequestsInFlightRef = useRef<Set<string>>(new Set());
+  const newerMessagesRequestsInFlightRef = useRef<Set<string>>(new Set());
   // Cada request captura o tenant em que começou. Quando o operador troca de
   // empresa, respostas atrasadas do tenant anterior não podem alterar a fila,
   // o histórico aberto nem o aviso de erro do tenant novo.
   const activeTenantIdRef = useRef(activeTenant.id);
   activeTenantIdRef.current = activeTenant.id;
 
+  // Formata pra exibição (HH:MM) mas preserva o ISO cru separadamente — os
+  // cursores de paginação (oldest/newestLoadedMessageTimestamp) e a data dos
+  // separadores de dia precisam do valor completo, não só da hora.
+  const formatMessagesForDisplay = (rawMessages: ChatMessage[]): ChatMessage[] =>
+    rawMessages.map((message) => ({
+      ...message,
+      timestamp: new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    }));
+
+  // TASK-0280 (achado real, "Carregando histórico completo" toda vez que
+  // abre uma conversa, demora e atrapalha em rede fraca): antes buscava a
+  // conversa INTEIRA (getConversation) só pra abrir o chat. Agora busca só a
+  // última página (igual ao WhatsApp real) — o resto vem sob demanda em
+  // loadOlderMessages, conforme o operador rola pra cima.
   const loadRealConversationHistory = async (phone: string, leadId: string) => {
     const requestTenantId = activeTenantIdRef.current;
     if (historyRequestsInFlightRef.current.has(phone)) return;
     historyRequestsInFlightRef.current.add(phone);
     setLeads((prev) => prev.map((lead) => lead.id === leadId ? { ...lead, historyLoading: true } : lead));
     try {
-      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}`);
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/messages?limit=30`);
       const data = await response.json().catch(() => null);
-      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.conversation) {
+      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.messages) {
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
-      const messages: ChatMessage[] = (data.conversation.messages || []).map((message: ChatMessage) => ({
-        ...message,
-        timestamp: new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      }));
+      const rawMessages: ChatMessage[] = data.messages;
+      const messages = formatMessagesForDisplay(rawMessages);
       if (activeTenantIdRef.current !== requestTenantId) return;
       const lastMessage = messages[messages.length - 1];
       setLeads((prev) => prev.map((lead) => lead.id === leadId ? {
@@ -1308,6 +1344,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         historyLoaded: true,
         historyLoading: false,
         lastMessageId: lastMessage?.id,
+        oldestLoadedMessageTimestamp: rawMessages[0]?.timestamp,
+        newestLoadedMessageTimestamp: rawMessages[rawMessages.length - 1]?.timestamp,
+        hasMoreOlderMessages: Boolean(data.hasMore),
       } : lead));
     } catch (err: any) {
       if (activeTenantIdRef.current !== requestTenantId) return;
@@ -1315,6 +1354,92 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setErrorMsg(err?.message || 'Não foi possível carregar o histórico desta conversa.');
     } finally {
       historyRequestsInFlightRef.current.delete(phone);
+    }
+  };
+
+  // TASK-0280 — busca a página anterior à mais antiga já carregada, disparada
+  // ao rolar a conversa pro topo (ver handleMessagesScroll). Preserva a
+  // posição visual: como as mensagens antigas são inseridas ANTES das que já
+  // estão na tela, sem compensar o scroll o operador veria o conteúdo
+  // "pular" pra baixo (a lista cresce por cima do que ele estava vendo).
+  const loadOlderMessages = async (phone: string, leadId: string) => {
+    const lead = leads.find((l) => l.id === leadId) as any;
+    if (!lead || lead.hasMoreOlderMessages === false || lead.loadingOlderMessages) return;
+    if (olderMessagesRequestsInFlightRef.current.has(phone)) return;
+    const cursor = lead.oldestLoadedMessageTimestamp;
+    if (!cursor) return;
+    const requestTenantId = activeTenantIdRef.current;
+    olderMessagesRequestsInFlightRef.current.add(phone);
+    setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, loadingOlderMessages: true } : l));
+    const container = messagesContainerRef.current;
+    const scrollHeightBefore = container?.scrollHeight ?? 0;
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/messages?limit=30&before=${encodeURIComponent(cursor)}`);
+      const data = await response.json().catch(() => null);
+      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.messages) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      const rawOlder: ChatMessage[] = data.messages;
+      const older = formatMessagesForDisplay(rawOlder);
+      if (activeTenantIdRef.current !== requestTenantId) return;
+      setLeads((prev) => prev.map((l) => l.id === leadId ? {
+        ...l,
+        messages: [...older, ...(l.messages || [])],
+        loadingOlderMessages: false,
+        oldestLoadedMessageTimestamp: rawOlder[0]?.timestamp ?? l.oldestLoadedMessageTimestamp,
+        hasMoreOlderMessages: Boolean(data.hasMore),
+      } : l));
+      // Restaura a posição de leitura depois do DOM crescer por cima —
+      // requestAnimationFrame garante que o navegador já recalculou o
+      // scrollHeight novo antes de ajustar o scrollTop.
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - scrollHeightBefore;
+      });
+    } catch (err: any) {
+      if (activeTenantIdRef.current !== requestTenantId) return;
+      setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, loadingOlderMessages: false } : l));
+      setErrorMsg(err?.message || 'Não foi possível carregar mensagens anteriores desta conversa.');
+    } finally {
+      olderMessagesRequestsInFlightRef.current.delete(phone);
+    }
+  };
+
+  // TASK-0280 — substitui a antiga recarga da conversa inteira a cada evento
+  // SSE (loadRealConversationHistory de novo, que descartaria as páginas
+  // antigas já carregadas pelo scroll) por buscar só o que é mais novo que o
+  // já exibido e anexar ao final.
+  const loadNewerMessages = async (phone: string, leadId: string) => {
+    const lead = leads.find((l) => l.id === leadId) as any;
+    if (!lead?.historyLoaded || newerMessagesRequestsInFlightRef.current.has(phone)) return;
+    const cursor = lead.newestLoadedMessageTimestamp;
+    if (!cursor) return;
+    const requestTenantId = activeTenantIdRef.current;
+    newerMessagesRequestsInFlightRef.current.add(phone);
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/messages?after=${encodeURIComponent(cursor)}`);
+      const data = await response.json().catch(() => null);
+      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.messages) return;
+      const rawNewer: ChatMessage[] = data.messages;
+      if (!rawNewer.length) return;
+      const newer = formatMessagesForDisplay(rawNewer);
+      setLeads((prev) => prev.map((l) => {
+        if (l.id !== leadId) return l;
+        const existingIds = new Set((l.messages || []).map((m) => m.id));
+        const toAppend = newer.filter((m) => !existingIds.has(m.id));
+        if (!toAppend.length) return l;
+        const lastMessage = toAppend[toAppend.length - 1];
+        return {
+          ...l,
+          messages: [...(l.messages || []), ...toAppend],
+          textContent: lastMessage?.text || l.textContent,
+          lastMessageId: lastMessage?.id,
+          newestLoadedMessageTimestamp: rawNewer[rawNewer.length - 1]?.timestamp,
+        };
+      }));
+    } catch {
+      // Silencioso: o poll de segurança e o próximo evento SSE cobrem uma falha pontual.
+    } finally {
+      newerMessagesRequestsInFlightRef.current.delete(phone);
     }
   };
 
@@ -1496,7 +1621,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           const payload = JSON.parse(event.data);
           const phone: string | undefined = payload?.phone;
           if (phone && phone === activeLeadPhoneRef.current) {
-            void loadRealConversationHistory(phone, `real-${phone}`);
+            void loadNewerMessages(phone, `real-${phone}`);
           }
           const status: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | undefined = payload?.aiReplyStatus;
           if (!phone || !status) return;
@@ -4374,7 +4499,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onScroll={handleMessagesScroll}
                 className="h-full min-h-0 p-4 overflow-y-auto space-y-3 bg-[#0b141a] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] scrollbar-thin"
               >
-                
+                {/* TASK-0280 — indicador da busca da página anterior (rolagem
+                    pro topo), separado do placeholder de carga inicial: não
+                    troca o conteúdo já na tela, só aparece por cima dele. */}
+                {(selectedLead as any).loadingOlderMessages && (
+                  <div className="flex justify-center py-1.5 text-[10px] text-slate-500">
+                    {isSpanish ? 'Cargando mensajes anteriores...' : 'Carregando mensagens anteriores...'}
+                  </div>
+                )}
+
                 {/* A saudação exibida pelo WhatsApp no clique do anúncio é uma
                     camada nativa do anúncio e não chega como uma mensagem
                     comum em `messages[]`. Mostramos a atribuição aqui sem
@@ -4408,20 +4541,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 )}
 
                 {/* TASK-0276 (achado real, "a cada nova mensagem a página
-                    inteira pisca"): toda mensagem SSE da conversa aberta
-                    chama loadRealConversationHistory, que liga
-                    historyLoading=true antes do fetch e desliga depois —
-                    esse loading trocava a lista INTEIRA de mensagens já
-                    renderizadas por este placeholder, mesmo já tendo
-                    histórico carregado, só pra reaparecer 1 chamada de rede
-                    depois com o mesmo conteúdo (mais a mensagem nova). Cada
-                    mensagem recebida virava um blank-e-repopula visível. Só
-                    mostra o placeholder na primeira carga real (sem
-                    histórico ainda) — um refresh silencioso de uma conversa
-                    já carregada nunca mais esconde o que já está na tela. */}
+                    inteira pisca") — historyLoading só liga na primeira
+                    abertura da conversa (loadRealConversationHistory); uma
+                    mensagem nova chegando por SSE anexa em silêncio via
+                    loadNewerMessages (TASK-0280), sem religar esse loading
+                    nem trocar a lista inteira por este placeholder. */}
                 {(selectedLead as any).historyLoading && !(selectedLead as any).historyLoaded ? (
                   <div className="flex min-h-32 items-center justify-center text-xs text-slate-500">
-                    {isSpanish ? 'Cargando el historial completo de esta conversación...' : 'Carregando histórico completo desta conversa...'}
+                    {isSpanish ? 'Cargando los mensajes recientes...' : 'Carregando mensagens recentes...'}
                   </div>
                 ) : selectedLead.messages && selectedLead.messages.length > 0 ? (
                   selectedLead.messages.map((msg, messageIndex) => {
