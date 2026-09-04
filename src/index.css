@@ -787,12 +787,14 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
 }
 
 /* Modelo estrutural 6a: contexto essencial dentro da conversa, sem terceira coluna permanente */
-.atendimento-context-strip { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:11px 24px; border-bottom:1px solid var(--border-subtle, #1b242b); background:var(--surface-sunken, #11161b); }
+/* TASK-0259 (pedido direto): "diminui as caixa de contexto com uma fonte
+   menor" — padding e tipografia reduzidos, mesmo conteúdo/lógica. */
+.atendimento-context-strip { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:7px 14px; border-bottom:1px solid var(--border-subtle, #1b242b); background:var(--surface-sunken, #11161b); }
 .atendimento-context-strip__copy { min-width:0; }
-.atendimento-context-strip__label { display:block; color:var(--text-label, #6e7c87); font:700 10.5px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.12em; }
-.atendimento-context-strip__copy p { margin:4px 0 0; color:var(--text-secondary, #a7b4be); font-size:13.5px; line-height:1.45; }
+.atendimento-context-strip__label { display:block; color:var(--text-label, #6e7c87); font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.1em; }
+.atendimento-context-strip__copy p { margin:2px 0 0; color:var(--text-secondary, #a7b4be); font-size:11.5px; line-height:1.4; }
 .atendimento-context-strip__rationale { color:var(--text-muted, #8494a0); }
-.atendimento-context-strip__action { flex:none; border:1px solid var(--border, #232c33); border-radius:7px; padding:7px 11px; color:var(--text-secondary, #a7b4be); background:transparent; font-size:12px; font-weight:700; cursor:pointer; }
+.atendimento-context-strip__action { flex:none; border:1px solid var(--border, #232c33); border-radius:6px; padding:5px 8px; color:var(--text-secondary, #a7b4be); background:transparent; font-size:10.5px; font-weight:700; cursor:pointer; }
 .atendimento-context-strip__action:hover { color:var(--text-primary, #f2f6f9); border-color:var(--action, #5ebf92); }
 html[data-theme='light'] .atendimento-context-strip { background:#fbfaf7; border-color:#e7e5de; }
 
@@ -809,7 +811,18 @@ html[data-theme='clean'] .atendimento-context-strip__rationale { color:#94A3B8; 
 html[data-theme='light'] .atendimento-context-strip__action { border-color:#dcdad3; color:#5a5b54; }
 
 html[data-theme='clean'] .atendimento-context-strip__action { border-color:#E4E7EC; color:#64748B; }
-@media (max-width:760px) { .atendimento-context-strip { align-items:flex-start; padding:10px 16px; } .atendimento-context-strip__action { padding:8px 10px; } }
+@media (max-width:760px) { .atendimento-context-strip { align-items:flex-start; padding:6px 12px; } .atendimento-context-strip__action { padding:5px 7px; } }
+
+/* TASK-0259 (pedido direto): campo de digitação da conversa não usa o
+   contorno verde global de foco (regra acima, button/a/input/textarea/
+   select:focus-visible) — no toque em mobile, o Chrome/Android trata o
+   toque num <textarea> como navegação por teclado e o contorno cheio
+   aparecia mesmo sem uso de teclado real, "não ficou bom". A sobrescrita
+   mora aqui (CSS solto, fora de qualquer @layer) porque o `focus:outline-
+   none` do Tailwind vive dentro de @layer utilities — nas camadas CSS do
+   Tailwind v4, CSS solto sempre vence camada nomeada, então o utilitário
+   sozinho nunca conseguiria sobrescrever a regra global acima. */
+.atendimento-composer-textarea:focus-visible { outline: none; }
 
 /* ──────────────────────────────────────────────────────────────────────────
    Handoff aprovado — Atendimento: tokens neutros, ação única e hierarquia

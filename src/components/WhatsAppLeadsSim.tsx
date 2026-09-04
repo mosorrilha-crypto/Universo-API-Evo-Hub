@@ -76,8 +76,7 @@ import {
   Video,
   Copy,
   Megaphone,
-  MessageCircle,
-  Info
+  MessageCircle
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -417,6 +416,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
+
+  // TASK-0259 (pedido direto): aviso de assunção de controle vira banner
+  // discreto na primeira vez que o operador toca no campo de digitação,
+  // em vez de ícone/parágrafo permanentes. Flag em localStorage garante
+  // que só apareça uma vez por navegador.
+  const [showComposerHint, setShowComposerHint] = useState(false);
+  const handleComposerFirstFocus = () => {
+    try {
+      if (localStorage.getItem('saas_composer_takeover_hint_seen')) return;
+      localStorage.setItem('saas_composer_takeover_hint_seen', '1');
+    } catch {
+      // localStorage indisponível (modo privado etc.) — mostra mesmo assim,
+      // só não persiste a preferência de "já vi".
+    }
+    setShowComposerHint(true);
+    window.setTimeout(() => setShowComposerHint(false), 6000);
+  };
 
   // TASK-0184: caixa de texto dinâmica igual ao WhatsApp real — cresce com
   // o texto (até um teto) em vez do <input> de altura fixa que só rolava o
@@ -3646,7 +3662,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       </span>
                     </div>
                     <p className="text-[11px] font-normal text-slate-400 flex items-center gap-1.5 min-w-0">
-                      <span className="truncate min-w-0">{selectedLead.phone} • {selectedLead.messages?.length || 0} mensagens</span>
+                      {/* TASK-0259 (pedido direto): telefone saiu daqui de
+                          vez — fica só dentro da Ficha do Contato (Ficha
+                          IA), que já recebe `selectedLead.phone` como prop.
+                          Contador de mensagens continua, é útil no
+                          cabeçalho e não é dado sensível. */}
+                      <span className="truncate min-w-0">{selectedLead.messages?.length || 0} mensagens</span>
                       {/* TASK-0258 (pedido direto): quando a janela de 24h
                           está aberta e não há nenhuma ação pendente, a faixa
                           de status inteira (linha cheia, sempre visível)
@@ -3770,6 +3791,138 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   >
                     {showRightPanel ? <PanelRightClose className="w-[18px] h-[18px]" /> : <PanelRightOpen className="w-[18px] h-[18px]" />}
                   </button>
+
+                  {/* TASK-0259 (pedido direto): a barra de etiquetas sempre
+                      visível (fileira inteira só pra isso) virou este ícone,
+                      ao lado da Ficha IA — "sobe o icon de etiqueta pro lado
+                      do icon da ficha de ia... eliminamos mais uma barra".
+                      Um botão pra mobile (junto do IdCard) e outro pra
+                      desktop (junto do PanelRightOpen acima) — cada um só
+                      aparece no seu breakpoint, mas os dois abrem o mesmo
+                      popover, com as etiquetas já aplicadas (removíveis),
+                      sugestões e criar nova — mesmo conteúdo/lógica de
+                      antes, só que sob demanda em vez de sempre visível. Um
+                      ponto verde no ícone avisa que já tem etiqueta aplicada
+                      mesmo com o popover fechado. */}
+                  <div className="relative">
+                    {[true, false].map((isMobileVariant) => (
+                      <button
+                        key={isMobileVariant ? 'mobile' : 'desktop'}
+                        onClick={() => { setIsLabelPickerOpen((v) => !v); setNewLabelInput(''); }}
+                        className={`${isMobileVariant ? 'lg:hidden' : 'hidden lg:flex'} relative p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer`}
+                        title={isSpanish ? 'Etiquetas' : 'Etiquetas'}
+                      >
+                        <Tag className="w-[18px] h-[18px]" />
+                        {(selectedLead.conversationLabels || []).length > 0 && (
+                          <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        )}
+                      </button>
+                    ))}
+                    {isLabelPickerOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setIsLabelPickerOpen(false)} />
+                        <div className="absolute right-0 top-10 z-50 w-72 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-3 space-y-2 origin-top-right animate-pop-in">
+                          {(selectedLead.conversationLabels || []).length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-700">
+                              {(selectedLead.conversationLabels || []).map((label) => (
+                                <span
+                                  key={label}
+                                  className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600 bg-slate-800/70 text-slate-200 flex items-center gap-1"
+                                >
+                                  {label}
+                                  <button
+                                    onClick={() => handleRemoveLabel(selectedLead.id, label)}
+                                    className="hover:opacity-70 cursor-pointer"
+                                    title={isSpanish ? 'Quitar etiqueta' : 'Remover etiqueta'}
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {(() => {
+                            const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
+                            const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
+                              .filter((l) => !alreadyOn.has(normalizeLabelText(l)) && !dismissedDefaultSuggestions.has(normalizeLabelText(l)));
+                            if (!suggestions.length) return null;
+                            return (
+                              <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-700">
+                                {suggestions.map((l) => (
+                                  <span
+                                    key={l}
+                                    className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 flex items-center gap-1"
+                                  >
+                                    <button
+                                      onClick={() => { handleAddLabel(selectedLead.id, l); setIsLabelPickerOpen(false); }}
+                                      className="hover:text-white cursor-pointer"
+                                      title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
+                                    >
+                                      + {l}
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        if (!window.confirm(isSpanish
+                                          ? `¿Eliminar la etiqueta "${l}" del catálogo de la empresa? Afecta a todas las conversaciones.`
+                                          : `Excluir a etiqueta "${l}" do catálogo da empresa? Afeta todas as conversas.`)) return;
+                                        try {
+                                          await handleDeleteLabelCatalog(l);
+                                        } catch (err: any) {
+                                          setErrorMsg(err?.message || (isSpanish ? 'No fue posible eliminar la etiqueta.' : 'Não foi possível excluir a etiqueta.'));
+                                        }
+                                      }}
+                                      className="hover:text-rose-300 cursor-pointer"
+                                      title={isSpanish ? 'Eliminar del catálogo' : 'Excluir do catálogo'}
+                                    >
+                                      <X className="w-2.5 h-2.5" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
+
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              if (newLabelInput.trim()) {
+                                handleAddLabel(selectedLead.id, newLabelInput);
+                                setNewLabelInput('');
+                                setIsLabelPickerOpen(false);
+                              }
+                            }}
+                            className="flex items-center gap-1.5"
+                          >
+                            <input
+                              type="text"
+                              value={newLabelInput}
+                              onChange={(e) => setNewLabelInput(e.target.value)}
+                              placeholder={isSpanish ? 'Nueva etiqueta...' : 'Nova etiqueta...'}
+                              autoFocus
+                              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                            />
+                            <button
+                              type="submit"
+                              className="p-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 rounded-lg cursor-pointer flex-shrink-0"
+                              title={isSpanish ? 'Agregar' : 'Adicionar'}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </form>
+
+                          <button
+                            type="button"
+                            onClick={() => { setIsLabelPickerOpen(false); openLabelManager(); }}
+                            className="w-full flex items-center justify-center gap-1.5 text-[10px] text-slate-400 hover:text-white pt-2 mt-1 border-t border-slate-700 cursor-pointer"
+                          >
+                            <Settings className="w-3 h-3" />
+                            {isSpanish ? 'Gestionar etiquetas' : 'Gerenciar etiquetas'}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
 
                   {/* Achado ao vivo: as ações da conversa (bloquear IA pra
                       esse lead, fixar, marcar não lida, silenciar, arquivar)
@@ -3951,138 +4104,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </div>
               </div>
 
-              {/* Etiquetas livres da conversa (tipo WhatsApp Business).
-                  TASK-0185/0187 (pedido direto): mesma cor de fundo do
-                  cabeçalho acima (#202c33) e SEM nenhuma borda fechando o
-                  bloco — o WhatsApp real não deixa nenhuma linha visível
-                  entre o cabeçalho e o começo das mensagens, então tirada de
-                  vez (não só movida) pra bater com o real. Tema das
-                  etiquetas trocado de colorido (`labelColorClasses`, uma cor
-                  por etiqueta) pra um único tom neutro — "ficou muito
-                  carregado", pedido direto pra ficar mais minimalista. */}
-              <div className="px-3 pt-0 pb-1.5 bg-[#202c33] flex items-center gap-1.5 flex-wrap relative">
-                <Tag className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                {(selectedLead.conversationLabels || []).map((label) => (
-                  <span
-                    key={label}
-                    className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600 bg-slate-800/70 text-slate-200 flex items-center gap-1"
-                  >
-                    {label}
-                    <button
-                      onClick={() => handleRemoveLabel(selectedLead.id, label)}
-                      className="hover:opacity-70 cursor-pointer"
-                      title={isSpanish ? 'Quitar etiqueta' : 'Remover etiqueta'}
-                    >
-                      <X className="w-2.5 h-2.5" />
-                    </button>
-                  </span>
-                ))}
-
-                {/* Só pra criar uma etiqueta NOVA (texto livre) ou gerenciar —
-                    as já cadastradas não moram mais aqui dentro. */}
-                <button
-                  onClick={() => { setIsLabelPickerOpen((v) => !v); setNewLabelInput(''); }}
-                  className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 transition-colors flex items-center gap-1 cursor-pointer"
-                  title={isSpanish ? 'Crear nueva etiqueta' : 'Criar nova etiqueta'}
-                >
-                  <Plus className="w-2.5 h-2.5" />
-                  {isSpanish ? 'Nueva' : 'Nova'}
-                </button>
-
-                {isLabelPickerOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsLabelPickerOpen(false)} />
-                    <div className="absolute left-3 top-9 z-50 w-72 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-3 space-y-2 origin-top-left animate-pop-in">
-                      {/* TASK-0258 (pedido direto): sugestões saíram da barra
-                          sempre visível (ficava poluída, achado com print
-                          real) e passaram a morar aqui dentro do popover — só
-                          aparecem quando o operador toca "+ Nova". Mesma
-                          lógica/ações de antes: um toque aplica, o X exclui a
-                          sugestão do catálogo do tenant inteiro (mesma ação
-                          de "Gerenciar etiquetas", só que sem precisar abrir
-                          o modal). */}
-                      {(() => {
-                        const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
-                        const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
-                          .filter((l) => !alreadyOn.has(normalizeLabelText(l)) && !dismissedDefaultSuggestions.has(normalizeLabelText(l)));
-                        if (!suggestions.length) return null;
-                        return (
-                          <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-700">
-                            {suggestions.map((l) => (
-                              <span
-                                key={l}
-                                className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 flex items-center gap-1"
-                              >
-                                <button
-                                  onClick={() => { handleAddLabel(selectedLead.id, l); setIsLabelPickerOpen(false); }}
-                                  className="hover:text-white cursor-pointer"
-                                  title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
-                                >
-                                  + {l}
-                                </button>
-                                <button
-                                  onClick={async () => {
-                                    if (!window.confirm(isSpanish
-                                      ? `¿Eliminar la etiqueta "${l}" del catálogo de la empresa? Afecta a todas las conversaciones.`
-                                      : `Excluir a etiqueta "${l}" do catálogo da empresa? Afeta todas as conversas.`)) return;
-                                    try {
-                                      await handleDeleteLabelCatalog(l);
-                                    } catch (err: any) {
-                                      setErrorMsg(err?.message || (isSpanish ? 'No fue posible eliminar la etiqueta.' : 'Não foi possível excluir a etiqueta.'));
-                                    }
-                                  }}
-                                  className="hover:text-rose-300 cursor-pointer"
-                                  title={isSpanish ? 'Eliminar del catálogo' : 'Excluir do catálogo'}
-                                >
-                                  <X className="w-2.5 h-2.5" />
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        );
-                      })()}
-
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (newLabelInput.trim()) {
-                            handleAddLabel(selectedLead.id, newLabelInput);
-                            setNewLabelInput('');
-                            setIsLabelPickerOpen(false);
-                          }
-                        }}
-                        className="flex items-center gap-1.5"
-                      >
-                        <input
-                          type="text"
-                          value={newLabelInput}
-                          onChange={(e) => setNewLabelInput(e.target.value)}
-                          placeholder={isSpanish ? 'Nueva etiqueta...' : 'Nova etiqueta...'}
-                          autoFocus
-                          className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                        />
-                        <button
-                          type="submit"
-                          className="p-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 rounded-lg cursor-pointer flex-shrink-0"
-                          title={isSpanish ? 'Agregar' : 'Adicionar'}
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </form>
-
-                      <button
-                        type="button"
-                        onClick={() => { setIsLabelPickerOpen(false); openLabelManager(); }}
-                        className="w-full flex items-center justify-center gap-1.5 text-[10px] text-slate-400 hover:text-white pt-2 mt-1 border-t border-slate-700 cursor-pointer"
-                      >
-                        <Settings className="w-3 h-3" />
-                        {isSpanish ? 'Gestionar etiquetas' : 'Gerenciar etiquetas'}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-
               {/* TASK-0187 (pedido direto, 01/09/2026): alerta PERSISTENTE de
                   escalonamento aberto dentro da própria conversa — o único
                   sinal que existia (aiReplyStatusByPhone via SSE) some
@@ -4092,28 +4113,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   até o escalonamento ser resolvido de verdade (não some
                   sozinho, não tem botão de fechar — é sinal de segurança,
                   não decoração). blockedDraft (quando existe) é o rascunho
-                  real que o revisor pré-envio recusou mandar. */}
+                  real que o revisor pré-envio recusou mandar. TASK-0259
+                  (pedido direto): cor volta pra âmbar/laranja (era rose) e
+                  fonte/padding menores — mesma prioridade visual de antes,
+                  só menos pesado na tela. */}
               {(selectedLead as any)?.isReal && (() => {
                 const activeEscalation = escalations.find(
                   (e) => e.phone === selectedLead.phone && e.status !== 'resolved' && e.status !== 'archived' && !e.resolved,
                 );
                 if (!activeEscalation) return null;
                 return (
-                  <div className="bg-rose-950/40 border-b border-rose-800/40 px-3 py-2 flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
+                  <div className="bg-amber-950/40 border-b border-amber-800/40 px-3 py-1.5 flex items-start gap-2">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-300 flex-shrink-0 mt-0.5" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[11px] font-bold text-rose-200">
+                      <p className="text-[10px] font-bold text-amber-200">
                         {activeEscalation.blockedDraft
                           ? (isSpanish ? 'El revisor bloqueó una respuesta automática' : 'O revisor bloqueou uma resposta automática')
                           : (isSpanish ? 'Conversación escalada para un humano' : 'Conversa escalada para humano')}
                       </p>
-                      <p className="text-[11px] text-rose-300/90 truncate">{activeEscalation.reason}</p>
+                      <p className="text-[10px] text-amber-300/90 truncate">{activeEscalation.reason}</p>
                     </div>
                     {onGoToEscalations && (
                       <button
                         type="button"
                         onClick={onGoToEscalations}
-                        className="shrink-0 rounded-lg border border-rose-500/30 px-2 py-1 text-[10px] font-bold text-rose-200 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                        className="shrink-0 rounded-lg border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-200 hover:bg-amber-500/10 transition-colors cursor-pointer"
                       >
                         {isSpanish ? 'Ver escalamiento' : 'Ver escalonamento'}
                       </button>
@@ -4790,6 +4814,30 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
+                {/* TASK-0259 (pedido direto): o aviso de assunção de controle
+                    deixou de ser um parágrafo fixo permanente (poluía a
+                    tela em toda conversa) e virou este banner discreto, que
+                    aparece só na primeira vez que o operador toca no campo
+                    de digitação (`handleComposerFirstFocus`, flag salva em
+                    localStorage — mesmo padrão de "não mostrar de novo" já
+                    usado nas sugestões de etiqueta) e some sozinho depois
+                    de alguns segundos. */}
+                {showComposerHint && (
+                  <div className="flex items-center gap-1.5 bg-[#111b21] border border-slate-800 rounded-lg px-3 py-1.5 text-[10px] text-slate-400 animate-pop-in">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80 shrink-0" />
+                    <span className="flex-1">{isSpanish
+                      ? 'Al enviar, asumes esta conversación: el agente deja de responder aquí hasta que la devuelvas. Las demás siguen normales.'
+                      : 'Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.'}</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowComposerHint(false)}
+                      className="p-0.5 text-slate-500 hover:text-white rounded cursor-pointer shrink-0"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
                 {/* WhatsApp Style Text Input Form */}
                 {/* Achado real, 29/08/2026 (pedido do dono do produto,
                     comparação lado a lado com o app real): a caixa de texto
@@ -4893,7 +4941,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           handleSendTextMessage();
                         }
                       }}
-                      className="flex-1 min-w-0 bg-transparent text-sm text-[#e9edef] placeholder-slate-400 py-2.5 leading-6 resize-none overflow-y-auto focus:outline-none"
+                      onFocus={handleComposerFirstFocus}
+                      className="atendimento-composer-textarea flex-1 min-w-0 bg-transparent text-sm text-[#e9edef] placeholder-slate-400 py-2.5 leading-6 resize-none overflow-y-auto focus:outline-none"
                       style={{ maxHeight: '120px' }}
                     />
 
@@ -4971,25 +5020,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         </>
                       )}
                     </div>
-
-                    {/* TASK-0258 (pedido direto): o aviso de assunção de
-                        controle deixou de ser um parágrafo fixo sempre
-                        visível embaixo do campo de texto (poluía a tela em
-                        toda conversa, sem nunca sumir) e virou este ícone —
-                        `title` mostra no hover (desktop); o alert cobre o
-                        toque no mobile, onde `title` não abre sozinho. */}
-                    <button
-                      type="button"
-                      onClick={() => window.alert(isSpanish
-                        ? 'Al enviar, asumes esta conversación: el agente deja de responder aquí hasta que la devuelvas. Las demás siguen normales.'
-                        : 'Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.')}
-                      className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer flex-shrink-0"
-                      title={isSpanish
-                        ? 'Al enviar, asumes esta conversación: el agente deja de responder aquí hasta que la devuelvas. Las demás siguen normales.'
-                        : 'Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.'}
-                    >
-                      <Info className="w-[18px] h-[18px]" />
-                    </button>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
