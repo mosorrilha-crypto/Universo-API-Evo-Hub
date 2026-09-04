@@ -94,7 +94,14 @@ describe('contraste global de botões no tema claro', () => {
   });
 
   it('mantém texto branco nas bolhas de mensagem enviada (operador/IA) que ficam com fundo escuro de propósito no claro', () => {
-    expect(css).toContain("html[data-theme='light'] [class*='bg-[#2e261f]'].text-white");
+    expect(css).toContain("html[data-theme='light'] [class*='bg-[#334155]'].text-white");
     expect(css).toContain("html[data-theme='light'] [class*='bg-[#005c4b]'].text-white");
+  });
+
+  it('mantém texto claro na bolha do operador (azul-acinzentado, TASK-0256) no tema claro/limpo', () => {
+    expect(css).toContain("html[data-theme='light'] [class*='bg-[#334155]'].text-slate-100");
+    expect(css).toContain("html[data-theme='clean'] [class*='bg-[#334155]'].text-slate-100");
+    expect(css).toContain("html[data-theme='light'] [class*='bg-[#334155]'] .text-slate-300");
+    expect(css).toContain("html[data-theme='clean'] [class*='bg-[#334155]'] .text-slate-300");
   });
 });
