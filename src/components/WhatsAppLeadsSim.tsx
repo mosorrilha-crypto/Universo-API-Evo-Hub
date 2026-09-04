@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
@@ -113,6 +113,26 @@ const COMPOSER_EMOJIS = [
 // do dono do produto: só a Clic Piscinas por agora; generalizar pra modelo
 // por tenant fica pra quando outro tenant precisar de contrato de verdade.
 const CLIC_PISCINAS_TENANT_ID = '45dbb383-522e-400b-9804-0ea65f589d40';
+
+// TASK-0267 (pedido direto, "gostaria de uma nova aba na ficha ia com os
+// escalonamentos deste lead para facilitar a tomada de decisão") — mesmas
+// legendas/cores já usadas em EscalationsPanel.tsx (fila geral de
+// Pendências), reaplicadas aqui numa versão compacta e escopada a UM
+// contato só, sem duplicar o componente inteiro.
+const ESCALATION_STATUS_META: Record<NonNullable<EscalationInfo['status']> | 'default', { label: string; className: string }> = {
+  open: { label: 'Sem responsável', className: 'border-amber-500/30 bg-amber-500/10 text-amber-200' },
+  assigned: { label: 'Em atendimento', className: 'border-sky-500/30 bg-sky-500/10 text-sky-200' },
+  awaiting_customer: { label: 'Aguardando cliente', className: 'border-violet-500/30 bg-violet-500/10 text-violet-200' },
+  resolved: { label: 'Resolvido', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' },
+  archived: { label: 'Arquivado', className: 'border-slate-600 bg-slate-800 text-slate-300' },
+  default: { label: 'Sem responsável', className: 'border-amber-500/30 bg-amber-500/10 text-amber-200' },
+};
+const ESCALATION_PRIORITY_META: Record<NonNullable<EscalationInfo['priority']>, { label: string; className: string }> = {
+  critical: { label: 'Crítica', className: 'border-rose-500/30 bg-rose-500/10 text-rose-200' },
+  high: { label: 'Alta', className: 'border-amber-500/30 bg-amber-500/10 text-amber-200' },
+  medium: { label: 'Média', className: 'border-sky-500/30 bg-sky-500/10 text-sky-200' },
+  low: { label: 'Baixa', className: 'border-slate-600 bg-slate-800 text-slate-300' },
+};
 
 interface WhatsAppLeadsSimProps {
   onSaveTranscript: (item: SavedTranscriptItem) => void;
@@ -334,7 +354,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'window_closed'>('all');
   // Painel lateral de contexto do contato (Referência 1: 3 colunas ativas no desktop)
   const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
-  const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis'>('profile');
+  const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis' | 'escalations'>('profile');
   const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
   // Se o tenant ativo tem WABA (WhatsApp Business Account) configurado —
   // usado pra bloquear "Reabrir a conversa" já na página, antes de abrir o
@@ -1996,6 +2016,119 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  // Achado real (print da Ficha do Contato, "Gisse" com "Agendou? sim" mas
+  // "AGENDAMENTOS: Nenhum agendamento ativo"): as duas seções liam fontes
+  // DIFERENTES. "Agendou?" usa `paymentAppointment` (busca dedicada,
+  // GET /api/conversations/:phone/appointment — sempre atual, escopada só
+  // por telefone). A lista "AGENDAMENTOS" usava só `upcomingEvents`
+  // (GET /api/google-calendar/upcoming-events, escopado pelo MÊS em
+  // exibição na Agenda — só populado sob demanda, quando o operador abre o
+  // painel de Agenda, e só cobre o mês corrente por padrão). Se o
+  // agendamento do lead cai fora desse mês (ou a Agenda nunca foi aberta
+  // nesta sessão), `upcomingEvents` fica vazio/sem esse item, mesmo com
+  // `paymentAppointment` confirmando um agendamento real — daí o
+  // "sim"/"nenhum ativo" contraditório na mesma tela. Junta as duas fontes
+  // aqui, uma vez só (usado tanto na Ficha desktop quanto na gaveta
+  // mobile), evitando duplicar o mesmo item se ele já vier de
+  // `upcomingEvents` (casa por horário exato). Também corrige
+  // `funnelStage.name`: antes sempre dizia "Horário já passou" pra
+  // qualquer `paymentAppointment`, mesmo um agendamento futuro.
+  const contactFunnelInfo = useMemo(() => {
+    const phone = selectedLead?.phone;
+    const fromCalendar = phone
+      ? upcomingEvents
+          .filter((ev) => ev.phone === phone)
+          .map((ev) => ({
+            id: ev.id,
+            date: ev.date || 'Hoje',
+            time: ev.time || '12:00',
+            title: ev.title || 'Consulta',
+            status: 'scheduled' as const,
+          }))
+      : [];
+    const paymentStartMs = paymentAppointment ? new Date(paymentAppointment.startIso).getTime() : null;
+    const alreadyListed = paymentStartMs != null && fromCalendar.some((appt) => {
+      const applied = upcomingEvents.find((ev) => ev.id === appt.id);
+      return applied?.startIso ? new Date(applied.startIso).getTime() === paymentStartMs : false;
+    });
+    const upcomingAppointments = paymentAppointment && !alreadyListed
+      ? [
+          ...fromCalendar,
+          {
+            id: 'payment-appointment',
+            date: new Date(paymentAppointment.startIso).toLocaleDateString('pt-BR'),
+            time: new Date(paymentAppointment.startIso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            title: paymentAppointment.summary || 'Consulta',
+            status: (paymentStartMs != null && paymentStartMs < Date.now() ? 'passed' : 'scheduled') as 'passed' | 'scheduled',
+          },
+        ]
+      : fromCalendar;
+    const funnelStageName = paymentAppointment
+      ? (paymentStartMs != null && paymentStartMs < Date.now() ? 'Horário já passou' : 'Agendamento Confirmado')
+      : (selectedLead?.fullAnalysis?.stage || 'Em Qualificação');
+    return { upcomingAppointments, funnelStageName };
+  }, [selectedLead?.phone, selectedLead?.fullAnalysis?.stage, paymentAppointment, upcomingEvents]);
+
+  // TASK-0267 (pedido direto): histórico completo de escalonamentos DESTE
+  // contato — antes só existia o alerta do escalonamento ATIVO (banner no
+  // topo da conversa, achado ~linha 4172) ou a fila geral de Pendências
+  // (todos os leads misturados); não tinha como ver, dentro da própria
+  // conversa, os escalonamentos passados de um contato específico pra
+  // ajudar a decidir o que fazer agora (ex: já escalou antes por esse
+  // mesmo motivo?). Mais recente primeiro.
+  const leadEscalationHistory = useMemo(() => {
+    const phone = selectedLead?.phone;
+    if (!phone) return [];
+    return escalations
+      .filter((e) => e.phone === phone)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [escalations, selectedLead?.phone]);
+
+  const renderEscalationHistoryPanel = () => (
+    <div className="p-3 space-y-2.5 overflow-y-auto">
+      {leadEscalationHistory.length === 0 ? (
+        <p className="text-xs text-slate-500 text-center py-6">
+          {isSpanish ? 'Ningún escalamiento registrado para este contacto.' : 'Nenhum escalonamento registrado para este contato.'}
+        </p>
+      ) : (
+        leadEscalationHistory.map((esc) => {
+          const isOpen = esc.status !== 'resolved' && esc.status !== 'archived' && !esc.resolved;
+          const statusMeta = ESCALATION_STATUS_META[esc.status || 'default'];
+          const priorityMeta = esc.priority ? ESCALATION_PRIORITY_META[esc.priority] : null;
+          return (
+            <div key={esc.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-1.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold ${statusMeta.className}`}>{statusMeta.label}</span>
+                {priorityMeta && <span className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold ${priorityMeta.className}`}>{priorityMeta.label}</span>}
+              </div>
+              <p className="text-xs text-slate-200 leading-relaxed">{esc.reason}</p>
+              <p className="text-[10px] text-slate-500">{new Date(esc.createdAt).toLocaleString('pt-BR')}</p>
+              {esc.blockedDraft && (
+                <p className="text-[10px] text-amber-300/90">
+                  {isSpanish ? 'Borrador bloqueado: ' : 'Rascunho bloqueado: '}"{esc.blockedDraft}"
+                </p>
+              )}
+              {esc.resolutionNote && (
+                <p className="text-[10px] text-emerald-300/90">
+                  {isSpanish ? 'Resolución: ' : 'Resolução: '}{esc.resolutionNote}
+                </p>
+              )}
+              {isOpen && onGoToEscalations && (
+                <button
+                  type="button"
+                  onClick={onGoToEscalations}
+                  className="text-[10px] font-bold text-sky-300 hover:text-sky-200 cursor-pointer"
+                >
+                  {isSpanish ? 'Ver en la cola de Pendencias →' : 'Ver na fila de Pendências →'}
+                </button>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
 
   // Conversas arquivadas saem da lista principal e ficam numa seção própria,
   // colapsável — igual à seção "Arquivadas" do WhatsApp Web real.
@@ -5070,7 +5203,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {/* ========================================== */}
         {showRightPanel && (
           <div className="atendimento-analysis-panel hidden lg:flex lg:col-span-3 border-l border-slate-800/45 bg-[#111b21] flex-col overflow-y-auto scrollbar-thin">
-            {/* Seletor de visualização: Ficha do Contato vs Análise IA */}
+            {/* Seletor de visualização: Ficha do Contato vs Análise IA vs
+                Escalonamentos (TASK-0267) */}
             <div className="flex border-b border-slate-800 bg-[#0f171d] px-3 pt-2 gap-2 shrink-0">
               <button
                 type="button"
@@ -5094,6 +5228,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 Análise IA
               </button>
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('escalations')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer flex items-center gap-1 ${
+                  rightPanelTab === 'escalations'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                {isSpanish ? 'Escalamientos' : 'Escalonamentos'}
+                {leadEscalationHistory.length > 0 && (
+                  <span className="text-[9px] px-1.5 rounded-full bg-slate-700 text-slate-300">{leadEscalationHistory.length}</span>
+                )}
+              </button>
             </div>
 
             {rightPanelTab === 'profile' ? (
@@ -5106,24 +5254,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
                   notes: visibleContactContext?.memory?.conversationSummary || undefined,
                   funnelStage: {
-                    name: paymentAppointment ? 'Horário já passou' : (selectedLead.fullAnalysis?.stage || 'Em Qualificação'),
+                    name: contactFunnelInfo.funnelStageName,
                     currentStep: paymentAppointment ? 5 : 3,
                     totalSteps: 5,
                   },
-                  upcomingAppointments: upcomingEvents
-                    .filter((ev) => ev.phone === selectedLead.phone)
-                    .map((ev) => ({
-                      id: ev.id,
-                      date: ev.date || 'Hoje',
-                      time: ev.time || '12:00',
-                      title: ev.title || 'Consulta',
-                      status: 'scheduled',
-                    })),
+                  upcomingAppointments: contactFunnelInfo.upcomingAppointments,
                 } : null}
                 agentStatus={selectedLead?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
                 onClose={() => setShowRightPanel(false)}
               />
+            ) : rightPanelTab === 'escalations' ? (
+              renderEscalationHistoryPanel()
             ) : (
               <div className="p-2.5 space-y-2.5">
                 <label
@@ -5194,7 +5336,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
             </div>
             {/* TASK-0251: mesmo seletor de abas do desktop ("Ficha do
-                Contato" / "Análise IA"), reaproveitando `rightPanelTab`. */}
+                Contato" / "Análise IA"), reaproveitando `rightPanelTab`.
+                TASK-0267: terceira aba "Escalonamentos" adicionada aqui e
+                no desktop ao mesmo tempo, mesmo estado compartilhado. */}
             <div className="flex border-b border-slate-800 bg-[#0f171d] px-3 pt-2 gap-2 flex-shrink-0">
               <button
                 type="button"
@@ -5218,6 +5362,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 Análise IA
               </button>
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('escalations')}
+                className={`pb-2 px-2 text-xs font-bold transition-colors border-b-2 cursor-pointer flex items-center gap-1 ${
+                  rightPanelTab === 'escalations'
+                    ? 'text-emerald-400 border-emerald-400'
+                    : 'text-slate-400 border-transparent hover:text-slate-200'
+                }`}
+              >
+                {isSpanish ? 'Escalamientos' : 'Escalonamentos'}
+                {leadEscalationHistory.length > 0 && (
+                  <span className="text-[9px] px-1.5 rounded-full bg-slate-700 text-slate-300">{leadEscalationHistory.length}</span>
+                )}
+              </button>
             </div>
             {rightPanelTab === 'profile' ? (
               <ConversationContextSidebar
@@ -5229,25 +5387,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   firstContactAt: selectedLead.messages?.[0]?.timestamp || selectedLead.timestamp,
                   notes: visibleContactContext?.memory?.conversationSummary || undefined,
                   funnelStage: {
-                    name: paymentAppointment ? 'Horário já passou' : (selectedLead.fullAnalysis?.stage || 'Em Qualificação'),
+                    name: contactFunnelInfo.funnelStageName,
                     currentStep: paymentAppointment ? 5 : 3,
                     totalSteps: 5,
                   },
-                  upcomingAppointments: upcomingEvents
-                    .filter((ev) => ev.phone === selectedLead.phone)
-                    .map((ev) => ({
-                      id: ev.id,
-                      date: ev.date || 'Hoje',
-                      time: ev.time || '12:00',
-                      title: ev.title || 'Consulta',
-                      status: 'scheduled',
-                    })),
+                  upcomingAppointments: contactFunnelInfo.upcomingAppointments,
                 }}
                 agentStatus={(selectedLead as any)?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => handleUpdateConversationState(selectedLead.id, { aiBlocked: !(selectedLead as any).aiBlockedAt })}
                 onClose={() => setMobileAnalysisOpen(false)}
                 isMobile
               />
+            ) : rightPanelTab === 'escalations' ? (
+              renderEscalationHistoryPanel()
             ) : (
             <div className="p-3 space-y-3 overflow-y-auto">
               {/* Auto IA — mesmo toggle da coluna de desktop (ver comentário
