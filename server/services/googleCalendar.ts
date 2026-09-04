@@ -30,7 +30,13 @@ type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
 // o escopo novo ao reconectar (o botão "Conectar Google Calendar" já força
 // `prompt: 'consent'`, então basta clicar de novo) — o token antigo continua
 // funcionando pra Calendar normalmente até lá, só não habilita Sheets.
-const SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/spreadsheets'];
+// TASK-0267 — escopo de e-mail somado pra gravar qual conta Google foi
+// conectada (google_account_email em tenant_calendar_tokens), só pra
+// diagnóstico interno (nunca exibido no painel/Agenda) — resolve dúvida real
+// de suporte ("é a mesma conta que uso no celular?") sem precisar reconectar
+// pra descobrir. Tenant que já conectou ANTES desta mudança só ganha o
+// escopo novo ao reconectar (mesmo padrão do escopo de Sheets acima).
+const SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/userinfo.email'];
 
 /**
  * Token por tenant, na tabela Postgres `tenant_calendar_tokens` (Bloco 2.A) —
@@ -47,12 +53,31 @@ async function loadRefreshToken(tenantId: string): Promise<string | null> {
   return decryptSecret(data.refresh_token);
 }
 
-async function saveRefreshToken(tenantId: string, refreshToken: string): Promise<void> {
+async function saveRefreshToken(tenantId: string, refreshToken: string, accountEmail?: string | null): Promise<void> {
   const db = getDb();
-  const { error } = await db
-    .from('tenant_calendar_tokens')
-    .upsert({ tenant_id: tenantId, refresh_token: encryptSecret(refreshToken), connected_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
+  const row: Record<string, unknown> = { tenant_id: tenantId, refresh_token: encryptSecret(refreshToken), connected_at: new Date().toISOString() };
+  // Só sobrescreve o e-mail quando temos um valor novo (ex: rotação de token
+  // dentro de getAuthorizedGoogleClient, que não busca o userinfo de novo) —
+  // nunca apaga um e-mail já gravado por falta de info nesta chamada específica.
+  if (accountEmail) row.google_account_email = accountEmail;
+  const { error } = await db.from('tenant_calendar_tokens').upsert(row, { onConflict: 'tenant_id' });
   if (error) throw error;
+}
+
+/**
+ * Melhor esforço, nunca bloqueia a conexão: se a chamada ao userinfo falhar
+ * (rede, escopo ainda não concedido numa reconexão antiga), o Calendar
+ * continua funcionando normalmente, só sem o e-mail pra diagnóstico.
+ */
+async function fetchAccountEmail(client: OAuth2Client): Promise<string | null> {
+  try {
+    const oauth2 = google.oauth2({ version: 'v2', auth: client });
+    const { data } = await oauth2.userinfo.get();
+    return data.email || null;
+  } catch (err) {
+    console.warn('⚠️  [GoogleCalendar] Falha ao buscar e-mail da conta conectada (não bloqueia a conexão):', (err as Error).message);
+    return null;
+  }
 }
 
 function createOAuthClient(clientId?: string, clientSecret?: string, redirectUri?: string): OAuth2Client {
@@ -107,7 +132,9 @@ export async function handleGoogleOAuthCallback(
   if (!tokens.refresh_token) {
     throw new Error('Google não devolveu um refresh_token — desconecte o app em myaccount.google.com/permissions e tente conectar de novo (o consentimento precisa ser "fresco").');
   }
-  await saveRefreshToken(tenantId, tokens.refresh_token);
+  client.setCredentials(tokens);
+  const accountEmail = await fetchAccountEmail(client);
+  await saveRefreshToken(tenantId, tokens.refresh_token, accountEmail);
 }
 
 export async function isGoogleCalendarConnected(tenantId: string): Promise<boolean> {
