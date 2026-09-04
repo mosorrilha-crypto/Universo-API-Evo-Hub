@@ -1566,6 +1566,7 @@ export const App: React.FC = () => {
             description="Transforme oportunidades em horários confirmados e acompanhe a próxima ação comercial."
             accent="green"
             compact
+            hideHeader
           >
           <AgendaWorkspace
             transactions={transactions}
@@ -1588,6 +1589,7 @@ export const App: React.FC = () => {
             description="Acompanhe receitas, despesas e cobranças em aberto em uma área dedicada."
             accent="blue"
             compact
+            hideHeader
           >
           <FinancialWorkspace
             transactions={transactions}
