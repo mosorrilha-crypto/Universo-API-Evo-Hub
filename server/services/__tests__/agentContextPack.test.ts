@@ -40,6 +40,24 @@ describe('Agent Context Pack', () => {
     expect(pack.selectedFacts).not.toHaveProperty('preferredName');
   });
 
+  it('inclui há quanto tempo e o motivo da escalação aberta, com instrução explícita de não reabrir o mesmo assunto', () => {
+    const fortyMinutesAgo = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+    const pack = buildAgentContextPack({
+      memory: null,
+      escalation: {
+        id: 'esc-2',
+        kind: 'general',
+        resolved: false,
+        reason: 'Revisor pré-envio bloqueou a resposta automática: nome não confirmado antes de avançar pra agenda.',
+        createdAt: fortyMinutesAgo,
+      },
+    });
+
+    expect(pack.promptSection).toContain('há 40 min');
+    expect(pack.promptSection).toContain('motivo: "Revisor pré-envio bloqueou a resposta automática');
+    expect(pack.promptSection).toContain('NÃO reabra nem repita sozinho o mesmo assunto');
+  });
+
   it('declara indisponibilidade de fonte viva de forma conservadora, nunca como ausência de agenda', () => {
     const pack = buildAgentContextPack({
       memory: null,
