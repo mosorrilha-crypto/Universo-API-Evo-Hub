@@ -239,7 +239,18 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     if (!service || !date || !time) return;
     const selectedLead = leads.find((lead) => lead.id === clientId);
     const phone = selectedLead?.phone || clientPhone;
-    if (!phone) {
+    const isEdit = appointmentDialog?.mode === 'edit' && !!appointmentDialog.event;
+    // TASK-0270 (achado real ao investigar "não consigo remarcar no
+    // desktop"): "Cliente do CRM"/"Telefone avulso" ficavam `disabled` no
+    // modo edição — inputs/selects `disabled` NÃO entram no FormData do
+    // navegador, então `clientId`/`clientPhone` sempre chegavam vazios aqui
+    // e este guard bloqueava TODA remarcação antes de sequer chamar a API
+    // de reagendar, sem nenhum erro visível pro operador (só o toast
+    // genérico de "informe um cliente", fácil de não notar/entender como a
+    // causa real). Editar um evento já existente nunca precisa de telefone
+    // pra concluir — só é usado (opcionalmente) pra vincular o evento a um
+    // contato, ver bloco abaixo.
+    if (!isEdit && !phone) {
       onToast('Informe um cliente do CRM ou um telefone para criar o agendamento.');
       return;
     }
@@ -249,14 +260,34 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     const end = new Date(start.getTime() + 60 * 60 * 1000);
     setSubmitting(true);
     try {
-      if (appointmentDialog?.mode === 'edit' && appointmentDialog.event) {
-        const existing = appointmentDialog.event;
+      if (isEdit && appointmentDialog!.event) {
+        const existing = appointmentDialog!.event;
         await callEventAction(`/api/google-calendar/events/${encodeURIComponent(existing.id)}`, 'PATCH', { summary });
         const oldStart = new Date(existing.startIso);
         if (oldStart.getTime() !== start.getTime()) {
           await callEventAction(`/api/google-calendar/events/${encodeURIComponent(existing.id)}/reschedule`, 'PATCH', { newStartIso: start.toISOString(), newEndIso: end.toISOString() });
         }
-        onToast('Agendamento atualizado e agenda sincronizada.');
+        // TASK-0270 (pedido direto, "esta cliente foi agendada pelo google
+        // como eu posso vincular o agendamento no sistema para aparecer
+        // aqui na ficha de acompanhamento?"): um evento criado direto no
+        // Google Calendar (fora do WhatsApp) nunca tem uma linha em
+        // `appointments` — vincular aqui, só quando o operador de fato
+        // escolheu um cliente/telefone, faz esse evento já existente
+        // aparecer na Ficha do Contato sem duplicar nada na agenda (o
+        // endpoint abaixo nunca cria evento novo, só grava a referência).
+        if (phone) {
+          await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/link-appointment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ eventId: existing.id, summary, startIso: start.toISOString().slice(0, 19), endIso: end.toISOString().slice(0, 19) }),
+          }).then(async (response) => {
+            if (!response.ok) {
+              const data = await response.json().catch(() => null);
+              throw new Error(getApiError(data, 'Não foi possível vincular este agendamento ao contato.'));
+            }
+          });
+        }
+        onToast(phone ? 'Agendamento atualizado, sincronizado e vinculado ao contato.' : 'Agendamento atualizado e agenda sincronizada.');
       } else {
         const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/manual-appointment`, {
           method: 'POST',
@@ -750,7 +781,7 @@ const inputClass = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 
 function AppointmentDialog({ dialog, leads, currency, isSpanish, onClose, onSubmit, submitting }: { dialog: AppointmentDialogState; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
   const eventDate = dialog.event ? new Date(dialog.event.startIso) : dialog.initialDate ? new Date(`${dialog.initialDate}T12:00:00`) : new Date();
   const cleanSummary = dialog.event?.summary.replace(/^\[[^\]]+\]\s*/, '') || '';
-  return <DialogShell title={dialog.mode === 'new' ? (isSpanish ? 'Nuevo agendamiento' : 'Novo agendamento') : (isSpanish ? 'Editar agendamiento' : 'Editar agendamento')} description={isSpanish ? 'El servicio, la agenda y el cobro quedan vinculados en el mismo flujo.' : 'O serviço, a agenda e a cobrança ficam vinculados ao mesmo fluxo.'} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label={isSpanish ? 'Cliente del CRM' : 'Cliente do CRM'}><select name="clientId" defaultValue="" className={inputClass} disabled={dialog.mode === 'edit'}><option value="">{isSpanish ? 'Seleccionar cliente' : 'Selecionar cliente'}</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field><Field label={isSpanish ? 'Teléfono para cliente sin registro' : 'Telefone para cliente avulso'}><input name="clientPhone" disabled={dialog.mode === 'edit'} placeholder="Ej.: 595 981 123456" className={inputClass} /></Field></div><Field label={isSpanish ? 'Nombre de la clienta (opcional)' : 'Nome do cliente (opcional)'}><input name="clientName" placeholder={isSpanish ? 'Usado para identificar el registro sin cuenta' : 'Usado para identificar o cadastro avulso'} className={inputClass} disabled={dialog.mode === 'edit'} /></Field><Field label={isSpanish ? 'Servicio' : 'Serviço'}><input name="service" required defaultValue={cleanSummary} placeholder={isSpanish ? 'Ej.: Diseño de cejas' : 'Ex.: Design de sobrancelhas'} className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label={isSpanish ? 'Fecha' : 'Data'}><input name="date" type="date" required defaultValue={dateInputValue(eventDate)} className={inputClass} /></Field><Field label={isSpanish ? 'Hora' : 'Hora'}><input name="time" type="time" required defaultValue={timeInputValue(eventDate)} className={inputClass} /></Field></div><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor del cobro' : 'Valor da cobrança'} (${currency})`}><input name="amount" type="number" min="0" step="0.01" defaultValue={dialog.event?.payment?.amount ?? ''} disabled={dialog.mode === 'edit'} placeholder="0" className={inputClass} /></Field><Field label={isSpanish ? 'Origen' : 'Origem'}><select name="source" defaultValue="unknown" className={inputClass}><option value="unknown">{isSpanish ? 'Sin origen identificado' : 'Sem origem identificada'}</option><option value="ads">Ads</option><option value="referral">{isSpanish ? 'Recomendación' : 'Indicação'}</option><option value="organic">{isSpanish ? 'Orgánico' : 'Orgânico'}</option></select></Field></div><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 transition-opacity disabled:opacity-50">{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : dialog.mode === 'new' ? (isSpanish ? 'Crear agendamiento y cobro' : 'Criar agendamento e cobrança') : (isSpanish ? 'Guardar cambios' : 'Salvar alterações')}</button></form></DialogShell>;
+  return <DialogShell title={dialog.mode === 'new' ? (isSpanish ? 'Nuevo agendamiento' : 'Novo agendamento') : (isSpanish ? 'Editar agendamiento' : 'Editar agendamento')} description={isSpanish ? 'El servicio, la agenda y el cobro quedan vinculados en el mismo flujo.' : 'O serviço, a agenda e a cobrança ficam vinculados ao mesmo fluxo.'} onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 pt-5">{dialog.mode === 'edit' && <p className="text-[10px] leading-relaxed text-slate-500">{isSpanish ? 'Un evento creado directamente en Google Calendar (fuera de WhatsApp) no aparece en la Ficha del contacto hasta vincularlo aquí a un cliente/teléfono — no crea otro evento ni duplica nada.' : 'Um evento criado direto no Google Calendar (fora do WhatsApp) não aparece na Ficha do contato até ser vinculado aqui a um cliente/telefone — não cria outro evento nem duplica nada.'}</p>}<div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label={dialog.mode === 'edit' ? (isSpanish ? 'Vincular a un cliente del CRM (opcional)' : 'Vincular a um cliente do CRM (opcional)') : (isSpanish ? 'Cliente del CRM' : 'Cliente do CRM')}><select name="clientId" defaultValue="" className={inputClass}><option value="">{isSpanish ? 'Seleccionar cliente' : 'Selecionar cliente'}</option>{leads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></Field><Field label={dialog.mode === 'edit' ? (isSpanish ? 'O vincular por teléfono (opcional)' : 'Ou vincular por telefone (opcional)') : (isSpanish ? 'Teléfono para cliente sin registro' : 'Telefone para cliente avulso')}><input name="clientPhone" placeholder="Ej.: 595 981 123456" className={inputClass} /></Field></div><Field label={isSpanish ? 'Nombre de la clienta (opcional)' : 'Nome do cliente (opcional)'}><input name="clientName" placeholder={isSpanish ? 'Usado para identificar el registro sin cuenta' : 'Usado para identificar o cadastro avulso'} className={inputClass} /></Field><Field label={isSpanish ? 'Servicio' : 'Serviço'}><input name="service" required defaultValue={cleanSummary} placeholder={isSpanish ? 'Ej.: Diseño de cejas' : 'Ex.: Design de sobrancelhas'} className={inputClass} /></Field><div className="grid grid-cols-2 gap-4"><Field label={isSpanish ? 'Fecha' : 'Data'}><input name="date" type="date" required defaultValue={dateInputValue(eventDate)} className={inputClass} /></Field><Field label={isSpanish ? 'Hora' : 'Hora'}><input name="time" type="time" required defaultValue={timeInputValue(eventDate)} className={inputClass} /></Field></div><div className="grid grid-cols-2 gap-4"><Field label={`${isSpanish ? 'Valor del cobro' : 'Valor da cobrança'} (${currency})`}><input name="amount" type="number" min="0" step="0.01" defaultValue={dialog.event?.payment?.amount ?? ''} disabled={dialog.mode === 'edit'} placeholder="0" className={inputClass} /></Field><Field label={isSpanish ? 'Origen' : 'Origem'}><select name="source" defaultValue="unknown" className={inputClass}><option value="unknown">{isSpanish ? 'Sin origen identificado' : 'Sem origem identificada'}</option><option value="ads">Ads</option><option value="referral">{isSpanish ? 'Recomendación' : 'Indicação'}</option><option value="organic">{isSpanish ? 'Orgánico' : 'Orgânico'}</option></select></Field></div><button type="submit" disabled={submitting} className="w-full rounded-xl bg-emerald-400 py-3 text-xs font-black text-slate-950 transition-opacity disabled:opacity-50">{submitting ? (isSpanish ? 'Guardando...' : 'Salvando...') : dialog.mode === 'new' ? (isSpanish ? 'Crear agendamiento y cobro' : 'Criar agendamento e cobrança') : (isSpanish ? 'Guardar cambios' : 'Salvar alterações')}</button></form></DialogShell>;
 }
 
 function TransactionDialog({ kind, leads, currency, isSpanish, onClose, onSubmit, submitting }: { kind: 'income' | 'expense'; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean }) {
