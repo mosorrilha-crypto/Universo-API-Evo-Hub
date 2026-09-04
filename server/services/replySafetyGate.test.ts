@@ -197,4 +197,61 @@ describe('revisor pré-envio de respostas automáticas', () => {
 
     expect(verdict).toMatchObject({ approved: true, source: 'gemini-reviewer', severity: 'low' });
   });
+
+  describe('override determinístico pra bloqueio falso-positivo só por "nome ausente" (achado real 04/09/2026, TASK-0277)', () => {
+    it('aprova automaticamente quando o motivo é exclusivamente sobre nome ausente e o rascunho não avança pra agenda', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'O rascunho informa o preço e serviços, mas não solicita ou confirma o nome da cliente antes de avançar, conforme exigido pelas regras de atendimento.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Hola, cuánto cuesta el combo de cejas y labios?',
+        draftBubbles: ['Para ambas zonas tenemos el Combo Micro Cejas + Labios a Gs 850.000, que incluye la evaluación presencial previa con Monique.', '¿Tenés algún procedimiento previo en cejas o labios, o sería tu primera vez?'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(true);
+      expect(verdict.reason).toContain('override determinístico');
+    });
+
+    it('NÃO aprova quando o bloqueio mistura nome ausente com outro problema real (confusão com o nome da própria assistente)', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'A assistente se apresentou como Ana, mas incluiu o próprio nome na saudação como se estivesse falando com ela mesma ("Hola, Ana, todo bien?"), além de ainda não ter solicitado ou confirmado o nome da cliente antes de avançar.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Hola, quiero info',
+        draftBubbles: ['Hola, Ana, todo bien?', '¿Qué servicio te gustaría consultar?'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(false);
+    });
+
+    it('NÃO aprova quando o rascunho realmente empurra pra agenda, mesmo que o motivo cite só nome', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'O rascunho não solicita ou confirma o nome da cliente antes de avançar.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Quiero agendar',
+        draftBubbles: ['¿Qué día te queda mejor para agendar tu turno?'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(false);
+    });
+  });
 });

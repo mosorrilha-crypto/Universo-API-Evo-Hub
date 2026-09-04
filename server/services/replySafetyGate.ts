@@ -331,6 +331,44 @@ function matchesCustomerLanguage(customerMessage: string, suggestionText: string
   return true;
 }
 
+/**
+ * Achado real de produção (04/09/2026): mesmo com a regra 24 (autoReply.ts)
+ * e o parágrafo "NOME DO CLIENTE" deste revisor já cobrindo explicitamente
+ * que dúvida informativa/triagem NUNCA precisa de nome — inclusive com
+ * clarificação extra sobre o sinal "fluxo de agendamento" não valer pra
+ * qualquer resposta da conversa (TASK-0257) — o revisor (Groq e Gemini)
+ * continuou bloqueando por "nome não confirmado" em pelo menos 3 casos reais
+ * na mesma tarde, em conversas de clientes de verdade: reforço de prompt
+ * sozinho não bastou pra essa classe específica de bloqueio.
+ *
+ * Correção determinística (não mais uma terceira tentativa de reforçar o
+ * texto do prompt): quando o motivo do bloqueio é EXCLUSIVAMENTE sobre nome
+ * ausente — sem nenhum outro problema junto, como confusão com o nome da
+ * própria assistente, idioma errado, pagamento ou dado inventado — e o
+ * rascunho não empurra pra agenda de verdade (mesma checagem `pushesBooking`
+ * já usada acima nas regras determinísticas), aprova automaticamente. Um
+ * bloqueio que mistura "nome ausente" com qualquer outro problema real
+ * (ex: "se apresentou como Ana, mas... e também não confirmou o nome")
+ * continua bloqueado normalmente — só o caso isolado e comprovadamente
+ * repetido é que vira aprovação automática.
+ */
+function overrideNameOnlyFalsePositive(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  if (verdict.approved || verdict.source === 'rules') return verdict;
+  const reason = verdict.reason.toLowerCase();
+  const isNameComplaint = /\bnome\b/.test(reason) && /(solicit|confirm)/.test(reason);
+  if (!isNameComplaint) return verdict;
+  const hasSelfReferenceIssue = /(se apresentou como|falando com ela mesma|pr[óo]prio nome|nome da assistente|nome do agente)/.test(reason);
+  const hasOtherIssue = /(invent|alucina|pagamento|reembolso|idioma|espanhol|portugu[êe]s|disponibilidade real|hor[áa]rio confirmado|comprovante|\bdocumento\b)/.test(reason);
+  if (hasSelfReferenceIssue || hasOtherIssue) return verdict;
+  const combinedDraft = input.draftBubbles.map((bubble) => String(bubble || '')).join('\n');
+  if (pushesBooking(combinedDraft)) return verdict;
+  return {
+    ...verdict,
+    approved: true,
+    reason: `${verdict.reason} — aprovado por override determinístico (bloqueio só por nome ausente, sem avanço real de agenda; ver regra 24 de autoReply.ts e TASK-0277).`,
+  };
+}
+
 function parseReviewerDecision(value: unknown, source: ReplySafetySource): ReplySafetyVerdict {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const approved = data.approved === true;
@@ -354,7 +392,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
   if (deps.groqApiKey) {
     try {
       const result = await callGroqJsonCompletion(deps.groqApiKey, prompt);
-      return parseReviewerDecision(result.parsed, 'groq-reviewer');
+      return overrideNameOnlyFalsePositive(parseReviewerDecision(result.parsed, 'groq-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Groq indisponível, tentando Gemini: ${error?.message || error}`);
     }
@@ -367,7 +405,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0 },
       }), 12_000);
-      return parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer');
+      return overrideNameOnlyFalsePositive(parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Gemini indisponível: ${error?.message || error}`);
     }
