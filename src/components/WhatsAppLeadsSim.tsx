@@ -4468,7 +4468,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       return (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsHeaderMenuOpen(false)} />
+                          {/* Achado real (pedido direto, 04/09/2026, com
+                              print): este menu já abria ancorado no ícone
+                              "⋮" (top-down, `top-10`/`origin-top-right`,
+                              exatamente como pedido) — o problema nunca foi
+                              a posição, e sim a ALTURA: com até 14 itens
+                              (vários condicionais) e nenhum teto, a lista
+                              crescia livremente e cobria quase a tela
+                              inteira. `max-h-[70vh]` + rolagem própria na
+                              lista interna (o `rounded-xl` fica no wrapper
+                              externo, que precisa de `overflow-hidden` pra
+                              recortar os cantos — por isso a rolagem vive
+                              num `<div>` filho, não no mesmo elemento). */}
                           <div className="mobile-header-context-menu absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
+                          <div className="max-h-[70vh] overflow-y-auto">
                             {(selectedLead as any)?.isReal && !paymentAppointment && (
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsManualAppointmentModalOpen(true); }}
@@ -4611,6 +4624,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Eliminar conversación permanentemente' : 'Excluir conversa permanentemente'}</span>
                             </button>
+                          </div>
                           </div>
                         </>
                       );
@@ -5518,54 +5532,58 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       {showAttachMenu && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
-                          <div className="absolute bottom-full right-0 mb-2 z-50 w-60 max-h-64 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-1.5 origin-bottom-right animate-pop-in">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowAttachMenu(false);
-                                (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
-                              }}
-                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                            >
-                              <Paperclip className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                              <span>{isSpanish ? 'Documento o foto' : 'Documento ou foto'}</span>
-                            </button>
+                          {/* Redesenho (pedido direto, 04/09/2026, com print
+                              comparando com o menu de anexos real do
+                              WhatsApp): a lista vertical de texto virou uma
+                              grade de ícones em círculo + rótulo, reaproveitando
+                              `renderToolTile` (mesma função já usada na gaveta
+                              "Ferramentas", TASK-0282) em vez de duplicar o
+                              padrão visual. Cartão próprio (`rounded-2xl`,
+                              mais largo) em vez de lista estreita — evita a
+                              colisão visual com o botão flutuante "ir pro
+                              fim da conversa" relatada no print. */}
+                          <div className="absolute bottom-full right-0 mb-2 z-50 w-72 max-h-80 overflow-y-auto bg-[#233138] border border-slate-700 rounded-2xl shadow-2xl p-3 origin-bottom-right animate-pop-in">
+                            <div className="grid grid-cols-3 gap-3">
+                              {renderToolTile({
+                                key: 'attach-file',
+                                icon: <Paperclip className="h-5 w-5" />,
+                                label: isSpanish ? 'Documento o foto' : 'Documento ou foto',
+                                onClick: () => {
+                                  setShowAttachMenu(false);
+                                  (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
+                                },
+                              })}
+                            </div>
 
                             {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
                               <>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                                   {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
                                 </div>
-                                {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                  >
-                                    <ImageIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                    <span className="truncate">{p.name}</span>
-                                  </button>
-                                ))}
+                                <div className="grid grid-cols-3 gap-3">
+                                  {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => renderToolTile({
+                                    key: p.id,
+                                    icon: <ImageIcon className="h-5 w-5" />,
+                                    label: p.name,
+                                    onClick: () => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); },
+                                  }))}
+                                </div>
                               </>
                             )}
 
                             {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
                               <>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                                   {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
                                 </div>
-                                {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => { setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                  >
-                                    <Video className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                    <span className="truncate">{p.name}</span>
-                                  </button>
-                                ))}
+                                <div className="grid grid-cols-3 gap-3">
+                                  {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => renderToolTile({
+                                    key: p.id,
+                                    icon: <Video className="h-5 w-5" />,
+                                    label: p.name,
+                                    onClick: () => { setShowAttachMenu(false); handleSendExampleVideo(p.name); },
+                                  }))}
+                                </div>
                               </>
                             )}
                           </div>
