@@ -30,6 +30,7 @@ import { buildAgentContextPack, deriveContactMemoryPatch, loadAgentContextPack, 
 import { upsertContactAgentMemory } from './contactAgentMemoryStore';
 import { recordAgentTurnTrace } from './agentTurnTraceStore';
 import { listRecentApprovedReplyExamples, formatApprovedReplyExamplesForPrompt } from './approvedReplyExampleStore';
+import { isPlausiblePersonalName } from './contactNameGuard';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
@@ -466,7 +467,7 @@ REGRAS DE ESTILO (sempre aplicar):
 2. Adapte vocabulário, saudações e tom ESTRITAMENTE ao "toneOfVoice" do contexto do negócio abaixo — ele é quem define dialeto, formalidade e quais expressões (incluindo diminutivos) usar ou evitar. Nunca adicione um traço de estilo (diminutivo, gíria, tratamento informal) que o toneOfVoice não pediu, mesmo que pareça natural no idioma do cliente.
 3. Empatia e foco no benefício primeiro — nunca abra com currículo, dados técnicos ou lista de qualificações.
 4. Prefira perguntas abertas de diálogo a despejar informação toda de uma vez — mesma exceção do item 1 quando o tenant pedir explicitamente um bloco único pra um conteúdo específico.
-5. Não invente preços, horários, nome do cliente ou qualquer dado específico que não esteja explícito no contexto/histórico abaixo — nesse caso, diga que vai confirmar e retornar em breve, ou simplesmente não use um nome. Nunca chame o cliente por um nome que não apareceu no "Nome do cliente" fornecido nem foi dito por ele mesmo na conversa. Isso inclui o SEU PRÓPRIO nome de atendente (ex: "Ana", ou qualquer nome usado na sua própria apresentação) — achado real de produção (04/09/2026): um rascunho se apresentou como "Ana" e, na mesma bolha, cumprimentou a cliente como se ela também se chamasse "Ana" ("Hola, Ana, todo bien?"), confundindo o próprio nome de atendente com o da cliente. Se não houver "Nome do cliente" nenhum, não use nome nenhum na saudação — nem o seu.
+5. Não invente preços, horários, nome do cliente ou qualquer dado específico que não esteja explícito no contexto/histórico abaixo — nesse caso, diga que vai confirmar e retornar em breve, ou simplesmente não use um nome. Nunca chame o cliente por um nome que não apareceu no "Nome do cliente" fornecido nem foi dito por ele mesmo na conversa.
 6. Se o histórico mostra que vocês já se falaram, NUNCA se apresente de novo — continue a conversa naturalmente, como quem lembra o que já foi dito.
 7. Pode usar leve leveza/humor quando cabível, mas sempre com segurança e sem soar debochado.
 8. Nunca use parênteses nem dois-pontos explicativos dentro da mensagem — soa a texto escrito, não a uma pessoa conversando.
@@ -1902,6 +1903,11 @@ export async function generateAutoReplyForText(
   isCampaignEntry: boolean = false
 ): Promise<AutoReplyResult | null> {
   if (!ai || !text.trim()) return null;
+  // TASK-0278 — não confia cegamente no "nome" que o WhatsApp devolve: pode
+  // ser um status ("Ocupado"), o nome do negócio da cliente, ou só emoji —
+  // nesses casos, segue sem nome nenhum em vez de chamar a cliente por algo
+  // que não é o nome dela de verdade.
+  contactName = isPlausiblePersonalName(contactName) ? contactName : undefined;
   const isBurst = messageCount !== undefined ? messageCount > 1 : undefined;
   const isFirstCampaignContact = isCampaignEntry && (!history || history.length === 0);
 
