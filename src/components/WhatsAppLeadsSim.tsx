@@ -165,6 +165,15 @@ interface WhatsAppLeadsSimProps {
    * WhatsApp: "esse menu e cabeçalho não precisa em cima"). No desktop as
    * três colunas ficam sempre visíveis, então isso não afeta nada lá. */
   onThreadOpenChange?: (open: boolean) => void;
+  /** TASK-0269 (pedido direto): atalho pra Agenda completa (mesma aba do
+      menu superior) direto do cabeçalho da conversa aberta no mobile — antes
+      só existia como botão `hidden lg:flex` (CalendarPlus, cadastro manual de
+      agendamento), então no celular o operador não tinha nenhum acesso à
+      Agenda sem sair da conversa e navegar pela barra de abas. Troca a aba
+      ativa do app pra "agenda" (mesmo padrão de `onGoToEscalations`). App.tsx
+      só passa esta prop quando o usuário logado tem permissão pra ver a
+      Agenda (`canSeeAgenda`) — se vier `undefined`, o botão nem aparece. */
+  onGoToAgenda?: () => void;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -252,6 +261,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   escalationsPendingCount = 0,
   escalations = [],
   onGoToEscalations,
+  onGoToAgenda,
   openLeadPhone,
   openLeadRequestId,
 }) => {
@@ -3878,6 +3888,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   >
                     <IdCard className="w-[18px] h-[18px]" />
                   </button>
+
+                  {/* TASK-0269 (pedido direto, print da conversa da Gisse:
+                      "preciso ajustar o agendamento dela mas não tenho a
+                      agenda disponível na conversa aberta coloca um icon ao
+                      lado do botão da ia") — atalho pra Agenda completa, só
+                      no mobile (a coluna 3/toolbar de desktop já tem acesso
+                      via `CalendarPlus`/painel de eventos). Ao lado do
+                      IdCard, mesmo grupo de ícones exclusivos da conversa
+                      aberta. Só aparece se App.tsx passar a prop (usuário
+                      logado tem permissão pra ver a Agenda). */}
+                  {onGoToAgenda && (
+                    <button
+                      onClick={onGoToAgenda}
+                      className="lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      title="Abrir a Agenda completa"
+                    >
+                      <CalendarPlus className="w-[18px] h-[18px]" />
+                    </button>
+                  )}
 
                   {/* Transferir pro WhatsApp pessoal do operador — abre um
                       link wa.me com o telefone deste lead numa aba nova, pro

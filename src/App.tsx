@@ -1534,6 +1534,7 @@ export const App: React.FC = () => {
             // achar e manter visível o escalonamento aberto do lead atual.
             escalations={escalations}
             onGoToEscalations={() => handleSetActiveTab('escalations')}
+            onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
             onThreadOpenChange={setIsMobileWhatsAppThreadOpen}
