@@ -11,6 +11,7 @@ import { emitConversationUpdated } from './conversationEvents';
 import { registerPendingEcho } from './outboundEchoTracker';
 import { isAdsOnlyMode, getAdTriggerMessages, matchesAdTriggerMessage } from './agentStatus';
 import { matchCatalogClickCode, consumeCatalogClick } from './publicCatalogClickStore';
+import { deleteContactAgentMemory } from './contactAgentMemoryStore';
 
 /**
  * Reação de emoji a uma mensagem — metadado só do nosso painel (a Meta
@@ -791,7 +792,23 @@ export async function deleteConversation(tenantId: string, phone: string): Promi
   const { data, error } = await db.from('conversations').delete().eq('tenant_id', tenantId).eq('phone', phone).select('id');
   if (error) throw error;
   const deleted = !!data?.length;
-  if (deleted) emitConversationUpdated(tenantId, phone);
+  if (deleted) {
+    // Achado real (04/09/2026, TASK-0260): `conversations`/`messages` são
+    // apagadas aqui (cascade via FK), mas `contact_agent_memory` (intenção
+    // atual, resumo, objeções, fatos confirmados — a "memória operacional"
+    // que `loadAgentContextPack` recarrega a cada turno) é uma tabela à
+    // parte, chaveada só por tenant_id+phone, sem FK pra `conversations` —
+    // nunca era limpa. Resultado: apagar a conversa pra um teste limpo não
+    // zerava o contexto de verdade; a próxima mensagem do mesmo telefone
+    // ainda carregava a memória antiga. `appointments`/`escalations`
+    // continuam intocados de propósito (são fonte de verdade de agenda/
+    // escalonamento real, não "memória de chat" — ver comentário da
+    // migration 0042).
+    await deleteContactAgentMemory(tenantId, phone).catch((err) =>
+      console.warn(`⚠️  [Contact Memory] tenant=${tenantId} falha não bloqueante ao apagar memória junto com a conversa:`, (err as Error).message)
+    );
+    emitConversationUpdated(tenantId, phone);
+  }
   return deleted;
 }
 
