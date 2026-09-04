@@ -1336,6 +1336,56 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.status(201).json({ appointment });
   }));
 
+  // TASK-0270 (pedido direto, print da Ficha do Contato de "Noelia Esquivel":
+  // "Esta cliente foi agendada pelo google como eu posso vincular o
+  // agendamento no sistema para aparecer aqui na ficha de acompanhamento?")
+  // — um agendamento criado direto no Google Calendar (fora do WhatsApp, sem
+  // passar por criar_agendamento nem pelo manual-appointment acima) nunca
+  // gera uma linha em `appointments`, então a Ficha do Contato desse
+  // telefone nunca sabe que ele existe ("Agendou? não", sem card em
+  // AGENDAMENTOS), mesmo o evento real já estando na agenda e visível na
+  // aba Agenda. Diferente do endpoint acima, este NUNCA cria um evento novo
+  // (create=duplicaria o evento real que o operador está vinculando) nem
+  // chama checkFreeBusy (o evento já ocupa o horário) — só grava o vínculo
+  // telefone↔evento já existente, usando o eventId que o painel já tem em
+  // mãos (veio da própria listagem de eventos do Google Calendar deste
+  // tenant, GET /api/google-calendar/upcoming-events).
+  router.post('/api/conversations/:phone/link-appointment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const { eventId, summary, startIso, endIso } = req.body || {};
+    if (!eventId?.trim() || !summary?.trim() || !startIso || !endIso) {
+      return res.status(400).json({ error: 'Campos "eventId", "summary", "startIso" e "endIso" são obrigatórios.' });
+    }
+
+    // Mesmo guard do manual-appointment: nunca sobrescreve silenciosamente
+    // um agendamento ativo diferente já rastreado pra este telefone (evita
+    // vincular o evento errado por engano e perder a referência do real).
+    const existing = await getAppointmentForPhone(tenantId, phone);
+    const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
+    const existingIsUpcoming = existing && existing.eventId !== eventId && Date.parse(`${existing.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
+    if (existingIsUpcoming) {
+      return res.status(409).json({ error: `Este contato já tem um agendamento ativo diferente ("${existing!.summary}" em ${existing!.startIso}).` });
+    }
+
+    await setAppointmentForPhone(tenantId, phone, { eventId: eventId.trim(), summary: summary.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: !existing });
+
+    // TASK-0185 — mesmo backup em Google Sheets do manual-appointment: um
+    // agendamento vinculado aqui também precisa refletir "Agendou?" sem
+    // esperar a cliente mandar mensagem nova.
+    const conversationForSheet = await getConversation(tenantId, phone).catch(() => undefined);
+    queueLeadSheetSync(tenantId, calendarConfig, {
+      phone,
+      name: conversationForSheet?.name,
+      firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
+      interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
+      scheduled: true,
+    });
+
+    const appointment = await getAppointmentForPhone(tenantId, phone);
+    res.status(200).json({ appointment });
+  }));
+
   /**
    * Achado real em produção (19/08/2026, pedido direto do dono do produto):
    * o fluxo real de venda (WhatsApp → agendamento → comprovante aprovado) e
