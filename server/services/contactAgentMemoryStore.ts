@@ -234,6 +234,14 @@ function assertScope(tenantId: string, phone: string): void {
   if (!phone?.trim()) throw new Error('phone é obrigatório para memória de contato.');
 }
 
+/** Remove a memória operacional do contato — chamado junto com a exclusão da conversa, senão o próximo turno com o mesmo telefone carrega intenção/resumo/objeções de antes do "reset". */
+export async function deleteContactAgentMemory(tenantId: string, phone: string): Promise<void> {
+  assertScope(tenantId, phone);
+  const db = getDb();
+  const { error } = await db.from('contact_agent_memory').delete().eq('tenant_id', tenantId).eq('phone', phone);
+  if (error) throw error;
+}
+
 export async function getContactAgentMemory(tenantId: string, phone: string): Promise<ContactAgentMemory | null> {
   assertScope(tenantId, phone);
   const db = getDb();
