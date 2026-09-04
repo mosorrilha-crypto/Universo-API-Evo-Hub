@@ -3654,12 +3654,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       status "online" na mesma linha) — escala mais perto do
                       app de verdade, hierarquia mais clara. */}
                   <div className="min-w-0">
+                    {/* TASK-0259 (pedido direto): selo "ao vivo" removido —
+                        indicava sessão de teste em tempo real, mas era mais
+                        um badge poluindo o cabeçalho sem ação nenhuma
+                        associada, e o usuário confirmou que não precisa. */}
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
-                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-700/50 px-1.5 py-0.5 rounded-full flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        ao vivo
-                      </span>
                     </div>
                     <p className="text-[11px] font-normal text-slate-400 flex items-center gap-1.5 min-w-0">
                       {/* TASK-0259 (pedido direto): telefone saiu daqui de
@@ -3671,10 +3671,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       {/* TASK-0258 (pedido direto): quando a janela de 24h
                           está aberta e não há nenhuma ação pendente, a faixa
                           de status inteira (linha cheia, sempre visível)
-                          virou este badge pequeno — mesmo padrão visual do
-                          pill "ao vivo" acima. Quando a janela FECHA (aí sim
-                          há ação: reengajar/reabrir), o card cheio com botão
-                          continua aparecendo igual a antes, na área do
+                          virou este badge pequeno. Quando a janela FECHA (aí
+                          sim há ação: reengajar/reabrir), o card cheio com
+                          botão continua aparecendo igual a antes, na área do
                           composer mais abaixo. */}
                       {(() => {
                         const serviceWindow = visibleContactContext?.serviceWindow;
