@@ -14,6 +14,7 @@ import { getTenantSegment } from './tenantProfileStore';
 import { logEscalation, isPaymentRelated, looksLikeHarassment } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
+import { isPlausiblePersonalName } from './contactNameGuard';
 import { runWithTenantDbContext } from './tenantDbContext';
 import type { ResolvedTenant } from './tenantResolver';
 import type { ParsedIncomingMessage } from './webhookParsers';
@@ -272,7 +273,7 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
             isBookingFlow: result.agent === 'agendamento',
             needsHumanConfirmation: result.needsHumanConfirmation,
             plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
-            contactName: message.contactName,
+            contactName: isPlausiblePersonalName(message.contactName) ? message.contactName : undefined,
           }, { ai: deps.getAi(), groqApiKey: deps.groqApiKey });
           if (!safety.approved) {
             const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
