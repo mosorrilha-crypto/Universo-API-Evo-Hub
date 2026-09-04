@@ -136,7 +136,7 @@ async function startServer() {
   app.use(createPublicCatalogRouter({ supabaseUrl: config.supabaseUrl, supabaseKey: config.supabaseKey }));
   app.use(createCommercialOfferRouter());
 
-  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase }));
+  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase, authenticateToken }));
   app.use(createEntitlementsRouter({ authenticateToken }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken }));

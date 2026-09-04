@@ -2,24 +2,35 @@ import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { authLoginRateLimiter, authSessionRateLimiter } from '../middleware/rateLimit';
+import type { RequestHandler } from 'express';
+import type { AuthenticatedRequest } from '../middleware/auth';
+import { authChangePasswordRateLimiter, authLoginRateLimiter, authSessionRateLimiter } from '../middleware/rateLimit';
 import { clearFailedLogins, isLoginLocked, recordFailedLogin } from '../services/authLoginAttempts';
 import { FirebaseAdminNotConfiguredError, verifyGoogleIdToken } from '../services/firebaseAdmin';
 
 interface AuthRouterDeps {
   jwtSecret: string;
   supabase: SupabaseClient | null;
+  authenticateToken: RequestHandler;
 }
 
-export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Router {
+export function createAuthRouter({ jwtSecret, supabase, authenticateToken }: AuthRouterDeps): Router {
   const router = Router();
 
   /**
    * Compartilhado entre login por senha e login com Google: bloqueio de
-   * tenant (TASK-0070) + emissão do JWT. Extraído pra não duplicar essa
-   * checagem quando o segundo caminho de login foi adicionado.
+   * tenant (TASK-0070) + bloqueio de operador (TASK-0261) + emissão do JWT.
+   * Extraído pra não duplicar essa checagem quando o segundo caminho de
+   * login foi adicionado.
    */
   async function issueSessionForOperator(operator: any) {
+    // Bloqueio individual do operador (TASK-0261) — checado ANTES do tenant
+    // porque é o caso mais específico. Mesma mensagem genérica do bloqueio
+    // de tenant (abaixo): não revela qual dos dois motivos causou o bloqueio.
+    if (operator.is_active === false) {
+      throw new Error('Acesso bloqueado. Fale com o administrador do sistema.');
+    }
+
     const { data: tenantRow, error: tenantError } = await supabase!
       .from('tenants')
       .select('is_active')
@@ -185,10 +196,13 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
 
       const { data, error } = await supabase
         .from('operators')
-        .select('id, tenant_id, email, name, role')
+        .select('id, tenant_id, email, name, role, is_active')
         .eq('id', payload.id)
         .maybeSingle();
       if (error || !data) return res.sendStatus(403);
+      // Operador bloqueado (TASK-0261) depois do login original: derruba a
+      // sessão já no próximo carregamento do app, não só em um login novo.
+      if (data.is_active === false) return res.sendStatus(403);
 
       res.json({
         operator: {
@@ -201,6 +215,45 @@ export function createAuthRouter({ jwtSecret, supabase }: AuthRouterDeps): Route
       });
     } catch {
       return res.sendStatus(403);
+    }
+  });
+
+  // Troca de senha pelo próprio operador (TASK-0261) — até aqui só existia
+  // o reset feito por um admin (PATCH /api/admin/operators/:id), onde é o
+  // admin quem escolhe a senha nova e portanto sempre sabe qual é. Esta rota
+  // cobre o caso "lembro a senha atual, mas quero trocar por segurança sem
+  // que ninguém mais (incluindo o saas_admin) saiba a senha nova" — o valor
+  // novo vai direto pro hash, nunca é lido nem logado em lugar nenhum.
+  // Exige a senha atual (não só o JWT válido) pra uma sessão sequestrada não
+  // conseguir travar o dono de fora só trocando a senha sem saber a antiga.
+  router.put('/api/auth/password', authenticateToken, authChangePasswordRateLimiter, async (req: AuthenticatedRequest, res) => {
+    const currentPassword = typeof req.body.currentPassword === 'string' ? req.body.currentPassword : '';
+    const newPassword = typeof req.body.newPassword === 'string' ? req.body.newPassword : '';
+
+    try {
+      if (!supabase) throw new Error('Supabase não está configurado.');
+      if (newPassword.length < 6) {
+        throw new Error('A nova senha precisa ter pelo menos 6 caracteres.');
+      }
+
+      const { data, error } = await supabase
+        .from('operators')
+        .select('id, password_hash')
+        .eq('id', req.user!.id)
+        .maybeSingle();
+      const operator = data as any;
+      if (error || !operator) throw new Error('Sessão inválida.');
+
+      const validPassword = await bcrypt.compare(currentPassword, operator.password_hash);
+      if (!validPassword) throw new Error('Senha atual incorreta.');
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+      const { error: updateError } = await supabase.from('operators').update({ password_hash: newHash }).eq('id', operator.id);
+      if (updateError) throw new Error('Falha ao atualizar a senha.');
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || 'Falha ao trocar a senha.' });
     }
   });
 
