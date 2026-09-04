@@ -1308,12 +1308,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const activeTenantIdRef = useRef(activeTenant.id);
   activeTenantIdRef.current = activeTenant.id;
 
-  // Formata pra exibição (HH:MM) mas preserva o ISO cru separadamente — os
-  // cursores de paginação (oldest/newestLoadedMessageTimestamp) e a data dos
-  // separadores de dia precisam do valor completo, não só da hora.
+  // Formata pra exibição (HH:MM) mas preserva o ISO cru em rawTimestamp — os
+  // cursores de paginação (oldest/newestLoadedMessageTimestamp) e o separador
+  // de dia (TASK-0281, ver isNewChatDateGroup/formatChatDateLabel abaixo)
+  // precisam do valor completo (data + hora), não só da hora exibida no balão.
   const formatMessagesForDisplay = (rawMessages: ChatMessage[]): ChatMessage[] =>
     rawMessages.map((message) => ({
       ...message,
+      rawTimestamp: message.timestamp,
       timestamp: new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
     }));
 
@@ -4553,9 +4555,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 ) : selectedLead.messages && selectedLead.messages.length > 0 ? (
                   selectedLead.messages.map((msg, messageIndex) => {
                     const previousMessage = messageIndex > 0 ? selectedLead.messages?.[messageIndex - 1] : undefined;
+                    // TASK-0281 (achado real, "a data tá errada" — confirmado
+                    // pelo dono do produto): `msg.timestamp` de mensagem real
+                    // já vem formatado só como "HH:MM" pra exibição no balão
+                    // — usar ele aqui fazia qualquer mensagem de dias atrás
+                    // aparecer como "Hoje" (ver getChatDateParts em
+                    // src/lib/chatDate.ts, que trata "HH:MM" como mock de
+                    // hoje de propósito). `rawTimestamp` guarda o ISO
+                    // completo só pra mensagem real; mock continua sem ele e
+                    // cai no mesmo fallback "hoje" de sempre.
+                    const currentDateSource = msg.rawTimestamp || msg.timestamp;
+                    const previousDateSource = previousMessage?.rawTimestamp || previousMessage?.timestamp;
                     const shouldShowDateSeparator = messageIndex === 0
-                      || isNewChatDateGroup(msg.timestamp, previousMessage?.timestamp);
-                    const dateLabel = formatChatDateLabel(msg.timestamp, isSpanish);
+                      || isNewChatDateGroup(currentDateSource, previousDateSource);
+                    const dateLabel = formatChatDateLabel(currentDateSource, isSpanish);
                     const isLead = msg.sender === 'lead';
                     const quotedMessage = msg.replyToMessageId
                       ? selectedLead.messages?.find((m) => m.id === msg.replyToMessageId)
