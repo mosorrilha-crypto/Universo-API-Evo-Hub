@@ -735,21 +735,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
-  // Achado real em produção: a rota POST /api/google-calendar/disconnect já
-  // existia no backend, mas nunca foi ligada a nenhum botão — não tinha como
-  // desconectar/trocar de conta pelo painel, só conectar pela primeira vez.
-  const handleDisconnectGoogleCalendar = async () => {
-    if (!window.confirm('Desconectar o Google Calendar? O agente de agendamento para de conseguir consultar/criar horários reais até você reconectar (pode ser com outra conta).')) return;
-    try {
-      const res = await apiFetch('/api/google-calendar/disconnect', { method: 'POST' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setGoogleCalendarConnected(false);
-    } catch (err) {
-      console.error('Falha ao desconectar Google Calendar:', err);
-      setErrorMsg('Não foi possível desconectar o Google Calendar agora — tente de novo.');
-    }
-  };
-
   // Widget de agenda (atendente pedia pra ver o que a IA já marcou sem sair
   // da plataforma) — busca só quando o painel é aberto, não em polling
   // constante (é um "olhar por baixo demanda", não um dado que muda a cada
@@ -3029,12 +3014,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `ReconectarWhatsAppQrCode.tsx` (arquivo próprio) pra ser
           reaproveitado lá sem duplicar a lógica de QR Code/polling. */}
 
-      {/* Desconectar Calendar mudou de lugar (pedido real, 29/08/2026):
-          "pode ficar dentro da agenda" — some botão fazia sentido perto de
-          "conectar/ver agenda" só que num painel genérico de Ferramentas.
-          Agora vive dentro do próprio painel "Agenda" (UpcomingEventsPanel),
-          junto do resto das ações de calendário — ver `googleCalendarConnected`/
-          `onDisconnectCalendar` passados a ele mais abaixo. */}
+      {/* Desconectar Calendar mudou de lugar DE NOVO (TASK-0263, pedido
+          direto): morou aqui dentro de Ferramentas, depois dentro do popup
+          "Agenda" (UpcomingEventsPanel) — mas é uma ação rara de
+          configuração, não de uso diário, e não fazia sentido inflar o
+          cabeçalho desse popup. Mora agora na aba Agenda de verdade (menu
+          principal, `AgendaWorkspace.tsx`/`GoogleCalendarConnectionControl.tsx`),
+          junto de outras configurações raras. */}
 
       {/* Auto IA mudou de lugar (pedido real, 29/08/2026): "pode ir para
           ficha de ia" — é uma configuração de análise automática da
@@ -5515,7 +5501,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         onRegisterPayment={handleRegisterEventPayment}
         onEditPayment={handleEditEventPayment}
         googleCalendarConnected={googleCalendarConnected}
-        onDisconnectCalendar={handleDisconnectGoogleCalendar}
         backupSheetUrl={backupSheetUrl}
       />
 
