@@ -31,6 +31,7 @@ import { OperationsHomeWorkspace } from './components/OperationsHomeWorkspace';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
 import { LoginModal } from './components/LoginModal';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { getAuthToken, setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
 import { hasRoleAtLeast } from './lib/roles';
@@ -150,6 +151,7 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState<boolean>(false);
   // Um perfil em localStorage só melhora a continuidade visual; nunca libera
   // a plataforma SaaS até que a sessão seja confirmada pelo servidor.
   const [isSaasSessionConfirmed, setIsSaasSessionConfirmed] = useState(false);
@@ -1338,6 +1340,7 @@ export const App: React.FC = () => {
                 capabilities={tenantCapabilities}
         canAccessSaasAdmin={canSeeSaasMaster}
         escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
+        onOpenChangePasswordModal={() => setIsChangePasswordModalOpen(true)}
       />
       </div>
       {activeTab !== 'whatsapp' && canSeeConversations && (
@@ -1747,6 +1750,11 @@ export const App: React.FC = () => {
           setIsLoginModalOpen(false);
           showToast(`Bem-vindo, ${usr.name}!`);
         }}
+      />
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordModalOpen}
+        onClose={() => setIsChangePasswordModalOpen(false)}
       />
 
     </div>

@@ -381,7 +381,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // admin cria operador só dentro do próprio tenant; saas_admin pode
   // escolher qualquer tenant.
   router.get('/api/admin/operators', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    let query = db().from('operators').select('id, tenant_id, email, name, role, created_at');
+    let query = db().from('operators').select('id, tenant_id, email, name, role, created_at, is_active');
     if (!isSaasAdmin(req)) {
       query = query.eq('tenant_id', req.user?.tenantId);
     }
@@ -431,9 +431,21 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
   // password, além da role já suportada. Continua um PATCH parcial — só os
   // campos enviados são alterados, mesma convenção do PATCH de tenant acima.
   router.patch('/api/admin/operators/:id', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { role, email, name, password } = req.body || {};
+    const { role, email, name, password, isActive } = req.body || {};
     const saasAdmin = isSaasAdmin(req);
     const patch: Record<string, unknown> = {};
+
+    // Bloqueio reversível de operador (TASK-0261) — separado da exclusão
+    // definitiva já existente (DELETE abaixo). Nunca deixa ninguém bloquear
+    // a própria conta: travaria a sessão de quem está fazendo a chamada sem
+    // ninguém pra reverter (mesmo saas_admin teria que pedir pra outro
+    // saas_admin desbloquear).
+    if (isActive !== undefined) {
+      if (isActive === false && req.params.id === req.user?.id) {
+        return res.status(400).json({ error: 'Você não pode bloquear seu próprio acesso.' });
+      }
+      patch.is_active = Boolean(isActive);
+    }
 
     if (role !== undefined) {
       if (!['operator', 'manager', 'admin', 'saas_admin'].includes(role)) {
@@ -462,7 +474,7 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (!saasAdmin) {
       query = query.eq('tenant_id', req.user?.tenantId);
     }
-    const { data, error } = await query.select('id, tenant_id, email, name, role, created_at').maybeSingle();
+    const { data, error } = await query.select('id, tenant_id, email, name, role, created_at, is_active').maybeSingle();
     if (error) {
       // e-mail único por tenant (unique(tenant_id, email), migration 0001) —
       // devolve mensagem legível em vez do erro cru do Postgres.

@@ -68,6 +68,7 @@ function renderHeader(
         activeTenant={activeTenant}
         onSelectTenant={vi.fn()}
         capabilities={capabilities}
+        onOpenChangePasswordModal={vi.fn()}
       />
     </AppPreferencesProvider>,
   );

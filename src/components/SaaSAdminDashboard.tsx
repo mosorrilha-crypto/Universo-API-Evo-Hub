@@ -1246,6 +1246,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
         role: op.role,
         avatar: DEFAULT_USER_AVATAR,
         department: '',
+        isActive: op.is_active !== false,
       }));
       setUsersList(mapped);
     } catch (err) {
@@ -1294,6 +1295,31 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
       setUserFormError(err.message || 'Falha ao cadastrar o usuário.');
     } finally {
       setIsSavingUser(false);
+    }
+  };
+
+  // Bloqueio reversível de operador (TASK-0261) — mesma estrutura de
+  // handleToggleTenantBlock acima, aplicada a operators.is_active em vez de
+  // tenants.is_active. Diferente de handleDeleteUser (exclusão definitiva),
+  // isso pode ser desfeito reativando depois.
+  const [busyBlockUserId, setBusyBlockUserId] = useState<string | null>(null);
+  const handleToggleUserBlock = async (user: UserProfile) => {
+    const action = user.isActive ? 'bloquear' : 'reativar';
+    if (!window.confirm(`Confirma ${action} o acesso de "${user.name}"? ${user.isActive ? 'O login dele para de funcionar até você reativar.' : 'O login volta a funcionar imediatamente.'}`)) return;
+    setBusyBlockUserId(user.id);
+    try {
+      const res = await apiFetch(`/api/admin/operators/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !user.isActive }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await fetchOperators();
+    } catch (err: any) {
+      alert(`Falha ao ${action} o usuário: ${err.message || 'tente de novo.'}`);
+    } finally {
+      setBusyBlockUserId(null);
     }
   };
 
@@ -1683,7 +1709,7 @@ export const SaaSAdminDashboard: React.FC<SaaSAdminDashboardProps> = ({
                             <select value={user.role} disabled={savingRoleForUserId === user.id} onChange={(event) => handleUpdateUserRole(user.id, event.target.value as UserRole)} aria-label={`Função de ${user.name}`} className="max-w-28 rounded-lg border border-slate-700 bg-slate-950 px-1.5 py-1 text-[10px] font-bold text-slate-200 focus:border-sky-500 focus:outline-none disabled:opacity-50">
                               <option value="operator">Operador</option><option value="manager">Gerente</option><option value="admin">Administrador</option><option value="saas_admin" disabled={!isSaasAdminUser}>SaaS Admin</option>
                             </select>
-                            <div className="flex shrink-0 gap-1"><button type="button" onClick={() => openEditCredentials(user)} title="Editar acesso" className="rounded-lg border border-slate-700 bg-slate-800 p-1.5 text-slate-200 transition hover:bg-slate-700"><KeyRound className="h-3.5 w-3.5" /></button><button type="button" onClick={() => handleDeleteUser(user.id, user.name)} title="Excluir usuário" className="rounded-lg border border-rose-900/70 bg-rose-950/40 p-1.5 text-rose-300 transition hover:bg-rose-900/60"><Trash2 className="h-3.5 w-3.5" /></button></div>
+                            <div className="flex shrink-0 gap-1"><button type="button" onClick={() => openEditCredentials(user)} title="Editar acesso" className="rounded-lg border border-slate-700 bg-slate-800 p-1.5 text-slate-200 transition hover:bg-slate-700"><KeyRound className="h-3.5 w-3.5" /></button><button type="button" onClick={() => handleToggleUserBlock(user)} disabled={busyBlockUserId === user.id || user.id === currentUser?.id} title={user.id === currentUser?.id ? 'Você não pode bloquear seu próprio acesso' : user.isActive ? 'Bloquear usuário' : 'Reativar usuário'} className={`rounded-lg border p-1.5 transition disabled:opacity-50 ${user.isActive ? 'border-amber-900/70 bg-amber-950/40 text-amber-300 hover:bg-amber-900/60' : 'border-emerald-900/70 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/60'}`}>{user.isActive ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}</button><button type="button" onClick={() => handleDeleteUser(user.id, user.name)} title="Excluir usuário" className="rounded-lg border border-rose-900/70 bg-rose-950/40 p-1.5 text-rose-300 transition hover:bg-rose-900/60"><Trash2 className="h-3.5 w-3.5" /></button></div>
                           </div>)}
                         </div>}
 
