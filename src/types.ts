@@ -45,6 +45,7 @@ export interface UserProfile {
   avatar: string;
   department: string;
   shift?: string;
+  isActive?: boolean;
 }
 
 export type CRMStage = 'novo' | 'contato' | 'proposta' | 'negociacao' | 'ganho' | 'perdido';

@@ -21,6 +21,7 @@ vi.mock('../../services/firebaseAdmin', async () => {
 });
 
 const { createAuthRouter } = await import('../auth');
+const { createAuthenticateToken } = await import('../../middleware/auth');
 const { createFakeSupabase } = await import('../../services/__tests__/fakeSupabase');
 const { FirebaseAdminNotConfiguredError } = await import('../../services/firebaseAdmin');
 
@@ -40,7 +41,7 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase }));
+  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase, authenticateToken: createAuthenticateToken('test-secret') }));
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());

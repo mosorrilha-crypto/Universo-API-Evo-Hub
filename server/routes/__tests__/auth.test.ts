@@ -12,6 +12,7 @@ import type { Server } from 'http';
 import bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createAuthRouter } from '../auth';
+import { createAuthenticateToken } from '../../middleware/auth';
 import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 
 const REAL_TENANT_UUID = '11111111-1111-1111-1111-111111111111';
@@ -30,7 +31,7 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase }));
+  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase, authenticateToken: createAuthenticateToken('test-secret') }));
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());

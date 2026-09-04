@@ -1,10 +1,10 @@
 /**
- * TASK-0070 — bloqueio de acesso por tenant (tenants.is_active). Um
- * saas_admin pode "desligar" o acesso de um tenant inteiro sem apagar
- * nada (reversível, diferente do DELETE de tenant que já existe e é
- * irreversível). O bloqueio precisa acontecer DEPOIS da senha validar
- * (nunca antes) — senão vira um jeito de descobrir se um tenant está
- * bloqueado sem saber a senha de ninguém dele.
+ * TASK-0261 — bloqueio reversível de operador (operators.is_active),
+ * separado da exclusão definitiva já existente (DELETE /api/admin/operators/:id).
+ * Mesmo raciocínio de ordem de checagem do bloqueio de tenant
+ * (authTenantBlocked.test.ts): só verificado DEPOIS da senha validar, nunca
+ * antes, senão vira um jeito de descobrir se uma conta está bloqueada sem
+ * saber a senha dela.
  */
 import express from 'express';
 import type { Server } from 'http';
@@ -14,7 +14,7 @@ import { createAuthRouter } from '../auth';
 import { createAuthenticateToken } from '../../middleware/auth';
 import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 
-const TENANT_ID = '11111111-1111-1111-1111-111111111111';
+const TENANT_ID = '22222222-2222-2222-2222-222222222222';
 
 let server: Server;
 let baseUrl: string;
@@ -22,9 +22,9 @@ let baseUrl: string;
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash('senha-real-123', 10);
   const supabase = createFakeSupabase({
-    tenants: [{ id: TENANT_ID, name: 'Tenant Bloqueado', is_active: false }],
+    tenants: [{ id: TENANT_ID, name: 'Tenant Normal', is_active: true }],
     operators: [
-      { id: 'op-1', tenant_id: TENANT_ID, email: 'operador@bloqueado.com', password_hash: passwordHash, name: 'Operador', role: 'admin' },
+      { id: 'op-bloqueado', tenant_id: TENANT_ID, email: 'bloqueado@example.com', password_hash: passwordHash, name: 'Operador Bloqueado', role: 'operator', is_active: false },
     ],
   });
 
@@ -44,12 +44,12 @@ afterAll(() => {
   server.close();
 });
 
-describe('POST /api/auth/login — tenant bloqueado', () => {
-  it('recusa login com senha CORRETA quando is_active=false', async () => {
+describe('POST /api/auth/login — operador bloqueado', () => {
+  it('recusa login com senha CORRETA quando operators.is_active=false', async () => {
     const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'operador@bloqueado.com', password: 'senha-real-123' }),
+      body: JSON.stringify({ email: 'bloqueado@example.com', password: 'senha-real-123' }),
     });
     expect(res.status).toBe(401);
     const data = await res.json();
@@ -57,11 +57,11 @@ describe('POST /api/auth/login — tenant bloqueado', () => {
     expect(data.token).toBeUndefined();
   });
 
-  it('continua recusando com mensagem genérica quando a senha também está errada (não vaza que o tenant está bloqueado antes de validar a senha)', async () => {
+  it('continua recusando com mensagem genérica quando a senha também está errada (não vaza que o operador está bloqueado antes de validar a senha)', async () => {
     const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'operador@bloqueado.com', password: 'senha-errada' }),
+      body: JSON.stringify({ email: 'bloqueado@example.com', password: 'senha-errada' }),
     });
     expect(res.status).toBe(401);
     const data = await res.json();

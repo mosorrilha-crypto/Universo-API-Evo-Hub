@@ -66,6 +66,20 @@ export const authSessionRateLimiter = rateLimit({
   message: { error: 'Muitas verificações de sessão. Aguarde um minuto e tente novamente.' },
 });
 
+// TASK-0261 — troca de senha pelo próprio operador exige um JWT válido
+// (barra bem mais alta que o login anônimo), mas ainda vale limitar: sem
+// isso, uma sessão comprometida teria tentativas ilimitadas pra adivinhar a
+// senha atual via bcrypt.compare antes de conseguir trocar. Mais apertado
+// que o rate limit de login porque o volume esperado de uso legítimo aqui é
+// bem menor (um operador troca a própria senha raramente).
+export const authChangePasswordRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de troca de senha. Aguarde alguns minutos e tente novamente.' },
+});
+
 // Achado do CodeQL (js/missing-rate-limiting, PR #496): /connect faz
 // autorização (checagem de entitlement + role admin) sem limite de
 // requisições. É uma ação administrativa rara (iniciar o consentimento
