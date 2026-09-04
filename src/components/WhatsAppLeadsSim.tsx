@@ -3907,19 +3907,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <IdCard className="w-[18px] h-[18px]" />
                   </button>
 
-                  {/* TASK-0269 (pedido direto, print da conversa da Gisse:
-                      "preciso ajustar o agendamento dela mas não tenho a
-                      agenda disponível na conversa aberta coloca um icon ao
-                      lado do botão da ia") — atalho pra Agenda completa, só
-                      no mobile (a coluna 3/toolbar de desktop já tem acesso
-                      via `CalendarPlus`/painel de eventos). Ao lado do
-                      IdCard, mesmo grupo de ícones exclusivos da conversa
-                      aberta. Só aparece se App.tsx passar a prop (usuário
-                      logado tem permissão pra ver a Agenda). */}
+                  {/* TASK-0269/TASK-0273 (pedido direto, print da conversa
+                      da Gisse: "preciso ajustar o agendamento dela mas não
+                      tenho a agenda disponível na conversa aberta coloca um
+                      icon ao lado do botão da ia") — atalho pra Agenda
+                      completa. Achado real (TASK-0273, mesmo print do
+                      "círculo vermelho" apontando pro espaço vazio no
+                      cabeçalho desktop): a suposição original de que "o
+                      desktop já tem acesso via CalendarPlus" estava errada
+                      — aquele botão (logo abaixo) só aparece quando o
+                      contato AINDA NÃO tem agendamento (`!paymentAppointment`),
+                      exatamente o oposto do caso em que o operador mais
+                      precisa gerenciar/reagendar (contato JÁ agendado). Por
+                      isso ficou `lg:hidden` (só mobile) até aqui — agora
+                      visível em qualquer largura, ao lado do IdCard, mesmo
+                      grupo de ícones exclusivos da conversa aberta. Só
+                      aparece se App.tsx passar a prop (usuário logado tem
+                      permissão pra ver a Agenda). */}
                   {onGoToAgenda && (
                     <button
                       onClick={onGoToAgenda}
-                      className="lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Abrir a Agenda completa"
                     >
                       <CalendarPlus className="w-[18px] h-[18px]" />
