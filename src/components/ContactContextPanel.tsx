@@ -180,7 +180,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
       <div className="atendimento-context-strip border-sky-500/20 bg-sky-950/15">
         <div className="atendimento-context-strip__copy min-w-0">
           <span className="atendimento-context-strip__label text-sky-300">{isSpanish ? 'CONTEXTO SUPERVISADO' : 'CONTEXTO SUPERVISIONADO'}</span>
-          <p className="truncate text-slate-100">
+          <p className="line-clamp-2 text-slate-100">
             {primaryAction || (isSpanish ? 'Sin acción sugerida por ahora.' : 'Sem ação sugerida no momento.')}
           </p>
           {(needsHuman || memory?.openLoops?.length) && (
