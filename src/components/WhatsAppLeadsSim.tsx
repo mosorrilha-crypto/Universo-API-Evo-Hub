@@ -3014,7 +3014,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           `ReconectarWhatsAppQrCode.tsx` (arquivo próprio) pra ser
           reaproveitado lá sem duplicar a lógica de QR Code/polling. */}
 
-      {/* Desconectar Calendar mudou de lugar DE NOVO (TASK-0260, pedido
+      {/* Desconectar Calendar mudou de lugar DE NOVO (TASK-0263, pedido
           direto): morou aqui dentro de Ferramentas, depois dentro do popup
           "Agenda" (UpcomingEventsPanel) — mas é uma ação rara de
           configuração, não de uso diário, e não fazia sentido inflar o

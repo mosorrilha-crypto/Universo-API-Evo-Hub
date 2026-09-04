@@ -3,7 +3,7 @@ import { CalendarCheck2, ExternalLink, Link2, Loader2, Unlink } from 'lucide-rea
 import { apiFetch } from '../../lib/apiClient';
 
 /**
- * TASK-0260 (pedido direto, print real): "Desconectar Google Calendar" já
+ * TASK-0263 (pedido direto, print real): "Desconectar Google Calendar" já
  * morou dentro de Ferramentas, depois dentro do popup "Agenda"
  * (`UpcomingEventsPanel`) — mas é uma ação rara de configuração (trocar de
  * conta), não de uso diário, e inflava o cabeçalho desse popup sem

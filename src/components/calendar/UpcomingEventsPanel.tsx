@@ -64,7 +64,7 @@ const EventPaymentAction: React.FC<{
         </button>
       );
     }
-    // TASK-0260 (pedido direto, print real): este botão, o lápis de editar
+    // TASK-0263 (pedido direto, print real): este botão, o lápis de editar
     // serviço e o par remarcar/excluir (mais abaixo) viviam com
     // `opacity-0 group-hover:opacity-100` — só apareciam com o mouse em
     // cima da linha. No toque (mobile/tablet, onde esse painel é mais
@@ -169,7 +169,7 @@ interface UpcomingEventsPanelProps {
   /** Edita um pagamento já lançado (etapa 2 do mesmo pedido). */
   onEditPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
   /** Só usado hoje pra decidir se mostra o link da planilha de backup
-   * (`backupSheetUrl`) — o botão de desconectar saiu daqui (TASK-0260,
+   * (`backupSheetUrl`) — o botão de desconectar saiu daqui (TASK-0263,
    * mora na aba Agenda de verdade agora). `null` quando o chamador ainda
    * não sabe o estado da conexão. */
   googleCalendarConnected: boolean | null;
@@ -459,7 +459,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
     : leads;
 
   return (
-    // TASK-0260 (pedido direto, print real): este painel já cobre a tela
+    // TASK-0263 (pedido direto, print real): este painel já cobre a tela
     // inteira com um fundo escuro (mesma sensação de "sair" do Atendimento
     // pra outra tela) mas o card em si ficava pequeno e centralizado,
     // sobrando muito espaço vazio em volta — "não faz sentido essa página
@@ -505,7 +505,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
-            {/* TASK-0260 (pedido direto): "Desconectar Google Calendar" saiu
+            {/* TASK-0263 (pedido direto): "Desconectar Google Calendar" saiu
                 daqui — não é ação de uso diário, e o print real mostrou que
                 sobrar tanto ícone aqui contribuía pra sensação de "caixa de
                 ferramentas apertada". Mora agora na aba Agenda de verdade

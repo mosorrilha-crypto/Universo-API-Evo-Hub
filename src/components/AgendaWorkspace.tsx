@@ -32,7 +32,7 @@ export function AgendaWorkspace(props: AgendaWorkspaceProps) {
 
   return (
     <div className="agenda-mobile-workspace space-y-3">
-      {/* TASK-0260 (pedido direto): configuração rara (trocar de conta do
+      {/* TASK-0263 (pedido direto): configuração rara (trocar de conta do
           Google Calendar), não uso diário — fica discreta aqui em cima,
           fora do fluxo principal de "Hoje"/"Calendário" abaixo. */}
       <GoogleCalendarConnectionControl />
