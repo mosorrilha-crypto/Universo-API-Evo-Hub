@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { CalendarDays, ListChecks } from 'lucide-react';
 import { AgendaFinanceiroCenter } from './AgendaFinanceiroCenter';
+import { GoogleCalendarConnectionControl } from './calendar/GoogleCalendarConnectionControl';
 import type { FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, RecurringExpense, UserProfile } from '../types';
 
 type AgendaMobileView = 'today' | 'calendar';
@@ -31,6 +32,10 @@ export function AgendaWorkspace(props: AgendaWorkspaceProps) {
 
   return (
     <div className="agenda-mobile-workspace space-y-3">
+      {/* TASK-0260 (pedido direto): configuração rara (trocar de conta do
+          Google Calendar), não uso diário — fica discreta aqui em cima,
+          fora do fluxo principal de "Hoje"/"Calendário" abaixo. */}
+      <GoogleCalendarConnectionControl />
       <nav className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/95 p-1.5 sm:hidden" aria-label="Visão da Agenda">
         <button type="button" onClick={() => setMobileView('today')} aria-current={mobileView === 'today' ? 'page' : undefined} className={`flex min-w-max flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${mobileView === 'today' ? 'bg-emerald-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><ListChecks className="h-4 w-4" /> Hoje</button>
         <button type="button" onClick={() => setMobileView('calendar')} aria-current={mobileView === 'calendar' ? 'page' : undefined} className={`flex min-w-max flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${mobileView === 'calendar' ? 'bg-sky-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><CalendarDays className="h-4 w-4" /> Calendário</button>

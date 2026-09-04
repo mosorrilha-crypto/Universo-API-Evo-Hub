@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LeadInfo } from '../../types';
-import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2, DollarSign, Unlink, ExternalLink } from 'lucide-react';
+import { Calendar as CalendarIcon, X, Loader2, RefreshCw, PlusCircle, Search, UserPlus, ChevronLeft, ChevronRight, Check, ChevronUp, ChevronDown, List, Grid3x3, Pencil, Clock, Trash2, DollarSign, ExternalLink } from 'lucide-react';
 
 const PAYMENT_METHODS = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'] as const;
 
@@ -64,12 +64,18 @@ const EventPaymentAction: React.FC<{
         </button>
       );
     }
+    // TASK-0260 (pedido direto, print real): este botão, o lápis de editar
+    // serviço e o par remarcar/excluir (mais abaixo) viviam com
+    // `opacity-0 group-hover:opacity-100` — só apareciam com o mouse em
+    // cima da linha. No toque (mobile/tablet, onde esse painel é mais
+    // usado) não existe hover real, então ficavam efetivamente invisíveis
+    // — "os botões estão escondidos". Ficam sempre visíveis agora.
     return (
       <button
         type="button"
         onClick={openForm}
         title="Registrar pagamento"
-        className="flex-shrink-0 text-slate-600 hover:text-emerald-400 opacity-0 group-hover/eventrow:opacity-100 transition-opacity cursor-pointer"
+        className="flex-shrink-0 text-slate-400 hover:text-emerald-400 cursor-pointer"
       >
         <DollarSign className="w-3.5 h-3.5" />
       </button>
@@ -162,13 +168,11 @@ interface UpcomingEventsPanelProps {
   onRegisterPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
   /** Edita um pagamento já lançado (etapa 2 do mesmo pedido). */
   onEditPayment: (eventId: string, amount: number, paymentMethod: string, status: string) => Promise<void>;
-  /** Achado real, 29/08/2026 (pedido do dono do produto): "Desconectar
-   * Calendar" morava num painel genérico de Ferramentas — faz mais sentido
-   * aqui dentro, junto do resto das ações de calendário. `undefined` quando
-   * o chamador ainda não sabe o estado da conexão (mesma convenção do botão
-   * "conectar/ver agenda" no WhatsAppLeadsSim). */
+  /** Só usado hoje pra decidir se mostra o link da planilha de backup
+   * (`backupSheetUrl`) — o botão de desconectar saiu daqui (TASK-0260,
+   * mora na aba Agenda de verdade agora). `null` quando o chamador ainda
+   * não sabe o estado da conexão. */
   googleCalendarConnected: boolean | null;
-  onDisconnectCalendar: () => void;
   /** TASK-0185 — link da planilha de backup no Google Sheets, só existe depois da primeira sincronização de um lead deste tenant. */
   backupSheetUrl?: string;
 }
@@ -265,7 +269,7 @@ const EditableSummary: React.FC<{ event: UpcomingEvent; onEditSummary: (eventId:
         type="button"
         onClick={() => { setDraft(event.summary); setIsEditing(true); }}
         title="Editar serviço"
-        className="flex-shrink-0 text-slate-600 hover:text-emerald-400 opacity-0 group-hover/summary:opacity-100 transition-opacity cursor-pointer"
+        className="flex-shrink-0 text-slate-500 hover:text-emerald-400 cursor-pointer"
       >
         <Pencil className="w-3 h-3" />
       </button>
@@ -346,12 +350,12 @@ const EventRowControls: React.FC<{
   }
 
   return (
-    <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover/eventrow:opacity-100 transition-opacity">
+    <div className="flex-shrink-0 flex items-center gap-1">
       <button
         type="button"
         onClick={() => { setDraftStart(toDatetimeLocalValue(event.startIso)); setIsRescheduling(true); }}
         title="Remarcar"
-        className="text-slate-600 hover:text-emerald-400 cursor-pointer"
+        className="text-slate-500 hover:text-emerald-400 cursor-pointer"
       >
         <Clock className="w-3.5 h-3.5" />
       </button>
@@ -368,7 +372,7 @@ const EventRowControls: React.FC<{
           }
         }}
         title="Excluir agendamento"
-        className="text-slate-600 hover:text-red-400 disabled:opacity-50 cursor-pointer"
+        className="text-slate-500 hover:text-red-400 disabled:opacity-50 cursor-pointer"
       >
         {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
       </button>
@@ -379,7 +383,7 @@ const EventRowControls: React.FC<{
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
   isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
   monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary, onReschedule, onDelete, onRegisterPayment, onEditPayment,
-  googleCalendarConnected, onDisconnectCalendar, backupSheetUrl,
+  googleCalendarConnected, backupSheetUrl,
 }) => {
   const [isPickingLead, setIsPickingLead] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -455,8 +459,18 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
     : leads;
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className={`bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full shadow-2xl max-h-[85vh] flex flex-col transition-all ${viewMode === 'calendar' && !isPickingLead ? 'max-w-lg' : 'max-w-md'}`}>
+    // TASK-0260 (pedido direto, print real): este painel já cobre a tela
+    // inteira com um fundo escuro (mesma sensação de "sair" do Atendimento
+    // pra outra tela) mas o card em si ficava pequeno e centralizado,
+    // sobrando muito espaço vazio em volta — "não faz sentido essa página
+    // ficar pequena... devemos ocupar todo o espaço útil e não ficar como
+    // uma caixa de ferramentas". No mobile (onde esse painel é mais usado)
+    // vira tela cheia de verdade (sem cantos arredondados, sem margem); a
+    // partir do breakpoint `sm` (telas maiores, que já sobra espaço do
+    // lado) volta a ser um modal centralizado — mesmo padrão de todo modal
+    // deste painel.
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center sm:p-4">
+      <div className={`bg-slate-900 sm:border sm:border-slate-800 rounded-none sm:rounded-2xl p-6 w-full h-full sm:h-auto shadow-2xl sm:max-h-[85vh] flex flex-col transition-all ${viewMode === 'calendar' && !isPickingLead ? 'sm:max-w-lg' : 'sm:max-w-md'}`}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <CalendarIcon className="w-5 h-5 text-emerald-400" />
@@ -491,10 +505,11 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
             >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
-            {/* Achado real, 29/08/2026 (pedido do dono do produto): "pode
-                ficar dentro da agenda" — desconectar pra trocar de conta,
-                ação rara mas precisa estar em algum lugar do próprio painel
-                de calendário, não num menu de Ferramentas genérico à parte. */}
+            {/* TASK-0260 (pedido direto): "Desconectar Google Calendar" saiu
+                daqui — não é ação de uso diário, e o print real mostrou que
+                sobrar tanto ícone aqui contribuía pra sensação de "caixa de
+                ferramentas apertada". Mora agora na aba Agenda de verdade
+                (menu principal), junto de outras configurações raras. */}
             {googleCalendarConnected && backupSheetUrl && (
               <a
                 href={backupSheetUrl}
@@ -505,15 +520,6 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
               >
                 <ExternalLink className="w-4 h-4" />
               </a>
-            )}
-            {googleCalendarConnected && (
-              <button
-                onClick={onDisconnectCalendar}
-                title="Desconectar Google Calendar (pra trocar de conta)"
-                className="p-1.5 text-slate-400 hover:text-rose-300 rounded-lg cursor-pointer"
-              >
-                <Unlink className="w-4 h-4" />
-              </button>
             )}
             <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer">
               <X className="w-4 h-4" />
