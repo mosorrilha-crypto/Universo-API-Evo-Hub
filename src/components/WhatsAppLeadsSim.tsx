@@ -475,6 +475,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [inputMessage]);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
+  const [isGeneratingReengagement, setIsGeneratingReengagement] = useState(false);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
   // na conversa") — antes o botão só disparava speechSynthesis lendo o
   // texto/transcrição da mensagem, nunca tocava o áudio de verdade. Cache
@@ -2796,17 +2797,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Evolution não tem conceito de template (diferente do fluxo Meta em
-  // operatorFollowUpService.ts) — o texto já sai pronto, sem placeholder,
-  // pro operador revisar/editar antes do envio de texto livre normal.
-  const buildReengagementDraft = (leadName: string, tenantName: string): string =>
-    `Oi ${leadName}! Aqui é a equipe da ${tenantName}, ainda estamos por aqui pra te ajudar 😊 Responde essa mensagem quando puder!`;
-
-  // Preenche o compositor com sugestão de retomada — sem modal de
-  // template como na Meta, só um rascunho pra revisão humana.
-  const handleDraftReengagementMessage = (lead: LeadInfo) => {
-    if (!activeTenant?.name) return;
-    handleDraftSuggestedReply(buildReengagementDraft(lead.name, activeTenant.name));
-    composerTextareaRef.current?.focus();
+  // operatorFollowUpService.ts) — o rascunho já sai pronto pro operador
+  // revisar/editar antes do envio de texto livre normal.
+  //
+  // Achado real (04/09/2026): a versão anterior era uma frase FIXA em
+  // português ("Oi {lead}! Aqui é a equipe da {tenant}..."), sem nenhuma
+  // relação com o assunto da conversa nem com o idioma real do cliente —
+  // pra um tenant que atende só em espanhol (Paraguai), isso saía errado
+  // toda vez. Agora reaproveita o mesmo pipeline de IA do botão "Gerar
+  // sugestão" (POST /api/ai/reply-from-hint, já usa histórico + KB e
+  // responde no idioma detectado do lead) com uma instrução específica de
+  // retomada, em vez de um texto fixo sem contexto.
+  const handleDraftReengagementMessage = async (lead: LeadInfo) => {
+    setIsGeneratingReengagement(true);
+    try {
+      const result = await handleGenerateReplyFromHint(
+        'O cliente ficou mais de 24h sem responder. Escreva uma mensagem curta e natural de retomada de contato, reconhecendo com leveza o tempo que passou, sem soar robótico nem desesperado, e sem repetir informação que já foi dada nesta conversa.'
+      );
+      if (result.error || !result.reply.trim()) {
+        setErrorMsg(result.error || 'Não foi possível gerar a mensagem de retomada agora.');
+        return;
+      }
+      handleDraftSuggestedReply(result.reply);
+      composerTextareaRef.current?.focus();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Não foi possível gerar a mensagem de retomada agora.');
+    } finally {
+      setIsGeneratingReengagement(false);
+    }
   };
 
   // Simulate sending an Audio Note from Lead or Agent
@@ -4908,11 +4926,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </div>
                           <button
                             type="button"
-                            onClick={() => handleDraftReengagementMessage(selectedLead)}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                            disabled={isGeneratingReengagement}
+                            onClick={() => void handleDraftReengagementMessage(selectedLead)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                           >
                             <Sparkles className="w-3 h-3" />
-                            Sugerir mensagem de retomada
+                            {isGeneratingReengagement ? 'Gerando...' : 'Sugerir mensagem de retomada'}
                           </button>
                         </div>
                       ) : isReopenBlockedByWaba ? (
