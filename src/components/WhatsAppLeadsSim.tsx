@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
 import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
@@ -76,8 +76,10 @@ import {
   Video,
   Copy,
   Megaphone,
-  MessageCircle
+  MessageCircle,
+  Receipt
 } from 'lucide-react';
+import { TransactionDialog } from './financial/TransactionDialog';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
 // livre, não um enum fixo. O operador pode digitar qualquer coisa.
@@ -174,6 +176,15 @@ interface WhatsAppLeadsSimProps {
       só passa esta prop quando o usuário logado tem permissão pra ver a
       Agenda (`canSeeAgenda`) — se vier `undefined`, o botão nem aparece. */
   onGoToAgenda?: () => void;
+  /** TASK-0284: libera o item "Marcar como comprovante" no menu "⋮" das
+      mensagens de imagem — App.tsx passa canSeeFinancial (mesmo flag que
+      controla a aba Financeiro). Sem isso, nunca oferece a ação. */
+  financialModuleEnabled?: boolean;
+  /** Cria a transação financeira do caminho avulso do comprovante — App.tsx
+      passa handleAddTransaction, a mesma função já usada pelo Financeiro. */
+  onAddTransaction?: (tx: FinancialTransaction) => Promise<boolean>;
+  /** Nome do operador logado, só pra atribuição no lançamento avulso criado a partir de um comprovante. */
+  operatorName?: string;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -264,6 +275,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onGoToAgenda,
   openLeadPhone,
   openLeadRequestId,
+  financialModuleEnabled,
+  onAddTransaction,
+  operatorName,
 }) => {
   const { t, language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -491,6 +505,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [inputMessage]);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
+  // TASK-0284: rascunho aberto quando o operador marca uma imagem do chat
+  // como comprovante — a IA já rodou (ou falhou, extraction fica null) até
+  // aqui; o modal (mesmo usado no Financeiro) deixa o operador revisar/
+  // editar antes de qualquer registro real acontecer.
+  const [analyzingPaymentProofFor, setAnalyzingPaymentProofFor] = useState<string | null>(null);
+  const [paymentProofDraft, setPaymentProofDraft] = useState<{
+    messageId: string;
+    leadName: string;
+    leadPhone: string;
+    extraction: {
+      amount: number | null;
+      method: PaymentMethod | null;
+      bankOrApp: string | null;
+    } | null;
+  } | null>(null);
+  const [submittingPaymentProof, setSubmittingPaymentProof] = useState(false);
   const [isGeneratingReengagement, setIsGeneratingReengagement] = useState(false);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
   // na conversa") — antes o botão só disparava speechSynthesis lendo o
@@ -2917,6 +2947,83 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
+  // TASK-0284: operador marcou uma imagem do chat como comprovante de
+  // pagamento (menu "⋮" do balão). Analisa via IA (extração estruturada,
+  // nunca confirma nada sozinha) e abre o modal de lançamento financeiro
+  // pré-preenchido — mesmo se a análise falhar (extraction fica null), o
+  // modal abre vazio pro operador preencher à mão, nunca bloqueia o fluxo.
+  const handleFlagAsPaymentProof = async (msg: ChatMessage) => {
+    if (!selectedLead || !(selectedLead as any).isReal) return;
+    setAnalyzingPaymentProofFor(msg.id);
+    let extraction: { amount: number | null; method: PaymentMethod | null; bankOrApp: string | null } | null = null;
+    try {
+      const res = await apiFetch(
+        `/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(msg.id)}/analyze-payment-proof`,
+        { method: 'POST' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      if (data.success) extraction = data.extraction;
+      else setErrorMsg('Não foi possível analisar essa imagem automaticamente — preencha os campos manualmente.');
+    } catch (err) {
+      console.error('Falha ao analisar comprovante:', err);
+      setErrorMsg('Não foi possível analisar essa imagem agora. Tente de novo em instantes.');
+    } finally {
+      setAnalyzingPaymentProofFor(null);
+    }
+    setPaymentProofDraft({ messageId: msg.id, leadName: selectedLead.name, leadPhone: selectedLead.phone, extraction });
+  };
+
+  // Duas saídas: com "Vincular a este agendamento" marcado, confirma o
+  // pagamento de verdade pelo mesmo caminho sensível já usado no painel de
+  // Escalonamentos (cria o evento real no Calendar, usa o valor da IA como
+  // valor REAL em vez do preço do catálogo); sem vínculo, cria só um
+  // lançamento financeiro avulso — nunca toca payment_status/appointments.
+  const savePaymentProofTransaction = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!paymentProofDraft) return;
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get('amount') || 0);
+    const description = String(form.get('description') || '').trim();
+    const linkToAppointment = form.get('linkToAppointment') === 'on';
+    if (!description || !Number.isFinite(amount) || amount <= 0) return;
+    setSubmittingPaymentProof(true);
+    try {
+      if (linkToAppointment && paymentAppointment) {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(paymentProofDraft.leadPhone)}/verify-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'verified', overrideAmount: amount }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        setPaymentAppointment(data.appointment);
+      } else {
+        const created = await onAddTransaction?.({
+          id: crypto.randomUUID(),
+          leadId: selectedLead?.id || 'chat-image',
+          leadName: paymentProofDraft.leadName,
+          leadPhone: paymentProofDraft.leadPhone,
+          productName: description,
+          amount,
+          paymentMethod: String(form.get('paymentMethod')) as PaymentMethod,
+          status: String(form.get('status') || 'pago') as PaymentStatus,
+          date: new Date().toISOString(),
+          operatorName,
+          channel: 'Comprovante via WhatsApp',
+          entryType: 'income',
+          sourceRef: `chat-image:${paymentProofDraft.messageId}`,
+        } as FinancialTransaction);
+        if (!created) throw new Error('Não foi possível registrar no servidor.');
+      }
+      setPaymentProofDraft(null);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Não foi possível confirmar. Tente de novo.');
+    } finally {
+      setSubmittingPaymentProof(false);
+    }
+  };
+
   // Preenche o compositor para revisão humana antes de qualquer envio real.
   const handleDraftSuggestedReply = (replyText: string) => {
     if (!selectedLead) return;
@@ -4785,6 +4892,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   <Smile className="w-3.5 h-3.5" />
                                   <span>{isSpanish ? 'Reaccionar' : 'Reagir'}</span>
                                 </button>
+                                {msg.type === 'image' && financialModuleEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setOpenMessageMenuFor(null); handleFlagAsPaymentProof(msg); }}
+                                    disabled={analyzingPaymentProofFor === msg.id}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    <Receipt className="w-3.5 h-3.5" />
+                                    <span>{analyzingPaymentProofFor === msg.id ? (isSpanish ? 'Analizando...' : 'Analisando...') : (isSpanish ? 'Marcar como comprobante' : 'Marcar como comprovante')}</span>
+                                  </button>
+                                )}
                                 <div className="border-t border-slate-700" />
                                 <button
                                   type="button"
@@ -5807,6 +5925,38 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       />
 
       <ImageLightboxModal imageUrl={viewImageUrl} onClose={() => setViewImageUrl(null)} />
+
+      {/* TASK-0284: modal de lançamento financeiro a partir de um comprovante
+          marcado no chat — mesmo componente do Financeiro, pré-preenchido
+          pela IA quando disponível. Cliente travado no contato da conversa
+          (sem seletor de CRM); oferece vincular a um agendamento pendente
+          quando existir (paymentAppointment + acesso à Agenda). */}
+      {paymentProofDraft && (
+        <TransactionDialog
+          kind="income"
+          leads={[]}
+          lockedLead={{ name: paymentProofDraft.leadName, phone: paymentProofDraft.leadPhone }}
+          currency={activeTenant?.currency || 'PYG'}
+          isSpanish={isSpanish}
+          onClose={() => setPaymentProofDraft(null)}
+          onSubmit={savePaymentProofTransaction}
+          submitting={submittingPaymentProof}
+          initialValues={{
+            description: paymentProofDraft.extraction?.bankOrApp
+              ? `Comprovante recebido — ${paymentProofDraft.extraction.bankOrApp}`
+              : 'Comprovante recebido no WhatsApp',
+            amount: paymentProofDraft.extraction?.amount ?? undefined,
+            paymentMethod: paymentProofDraft.extraction?.method ?? undefined,
+          }}
+          linkableAppointment={
+            paymentAppointment &&
+            !!onGoToAgenda &&
+            (paymentAppointment.paymentStatus === 'awaiting_payment' || paymentAppointment.paymentStatus === 'pending_verification')
+              ? { summary: paymentAppointment.summary, startIso: paymentAppointment.startIso }
+              : null
+          }
+        />
+      )}
 
       {/* Add New Lead Modal */}
       <AddLeadModal

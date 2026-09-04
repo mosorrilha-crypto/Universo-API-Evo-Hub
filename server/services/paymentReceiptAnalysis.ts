@@ -10,6 +10,7 @@
  */
 import type { GoogleGenAI } from '@google/genai';
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
+import type { PaymentMethod } from './financialStore';
 
 export interface ReceiptAnalysisResult {
   looksLikeReceipt: boolean;
@@ -56,6 +57,83 @@ Se NÃO parecer um comprovante: diga em poucas palavras o que a imagem parece se
     };
   } catch (err) {
     console.warn('⚠️  [Análise de comprovante] Falha na chamada ao Gemini (segue sem dica):', (err as Error).message);
+    return null;
+  }
+}
+
+const VALID_PAYMENT_METHODS: PaymentMethod[] = ['PIX', 'Transferência Bancária', 'Cartão de Crédito', 'Boleto Bancário', 'Link WhatsApp'];
+
+export interface ReceiptExtractionResult {
+  looksLikeReceipt: boolean;
+  amount: number | null;
+  currency: string | null;
+  /** ISO yyyy-mm-dd quando dá pra ler, senão null. */
+  date: string | null;
+  /** Só um valor válido de PaymentMethod, ou null — nunca adivinhado/coagido. */
+  method: PaymentMethod | null;
+  bankOrApp: string | null;
+  holderName: string | null;
+  confidence: 'low' | 'medium' | 'high';
+  hint: string;
+}
+
+/**
+ * Igual a analyzePaymentReceiptWithGemini acima, mas tenta extrair campos
+ * ESTRUTURADOS (valor, data, método) pra pré-preencher um formulário — usado
+ * quando um operador marca manualmente uma imagem do chat como comprovante
+ * (menu "⋮" do balão), não pelo fluxo automático de agendamento. Nunca
+ * lança, nunca confirma nada sozinha: é só apoio pro operador revisar antes
+ * de registrar o lançamento financeiro de verdade.
+ */
+export async function extractPaymentProofDataWithGemini(
+  ai: GoogleGenAI | null,
+  imageBase64: string,
+  mimeType: string
+): Promise<ReceiptExtractionResult | null> {
+  if (!ai || !imageBase64) return null;
+
+  try {
+    const prompt = `Você está ajudando um atendente humano a preencher rapidamente um formulário de lançamento financeiro a partir de uma imagem enviada por um cliente no WhatsApp (possível comprovante de pagamento — transferência, PIX, recibo). Você NUNCA confirma o pagamento e NUNCA inventa um dado que não conseguir ler direito na imagem — quando não tiver certeza de um campo, devolva null nele.
+
+Responda ESTRITAMENTE em JSON:
+{"looksLikeReceipt": true|false, "amount": number|null, "currency": "BRL"|"PYG"|... |null, "date": "AAAA-MM-DD"|null, "method": "PIX"|"Transferência Bancária"|"Cartão de Crédito"|"Boleto Bancário"|"Link WhatsApp"|null, "bankOrApp": string|null, "holderName": string|null, "confidence": "low"|"medium"|"high", "hint": "frase curta (máx ~15 palavras)"}
+
+Regras:
+- "method" só pode ser um dos valores literais da lista acima, ou null se não der pra mapear com confiança.
+- "amount" é só o número (sem símbolo de moeda), ou null.
+- "date" só em formato ISO se estiver legível, senão null.
+- Se NÃO parecer um comprovante, devolva looksLikeReceipt=false e preencha "hint" com o que a imagem parece ser; os demais campos ficam null.`;
+
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+
+    const response = await withGeminiRetry(
+      () =>
+        ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: [
+            { inlineData: { data: cleanBase64, mimeType: mimeType || 'image/jpeg' } },
+            { text: prompt },
+          ],
+          config: { responseMimeType: 'application/json' },
+        }),
+      GEMINI_TIMEOUT_MS
+    );
+
+    const parsed = JSON.parse(response.text || '{}') as Partial<ReceiptExtractionResult>;
+    const method = typeof parsed.method === 'string' && VALID_PAYMENT_METHODS.includes(parsed.method as PaymentMethod) ? (parsed.method as PaymentMethod) : null;
+    return {
+      looksLikeReceipt: !!parsed.looksLikeReceipt,
+      amount: typeof parsed.amount === 'number' && Number.isFinite(parsed.amount) ? parsed.amount : null,
+      currency: typeof parsed.currency === 'string' && parsed.currency.trim() ? parsed.currency.trim() : null,
+      date: typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(parsed.date) ? parsed.date : null,
+      method,
+      bankOrApp: typeof parsed.bankOrApp === 'string' && parsed.bankOrApp.trim() ? parsed.bankOrApp.trim() : null,
+      holderName: typeof parsed.holderName === 'string' && parsed.holderName.trim() ? parsed.holderName.trim() : null,
+      confidence: parsed.confidence === 'high' || parsed.confidence === 'medium' ? parsed.confidence : 'low',
+      hint: typeof parsed.hint === 'string' ? parsed.hint.trim() : '',
+    };
+  } catch (err) {
+    console.warn('⚠️  [Extração de comprovante] Falha na chamada ao Gemini (segue sem extração):', (err as Error).message);
     return null;
   }
 }

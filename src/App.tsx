@@ -1219,6 +1219,7 @@ export const App: React.FC = () => {
           pixQrCode: newTx.pixQrCode,
           paymentLinkUrl: newTx.paymentLinkUrl,
           entryType: newTx.entryType,
+          sourceRef: newTx.sourceRef,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1546,6 +1547,9 @@ export const App: React.FC = () => {
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
             onThreadOpenChange={setIsMobileWhatsAppThreadOpen}
+            financialModuleEnabled={canSeeFinancial}
+            onAddTransaction={handleAddTransaction}
+            operatorName={currentUser?.name}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}
