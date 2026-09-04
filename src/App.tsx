@@ -339,9 +339,7 @@ export const App: React.FC = () => {
     // reais do Supabase (só o painel SaaS Master, restrito a saas_admin,
     // busca a lista real via /api/admin/tenants). Sem isso, o badge do
     // cabeçalho ficava preso no nome do mock pra qualquer operador que não
-    // fosse saas_admin, mesmo depois do fix acima. GET /api/tenant é
-    // self-scoped (resolve pelo JWT, sem exigir role nenhuma) e sempre
-    // reflete o tenant real de quem está logado.
+    // fosse saas_admin, mesmo depois do fix acima.
     apiFetch('/api/tenant')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -361,6 +359,27 @@ export const App: React.FC = () => {
         // pra outro tenant.
         const savedOverrideId = currentUser.role === 'saas_admin' ? localStorage.getItem(ACTIVE_TENANT_OVERRIDE_KEY) : null;
         if (savedOverrideId && savedOverrideId !== data.tenant.id) return;
+        // Segundo achado real (04/09/2026, TASK-0264, encontrado testando o
+        // app de verdade num F5): GET /api/tenant NÃO é imune ao seletor de
+        // tenant do saas_admin como o comentário acima (removido) afirmava —
+        // ele usa exatamente o mesmo `tenantOf()`/`resolveTenantId()` de
+        // qualquer outra rota tenant-scoped, então também respeita o header
+        // `X-Tenant-Id` (ver conversations.ts). No F5, `activeTenant` nasce
+        // do primeiro item de `tenants` (cache local, ordem arbitrária vinda
+        // de /api/admin/tenants — não necessariamente o tenant de login) até
+        // este efeito corrigir; nesse intervalo, `setTenantOverride` (chamado
+        // a cada render, ver mais abaixo) já mandou esse id ERRADO pro
+        // apiFetch, e ESTA chamada específica saiu com o `X-Tenant-Id`
+        // errado ainda grudado, embora o bloco síncrono logo acima já tivesse
+        // corrigido `activeTenant` corretamente pro tenant de login. Quando a
+        // resposta chega, ela then reflete o tenant ERRADO (não o de login) —
+        // aplicá-la sem checar desfaz a correção síncrona, prendendo
+        // `activeTenant` (e todo fetch que depende dele — conversas, CRM,
+        // etc.) no tenant errado até o próximo F5 acidentalmente "acertar" a
+        // ordem do cache. Nunca aplica um tenant diferente do tenant de login
+        // real do operador; esta chamada só serve pra enriquecer
+        // currency/locale do tenant que a correção síncrona já escolheu.
+        if (data.tenant.id !== currentUser.tenantId) return;
         // currency/locale entraram aqui (19/08/2026) pro Financeiro formatar
         // valores na moeda real do tenant em vez de R$/pt-BR fixo.
         setActiveTenant((prev) =>
