@@ -16,7 +16,7 @@ export interface AgentContextPack {
   liveState: {
     appointment: Pick<TrackedAppointment, 'paymentStatus' | 'heldUntil' | 'eventId'> | null;
     appointmentAvailable: boolean;
-    escalation: Pick<Escalation, 'id' | 'kind' | 'resolved'> | null;
+    escalation: (Pick<Escalation, 'id' | 'kind' | 'resolved'> & Partial<Pick<Escalation, 'reason' | 'createdAt'>>) | null;
     escalationAvailable: boolean;
   };
   selectedFacts: Record<string, unknown>;
@@ -92,7 +92,15 @@ function renderLiveState(liveState: AgentContextPack['liveState']): string[] {
   if (!liveState.escalationAvailable) {
     lines.push('- Escalonamentos: estado vivo indisponível neste turno; preserve o tratamento conservador de casos sensíveis.');
   } else if (liveState.escalation) {
-    lines.push(`- Escalonamento humano aberto (${liveState.escalation.kind}): mantenha a decisão sob revisão humana; não prometa resolução, reembolso ou exceção.`);
+    const minutesOpen = liveState.escalation.createdAt
+      ? Math.max(0, Math.round((Date.now() - new Date(liveState.escalation.createdAt).getTime()) / 60000))
+      : undefined;
+    const reasonSnippet = compactText(liveState.escalation.reason, 160);
+    lines.push(
+      `- Escalonamento humano aberto (${liveState.escalation.kind}${minutesOpen !== undefined ? `, há ${minutesOpen} min` : ''})` +
+      `${reasonSnippet ? `, motivo: "${reasonSnippet}"` : ''}: mantenha a decisão sob revisão humana; não prometa resolução, reembolso ou exceção.` +
+      ' NÃO reabra nem repita sozinho o mesmo assunto que gerou esta escalação (o mesmo preço/horário/pedido já está em análise humana) — se a cliente insistir nele, reconheça que já está sendo verificado, sem novo prazo ou promessa.'
+    );
   }
   return lines;
 }
@@ -101,7 +109,7 @@ export function buildAgentContextPack(input: {
   memory: ContactAgentMemory | null;
   appointment?: Pick<TrackedAppointment, 'paymentStatus' | 'heldUntil' | 'eventId'> | null;
   appointmentAvailable?: boolean;
-  escalation?: Pick<Escalation, 'id' | 'kind' | 'resolved'> | null;
+  escalation?: (Pick<Escalation, 'id' | 'kind' | 'resolved'> & Partial<Pick<Escalation, 'reason' | 'createdAt'>>) | null;
   escalationAvailable?: boolean;
 }): AgentContextPack {
   const liveState = {
