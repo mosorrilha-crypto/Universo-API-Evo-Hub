@@ -287,7 +287,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // sink continuaria existindo) ou cifrar no cliente (a chave ficaria no
   // próprio JS, não protege de verdade). Lista começa vazia e é populada
   // pelo fetch real (/api/conversations) a cada carregamento/troca de tenant.
-  const [leads, setLeads] = useState<(LeadInfo & { textContent: string; messages: ChatMessage[]; result?: TranscriptionResult; fullAnalysis?: FullConversationAnalysis; historyLoaded?: boolean; historyLoading?: boolean; lastMessageId?: string })[]>([]);
+  const [leads, setLeads] = useState<(LeadInfo & {
+    textContent: string;
+    messages: ChatMessage[];
+    result?: TranscriptionResult;
+    fullAnalysis?: FullConversationAnalysis;
+    historyLoaded?: boolean;
+    historyLoading?: boolean;
+    lastMessageId?: string;
+    /** TASK-0280 — timestamp ISO (não formatado) da mensagem mais antiga já carregada, usado como cursor pra buscar a página anterior ao rolar pra cima. `undefined` quando ainda não sabemos (nada carregado) ou quando não há mais nada antes (oldestLoadedIsFirstEver=true). */
+    oldestLoadedMessageTimestamp?: string;
+    /** TASK-0280 — timestamp ISO da mensagem mais nova já carregada, usado como cursor pra buscar só o que chegou de novo (SSE) sem reler a página inteira. */
+    newestLoadedMessageTimestamp?: string;
+    /** TASK-0280 — false quando a página mais antiga já carregada é o começo real da conversa (não precisa mais tentar buscar mensagens anteriores). undefined = ainda não sabemos. */
+    hasMoreOlderMessages?: boolean;
+    /** TASK-0280 — true enquanto busca a página anterior (rolagem pro topo), separado de historyLoading (que é só a carga inicial). */
+    loadingOlderMessages?: boolean;
+  })[]>([]);
   // Purga ativa, uma vez por montagem: navegadores que já usaram o painel
   // antes desta correção podem ter PII de cliente em texto puro gravada de
   // uma sessão anterior — sem isso, ela ficaria lá indefinidamente, já que
@@ -475,6 +491,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [inputMessage]);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
+  const [isGeneratingReengagement, setIsGeneratingReengagement] = useState(false);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
   // na conversa") — antes o botão só disparava speechSynthesis lendo o
   // texto/transcrição da mensagem, nunca tocava o áudio de verdade. Cache
@@ -1057,6 +1074,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     shouldAutoScrollRef.current = isNearBottom;
     setIsAtLatestMessage(isNearBottom);
     if (isNearBottom) setNewMessagesWhileAway(0);
+    // TASK-0280 — rolar perto do topo busca a página anterior de mensagens
+    // (igual ao WhatsApp real), em vez de já ter carregado o histórico
+    // inteiro na abertura da conversa.
+    if (container.scrollTop <= 120 && selectedLead && (selectedLead as any).isReal) {
+      void loadOlderMessages(selectedLead.phone, selectedLead.id);
+    }
   };
 
   // Achado real testando com o Lucas em produção ("dá pra otimizar as
@@ -1277,27 +1300,43 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   const activeLeadPhoneRef = useRef<string | null>(null);
   const fetchConversationsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyRequestsInFlightRef = useRef<Set<string>>(new Set());
+  const olderMessagesRequestsInFlightRef = useRef<Set<string>>(new Set());
+  const newerMessagesRequestsInFlightRef = useRef<Set<string>>(new Set());
   // Cada request captura o tenant em que começou. Quando o operador troca de
   // empresa, respostas atrasadas do tenant anterior não podem alterar a fila,
   // o histórico aberto nem o aviso de erro do tenant novo.
   const activeTenantIdRef = useRef(activeTenant.id);
   activeTenantIdRef.current = activeTenant.id;
 
+  // Formata pra exibição (HH:MM) mas preserva o ISO cru em rawTimestamp — os
+  // cursores de paginação (oldest/newestLoadedMessageTimestamp) e o separador
+  // de dia (TASK-0281, ver isNewChatDateGroup/formatChatDateLabel abaixo)
+  // precisam do valor completo (data + hora), não só da hora exibida no balão.
+  const formatMessagesForDisplay = (rawMessages: ChatMessage[]): ChatMessage[] =>
+    rawMessages.map((message) => ({
+      ...message,
+      rawTimestamp: message.timestamp,
+      timestamp: new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    }));
+
+  // TASK-0280 (achado real, "Carregando histórico completo" toda vez que
+  // abre uma conversa, demora e atrapalha em rede fraca): antes buscava a
+  // conversa INTEIRA (getConversation) só pra abrir o chat. Agora busca só a
+  // última página (igual ao WhatsApp real) — o resto vem sob demanda em
+  // loadOlderMessages, conforme o operador rola pra cima.
   const loadRealConversationHistory = async (phone: string, leadId: string) => {
     const requestTenantId = activeTenantIdRef.current;
     if (historyRequestsInFlightRef.current.has(phone)) return;
     historyRequestsInFlightRef.current.add(phone);
     setLeads((prev) => prev.map((lead) => lead.id === leadId ? { ...lead, historyLoading: true } : lead));
     try {
-      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}`);
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/messages?limit=30`);
       const data = await response.json().catch(() => null);
-      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.conversation) {
+      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.messages) {
         throw new Error(data?.error || `HTTP ${response.status}`);
       }
-      const messages: ChatMessage[] = (data.conversation.messages || []).map((message: ChatMessage) => ({
-        ...message,
-        timestamp: new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      }));
+      const rawMessages: ChatMessage[] = data.messages;
+      const messages = formatMessagesForDisplay(rawMessages);
       if (activeTenantIdRef.current !== requestTenantId) return;
       const lastMessage = messages[messages.length - 1];
       setLeads((prev) => prev.map((lead) => lead.id === leadId ? {
@@ -1307,6 +1346,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         historyLoaded: true,
         historyLoading: false,
         lastMessageId: lastMessage?.id,
+        oldestLoadedMessageTimestamp: rawMessages[0]?.timestamp,
+        newestLoadedMessageTimestamp: rawMessages[rawMessages.length - 1]?.timestamp,
+        hasMoreOlderMessages: Boolean(data.hasMore),
       } : lead));
     } catch (err: any) {
       if (activeTenantIdRef.current !== requestTenantId) return;
@@ -1314,6 +1356,92 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setErrorMsg(err?.message || 'Não foi possível carregar o histórico desta conversa.');
     } finally {
       historyRequestsInFlightRef.current.delete(phone);
+    }
+  };
+
+  // TASK-0280 — busca a página anterior à mais antiga já carregada, disparada
+  // ao rolar a conversa pro topo (ver handleMessagesScroll). Preserva a
+  // posição visual: como as mensagens antigas são inseridas ANTES das que já
+  // estão na tela, sem compensar o scroll o operador veria o conteúdo
+  // "pular" pra baixo (a lista cresce por cima do que ele estava vendo).
+  const loadOlderMessages = async (phone: string, leadId: string) => {
+    const lead = leads.find((l) => l.id === leadId) as any;
+    if (!lead || lead.hasMoreOlderMessages === false || lead.loadingOlderMessages) return;
+    if (olderMessagesRequestsInFlightRef.current.has(phone)) return;
+    const cursor = lead.oldestLoadedMessageTimestamp;
+    if (!cursor) return;
+    const requestTenantId = activeTenantIdRef.current;
+    olderMessagesRequestsInFlightRef.current.add(phone);
+    setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, loadingOlderMessages: true } : l));
+    const container = messagesContainerRef.current;
+    const scrollHeightBefore = container?.scrollHeight ?? 0;
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/messages?limit=30&before=${encodeURIComponent(cursor)}`);
+      const data = await response.json().catch(() => null);
+      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.messages) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      const rawOlder: ChatMessage[] = data.messages;
+      const older = formatMessagesForDisplay(rawOlder);
+      if (activeTenantIdRef.current !== requestTenantId) return;
+      setLeads((prev) => prev.map((l) => l.id === leadId ? {
+        ...l,
+        messages: [...older, ...(l.messages || [])],
+        loadingOlderMessages: false,
+        oldestLoadedMessageTimestamp: rawOlder[0]?.timestamp ?? l.oldestLoadedMessageTimestamp,
+        hasMoreOlderMessages: Boolean(data.hasMore),
+      } : l));
+      // Restaura a posição de leitura depois do DOM crescer por cima —
+      // requestAnimationFrame garante que o navegador já recalculou o
+      // scrollHeight novo antes de ajustar o scrollTop.
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - scrollHeightBefore;
+      });
+    } catch (err: any) {
+      if (activeTenantIdRef.current !== requestTenantId) return;
+      setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, loadingOlderMessages: false } : l));
+      setErrorMsg(err?.message || 'Não foi possível carregar mensagens anteriores desta conversa.');
+    } finally {
+      olderMessagesRequestsInFlightRef.current.delete(phone);
+    }
+  };
+
+  // TASK-0280 — substitui a antiga recarga da conversa inteira a cada evento
+  // SSE (loadRealConversationHistory de novo, que descartaria as páginas
+  // antigas já carregadas pelo scroll) por buscar só o que é mais novo que o
+  // já exibido e anexar ao final.
+  const loadNewerMessages = async (phone: string, leadId: string) => {
+    const lead = leads.find((l) => l.id === leadId) as any;
+    if (!lead?.historyLoaded || newerMessagesRequestsInFlightRef.current.has(phone)) return;
+    const cursor = lead.newestLoadedMessageTimestamp;
+    if (!cursor) return;
+    const requestTenantId = activeTenantIdRef.current;
+    newerMessagesRequestsInFlightRef.current.add(phone);
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/messages?after=${encodeURIComponent(cursor)}`);
+      const data = await response.json().catch(() => null);
+      if (activeTenantIdRef.current !== requestTenantId || !response.ok || !data?.messages) return;
+      const rawNewer: ChatMessage[] = data.messages;
+      if (!rawNewer.length) return;
+      const newer = formatMessagesForDisplay(rawNewer);
+      setLeads((prev) => prev.map((l) => {
+        if (l.id !== leadId) return l;
+        const existingIds = new Set((l.messages || []).map((m) => m.id));
+        const toAppend = newer.filter((m) => !existingIds.has(m.id));
+        if (!toAppend.length) return l;
+        const lastMessage = toAppend[toAppend.length - 1];
+        return {
+          ...l,
+          messages: [...(l.messages || []), ...toAppend],
+          textContent: lastMessage?.text || l.textContent,
+          lastMessageId: lastMessage?.id,
+          newestLoadedMessageTimestamp: rawNewer[rawNewer.length - 1]?.timestamp,
+        };
+      }));
+    } catch {
+      // Silencioso: o poll de segurança e o próximo evento SSE cobrem uma falha pontual.
+    } finally {
+      newerMessagesRequestsInFlightRef.current.delete(phone);
     }
   };
 
@@ -1495,7 +1623,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           const payload = JSON.parse(event.data);
           const phone: string | undefined = payload?.phone;
           if (phone && phone === activeLeadPhoneRef.current) {
-            void loadRealConversationHistory(phone, `real-${phone}`);
+            void loadNewerMessages(phone, `real-${phone}`);
           }
           const status: 'generating' | 'drafted' | 'safety_blocked' | 'escalated' | 'awaiting_human' | 'template_sent' | 'sent' | 'delivery_failed' | 'failed' | undefined = payload?.aiReplyStatus;
           if (!phone || !status) return;
@@ -2796,17 +2924,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Evolution não tem conceito de template (diferente do fluxo Meta em
-  // operatorFollowUpService.ts) — o texto já sai pronto, sem placeholder,
-  // pro operador revisar/editar antes do envio de texto livre normal.
-  const buildReengagementDraft = (leadName: string, tenantName: string): string =>
-    `Oi ${leadName}! Aqui é a equipe da ${tenantName}, ainda estamos por aqui pra te ajudar 😊 Responde essa mensagem quando puder!`;
-
-  // Preenche o compositor com sugestão de retomada — sem modal de
-  // template como na Meta, só um rascunho pra revisão humana.
-  const handleDraftReengagementMessage = (lead: LeadInfo) => {
-    if (!activeTenant?.name) return;
-    handleDraftSuggestedReply(buildReengagementDraft(lead.name, activeTenant.name));
-    composerTextareaRef.current?.focus();
+  // operatorFollowUpService.ts) — o rascunho já sai pronto pro operador
+  // revisar/editar antes do envio de texto livre normal.
+  //
+  // Achado real (04/09/2026): a versão anterior era uma frase FIXA em
+  // português ("Oi {lead}! Aqui é a equipe da {tenant}..."), sem nenhuma
+  // relação com o assunto da conversa nem com o idioma real do cliente —
+  // pra um tenant que atende só em espanhol (Paraguai), isso saía errado
+  // toda vez. Agora reaproveita o mesmo pipeline de IA do botão "Gerar
+  // sugestão" (POST /api/ai/reply-from-hint, já usa histórico + KB e
+  // responde no idioma detectado do lead) com uma instrução específica de
+  // retomada, em vez de um texto fixo sem contexto.
+  const handleDraftReengagementMessage = async (lead: LeadInfo) => {
+    setIsGeneratingReengagement(true);
+    try {
+      const result = await handleGenerateReplyFromHint(
+        'O cliente ficou mais de 24h sem responder. Escreva uma mensagem curta e natural de retomada de contato, reconhecendo com leveza o tempo que passou, sem soar robótico nem desesperado, e sem repetir informação que já foi dada nesta conversa.'
+      );
+      if (result.error || !result.reply.trim()) {
+        setErrorMsg(result.error || 'Não foi possível gerar a mensagem de retomada agora.');
+        return;
+      }
+      handleDraftSuggestedReply(result.reply);
+      composerTextareaRef.current?.focus();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Não foi possível gerar a mensagem de retomada agora.');
+    } finally {
+      setIsGeneratingReengagement(false);
+    }
   };
 
   // Simulate sending an Audio Note from Lead or Agent
@@ -3136,17 +3281,54 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // "Ferramentas" (aba inferior) empurrava a lista de conversas inteira pra
   // baixo — o painel entrava no fluxo normal do documento, dentro do
   // Controls Bar. Conteúdo extraído numa variável pra ser reaproveitado sem
-  // duplicar JSX à mão: no desktop continua inline (ver `hidden sm:flex`
-  // logo abaixo, mesmo lugar de sempre); no mobile vira uma gaveta que sobe
-  // por cima da tela, mesmo padrão já usado pela Ficha IA
-  // (`atendimento-analysis-drawer`, mais abaixo).
-  // Achado real, 29/08/2026 (pedido do dono do produto, print com o painel
-  // de Ferramentas aberto): "Apenas Anúncios"/"Gatilhos" e o botão "Agenda"
-  // (que já existe como ícone próprio na barra inferior) só ocupavam espaço
-  // aqui repetindo controles que já existem em outro lugar mais óbvio —
-  // movidos pra dentro da faixa "Status do agente" (os dois primeiros) e
-  // removida a duplicata do botão Agenda (o ícone da barra inferior já cobre
-  // exatamente a mesma ação em qualquer largura de tela).
+  // duplicar JSX à mão. Desktop não usa mais este conteúdo (a barra de
+  // ferramentas exclusiva de desktop foi removida na TASK-0225) — só a
+  // gaveta mobile (ver `isToolbarSettingsOpen`, mais abaixo) renderiza
+  // `toolbarSettingsBody` hoje.
+  //
+  // Redesenho (pedido direto, 04/09/2026, com prints comparando com o
+  // menu de anexos real do WhatsApp): a gaveta ganhou o Status do agente
+  // (Ativo/Restrito/Pausado), que antes vivia numa faixa fixa sempre visível
+  // no topo da lista de conversas — no desktop essa faixa continua (não tem
+  // gaveta lá), mas no mobile ela ocupava espaço permanente pra uma ação
+  // que o operador só usa de vez em quando. As ações restantes (Somente
+  // anúncios, Gatilhos, Notificações) viraram uma grade de ícones em
+  // círculo + rótulo embaixo, no mesmo estilo do menu de anexos do
+  // WhatsApp real, em vez da fileira de botões retangulares de texto.
+  const renderToolTile = (options: {
+    key: string;
+    icon: React.ReactNode;
+    label: string;
+    onClick: () => void;
+    active?: boolean;
+    disabled?: boolean;
+    badge?: number;
+  }) => (
+    <button
+      key={options.key}
+      type="button"
+      onClick={options.onClick}
+      disabled={options.disabled}
+      className="relative flex flex-col items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+    >
+      <span
+        className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
+          options.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/60 text-slate-300'
+        }`}
+      >
+        {options.icon}
+      </span>
+      {!!options.badge && (
+        <span className="absolute right-1 top-0 min-w-[1.1rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[1.1rem] text-white">
+          {options.badge}
+        </span>
+      )}
+      <span className="max-w-[4.5rem] text-center text-[10px] font-semibold leading-tight text-slate-300">
+        {options.label}
+      </span>
+    </button>
+  );
+
   const toolbarSettingsBody = (
     <>
       {/* Reconectar WhatsApp mudou de lugar (pedido real, 29/08/2026):
@@ -3172,22 +3354,73 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           dentro do componente, tanto na coluna de desktop quanto na gaveta
           mobile. */}
 
+      <div className="w-full">
+        <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
+            {(['active', 'restricted', 'paused'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => handleChangeAgentStatus(status)}
+                title={
+                  agentStatus === null
+                    ? 'Confirmando o status real do agente...'
+                    : status === 'active' ? 'Agente responde sempre' :
+                      status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                      'Agente pausado — silêncio total'
+                }
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                  agentStatus === status
+                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+              </button>
+            ))}
+          </div>
+          {agentStatusLoadFailed && (
+            <button
+              type="button"
+              onClick={loadAgentStatus}
+              title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+            >
+              <AlertCircle className="h-3 w-3" />
+              <span>Erro</span>
+              <span className="sr-only">Status incerto — recarregar</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Push notification do PWA do atendente (issue #159) — pra não
           depender só de estar olhando o painel pra perceber escalação
           nova ou agente pausado com lead sem resposta. */}
-      <button
-        onClick={handleTogglePush}
-        disabled={pushBusy}
-        title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-        className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
-          pushEnabled
-            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
-            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
-        }`}
-      >
-        {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-        <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-      </button>
+      <div className="grid w-full grid-cols-4 gap-3 pt-1">
+        {renderToolTile({
+          key: 'ads-only',
+          icon: <Filter className="h-5 w-5" />,
+          label: adsOnly ? 'Somente anúncios (ativo)' : 'Somente anúncios',
+          active: adsOnly,
+          onClick: handleToggleAdsOnly,
+        })}
+        {adsOnly && renderToolTile({
+          key: 'ad-triggers',
+          icon: <Settings className="h-5 w-5" />,
+          label: 'Gatilhos',
+          onClick: openAdTriggersModal,
+          badge: adTriggerMessages.length || undefined,
+        })}
+        {renderToolTile({
+          key: 'push',
+          icon: pushEnabled ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />,
+          label: pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Notificações',
+          active: pushEnabled,
+          disabled: pushBusy,
+          onClick: handleTogglePush,
+        })}
+      </div>
     </>
   );
 
@@ -3422,12 +3655,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Removido o bloco inteiro — o contexto já está estabelecido
               pela aba ativa + barra de controles, sem perda de informação. */}
 
-          {/* Status do agente (Ativo/Restrito/Pausado) — subiu pro topo da
-              coluna, como um cabeçalho fino (pedido direto, 28/08/2026, com
-              print comparando com o app real do WhatsApp): antes ficava no
-              meio da tela, ao lado da busca; agora é a primeira coisa
-              visível, logo abaixo da faixa fina de "Atendimento". */}
-          <div className="flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
+          {/* Status do agente (Ativo/Restrito/Pausado) — visível só no
+              desktop (`hidden lg:flex`, pedido direto 04/09/2026, com print
+              comparando com a gaveta "Ferramentas" do WhatsApp real): no
+              mobile essa faixa fixa ocupava espaço permanente no topo da
+              lista de conversas; o mesmo controle mudou pra dentro da
+              gaveta de Ferramentas (ver `toolbarSettingsBody`), que só
+              aparece quando o operador realmente precisa mexer no status.
+              Desktop não tem gaveta de Ferramentas (removida na TASK-0225),
+              então mantém a faixa fixa aqui, sem mudança. */}
+          <div className="hidden lg:flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
             <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {/* Modo "somente anúncios" + Gatilhos — achado real, 29/08/2026
@@ -3560,13 +3797,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 {t('unread')} ({unreadLeadsCount})
               </button>
+              {/* TASK-0279 (pedido direto, 04/09/2026): "Fora das 24h" não é
+                  mais importante que conversas dentro da janela que
+                  precisam de atenção (essas já ganham destaque de verdade
+                  na seção "ESPERANDO HÁ MAIS DE 30 MIN" da própria lista,
+                  em vermelho/laranja) — rebaixado de pill igual a
+                  Tudo/Não lidos pra estilo secundário/discreto, sem
+                  competir visualmente com o que precisa de atenção agora. */}
               <button
                 onClick={() => setActiveTabFilter('window_closed')}
                 title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap cursor-pointer border ${
                   activeTabFilter === 'window_closed'
-                    ? 'bg-emerald-500 text-slate-950 font-bold'
-                    : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
+                    ? 'border-slate-500 text-slate-200 bg-transparent'
+                    : 'border-slate-700/70 text-slate-500 hover:text-slate-300 bg-transparent'
                 }`}
               >
                 Fora das 24h ({windowClosedLeadsCount})
@@ -3633,9 +3877,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             {filteredLeads.length > 0 ? (
               waitingGroups.map((group) => group.leads.length > 0 && (
                 <section key={group.id} aria-label={waitingGroupMeta[group.id].label}>
-                  <div className={`px-3 py-2 text-[10px] font-bold tracking-[0.11em] ${waitingGroupMeta[group.id].className}`}>
-                    {waitingGroupMeta[group.id].label} · {group.leads.length}
-                  </div>
+                  {/* TASK-0279 (pedido direto, 04/09/2026: "essa barrinha de
+                      aguardando clientes não é muito útil") — a barra
+                      "AGUARDANDO CLIENTE" some; sem ação/urgência pra
+                      sinalizar (é só "esperando o lead responder"), a
+                      etiqueta só ocupava espaço. As barras de espera real
+                      (mais de 30min / até 30min) continuam, pois essas sim
+                      indicam algo que precisa de atenção agora. */}
+                  {group.id !== 'awaitingClient' && (
+                    <div className={`px-3 py-2 text-[10px] font-bold tracking-[0.11em] ${waitingGroupMeta[group.id].className}`}>
+                      {waitingGroupMeta[group.id].label} · {group.leads.length}
+                    </div>
+                  )}
                   {group.leads.map((lead) => renderLeadRow(lead))}
                 </section>
               ))
@@ -3889,19 +4142,27 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     <IdCard className="w-[18px] h-[18px]" />
                   </button>
 
-                  {/* TASK-0269 (pedido direto, print da conversa da Gisse:
-                      "preciso ajustar o agendamento dela mas não tenho a
-                      agenda disponível na conversa aberta coloca um icon ao
-                      lado do botão da ia") — atalho pra Agenda completa, só
-                      no mobile (a coluna 3/toolbar de desktop já tem acesso
-                      via `CalendarPlus`/painel de eventos). Ao lado do
-                      IdCard, mesmo grupo de ícones exclusivos da conversa
-                      aberta. Só aparece se App.tsx passar a prop (usuário
-                      logado tem permissão pra ver a Agenda). */}
+                  {/* TASK-0269/TASK-0273 (pedido direto, print da conversa
+                      da Gisse: "preciso ajustar o agendamento dela mas não
+                      tenho a agenda disponível na conversa aberta coloca um
+                      icon ao lado do botão da ia") — atalho pra Agenda
+                      completa. Achado real (TASK-0273, mesmo print do
+                      "círculo vermelho" apontando pro espaço vazio no
+                      cabeçalho desktop): a suposição original de que "o
+                      desktop já tem acesso via CalendarPlus" estava errada
+                      — aquele botão (logo abaixo) só aparece quando o
+                      contato AINDA NÃO tem agendamento (`!paymentAppointment`),
+                      exatamente o oposto do caso em que o operador mais
+                      precisa gerenciar/reagendar (contato JÁ agendado). Por
+                      isso ficou `lg:hidden` (só mobile) até aqui — agora
+                      visível em qualquer largura, ao lado do IdCard, mesmo
+                      grupo de ícones exclusivos da conversa aberta. Só
+                      aparece se App.tsx passar a prop (usuário logado tem
+                      permissão pra ver a Agenda). */}
                   {onGoToAgenda && (
                     <button
                       onClick={onGoToAgenda}
-                      className="lg:hidden p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
+                      className="p-2 hover:bg-[#2a3942] rounded-lg text-slate-300 transition-colors cursor-pointer"
                       title="Abrir a Agenda completa"
                     >
                       <CalendarPlus className="w-[18px] h-[18px]" />
@@ -4332,7 +4593,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onScroll={handleMessagesScroll}
                 className="h-full min-h-0 p-4 overflow-y-auto space-y-3 bg-[#0b141a] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] scrollbar-thin"
               >
-                
+                {/* TASK-0280 — indicador da busca da página anterior (rolagem
+                    pro topo), separado do placeholder de carga inicial: não
+                    troca o conteúdo já na tela, só aparece por cima dele. */}
+                {(selectedLead as any).loadingOlderMessages && (
+                  <div className="flex justify-center py-1.5 text-[10px] text-slate-500">
+                    {isSpanish ? 'Cargando mensajes anteriores...' : 'Carregando mensagens anteriores...'}
+                  </div>
+                )}
+
                 {/* A saudação exibida pelo WhatsApp no clique do anúncio é uma
                     camada nativa do anúncio e não chega como uma mensagem
                     comum em `messages[]`. Mostramos a atribuição aqui sem
@@ -4365,16 +4634,33 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
-                {(selectedLead as any).historyLoading ? (
+                {/* TASK-0276 (achado real, "a cada nova mensagem a página
+                    inteira pisca") — historyLoading só liga na primeira
+                    abertura da conversa (loadRealConversationHistory); uma
+                    mensagem nova chegando por SSE anexa em silêncio via
+                    loadNewerMessages (TASK-0280), sem religar esse loading
+                    nem trocar a lista inteira por este placeholder. */}
+                {(selectedLead as any).historyLoading && !(selectedLead as any).historyLoaded ? (
                   <div className="flex min-h-32 items-center justify-center text-xs text-slate-500">
-                    {isSpanish ? 'Cargando el historial completo de esta conversación...' : 'Carregando histórico completo desta conversa...'}
+                    {isSpanish ? 'Cargando los mensajes recientes...' : 'Carregando mensagens recentes...'}
                   </div>
                 ) : selectedLead.messages && selectedLead.messages.length > 0 ? (
                   selectedLead.messages.map((msg, messageIndex) => {
                     const previousMessage = messageIndex > 0 ? selectedLead.messages?.[messageIndex - 1] : undefined;
+                    // TASK-0281 (achado real, "a data tá errada" — confirmado
+                    // pelo dono do produto): `msg.timestamp` de mensagem real
+                    // já vem formatado só como "HH:MM" pra exibição no balão
+                    // — usar ele aqui fazia qualquer mensagem de dias atrás
+                    // aparecer como "Hoje" (ver getChatDateParts em
+                    // src/lib/chatDate.ts, que trata "HH:MM" como mock de
+                    // hoje de propósito). `rawTimestamp` guarda o ISO
+                    // completo só pra mensagem real; mock continua sem ele e
+                    // cai no mesmo fallback "hoje" de sempre.
+                    const currentDateSource = msg.rawTimestamp || msg.timestamp;
+                    const previousDateSource = previousMessage?.rawTimestamp || previousMessage?.timestamp;
                     const shouldShowDateSeparator = messageIndex === 0
-                      || isNewChatDateGroup(msg.timestamp, previousMessage?.timestamp);
-                    const dateLabel = formatChatDateLabel(msg.timestamp, isSpanish);
+                      || isNewChatDateGroup(currentDateSource, previousDateSource);
+                    const dateLabel = formatChatDateLabel(currentDateSource, isSpanish);
                     const isLead = msg.sender === 'lead';
                     const quotedMessage = msg.replyToMessageId
                       ? selectedLead.messages?.find((m) => m.id === msg.replyToMessageId)
@@ -4908,11 +5194,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           </div>
                           <button
                             type="button"
-                            onClick={() => handleDraftReengagementMessage(selectedLead)}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                            disabled={isGeneratingReengagement}
+                            onClick={() => void handleDraftReengagementMessage(selectedLead)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                           >
                             <Sparkles className="w-3 h-3" />
-                            Sugerir mensagem de retomada
+                            {isGeneratingReengagement ? 'Gerando...' : 'Sugerir mensagem de retomada'}
                           </button>
                         </div>
                       ) : isReopenBlockedByWaba ? (
@@ -5466,22 +5753,35 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* Ferramentas no mobile — mesma gaveta deslizante da Ficha IA (ver
-          acima), aberta pela aba inferior "Ferramentas" (ícone de
-          engrenagem) em vez de empurrar a lista de conversas pra baixo
-          (achado real, 29/08/2026, pedido do dono do produto). Conteúdo
-          idêntico ao painel de desktop — reaproveita `toolbarSettingsBody`,
-          definido antes do "return" deste componente, sem duplicar JSX. */}
+      {/* Ferramentas no mobile — gaveta deslizante (aberta pela aba inferior
+          "Ferramentas", ícone de engrenagem) em vez de empurrar a lista de
+          conversas pra baixo (achado real, 29/08/2026, pedido do dono do
+          produto). Conteúdo reaproveita `toolbarSettingsBody`, definido
+          antes do "return" deste componente, sem duplicar JSX.
+          Redesenho (pedido direto, 04/09/2026, com print comparando com o
+          menu de anexos real do WhatsApp): antes o fundo inteiro escurecia
+          (`bg-slate-950/80 backdrop-blur-sm`), dando a impressão de cobrir
+          a tela toda mesmo com a gaveta ocupando só uma fração dela — o
+          WhatsApp real não escurece nada atrás do menu de anexos, a
+          conversa continua visível e legível. Removido o escurecimento
+          (o `fixed inset-0` continua só como área clicável pra fechar ao
+          tocar fora) e adicionada a alcinha de arraste no topo do painel,
+          mesmo afordance visual do WhatsApp pra indicar que é uma gaveta
+          que pode ser puxada. Ficha IA (`atendimento-analysis-drawer`,
+          acima) não mudou — o pedido foi só sobre esta gaveta. */}
       {isToolbarSettingsOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          className="lg:hidden fixed inset-0 z-50 flex items-end"
           onClick={() => setIsToolbarSettingsOpen(false)}
         >
           <div
-            className="bg-[#111b21] w-full max-h-[85vh] rounded-t-2xl border-t border-slate-800 flex flex-col"
+            className="w-full max-h-[70vh] rounded-t-2xl border-t border-slate-800 bg-[#111b21] shadow-[0_-12px_32px_rgba(0,0,0,0.5)] flex flex-col animate-page-enter"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-3 border-b border-slate-800 flex-shrink-0">
+            <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
+              <span className="h-1 w-10 rounded-full bg-slate-700" aria-hidden="true" />
+            </div>
+            <div className="flex items-center justify-between px-3 pb-2 flex-shrink-0">
               <h3 className="text-sm font-bold text-white">Ferramentas</h3>
               <button
                 onClick={() => setIsToolbarSettingsOpen(false)}
@@ -5490,7 +5790,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-3 flex flex-wrap items-center gap-2.5 overflow-y-auto">
+            <div className="p-3 pt-1 flex flex-col gap-3 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
               {toolbarSettingsBody}
             </div>
           </div>
