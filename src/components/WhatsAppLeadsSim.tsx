@@ -3281,17 +3281,54 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // "Ferramentas" (aba inferior) empurrava a lista de conversas inteira pra
   // baixo — o painel entrava no fluxo normal do documento, dentro do
   // Controls Bar. Conteúdo extraído numa variável pra ser reaproveitado sem
-  // duplicar JSX à mão: no desktop continua inline (ver `hidden sm:flex`
-  // logo abaixo, mesmo lugar de sempre); no mobile vira uma gaveta que sobe
-  // por cima da tela, mesmo padrão já usado pela Ficha IA
-  // (`atendimento-analysis-drawer`, mais abaixo).
-  // Achado real, 29/08/2026 (pedido do dono do produto, print com o painel
-  // de Ferramentas aberto): "Apenas Anúncios"/"Gatilhos" e o botão "Agenda"
-  // (que já existe como ícone próprio na barra inferior) só ocupavam espaço
-  // aqui repetindo controles que já existem em outro lugar mais óbvio —
-  // movidos pra dentro da faixa "Status do agente" (os dois primeiros) e
-  // removida a duplicata do botão Agenda (o ícone da barra inferior já cobre
-  // exatamente a mesma ação em qualquer largura de tela).
+  // duplicar JSX à mão. Desktop não usa mais este conteúdo (a barra de
+  // ferramentas exclusiva de desktop foi removida na TASK-0225) — só a
+  // gaveta mobile (ver `isToolbarSettingsOpen`, mais abaixo) renderiza
+  // `toolbarSettingsBody` hoje.
+  //
+  // Redesenho (pedido direto, 04/09/2026, com prints comparando com o
+  // menu de anexos real do WhatsApp): a gaveta ganhou o Status do agente
+  // (Ativo/Restrito/Pausado), que antes vivia numa faixa fixa sempre visível
+  // no topo da lista de conversas — no desktop essa faixa continua (não tem
+  // gaveta lá), mas no mobile ela ocupava espaço permanente pra uma ação
+  // que o operador só usa de vez em quando. As ações restantes (Somente
+  // anúncios, Gatilhos, Notificações) viraram uma grade de ícones em
+  // círculo + rótulo embaixo, no mesmo estilo do menu de anexos do
+  // WhatsApp real, em vez da fileira de botões retangulares de texto.
+  const renderToolTile = (options: {
+    key: string;
+    icon: React.ReactNode;
+    label: string;
+    onClick: () => void;
+    active?: boolean;
+    disabled?: boolean;
+    badge?: number;
+  }) => (
+    <button
+      key={options.key}
+      type="button"
+      onClick={options.onClick}
+      disabled={options.disabled}
+      className="relative flex flex-col items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+    >
+      <span
+        className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
+          options.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/60 text-slate-300'
+        }`}
+      >
+        {options.icon}
+      </span>
+      {!!options.badge && (
+        <span className="absolute right-1 top-0 min-w-[1.1rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[1.1rem] text-white">
+          {options.badge}
+        </span>
+      )}
+      <span className="max-w-[4.5rem] text-center text-[10px] font-semibold leading-tight text-slate-300">
+        {options.label}
+      </span>
+    </button>
+  );
+
   const toolbarSettingsBody = (
     <>
       {/* Reconectar WhatsApp mudou de lugar (pedido real, 29/08/2026):
@@ -3317,22 +3354,73 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           dentro do componente, tanto na coluna de desktop quanto na gaveta
           mobile. */}
 
+      <div className="w-full">
+        <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
+            {(['active', 'restricted', 'paused'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => handleChangeAgentStatus(status)}
+                title={
+                  agentStatus === null
+                    ? 'Confirmando o status real do agente...'
+                    : status === 'active' ? 'Agente responde sempre' :
+                      status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                      'Agente pausado — silêncio total'
+                }
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                  agentStatus === status
+                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+              </button>
+            ))}
+          </div>
+          {agentStatusLoadFailed && (
+            <button
+              type="button"
+              onClick={loadAgentStatus}
+              title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+            >
+              <AlertCircle className="h-3 w-3" />
+              <span>Erro</span>
+              <span className="sr-only">Status incerto — recarregar</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Push notification do PWA do atendente (issue #159) — pra não
           depender só de estar olhando o painel pra perceber escalação
           nova ou agente pausado com lead sem resposta. */}
-      <button
-        onClick={handleTogglePush}
-        disabled={pushBusy}
-        title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-        className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
-          pushEnabled
-            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
-            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
-        }`}
-      >
-        {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-        <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-      </button>
+      <div className="grid w-full grid-cols-4 gap-3 pt-1">
+        {renderToolTile({
+          key: 'ads-only',
+          icon: <Filter className="h-5 w-5" />,
+          label: adsOnly ? 'Somente anúncios (ativo)' : 'Somente anúncios',
+          active: adsOnly,
+          onClick: handleToggleAdsOnly,
+        })}
+        {adsOnly && renderToolTile({
+          key: 'ad-triggers',
+          icon: <Settings className="h-5 w-5" />,
+          label: 'Gatilhos',
+          onClick: openAdTriggersModal,
+          badge: adTriggerMessages.length || undefined,
+        })}
+        {renderToolTile({
+          key: 'push',
+          icon: pushEnabled ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />,
+          label: pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Notificações',
+          active: pushEnabled,
+          disabled: pushBusy,
+          onClick: handleTogglePush,
+        })}
+      </div>
     </>
   );
 
@@ -3567,12 +3655,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Removido o bloco inteiro — o contexto já está estabelecido
               pela aba ativa + barra de controles, sem perda de informação. */}
 
-          {/* Status do agente (Ativo/Restrito/Pausado) — subiu pro topo da
-              coluna, como um cabeçalho fino (pedido direto, 28/08/2026, com
-              print comparando com o app real do WhatsApp): antes ficava no
-              meio da tela, ao lado da busca; agora é a primeira coisa
-              visível, logo abaixo da faixa fina de "Atendimento". */}
-          <div className="flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
+          {/* Status do agente (Ativo/Restrito/Pausado) — visível só no
+              desktop (`hidden lg:flex`, pedido direto 04/09/2026, com print
+              comparando com a gaveta "Ferramentas" do WhatsApp real): no
+              mobile essa faixa fixa ocupava espaço permanente no topo da
+              lista de conversas; o mesmo controle mudou pra dentro da
+              gaveta de Ferramentas (ver `toolbarSettingsBody`), que só
+              aparece quando o operador realmente precisa mexer no status.
+              Desktop não tem gaveta de Ferramentas (removida na TASK-0225),
+              então mantém a faixa fixa aqui, sem mudança. */}
+          <div className="hidden lg:flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
             <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {/* Modo "somente anúncios" + Gatilhos — achado real, 29/08/2026
@@ -5661,22 +5753,35 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* Ferramentas no mobile — mesma gaveta deslizante da Ficha IA (ver
-          acima), aberta pela aba inferior "Ferramentas" (ícone de
-          engrenagem) em vez de empurrar a lista de conversas pra baixo
-          (achado real, 29/08/2026, pedido do dono do produto). Conteúdo
-          idêntico ao painel de desktop — reaproveita `toolbarSettingsBody`,
-          definido antes do "return" deste componente, sem duplicar JSX. */}
+      {/* Ferramentas no mobile — gaveta deslizante (aberta pela aba inferior
+          "Ferramentas", ícone de engrenagem) em vez de empurrar a lista de
+          conversas pra baixo (achado real, 29/08/2026, pedido do dono do
+          produto). Conteúdo reaproveita `toolbarSettingsBody`, definido
+          antes do "return" deste componente, sem duplicar JSX.
+          Redesenho (pedido direto, 04/09/2026, com print comparando com o
+          menu de anexos real do WhatsApp): antes o fundo inteiro escurecia
+          (`bg-slate-950/80 backdrop-blur-sm`), dando a impressão de cobrir
+          a tela toda mesmo com a gaveta ocupando só uma fração dela — o
+          WhatsApp real não escurece nada atrás do menu de anexos, a
+          conversa continua visível e legível. Removido o escurecimento
+          (o `fixed inset-0` continua só como área clicável pra fechar ao
+          tocar fora) e adicionada a alcinha de arraste no topo do painel,
+          mesmo afordance visual do WhatsApp pra indicar que é uma gaveta
+          que pode ser puxada. Ficha IA (`atendimento-analysis-drawer`,
+          acima) não mudou — o pedido foi só sobre esta gaveta. */}
       {isToolbarSettingsOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          className="lg:hidden fixed inset-0 z-50 flex items-end"
           onClick={() => setIsToolbarSettingsOpen(false)}
         >
           <div
-            className="bg-[#111b21] w-full max-h-[85vh] rounded-t-2xl border-t border-slate-800 flex flex-col"
+            className="w-full max-h-[70vh] rounded-t-2xl border-t border-slate-800 bg-[#111b21] shadow-[0_-12px_32px_rgba(0,0,0,0.5)] flex flex-col animate-page-enter"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-3 border-b border-slate-800 flex-shrink-0">
+            <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
+              <span className="h-1 w-10 rounded-full bg-slate-700" aria-hidden="true" />
+            </div>
+            <div className="flex items-center justify-between px-3 pb-2 flex-shrink-0">
               <h3 className="text-sm font-bold text-white">Ferramentas</h3>
               <button
                 onClick={() => setIsToolbarSettingsOpen(false)}
@@ -5685,7 +5790,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-3 flex flex-wrap items-center gap-2.5 overflow-y-auto">
+            <div className="p-3 pt-1 flex flex-col gap-3 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
               {toolbarSettingsBody}
             </div>
           </div>
