@@ -76,7 +76,8 @@ import {
   Video,
   Copy,
   Megaphone,
-  MessageCircle
+  MessageCircle,
+  Info
 } from 'lucide-react';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
@@ -3644,8 +3645,33 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         ao vivo
                       </span>
                     </div>
-                    <p className="text-[11px] font-normal text-slate-400 truncate">
-                      {selectedLead.phone} • {selectedLead.messages?.length || 0} mensagens
+                    <p className="text-[11px] font-normal text-slate-400 flex items-center gap-1.5 min-w-0">
+                      <span className="truncate min-w-0">{selectedLead.phone} • {selectedLead.messages?.length || 0} mensagens</span>
+                      {/* TASK-0258 (pedido direto): quando a janela de 24h
+                          está aberta e não há nenhuma ação pendente, a faixa
+                          de status inteira (linha cheia, sempre visível)
+                          virou este badge pequeno — mesmo padrão visual do
+                          pill "ao vivo" acima. Quando a janela FECHA (aí sim
+                          há ação: reengajar/reabrir), o card cheio com botão
+                          continua aparecendo igual a antes, na área do
+                          composer mais abaixo. */}
+                      {(() => {
+                        const serviceWindow = visibleContactContext?.serviceWindow;
+                        const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
+                        if (!isWindowOpen) return null;
+                        const hoursRemaining = serviceWindow?.hoursRemaining ?? 24;
+                        return (
+                          <span
+                            className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-700/50 px-1.5 py-0.5 rounded-full"
+                            title={isSpanish
+                              ? `El agente puede responder normalmente. La ventana cierra ${hoursRemaining}h después de ahora, si el cliente no vuelve a escribir.`
+                              : `O agente pode responder normalmente. A janela fecha ${hoursRemaining}h depois de agora, se o cliente não escrever de novo.`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            {hoursRemaining}h
+                          </span>
+                        );
+                      })()}
                     </p>
                   </div>
                 </div>
@@ -3952,49 +3978,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </span>
                 ))}
 
-                {/* TASK-0185/0187: sugestões direto na barra, contorno
-                    tracejado pra diferenciar das já aplicadas. Um toque
-                    aplica; o X exclui a sugestão do catálogo do tenant
-                    inteiro (mesma ação de "Gerenciar etiquetas", só que sem
-                    precisar abrir o modal) — pedido direto pra dar conta do
-                    "ficou muito carregado" na raiz, apagando as que não
-                    fazem mais sentido em vez de só escondê-las. */}
-                {(() => {
-                  const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
-                  const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
-                    .filter((l) => !alreadyOn.has(normalizeLabelText(l)) && !dismissedDefaultSuggestions.has(normalizeLabelText(l)));
-                  return suggestions.map((l) => (
-                    <span
-                      key={l}
-                      className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 flex items-center gap-1"
-                    >
-                      <button
-                        onClick={() => handleAddLabel(selectedLead.id, l)}
-                        className="hover:text-white cursor-pointer"
-                        title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
-                      >
-                        + {l}
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!window.confirm(isSpanish
-                            ? `¿Eliminar la etiqueta "${l}" del catálogo de la empresa? Afecta a todas las conversaciones.`
-                            : `Excluir a etiqueta "${l}" do catálogo da empresa? Afeta todas as conversas.`)) return;
-                          try {
-                            await handleDeleteLabelCatalog(l);
-                          } catch (err: any) {
-                            setErrorMsg(err?.message || (isSpanish ? 'No fue posible eliminar la etiqueta.' : 'Não foi possível excluir a etiqueta.'));
-                          }
-                        }}
-                        className="hover:text-rose-300 cursor-pointer"
-                        title={isSpanish ? 'Eliminar del catálogo' : 'Excluir do catálogo'}
-                      >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
-                    </span>
-                  ));
-                })()}
-
                 {/* Só pra criar uma etiqueta NOVA (texto livre) ou gerenciar —
                     as já cadastradas não moram mais aqui dentro. */}
                 <button
@@ -4010,6 +3993,55 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setIsLabelPickerOpen(false)} />
                     <div className="absolute left-3 top-9 z-50 w-72 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-3 space-y-2 origin-top-left animate-pop-in">
+                      {/* TASK-0258 (pedido direto): sugestões saíram da barra
+                          sempre visível (ficava poluída, achado com print
+                          real) e passaram a morar aqui dentro do popover — só
+                          aparecem quando o operador toca "+ Nova". Mesma
+                          lógica/ações de antes: um toque aplica, o X exclui a
+                          sugestão do catálogo do tenant inteiro (mesma ação
+                          de "Gerenciar etiquetas", só que sem precisar abrir
+                          o modal). */}
+                      {(() => {
+                        const alreadyOn = new Set((selectedLead.conversationLabels || []).map((l) => normalizeLabelText(l)));
+                        const suggestions = Array.from(new Set([...tenantLabelSuggestions, ...BEAUTY_STUDIO_LABEL_SUGGESTIONS]))
+                          .filter((l) => !alreadyOn.has(normalizeLabelText(l)) && !dismissedDefaultSuggestions.has(normalizeLabelText(l)));
+                        if (!suggestions.length) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-700">
+                            {suggestions.map((l) => (
+                              <span
+                                key={l}
+                                className="text-[10px] px-2 py-0.5 rounded-full border border-dashed border-slate-600 text-slate-400 flex items-center gap-1"
+                              >
+                                <button
+                                  onClick={() => { handleAddLabel(selectedLead.id, l); setIsLabelPickerOpen(false); }}
+                                  className="hover:text-white cursor-pointer"
+                                  title={isSpanish ? 'Agregar etiqueta' : 'Adicionar etiqueta'}
+                                >
+                                  + {l}
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm(isSpanish
+                                      ? `¿Eliminar la etiqueta "${l}" del catálogo de la empresa? Afecta a todas las conversaciones.`
+                                      : `Excluir a etiqueta "${l}" do catálogo da empresa? Afeta todas as conversas.`)) return;
+                                    try {
+                                      await handleDeleteLabelCatalog(l);
+                                    } catch (err: any) {
+                                      setErrorMsg(err?.message || (isSpanish ? 'No fue posible eliminar la etiqueta.' : 'Não foi possível excluir a etiqueta.'));
+                                    }
+                                  }}
+                                  className="hover:text-rose-300 cursor-pointer"
+                                  title={isSpanish ? 'Eliminar del catálogo' : 'Excluir do catálogo'}
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
+
                       <form
                         onSubmit={(e) => {
                           e.preventDefault();
@@ -4684,23 +4716,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 {selectedLead && (() => {
                   const serviceWindow = visibleContactContext?.serviceWindow;
                   const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
-                  const hoursRemaining = serviceWindow?.hoursRemaining ?? 24;
                   const isMetaChannel = Boolean((selectedLead as any).phoneNumberId);
+
+                  {/* TASK-0258 (pedido direto): janela aberta e sem ação
+                      pendente não precisa de card de linha inteira — esse
+                      mesmo sinal (aberta, quantas horas faltam) já aparece
+                      como badge pequeno no cabeçalho da conversa, ao lado do
+                      telefone. O card cheio com botão continua exatamente
+                      como antes pros 3 casos que pedem decisão do operador
+                      (janela fechada). */}
+                  if (isWindowOpen) return null;
 
                   return (
                     <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
-                      {isWindowOpen ? (
-                        <div className="flex items-center gap-2 text-slate-300">
-                          <span className="flex items-center gap-1.5 font-bold text-emerald-400">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                            aberta - faltam {hoursRemaining}h
-                          </span>
-                          <span className="text-slate-500 hidden sm:inline">•</span>
-                          <span className="text-slate-400 hidden sm:inline">
-                            O agente pode responder normalmente. A janela fecha {hoursRemaining}h depois de agora, se o cliente não escrever de novo.
-                          </span>
-                        </div>
-                      ) : !isMetaChannel ? (
+                      {!isMetaChannel ? (
                         <div className="flex items-center justify-between w-full">
                           <div className="flex items-center gap-1.5 text-amber-400/90 font-semibold" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -4942,6 +4971,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         </>
                       )}
                     </div>
+
+                    {/* TASK-0258 (pedido direto): o aviso de assunção de
+                        controle deixou de ser um parágrafo fixo sempre
+                        visível embaixo do campo de texto (poluía a tela em
+                        toda conversa, sem nunca sumir) e virou este ícone —
+                        `title` mostra no hover (desktop); o alert cobre o
+                        toque no mobile, onde `title` não abre sozinho. */}
+                    <button
+                      type="button"
+                      onClick={() => window.alert(isSpanish
+                        ? 'Al enviar, asumes esta conversación: el agente deja de responder aquí hasta que la devuelvas. Las demás siguen normales.'
+                        : 'Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.')}
+                      className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer flex-shrink-0"
+                      title={isSpanish
+                        ? 'Al enviar, asumes esta conversación: el agente deja de responder aquí hasta que la devuelvas. Las demás siguen normales.'
+                        : 'Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.'}
+                    >
+                      <Info className="w-[18px] h-[18px]" />
+                    </button>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
@@ -4993,13 +5041,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   )}
                 </form>
                 )}
-                {/* Aviso de Assunção Humana de Controle (Referência 1) */}
-                <div className="px-3 pt-1.5 pb-0.5">
-                  <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80 shrink-0" />
-                    Ao enviar, você assume esta conversa: o agente para de responder aqui até você devolver. As outras seguem normais.
-                  </p>
-                </div>
               </div>
             </>
           ) : (
