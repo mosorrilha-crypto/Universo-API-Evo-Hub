@@ -13,13 +13,10 @@ import {
   Bell,
   BellOff,
   Brain,
-  CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Home,
-  Kanban,
   KeyRound,
   Layers,
   Link2,
@@ -35,7 +32,6 @@ import {
   Sun,
   Target,
   User,
-  WalletCards,
   X,
 } from 'lucide-react';
 
@@ -140,8 +136,6 @@ export const Header: React.FC<HeaderProps> = ({
   // sempre foi assim (o SaaS Admin sempre audita, ver comentário abaixo).
   const canSeeSaasMaster = canAccessSaasAdmin ?? hasRoleAtLeast(currentUser?.role, 'saas_admin');
   const canSeeConversations = hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.conversations;
-  const canSeeCrm = hasRoleAtLeast(currentUser?.role, 'operator') && capabilities.crm;
-  const canSeeAgenda = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.agenda;
   const canSeeFinancial = hasRoleAtLeast(currentUser?.role, 'manager') && capabilities.financial;
   const canSeeSystemLogs = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.systemLogs);
   const canSeeBroadcast = canSeeSaasMaster || (hasRoleAtLeast(currentUser?.role, 'admin') && capabilities.broadcast);
@@ -156,12 +150,15 @@ export const Header: React.FC<HeaderProps> = ({
     platform: 'Central de operação por WhatsApp', subtitle: canSeeFinancial ? 'Atendimento, vendas, agenda, financeiro e conversões em um só lugar' : 'Atendimento, vendas, agenda e conversões em um só lugar', today: 'Hoje', conversations: 'Conversas', sales: 'Vendas', schedule: 'Agenda', financial: 'Financeiro', growth: 'Crescimento', quality: 'Qualidade do agente', systemLogs: 'Logs do sistema', broadcast: 'Disparo em Massa', agentCatalog: 'Agente & catálogo', publicCatalog: 'Catálogo público', configure: 'Configurar', companies: 'Empresas', signIn: 'Entrar', signOut: 'Sair', activeCompany: 'Empresa ativa', changeOperator: 'Trocar operador', previous: 'Rolar menu para a esquerda', next: 'Rolar menu para a direita', menu: 'Menu'
   };
 
+  // TASK-0301 (pedido direto): Atendimento vira a tela padrão do sistema —
+  // saiu do menu superior (não precisa mais de botão próprio, é onde o
+  // operador já cai ao abrir o app; ver logo clicável mais abaixo pra
+  // voltar). CRM/Agenda/Financeiro também saíram do topo por pedido direto
+  // — só ficam acessíveis pela caixa de ferramentas dentro do Atendimento
+  // (mobile, ver WhatsAppLeadsSim.tsx `onGoToCrm`/`onGoToAgenda`/
+  // `onGoToFinancial`). Menu superior fica só com Crescimento, Configurar
+  // e Empresas.
   const primaryNavigation: NavigationItem[] = [
-    { id: 'home', label: copy.today, icon: <Home className="w-4 h-4" /> },
-    ...(canSeeConversations ? [{ id: 'whatsapp' as ActiveTab, label: copy.conversations, icon: <MessageSquare className="w-4 h-4" /> }] : []),
-    ...(canSeeCrm ? [{ id: 'crm' as ActiveTab, label: copy.sales, icon: <Kanban className="w-4 h-4" /> }] : []),
-    ...(canSeeAgenda ? [{ id: 'agenda' as ActiveTab, label: copy.schedule, icon: <CalendarDays className="w-4 h-4" /> }] : []),
-    ...(canSeeFinancial ? [{ id: 'financial' as ActiveTab, label: copy.financial, icon: <WalletCards className="w-4 h-4" /> }] : []),
     ...(canSeeGrowth ? [{ id: 'attribution' as ActiveTab, label: copy.growth, icon: <Target className="w-4 h-4" />, accent: 'sky' as const }] : []),
   ];
   const configurationNavigation: NavigationItem[] = [
@@ -378,8 +375,13 @@ export const Header: React.FC<HeaderProps> = ({
   return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
     <div className={headerInnerClassName}>
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">
-        {/* Escala aumentada (pedido real, 01/09/2026, com print comparando lado a lado com o WhatsApp Business real): o logo+nome ficava bem menor que o wordmark "WhatsApp" do app real, mesma proporção do ajuste já feito na conversa aberta (TASK-0164). */}
-        <div className="flex min-w-0 items-center gap-2"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-5 h-5" /></div><span className="truncate text-lg font-bold text-white">Universo</span></div>
+        {/* Escala aumentada (pedido real, 01/09/2026, com print comparando lado a lado com o WhatsApp Business real): o logo+nome ficava bem menor que o wordmark "WhatsApp" do app real, mesma proporção do ajuste já feito na conversa aberta (TASK-0164).
+            TASK-0301 (pedido direto): o logo agora é clicável e volta pro
+            Atendimento — desde que "Conversas" saiu do menu superior (vira
+            a tela padrão do sistema), sem isso quem navegasse pra
+            Crescimento/Configurar/Empresas não teria mais nenhum jeito de
+            voltar pro atendimento pelo cabeçalho. */}
+        <button type="button" onClick={() => selectTab('whatsapp')} className="flex min-w-0 items-center gap-2 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70" title={isSpanish ? 'Ir a Atención' : 'Ir para o Atendimento'}><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-5 h-5" /></div><span className="truncate text-lg font-bold text-white">Universo</span></button>
         <div className="flex items-center gap-1.5"><button type="button" onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')} className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-bold text-slate-200" title={isSpanish ? 'Português' : 'Español'}>{isSpanish ? 'PT' : 'ES'}</button>{renderThemeMenu('mobile')}<button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setOpenToolsMenu(null); setIsMobileTenantMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}</button></div>
       </div>
       {isMobileMenuOpen && (
@@ -492,7 +494,7 @@ export const Header: React.FC<HeaderProps> = ({
           título abreviado + ícone continuam à esquerda, só que agora
           compactos e sem quebrar em duas linhas. */}
       <div className="hidden items-center gap-3 py-2.5 md:flex">
-        <div className="flex min-w-0 shrink-0 items-center gap-2"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-inner"><MessageSquare className="w-4 h-4" /></div><h1 className="hidden truncate text-sm font-bold tracking-tight text-white lg:block">{copy.platform}</h1></div>
+        <button type="button" onClick={() => selectTab('whatsapp')} className="flex min-w-0 shrink-0 items-center gap-2 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70" title={isSpanish ? 'Ir a Atención' : 'Ir para o Atendimento'}><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-inner"><MessageSquare className="w-4 h-4" /></div><h1 className="hidden truncate text-sm font-bold tracking-tight text-white lg:block">{copy.platform}</h1></button>
         <button type="button" onClick={() => scrollTabs('left')} className="shrink-0 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.previous}><ChevronLeft className="w-4 h-4" /></button>
         <div ref={tabsRef} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scroll-smooth py-0.5">{primaryNavigation.map(renderTab)}{renderToolsMenu('configuration', 'desktop', copy.configure, configurationNavigation, isConfigurationActive)}{saasNavigation.map(renderTab)}</div>
         <button type="button" onClick={() => scrollTabs('right')} className="shrink-0 rounded-md border border-slate-700 bg-slate-900 p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-emerald-300" title={copy.next}><ChevronRight className="w-4 h-4" /></button>
