@@ -36,7 +36,10 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use(cookieParser());
+  // Servidor de teste efêmero, sem tráfego real — CodeQL não distingue isso
+  // de um app em produção (ver rationale completa em server.ts, mesma regra
+  // js/missing-token-validation).
+  app.use(cookieParser()); // lgtm[js/missing-token-validation]
   app.use(createAuthRouter({ jwtSecret: JWT_SECRET, supabase: supabase as any, authenticateToken: createAuthenticateToken(JWT_SECRET), isProduction: false }));
 
   await new Promise<void>((resolve) => {
