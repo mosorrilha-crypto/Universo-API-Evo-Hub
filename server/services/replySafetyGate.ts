@@ -35,6 +35,16 @@ export interface ReplySafetyVerdict {
   source: ReplySafetySource;
   severity: 'low' | 'medium' | 'high';
   reason: string;
+  /**
+   * TASK-0297 — quando presente, o chamador deve enviar ESTAS bolhas em vez
+   * do rascunho original: uma correção determinística removeu a parte
+   * problemática (hoje só o caso "empurrou agenda depois de pergunta
+   * informativa", ver `ruleVerdict`) em vez de bloquear a resposta inteira
+   * e escalar pra humano — mesmo espírito do gate anti-alucinação de
+   * horário em `autoReply.ts` (corrige em vez de só bloquear). `undefined`
+   * = nenhuma correção, comportamento normal (usa o rascunho original).
+   */
+  correctedBubbles?: string[];
 }
 
 export interface ReplySuggestionInput {
@@ -173,6 +183,23 @@ function ruleVerdict(input: ReplySafetyInput): ReplySafetyVerdict | null {
     return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta não preserva o idioma espanhol usado pela cliente.' };
   }
   if (isInformationalQuestion(input.customerMessage) && !hasExplicitBookingIntent(input.customerMessage) && pushesBooking(combinedDraft)) {
+    // TASK-0297 (achado real, Soledad/TASK-0287): quando o empurrão de
+    // agenda está isolado numa segunda bolha separada da resposta
+    // informativa (a primeira não menciona agenda), a correção certa é só
+    // remover essa bolha — a informação real já foi respondida direito na
+    // primeira. Corrigir aqui evita bloquear/escalar uma resposta que já
+    // estava 90% certa por causa de UMA bolha a mais. Rascunho de 1 bolha
+    // só (informação e empurrão misturados na mesma frase) não é seguro de
+    // recortar por regex — continua bloqueado/escalado normalmente.
+    if (bubbles.length === 2 && pushesBooking(bubbles[1]) && !pushesBooking(bubbles[0])) {
+      return {
+        approved: true,
+        source: 'rules',
+        severity: 'medium',
+        reason: 'A resposta tentava conduzir para agenda após uma pergunta somente informativa — corrigido automaticamente removendo a bolha que empurrava agenda (ver regra 14 de autoReply.ts e TASK-0297).',
+        correctedBubbles: [bubbles[0]],
+      };
+    }
     return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta tenta conduzir para agenda após uma pergunta somente informativa.' };
   }
   if (isPaymentOrSensitive(input.customerMessage)) {

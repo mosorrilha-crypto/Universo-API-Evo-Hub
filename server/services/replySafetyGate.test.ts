@@ -374,4 +374,50 @@ describe('revisor pré-envio de respostas automáticas', () => {
       expect(verdict.approved).toBe(false);
     });
   });
+
+  describe('correção automática de empurrão de agenda após pergunta informativa, em vez de bloquear (achado real, Soledad/TASK-0287, TASK-0297)', () => {
+    it('aprova e devolve correctedBubbles sem a bolha que empurra agenda, quando ela está isolada numa segunda bolha', async () => {
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Y sobre la hinchazón, es normal que quede así? Y sobre el procedimiento en sí?',
+        draftBubbles: [
+          'Y sobre la hinchazón, es normal que queden algo inflamados al terminar el procedimiento, pero va bajando rápidamente en las primeras horas.',
+          '¿Querés que revisemos la disponibilidad de la agenda para coordinar tu turno?',
+        ],
+      }, { ai: null });
+
+      expect(verdict.approved).toBe(true);
+      expect(verdict.source).toBe('rules');
+      expect(verdict.correctedBubbles).toEqual([
+        'Y sobre la hinchazón, es normal que queden algo inflamados al terminar el procedimiento, pero va bajando rápidamente en las primeras horas.',
+      ]);
+    });
+
+    it('NÃO corrige (continua bloqueando) quando é uma bolha única misturando informação e empurrão de agenda', async () => {
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Cuánto dura el procedimiento de cejas?',
+        draftBubbles: ['Dura aproximadamente un año. ¿Agendamos tu turno?'],
+      }, { ai: null });
+
+      expect(verdict.approved).toBe(false);
+      expect(verdict.correctedBubbles).toBeUndefined();
+    });
+
+    it('NÃO corrige quando a cliente já manifestou intenção explícita de agendar (empurrar agenda aí é legítimo, cai no revisor por IA normalmente)', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({ approved: true, severity: 'low', reason: 'Resposta contextual e segura.' }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Quiero agendar mi turno para la semana que viene',
+        draftBubbles: [
+          'Genial, tenemos disponibilidad esta semana.',
+          '¿Qué día te queda mejor para agendar tu turno?',
+        ],
+      }, { ai });
+
+      expect(verdict.approved).toBe(true);
+      expect(verdict.correctedBubbles).toBeUndefined();
+    });
+  });
 });
