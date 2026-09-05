@@ -535,6 +535,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // espaço na linha de composição com o clipe de verdade (pedido direto do
   // dono do produto, comparação lado a lado com o WhatsApp Business real).
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  // TASK-0299 (pedido direto, print real): antes cada produto com foto/vídeo
+  // de exemplo cadastrado virava um ícone próprio nesta grade — com vários
+  // produtos, a lista de "fotos de exemplo" sozinha já lotava o painel.
+  // Agora é 1 ícone por tipo de mídia ("Foto de exemplo"/"Vídeo de
+  // exemplo") que expande a lista de produtos embaixo da grade principal
+  // sob demanda, em vez de inflar a grade com N ícones quase idênticos.
+  const [expandedExampleMedia, setExpandedExampleMedia] = useState<'photo' | 'video' | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
 
@@ -4719,7 +4726,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               lista interna (o `rounded-xl` fica no wrapper
                               externo, que precisa de `overflow-hidden` pra
                               recortar os cantos — por isso a rolagem vive
-                              num `<div>` filho, não no mesmo elemento). */}
+                              num `<div>` filho, não no mesmo elemento).
+                              TASK-0299 (pedido direto, print real): os
+                              divisores `border-t border-slate-700` entre
+                              grupos de ações (4 no total) saíram — no tema
+                              escuro liam como linhas azuladas cortando o
+                              menu ("margens azuis"); a separação entre
+                              grupos de ações continua clara só pelo
+                              espaçamento e pela cor de cada item (âmbar/
+                              vermelho pras ações sensíveis). */}
                           <div className="mobile-header-context-menu absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
                           <div className="no-scrollbar max-h-[70vh] overflow-y-auto">
                             {(selectedLead as any)?.isReal && !paymentAppointment && (
@@ -4758,7 +4773,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 conta. Mora agora só no Header global (ver
                                 Header.tsx, usePushNotifications), visível em
                                 qualquer aba. */}
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
                               className={`w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
@@ -4791,7 +4805,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 <span>{isSpanish ? 'Activar IA y preparar borrador' : 'Ativar IA e preparar rascunho'}</span>
                               </button>
                             )}
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => openOperatorFeedback('operator_idea')}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
@@ -4808,7 +4821,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <AlertTriangle className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Reportar bug' : 'Reportar bug'}</span>
                             </button>
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
@@ -4843,7 +4855,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                               <span>{isArchived ? (isSpanish ? 'Desarchivar conversación' : 'Desarquivar conversa') : (isSpanish ? 'Archivar conversación' : 'Arquivar conversa')}</span>
                             </button>
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleClearChatMessages(selectedLead.id); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
@@ -5828,9 +5839,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     documento, empurra a lista de mensagens pra cima, exatamente
                     como o WhatsApp real faz), em vez de um popup `absolute`
                     ancorado no botão do clipe. Reaproveita `renderToolTile`
-                    (mesmo helper da gaveta "Ferramentas", TASK-0282). */}
+                    (mesmo helper da gaveta "Ferramentas", TASK-0282).
+                    TASK-0299 (pedido direto, print real): o cartão arredondado
+                    com borda própria (`rounded-2xl border`) flutuava com
+                    margem visível dos dois lados da tela — `-mx-2` cancela
+                    exatamente o `p-2` do wrapper pai (mesmo passo de 0.5rem
+                    do Tailwind), deixando o painel rente às laterais reais
+                    da tela ("borda a borda"), sem borda nem cantos
+                    arredondados nas laterais. */}
                 {showAttachMenu && (
-                  <div className="rounded-2xl bg-[#233138] border border-slate-700 p-3 animate-page-enter">
+                  <div className="-mx-2 bg-[#233138] p-3 animate-page-enter">
                     <div className="grid grid-cols-4 gap-3">
                       {renderToolTile({
                         key: 'attach-document',
@@ -5883,38 +5901,59 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           void handleSendTextMessage(undefined, knowledgeBase.paymentDetailsText);
                         },
                       })}
+                      {/* TASK-0299 (pedido direto, print real): antes 1 ícone
+                          POR PRODUTO com foto de exemplo cadastrada (lista
+                          crescia sem teto) — agora 1 ícone só, que expande a
+                          lista de produtos logo abaixo da grade (fora dela,
+                          não um popover ancorado: um popover de largura fixa
+                          poderia estourar a tela já que este ícone pode cair
+                          em qualquer coluna da grade, inclusive a última). */}
+                      {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && renderToolTile({
+                        key: 'attach-example-photo',
+                        icon: <ImageIcon className="h-5 w-5" />,
+                        label: isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo',
+                        active: expandedExampleMedia === 'photo',
+                        onClick: () => setExpandedExampleMedia((v) => (v === 'photo' ? null : 'photo')),
+                      })}
+                      {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && renderToolTile({
+                        key: 'attach-example-video',
+                        icon: <Video className="h-5 w-5" />,
+                        label: isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo',
+                        active: expandedExampleMedia === 'video',
+                        onClick: () => setExpandedExampleMedia((v) => (v === 'video' ? null : 'video')),
+                      })}
                     </div>
 
-                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                      <>
-                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                          {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                          {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => renderToolTile({
-                            key: p.id,
-                            icon: <ImageIcon className="h-5 w-5" />,
-                            label: p.name,
-                            onClick: () => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); },
-                          }))}
-                        </div>
-                      </>
+                    {expandedExampleMedia === 'photo' && (
+                      <div className="mt-3 space-y-1">
+                        {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => { setExpandedExampleMedia(null); setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
+                            className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        ))}
+                      </div>
                     )}
 
-                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                      <>
-                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                          {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                          {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => renderToolTile({
-                            key: p.id,
-                            icon: <Video className="h-5 w-5" />,
-                            label: p.name,
-                            onClick: () => { setShowAttachMenu(false); handleSendExampleVideo(p.name); },
-                          }))}
-                        </div>
-                      </>
+                    {expandedExampleMedia === 'video' && (
+                      <div className="mt-3 space-y-1">
+                        {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => { setExpandedExampleMedia(null); setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
+                            className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                          >
+                            <Video className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}

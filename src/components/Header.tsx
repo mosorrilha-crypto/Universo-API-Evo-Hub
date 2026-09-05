@@ -114,7 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
   const configurationButtonRef = useRef<HTMLButtonElement>(null);
   const themeButtonRef = useRef<HTMLButtonElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const mobileMenuTouchStartY = useRef<number | null>(null);
+  const mobileMenuTouchStartX = useRef<number | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [openToolsMenu, setOpenToolsMenu] = useState<ToolsMenuKind | null>(null);
   const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
@@ -232,19 +232,22 @@ export const Header: React.FC<HeaderProps> = ({
   // menu não tinha NENHUM jeito de fechar além de tocar de novo no ícone que
   // abriu ele — nem clique fora, nem gesto — achado real confirmado lendo o
   // código (os outros menus deste arquivo, como o de empresas, sempre
-  // tiveram esse listener; este nunca teve). "Empurrar pra cima" = arrastar
-  // o dedo de baixo pra cima dentro do menu fecha, igual um bottom
-  // sheet/gaveta comum de app mobile.
+  // tiveram esse listener; este nunca teve).
+  // TASK-0299 (pedido direto, print real): o menu virou uma gaveta lateral
+  // (ver wrapper abaixo) — o gesto de fechar acompanha a mudança, de
+  // "arrastar pra cima" (fazia sentido pro overlay de cima pra baixo da
+  // TASK-0289) pra "arrastar pra direita" (fecha empurrando o dedo na
+  // mesma direção da borda por onde a gaveta entrou).
   const MOBILE_MENU_SWIPE_CLOSE_THRESHOLD = 48;
   const handleMobileMenuTouchStart = (event: React.TouchEvent) => {
-    mobileMenuTouchStartY.current = event.touches[0]?.clientY ?? null;
+    mobileMenuTouchStartX.current = event.touches[0]?.clientX ?? null;
   };
   const handleMobileMenuTouchEnd = (event: React.TouchEvent) => {
-    const startY = mobileMenuTouchStartY.current;
-    mobileMenuTouchStartY.current = null;
-    if (startY === null) return;
-    const endY = event.changedTouches[0]?.clientY ?? startY;
-    if (startY - endY > MOBILE_MENU_SWIPE_CLOSE_THRESHOLD) setIsMobileMenuOpen(false);
+    const startX = mobileMenuTouchStartX.current;
+    mobileMenuTouchStartX.current = null;
+    if (startX === null) return;
+    const endX = event.changedTouches[0]?.clientX ?? startX;
+    if (endX - startX > MOBILE_MENU_SWIPE_CLOSE_THRESHOLD) setIsMobileMenuOpen(false);
   };
   const toggleToolsMenu = (kind: ToolsMenuKind, placement: 'mobile' | 'desktop') => {
     if (placement === 'desktop' && openToolsMenu !== kind) {
@@ -394,24 +397,30 @@ export const Header: React.FC<HeaderProps> = ({
               menu). TASK-0289 (pedido direto, print real): véu ganha cor
               (antes 100% transparente, só existia pra capturar o toque de
               "fechar fora") — escurece a lista de conversas atrás, sem
-              escondê-la de verdade, igual uma gaveta de verdade (o menu
-              deixou de empurrar o conteúdo pra baixo, ver o wrapper
-              abaixo). */}
+              escondê-la de verdade, igual uma gaveta de verdade. */}
           <div className="fixed inset-0 z-20 bg-slate-950/60 md:hidden" onClick={() => setIsMobileMenuOpen(false)} aria-hidden="true" />
-          {/* TASK-0289 (pedido direto, print real): "abre o menu como uma
-              gaveta... sem esconder os itens de baixo" — antes este menu
-              era conteúdo INLINE (`relative`) que empurrava a lista de
-              conversas pra baixo da tela, deixando um vazio visível no
-              meio do caminho. Agora é `absolute` ancorado no fim do
-              `<header>` (`top-full` — o header é `position: sticky`, que
-              estabelece bloco de contenção pra posicionamento absoluto
-              igual `relative` faria, então isso funciona sem precisar
-              calcular a altura do cabeçalho em pixel), flutuando por cima
-              da lista de conversas (só o véu acima escurece o que fica
-              embaixo). `max-h-[85vh] overflow-y-auto` evita estourar a
-              tela em telas baixas com muito conteúdo. */}
+          {/* TASK-0299 (pedido direto, print real, 2º round): a TASK-0289
+              tinha virado este menu num overlay full-width `absolute
+              top-full` (ancorado logo abaixo do header) — melhor que o
+              comportamento anterior (empurrava a lista pra baixo), mas a
+              altura ainda era baseada no CONTEÚDO, não na tela, sobrando
+              área "morta" (fundo visível) acima/abaixo do cartão. Pedido
+              direto: "aplica o efeito do menu da conversa [`animate-pop-in`,
+              o mesmo scale+fade usado no menu ⋮], como uma gaveta do lado
+              direito". Virou `fixed inset-y-0 right-0` (não mais `absolute`
+              ancorado no header — `position: sticky` não é bloco de
+              contenção pra elementos `fixed`, então isso o solta pra
+              ocupar a ALTURA REAL da tela, de ponta a ponta, sem depender
+              do conteúdo — elimina o espaço morto por definição), largura
+              fixa (drawer lateral, não mais tela inteira), com o próprio
+              `env(safe-area-inset-top)` (antes herdava isso só por estar
+              ancorado dentro do header; agora, sendo `fixed` na viewport,
+              precisa do próprio). Reaproveita `animate-pop-in` (já usado no
+              menu ⋮ da conversa) com `origin-right`, no lugar do antigo
+              `animate-page-enter`. */}
           <div
-            className="mobile-nav-menu absolute inset-x-0 top-full z-30 max-h-[85vh] overflow-y-auto animate-page-enter border-t border-slate-800 bg-slate-900 pb-3 pt-2 shadow-2xl md:hidden"
+            className="mobile-nav-menu fixed inset-y-0 right-0 z-30 flex w-[82vw] max-w-xs origin-right flex-col overflow-y-auto animate-pop-in border-l border-slate-800 bg-slate-900 pb-3 shadow-2xl md:hidden"
+            style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
             onTouchStart={handleMobileMenuTouchStart}
             onTouchEnd={handleMobileMenuTouchEnd}
           >
