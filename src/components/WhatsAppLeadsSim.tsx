@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
-import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
@@ -36,7 +35,9 @@ import {
   Calendar as CalendarIcon,
   CalendarPlus,
   FileText,
+  MapPin,
   Mic,
+  Wallet,
   Volume2,
   Paperclip,
   CheckCheck,
@@ -761,46 +762,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   useEffect(() => { fetchGoogleCalendarStatus(); }, []);
-
-  // Push notification do PWA do atendente (issue #159) — segundo canal de
-  // alerta pro operador (escalação nova, agente pausado com lead sem
-  // resposta), além do WhatsApp template já existente. `null` = ainda
-  // verificando se já existe assinatura salva no navegador; `false` cobre
-  // tanto "nunca ativou" quanto "navegador não suporta" (a mensagem de erro
-  // específica só aparece se o operador tentar ativar).
-  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
-  const [pushBusy, setPushBusy] = useState(false);
-
-  useEffect(() => {
-    getExistingPushSubscription()
-      .then((sub) => setPushEnabled(!!sub))
-      .catch(() => setPushEnabled(false));
-  }, []);
-
-  const handleTogglePush = async () => {
-    // Achado real em produção: o aviso de erro (setErrorMsg) nunca se
-    // limpava sozinho — se uma tentativa falhasse, o banner laranja ficava
-    // preso na tela pra sempre, mesmo numa tentativa seguinte bem-sucedida,
-    // fazendo parecer que continuava falhando quando na verdade já tinha
-    // ativado. Limpa aqui no início de cada tentativa nova.
-    setErrorMsg(null);
-    setPushBusy(true);
-    try {
-      if (pushEnabled) {
-        await disablePushNotifications();
-        setPushEnabled(false);
-      } else {
-        const result = await enablePushNotifications();
-        if (result.success) {
-          setPushEnabled(true);
-        } else {
-          setErrorMsg(result.error || 'Não foi possível ativar notificações agora.');
-        }
-      }
-    } finally {
-      setPushBusy(false);
-    }
-  };
 
   const handleConnectGoogleCalendar = async () => {
     try {
@@ -2794,16 +2755,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Send a new Text Message to the chat
-  const handleSendTextMessage = async (e?: React.FormEvent) => {
+  // `overrideText` (TASK-0284) — pra mandar um texto pronto (ex: link de
+  // localização fixa do negócio, ver tile "Localização" no menu de anexos)
+  // sem passar pela caixa de digitação: `setInputMessage` é assíncrono, então
+  // chamar `setInputMessage(texto)` seguido de `handleSendTextMessage()` na
+  // mesma função enviaria o valor ANTIGO de `inputMessage` (closure velho),
+  // não o texto recém-setado. Sem override, comportamento idêntico a antes.
+  const handleSendTextMessage = async (e?: React.FormEvent, overrideText?: string) => {
     if (e) e.preventDefault();
-    if (!inputMessage.trim() || !selectedLead) return;
+    const text = overrideText ?? inputMessage.trim();
+    if (!text || !selectedLead) return;
 
-    const replyToMessageId = replyingTo?.id;
+    const replyToMessageId = overrideText ? undefined : replyingTo?.id;
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       sender: senderRole,
       type: 'text',
-      text: inputMessage.trim(),
+      text,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       replyToMessageId,
     };
@@ -2814,7 +2782,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     };
 
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
-    setInputMessage('');
+    if (!overrideText) setInputMessage('');
     setReplyingTo(null);
 
     if (senderRole === 'agent' && (selectedLead as any).isReal) {
@@ -3501,9 +3469,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       </div>
 
-      {/* Push notification do PWA do atendente (issue #159) — pra não
-          depender só de estar olhando o painel pra perceber escalação
-          nova ou agente pausado com lead sem resposta. */}
+      {/* Notificações push do PWA do atendente saíram daqui (TASK-0284,
+          pedido direto): não são uma ação desta conversa/gaveta, são
+          configuração de conta — agora vivem só no Header global (mesmo
+          lugar em qualquer aba, não só dentro do Atendimento). */}
       <div className="grid w-full grid-cols-4 gap-3 pt-1">
         {renderToolTile({
           key: 'ads-only',
@@ -3518,14 +3487,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           label: 'Gatilhos',
           onClick: openAdTriggersModal,
           badge: adTriggerMessages.length || undefined,
-        })}
-        {renderToolTile({
-          key: 'push',
-          icon: pushEnabled ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />,
-          label: pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Notificações',
-          active: pushEnabled,
-          disabled: pushBusy,
-          onClick: handleTogglePush,
         })}
       </div>
     </>
@@ -4468,7 +4429,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       return (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsHeaderMenuOpen(false)} />
+                          {/* Achado real (pedido direto, 04/09/2026, com
+                              print): este menu já abria ancorado no ícone
+                              "⋮" (top-down, `top-10`/`origin-top-right`,
+                              exatamente como pedido) — o problema nunca foi
+                              a posição, e sim a ALTURA: com até 14 itens
+                              (vários condicionais) e nenhum teto, a lista
+                              crescia livremente e cobria quase a tela
+                              inteira. `max-h-[70vh]` + rolagem própria na
+                              lista interna (o `rounded-xl` fica no wrapper
+                              externo, que precisa de `overflow-hidden` pra
+                              recortar os cantos — por isso a rolagem vive
+                              num `<div>` filho, não no mesmo elemento). */}
                           <div className="mobile-header-context-menu absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
+                          <div className="no-scrollbar max-h-[70vh] overflow-y-auto">
                             {(selectedLead as any)?.isReal && !paymentAppointment && (
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsManualAppointmentModalOpen(true); }}
@@ -4497,24 +4471,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Phone className="w-3.5 h-3.5" />
                               <span>Abrir no WhatsApp</span>
                             </button>
-                            {/* TASK-0225: "Ativar notificações" (push do PWA
-                                do atendente, issue #159) mudou de casa — vinha
-                                da barra de ferramentas exclusiva de desktop
-                                que foi removida (só tinha esse item). Mesma
-                                lógica (`handleTogglePush`/`pushEnabled`/
-                                `pushBusy`), agora dentro deste menu — que já é
-                                visível em qualquer largura (sem `hidden
-                                lg:*`), então funciona igual em mobile e
-                                desktop. */}
-                            <button
-                              onClick={() => { void handleTogglePush(); setIsHeaderMenuOpen(false); }}
-                              disabled={pushBusy}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
-                              title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-                            >
-                              {pushEnabled ? <Bell className="w-3.5 h-3.5 text-emerald-300" /> : <BellOff className="w-3.5 h-3.5" />}
-                              <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-                            </button>
+                            {/* TASK-0284 (pedido direto, com print do menu ⋮
+                                real do WhatsApp, compacto e sem item de
+                                configuração de conta): "Ativar notificações"
+                                (push do PWA do atendente) saiu daqui — não é
+                                uma ação desta conversa, é configuração de
+                                conta. Mora agora só no Header global (ver
+                                Header.tsx, usePushNotifications), visível em
+                                qualquer aba. */}
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
@@ -4580,12 +4544,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Mail className="w-3.5 h-3.5" />
                               <span>{isManuallyUnread ? (isSpanish ? 'Marcar como leída' : 'Marcar como lida') : (isSpanish ? 'Marcar como no leída' : 'Marcar como não lida')}</span>
                             </button>
+                            {/* TASK-0284 (pedido direto): rótulo trocado de
+                                "Ativar/Silenciar notificações" (genérico,
+                                colidia em texto com o toggle de push do PWA
+                                que morava logo acima antes de sair daqui)
+                                pra deixar claro que silencia só ESTA
+                                conversa, não notificações do app inteiro. */}
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-                              <span>{isMuted ? (isSpanish ? 'Activar notificaciones' : 'Ativar notificações') : (isSpanish ? 'Silenciar notificaciones' : 'Silenciar notificações')}</span>
+                              <span>{isMuted ? (isSpanish ? 'Reactivar notificaciones de esta conversación' : 'Reativar notificações desta conversa') : (isSpanish ? 'Silenciar esta conversación' : 'Silenciar esta conversa')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setIsHeaderMenuOpen(false); setMobileThreadOpen(false); }}
@@ -4611,6 +4581,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Eliminar conversación permanentemente' : 'Excluir conversa permanentemente'}</span>
                             </button>
+                          </div>
                           </div>
                         </>
                       );
@@ -5505,73 +5476,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         na linha de composição. Agora é um único menu, com o
                         clipe como gatilho — igual ao WhatsApp real, que
                         também agrupa Documento/Câmera/Galeria atrás de um
-                        clipe só, do lado direito da caixa. */}
-                    <div className="relative flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setShowAttachMenu((v) => !v)}
-                        className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
-                        title={isSpanish ? 'Adjuntar' : 'Anexar'}
-                      >
-                        <Paperclip className="w-5 h-5" />
-                      </button>
-                      {showAttachMenu && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
-                          <div className="absolute bottom-full right-0 mb-2 z-50 w-60 max-h-64 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-1.5 origin-bottom-right animate-pop-in">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowAttachMenu(false);
-                                (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
-                              }}
-                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                            >
-                              <Paperclip className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                              <span>{isSpanish ? 'Documento o foto' : 'Documento ou foto'}</span>
-                            </button>
-
-                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                              <>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                  {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
-                                </div>
-                                {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                  >
-                                    <ImageIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                    <span className="truncate">{p.name}</span>
-                                  </button>
-                                ))}
-                              </>
-                            )}
-
-                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                              <>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                  {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
-                                </div>
-                                {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => { setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                  >
-                                    <Video className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                    <span className="truncate">{p.name}</span>
-                                  </button>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
+                        clipe só, do lado direito da caixa. Painel do menu
+                        (ver mais abaixo, fora do <form>) — pedido direto,
+                        04/09/2026, com print do WhatsApp real: o painel
+                        aparece ABAIXO da caixa de texto, não acima; por isso
+                        virou um painel no fluxo normal do documento (depois
+                        do form), não um popup `absolute` ancorado neste
+                        botão. */}
+                    <button
+                      type="button"
+                      onClick={() => setShowAttachMenu((v) => !v)}
+                      className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer flex-shrink-0"
+                      title={isSpanish ? 'Adjuntar' : 'Anexar'}
+                    >
+                      <Paperclip className="w-5 h-5" />
+                    </button>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
@@ -5622,6 +5541,103 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   )}
                 </form>
+                )}
+                {/* Painel de anexos — pedido direto (04/09/2026, com print
+                    do menu de anexos real do WhatsApp): fica ABAIXO da
+                    caixa de texto, não flutuando por cima dela — por isso
+                    vive aqui, como irmão do <form> acima (fluxo normal do
+                    documento, empurra a lista de mensagens pra cima, exatamente
+                    como o WhatsApp real faz), em vez de um popup `absolute`
+                    ancorado no botão do clipe. Reaproveita `renderToolTile`
+                    (mesmo helper da gaveta "Ferramentas", TASK-0282). */}
+                {showAttachMenu && (
+                  <div className="rounded-2xl bg-[#233138] border border-slate-700 p-3 animate-page-enter">
+                    <div className="grid grid-cols-4 gap-3">
+                      {renderToolTile({
+                        key: 'attach-document',
+                        icon: <FileText className="h-5 w-5" />,
+                        label: isSpanish ? 'Documento' : 'Documento',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          if ((selectedLead as any).isReal && fileInputRef.current) {
+                            fileInputRef.current.accept = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf';
+                            fileInputRef.current.click();
+                          } else {
+                            handleSendSampleFile();
+                          }
+                        },
+                      })}
+                      {renderToolTile({
+                        key: 'attach-photo',
+                        icon: <ImageIcon className="h-5 w-5" />,
+                        label: isSpanish ? 'Fotos' : 'Fotos',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          if ((selectedLead as any).isReal && fileInputRef.current) {
+                            fileInputRef.current.accept = 'image/*';
+                            fileInputRef.current.click();
+                          } else {
+                            handleSendSampleFile();
+                          }
+                        },
+                      })}
+                      {/* Localização e Dados da conta (pedido direto,
+                          04/09/2026): mensagens prontas que o operador manda
+                          manualmente quando o cliente pede — mesmo padrão,
+                          nunca inventam nada, só aparecem quando o tenant
+                          configurou o texto na Base de Conhecimento. */}
+                      {knowledgeBase.locationMapsUrl && renderToolTile({
+                        key: 'attach-location',
+                        icon: <MapPin className="h-5 w-5" />,
+                        label: isSpanish ? 'Ubicación' : 'Localização',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          void handleSendTextMessage(undefined, knowledgeBase.locationMapsUrl);
+                        },
+                      })}
+                      {knowledgeBase.paymentDetailsText && renderToolTile({
+                        key: 'attach-payment-details',
+                        icon: <Wallet className="h-5 w-5" />,
+                        label: isSpanish ? 'Datos de pago' : 'Dados da conta',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          void handleSendTextMessage(undefined, knowledgeBase.paymentDetailsText);
+                        },
+                      })}
+                    </div>
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                      <>
+                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => renderToolTile({
+                            key: p.id,
+                            icon: <ImageIcon className="h-5 w-5" />,
+                            label: p.name,
+                            onClick: () => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); },
+                          }))}
+                        </div>
+                      </>
+                    )}
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                      <>
+                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => renderToolTile({
+                            key: p.id,
+                            icon: <Video className="h-5 w-5" />,
+                            label: p.name,
+                            onClick: () => { setShowAttachMenu(false); handleSendExampleVideo(p.name); },
+                          }))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </>
