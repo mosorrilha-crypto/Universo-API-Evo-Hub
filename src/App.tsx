@@ -27,7 +27,8 @@ import { FinancialWorkspace } from './components/FinancialWorkspace';
 import { AdAttributionCAPI } from './components/AdAttributionCAPI';
 import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKnowledgeBase';
 import { PublicCatalogSettings } from './components/PublicCatalogSettings';
-import { OperationsHomeWorkspace } from './components/OperationsHomeWorkspace';
+import { TenantActivationChecklist } from './components/TenantActivationChecklist';
+import { evaluateTenantActivation } from './lib/tenantActivation';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
 import { LoginModal } from './components/LoginModal';
@@ -111,7 +112,7 @@ export const App: React.FC = () => {
     try {
       return parseStoredActiveTab(localStorage.getItem(ACTIVE_TAB_STORAGE_KEY));
     } catch {
-      return 'home';
+      return 'whatsapp';
     }
   });
   // Lead a abrir automaticamente ao entrar na aba WhatsApp — usado pelo
@@ -270,7 +271,7 @@ export const App: React.FC = () => {
       (activeTab === 'quality' && !canSeeQuality) ||
       (activeTab === 'system_logs' && !canSeeSystemLogs) ||
       (activeTab === 'broadcast' && !canSeeBroadcast);
-    if (blocked) handleSetActiveTab('home');
+    if (blocked) handleSetActiveTab('whatsapp');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, canManageAgent, canSeeAgenda, canSeeCatalog, canSeeConversations, canSeeCrm, canSeeFinancial, canSeeGrowth, canSeeQuality, canSeeSaasMaster, canSeeSystemLogs, canSeeBroadcast, currentUser?.role, tenantCapabilitiesState.tenantId, activeTenant.id]);
 
@@ -555,7 +556,7 @@ export const App: React.FC = () => {
   const suppressTabPushRef = useRef(false);
   useEffect(() => {
     if (suppressTabPushRef.current) { suppressTabPushRef.current = false; return; }
-    if (activeTab !== 'home') {
+    if (activeTab !== 'whatsapp') {
       window.history.pushState({ universoNav: 'tab', tab: activeTab }, '');
     }
   }, [activeTab]);
@@ -576,7 +577,7 @@ export const App: React.FC = () => {
       }
       const state = event.state as { universoNav?: string; tab?: ActiveTab } | null;
       suppressTabPushRef.current = true;
-      handleSetActiveTab(state?.universoNav === 'tab' && state.tab ? state.tab : 'home');
+      handleSetActiveTab(state?.universoNav === 'tab' && state.tab ? state.tab : 'whatsapp');
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -1403,7 +1404,7 @@ export const App: React.FC = () => {
         currentUser={currentUser}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={() => {
-          handleSetActiveTab('home');
+          handleSetActiveTab('whatsapp');
           setCurrentUser(null);
           setAuthToken(null);
           setIsSaasSessionConfirmed(false);
@@ -1471,42 +1472,41 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'home' && (
-          <OperationsHomeWorkspace
-            activeTenant={activeTenant}
-            currentUser={currentUser}
-            leads={leads}
-            transactions={transactions}
-            escalations={escalations}
-            knowledgeBase={knowledgeBase}
-            businessHours={businessHours}
-            canSeeAgenda={canSeeAgenda}
-            canSeeFinancial={canSeeFinancial}
-            canSeeAdminTools={canSeeAdminTools}
-            onNavigate={handleSetActiveTab}
-          />
-        )}
-
+        {/* TASK-0301 (pedido direto): o painel "Hoje" (Prioridades/Atalhos/
+            Configurar) saiu — Atendimento agora é a tela padrão do sistema.
+            Só a etapa "Configurar" sobrevive, focada na ativação de um tenant
+            novo (checklist de canal/contexto/agenda/serviços) — mora agora
+            dentro de Empresas, visível só pra quem já enxerga essa aba
+            (saas_admin). Prioridades/Atalhos (fila de pendências, métricas,
+            acessos rápidos) foram excluídos por pedido direto — "vamos
+            refinar isso futuramente". */}
         {activeTab === 'saas' && canSeeSaasMaster && (
-          <SaaSAdminDashboard
-            tenants={tenants}
-            activeTenant={activeTenant}
-            onSelectTenant={handleSelectTenant}
-            onEnterTenant={(tenant) => {
-              handleSelectTenant(tenant);
-              handleSetActiveTab('home');
-            }}
-            onAddTenant={(newT) => {
-              setTenants((prev) => [newT, ...prev]);
-              showToast(`Nova empresa ${newT.name} cadastrada`);
-            }}
-            onUpdateTenant={(updatedT) => {
-              setTenants((prev) => prev.map((t) => (t.id === updatedT.id ? updatedT : t)));
-              if (activeTenant.id === updatedT.id) setActiveTenant(updatedT);
-              showToast('Empresa atualizada');
-            }}
-            currentUser={currentUser || GUEST_USER}
-          />
+          <>
+            <TenantActivationChecklist
+              status={evaluateTenantActivation(activeTenant, knowledgeBase, businessHours)}
+              canConfigure={canSeeAdminTools}
+              onNavigate={handleSetActiveTab}
+            />
+            <SaaSAdminDashboard
+              tenants={tenants}
+              activeTenant={activeTenant}
+              onSelectTenant={handleSelectTenant}
+              onEnterTenant={(tenant) => {
+                handleSelectTenant(tenant);
+                handleSetActiveTab('whatsapp');
+              }}
+              onAddTenant={(newT) => {
+                setTenants((prev) => [newT, ...prev]);
+                showToast(`Nova empresa ${newT.name} cadastrada`);
+              }}
+              onUpdateTenant={(updatedT) => {
+                setTenants((prev) => prev.map((t) => (t.id === updatedT.id ? updatedT : t)));
+                if (activeTenant.id === updatedT.id) setActiveTenant(updatedT);
+                showToast('Empresa atualizada');
+              }}
+              currentUser={currentUser || GUEST_USER}
+            />
+          </>
         )}
 
         {/* Sempre montado (visibilidade controlada por CSS, não por
@@ -1594,6 +1594,8 @@ export const App: React.FC = () => {
             escalations={escalations}
             onGoToEscalations={() => handleSetActiveTab('escalations')}
             onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
+            onGoToCrm={canSeeCrm ? () => handleSetActiveTab('crm') : undefined}
+            onGoToFinancial={canSeeFinancial ? () => handleSetActiveTab('financial') : undefined}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
             onThreadOpenChange={setIsMobileWhatsAppThreadOpen}

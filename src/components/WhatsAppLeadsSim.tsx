@@ -78,7 +78,8 @@ import {
   Copy,
   Megaphone,
   MessageCircle,
-  Receipt
+  Receipt,
+  Kanban
 } from 'lucide-react';
 import { TransactionDialog } from './financial/TransactionDialog';
 
@@ -177,6 +178,15 @@ interface WhatsAppLeadsSimProps {
       só passa esta prop quando o usuário logado tem permissão pra ver a
       Agenda (`canSeeAgenda`) — se vier `undefined`, o botão nem aparece. */
   onGoToAgenda?: () => void;
+  /** TASK-0301 (pedido direto): CRM/Agenda/Financeiro saíram do menu
+      superior (Header.tsx) — Atendimento virou a tela padrão do sistema e
+      esses módulos só ficam acessíveis por dentro dele agora. Mesmo padrão
+      de onGoToAgenda/onGoToEscalations: App.tsx só passa a prop quando o
+      usuário logado tem permissão pra ver o módulo (canSeeCrm/
+      canSeeFinancial) — se vier undefined, o atalho correspondente na
+      gaveta "Ferramentas" (toolbarSettingsBody) nem aparece. */
+  onGoToCrm?: () => void;
+  onGoToFinancial?: () => void;
   /** TASK-0284: libera o item "Marcar como comprovante" no menu "⋮" das
       mensagens de imagem — App.tsx passa canSeeFinancial (mesmo flag que
       controla a aba Financeiro). Sem isso, nunca oferece a ação. */
@@ -289,6 +299,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   escalations = [],
   onGoToEscalations,
   onGoToAgenda,
+  onGoToCrm,
+  onGoToFinancial,
   closeThreadSignal,
   openLeadPhone,
   openLeadRequestId,
@@ -3622,6 +3634,42 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           badge: adTriggerMessages.length || undefined,
         })}
       </div>
+
+      {/* TASK-0301 (pedido direto): CRM, Agenda e Financeiro saíram do menu
+          superior (Header.tsx) — Atendimento virou a tela padrão do
+          sistema, então esses módulos precisam de um jeito de acesso daqui
+          de dentro. Cada tile só aparece se App.tsx passou a prop
+          correspondente (usuário logado tem permissão pro módulo) — mesmo
+          padrão de onGoToAgenda no ícone do cabeçalho da conversa aberta. */}
+      {(onGoToCrm || onGoToAgenda || onGoToFinancial) && (
+        <div className="w-full border-t border-slate-800 pt-3">
+          <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Módulos</p>
+          <div className="grid w-full grid-cols-4 gap-3">
+            {onGoToCrm && renderToolTile({
+              key: 'go-to-crm',
+              icon: <Kanban className="h-5 w-5" />,
+              label: 'Vendas',
+              onClick: () => { setIsToolbarSettingsOpen(false); onGoToCrm(); },
+            })}
+            {onGoToAgenda && renderToolTile({
+              key: 'go-to-agenda',
+              icon: <CalendarPlus className="h-5 w-5" />,
+              // "Agenda completa" (não só "Agenda") pra não confundir com o
+              // tile de mesmo nome na barra inferior, que abre só o popup
+              // de próximos eventos (handleOpenUpcomingEvents) — este vai
+              // pra aba Agenda de verdade (mês/semana, financeiro da agenda).
+              label: 'Agenda completa',
+              onClick: () => { setIsToolbarSettingsOpen(false); onGoToAgenda(); },
+            })}
+            {onGoToFinancial && renderToolTile({
+              key: 'go-to-financial',
+              icon: <Wallet className="h-5 w-5" />,
+              label: 'Financeiro',
+              onClick: () => { setIsToolbarSettingsOpen(false); onGoToFinancial(); },
+            })}
+          </div>
+        </div>
+      )}
     </>
   );
 
