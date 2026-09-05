@@ -37,6 +37,7 @@ import {
   FileText,
   MapPin,
   Mic,
+  Wallet,
   Volume2,
   Paperclip,
   CheckCheck,
@@ -5475,119 +5476,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         na linha de composição. Agora é um único menu, com o
                         clipe como gatilho — igual ao WhatsApp real, que
                         também agrupa Documento/Câmera/Galeria atrás de um
-                        clipe só, do lado direito da caixa. */}
-                    <div className="relative flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setShowAttachMenu((v) => !v)}
-                        className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
-                        title={isSpanish ? 'Adjuntar' : 'Anexar'}
-                      >
-                        <Paperclip className="w-5 h-5" />
-                      </button>
-                      {showAttachMenu && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
-                          {/* Redesenho (pedido direto, 04/09/2026, com print
-                              comparando com o menu de anexos real do
-                              WhatsApp): a lista vertical de texto virou uma
-                              grade de ícones em círculo + rótulo, reaproveitando
-                              `renderToolTile` (mesma função já usada na gaveta
-                              "Ferramentas", TASK-0282) em vez de duplicar o
-                              padrão visual. Cartão próprio (`rounded-2xl`,
-                              mais largo) em vez de lista estreita — evita a
-                              colisão visual com o botão flutuante "ir pro
-                              fim da conversa" relatada no print. */}
-                          <div className="absolute bottom-full right-0 mb-2 z-50 w-72 max-h-80 overflow-y-auto bg-[#233138] border border-slate-700 rounded-2xl shadow-2xl p-3 origin-bottom-right animate-pop-in">
-                            {/* Documento/Fotos separados (pedido direto,
-                                04/09/2026): eram um tile só ("Documento ou
-                                foto"); viraram dois, igual ao WhatsApp real
-                                (Documento vs Câmera/Galeria) — o `accept` do
-                                input real muda conforme o tile tocado, pra
-                                o seletor nativo já abrir focado no tipo
-                                certo. Localização manda o link fixo do
-                                Google Maps já configurado na Base de
-                                Conhecimento (`knowledgeBase.locationMapsUrl`
-                                — mesmo link que o próprio agente já manda
-                                quando o cliente pergunta o endereço, ver
-                                knowledgeBaseStore.ts) — nunca inventa um
-                                endereço, só aparece quando o tenant
-                                configurou. */}
-                            <div className="grid grid-cols-3 gap-3">
-                              {renderToolTile({
-                                key: 'attach-document',
-                                icon: <FileText className="h-5 w-5" />,
-                                label: isSpanish ? 'Documento' : 'Documento',
-                                onClick: () => {
-                                  setShowAttachMenu(false);
-                                  if ((selectedLead as any).isReal && fileInputRef.current) {
-                                    fileInputRef.current.accept = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf';
-                                    fileInputRef.current.click();
-                                  } else {
-                                    handleSendSampleFile();
-                                  }
-                                },
-                              })}
-                              {renderToolTile({
-                                key: 'attach-photo',
-                                icon: <ImageIcon className="h-5 w-5" />,
-                                label: isSpanish ? 'Fotos' : 'Fotos',
-                                onClick: () => {
-                                  setShowAttachMenu(false);
-                                  if ((selectedLead as any).isReal && fileInputRef.current) {
-                                    fileInputRef.current.accept = 'image/*';
-                                    fileInputRef.current.click();
-                                  } else {
-                                    handleSendSampleFile();
-                                  }
-                                },
-                              })}
-                              {knowledgeBase.locationMapsUrl && renderToolTile({
-                                key: 'attach-location',
-                                icon: <MapPin className="h-5 w-5" />,
-                                label: isSpanish ? 'Ubicación' : 'Localização',
-                                onClick: () => {
-                                  setShowAttachMenu(false);
-                                  void handleSendTextMessage(undefined, knowledgeBase.locationMapsUrl);
-                                },
-                              })}
-                            </div>
-
-                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                              <>
-                                <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                  {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
-                                </div>
-                                <div className="grid grid-cols-3 gap-3">
-                                  {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => renderToolTile({
-                                    key: p.id,
-                                    icon: <ImageIcon className="h-5 w-5" />,
-                                    label: p.name,
-                                    onClick: () => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); },
-                                  }))}
-                                </div>
-                              </>
-                            )}
-
-                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                              <>
-                                <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                  {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
-                                </div>
-                                <div className="grid grid-cols-3 gap-3">
-                                  {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => renderToolTile({
-                                    key: p.id,
-                                    icon: <Video className="h-5 w-5" />,
-                                    label: p.name,
-                                    onClick: () => { setShowAttachMenu(false); handleSendExampleVideo(p.name); },
-                                  }))}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
+                        clipe só, do lado direito da caixa. Painel do menu
+                        (ver mais abaixo, fora do <form>) — pedido direto,
+                        04/09/2026, com print do WhatsApp real: o painel
+                        aparece ABAIXO da caixa de texto, não acima; por isso
+                        virou um painel no fluxo normal do documento (depois
+                        do form), não um popup `absolute` ancorado neste
+                        botão. */}
+                    <button
+                      type="button"
+                      onClick={() => setShowAttachMenu((v) => !v)}
+                      className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer flex-shrink-0"
+                      title={isSpanish ? 'Adjuntar' : 'Anexar'}
+                    >
+                      <Paperclip className="w-5 h-5" />
+                    </button>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
@@ -5638,6 +5541,103 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   )}
                 </form>
+                )}
+                {/* Painel de anexos — pedido direto (04/09/2026, com print
+                    do menu de anexos real do WhatsApp): fica ABAIXO da
+                    caixa de texto, não flutuando por cima dela — por isso
+                    vive aqui, como irmão do <form> acima (fluxo normal do
+                    documento, empurra a lista de mensagens pra cima, exatamente
+                    como o WhatsApp real faz), em vez de um popup `absolute`
+                    ancorado no botão do clipe. Reaproveita `renderToolTile`
+                    (mesmo helper da gaveta "Ferramentas", TASK-0282). */}
+                {showAttachMenu && (
+                  <div className="rounded-2xl bg-[#233138] border border-slate-700 p-3 animate-page-enter">
+                    <div className="grid grid-cols-4 gap-3">
+                      {renderToolTile({
+                        key: 'attach-document',
+                        icon: <FileText className="h-5 w-5" />,
+                        label: isSpanish ? 'Documento' : 'Documento',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          if ((selectedLead as any).isReal && fileInputRef.current) {
+                            fileInputRef.current.accept = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf';
+                            fileInputRef.current.click();
+                          } else {
+                            handleSendSampleFile();
+                          }
+                        },
+                      })}
+                      {renderToolTile({
+                        key: 'attach-photo',
+                        icon: <ImageIcon className="h-5 w-5" />,
+                        label: isSpanish ? 'Fotos' : 'Fotos',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          if ((selectedLead as any).isReal && fileInputRef.current) {
+                            fileInputRef.current.accept = 'image/*';
+                            fileInputRef.current.click();
+                          } else {
+                            handleSendSampleFile();
+                          }
+                        },
+                      })}
+                      {/* Localização e Dados da conta (pedido direto,
+                          04/09/2026): mensagens prontas que o operador manda
+                          manualmente quando o cliente pede — mesmo padrão,
+                          nunca inventam nada, só aparecem quando o tenant
+                          configurou o texto na Base de Conhecimento. */}
+                      {knowledgeBase.locationMapsUrl && renderToolTile({
+                        key: 'attach-location',
+                        icon: <MapPin className="h-5 w-5" />,
+                        label: isSpanish ? 'Ubicación' : 'Localização',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          void handleSendTextMessage(undefined, knowledgeBase.locationMapsUrl);
+                        },
+                      })}
+                      {knowledgeBase.paymentDetailsText && renderToolTile({
+                        key: 'attach-payment-details',
+                        icon: <Wallet className="h-5 w-5" />,
+                        label: isSpanish ? 'Datos de pago' : 'Dados da conta',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          void handleSendTextMessage(undefined, knowledgeBase.paymentDetailsText);
+                        },
+                      })}
+                    </div>
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                      <>
+                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => renderToolTile({
+                            key: p.id,
+                            icon: <ImageIcon className="h-5 w-5" />,
+                            label: p.name,
+                            onClick: () => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); },
+                          }))}
+                        </div>
+                      </>
+                    )}
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                      <>
+                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => renderToolTile({
+                            key: p.id,
+                            icon: <Video className="h-5 w-5" />,
+                            label: p.name,
+                            onClick: () => { setShowAttachMenu(false); handleSendExampleVideo(p.name); },
+                          }))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </>
