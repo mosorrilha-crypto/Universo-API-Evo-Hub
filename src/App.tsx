@@ -843,14 +843,31 @@ export const App: React.FC = () => {
 
   // Busca o horário de funcionamento real salvo no backend (usado pelo
   // agendamento automático de verdade) e sincroniza no painel, se existir.
+  // TASK-0306 (achado real, pedido direto: "já fizemos várias tentativas mas
+  // os horários ainda não persistem"): confirmado no Supabase que o valor
+  // estava salvo corretamente no tenant (seg-sáb 09:00-18:00) — o problema
+  // nunca foi a gravação, e sim esta busca. Ela tinha `useEffect(..., [])`,
+  // sem depender de `currentUser`: dispara uma ÚNICA vez, no mount, usando o
+  // token/`X-Tenant-Id` que existir NAQUELE instante — se rodar antes da
+  // sessão terminar de resolver (ou antes do saas_admin trocar de empresa),
+  // a resposta vem vazia/errada e NUNCA tenta de novo pelo resto da sessão,
+  // mesmo depois do login terminar ou da troca de tenant. Mesma classe de
+  // bug já encontrada e corrigida 3x neste mesmo arquivo (linhas ~246, ~281,
+  // ~327) — todas guardam com `if (!currentUser) return;` e reagem a
+  // `currentUser`/`activeTenant.id` nas deps; esta busca era a única que
+  // ainda faltava esse tratamento. Também passa a resetar pra `{}` quando o
+  // backend não devolve nada (antes só atualizava se viesse algo, então uma
+  // troca de tenant sem horário configurado continuava mostrando o horário
+  // do tenant anterior).
   useEffect(() => {
+    if (!currentUser) return;
     apiFetch('/api/business-hours')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.businessHours) setBusinessHours(data.businessHours);
+        setBusinessHours(data?.businessHours || {});
       })
       .catch(() => {});
-  }, []);
+  }, [currentUser?.id, activeTenant.id]);
 
   // [CRM] Achado real em produção: OperatorCRM.tsx era 100% mock/localStorage
   // — leads reais que já chegam via WhatsApp nunca apareciam no CRM a menos
