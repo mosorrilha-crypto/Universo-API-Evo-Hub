@@ -236,6 +236,43 @@ describe('revisor pré-envio de respostas automáticas', () => {
       expect(verdict.approved).toBe(false);
     });
 
+    it('aprova quando o motivo só MENCIONA o idioma corretamente (não aponta mistura/erro) — achado real 05/09/2026, TASK-0302', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'O rascunho está em português, mas a cliente escreveu em português (o que está correto), porém deixou de cumprir a regra de negócio de solicitar ou confirmar o nome da cliente antes de avançar com o atendimento.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Quanto custa o Combo Full Face?',
+        draftBubbles: ['O Combo Full Face sai por Gs 1.200.000. Ele é uma experiência completa que inclui micropigmentação de sobrancelhas, lábios e extensão de cílios, já com a avaliação inclusa.', 'Você já realizou algum desses procedimentos antes?'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(true);
+      expect(verdict.reason).toContain('override determinístico');
+    });
+
+    it('NÃO aprova quando o motivo cita uma mistura/erro de idioma de verdade, além do nome ausente', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'O rascunho não solicitou o nome da cliente e ainda mistura idioma, com expressões em espanhol dentro de uma frase em português.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Quanto custa o combo?',
+        draftBubbles: ['O combo custa Gs 500.000.'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(false);
+    });
+
     it('NÃO aprova quando o rascunho realmente empurra pra agenda, mesmo que o motivo cite só nome', async () => {
       const ai: any = {
         models: {
