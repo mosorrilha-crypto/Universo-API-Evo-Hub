@@ -254,4 +254,124 @@ describe('revisor pré-envio de respostas automáticas', () => {
       expect(verdict.approved).toBe(false);
     });
   });
+
+  describe('override determinístico pra bloqueio falso-positivo por "ordem" de pedir o nome (achado real 04/09/2026, TASK-0293/TASK-0296)', () => {
+    it('aprova quando o motivo reclama de ordem (nome depois do preço) e o rascunho já pede o nome na mesma resposta', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'A assistente informou o preço e detalhes do combo antes de solicitar ou confirmar o nome da cliente, violando a regra de solicitar o nome antes de avançar, e a ordem das etapas exige pedir o nome primeiro.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Oi, quero marcar o combo de sobrancelhas e cílios pra semana que vem',
+        draftBubbles: [
+          'Oi, tudo bem? O Combo de Micro Sobrancelhas + Cílios sai por Gs 600.000 e já inclui a avaliação inicial.',
+          'Qual é o seu nome? Me conta também qual dia ou horário da semana que vem você prefere pra eu verificar a agenda pra você.',
+        ],
+      }, { ai });
+
+      expect(verdict.approved).toBe(true);
+      expect(verdict.reason).toContain('override determinístico');
+    });
+
+    it('NÃO aprova quando o rascunho empurra pra agenda de verdade e não pede o nome em lugar nenhum (violação real da regra 24, não falso-positivo de ordem)', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'A resposta avança pra agenda sem ter confirmado o nome antes; a ordem correta exige pedir o nome primeiro.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Quiero agendar mi turno',
+        draftBubbles: ['¿Qué día te queda mejor para agendar tu turno?'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(false);
+    });
+
+    it('NÃO aprova quando o motivo mistura ordem do nome com outro problema real (idioma)', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'A assistente informou o preço antes de pedir o nome (a ordem das etapas exige pedir o nome primeiro) e também misturou idioma espanhol na resposta.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Oi, quero marcar pra semana que vem',
+        draftBubbles: ['O Combo sai por Gs 600.000. Qual é o seu nome?'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(false);
+    });
+  });
+
+  describe('override determinístico pra bloqueio falso-positivo do pronome "te" como mistura de idioma (achado real 04/09/2026, TASK-0294/TASK-0296)', () => {
+    it('aprova quando o motivo cita mistura de idioma só por causa do "te", num rascunho 100% em português', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'A cliente escreveu em português, mas a última mensagem do rascunho utiliza expressões em espanhol/português misturadas ("como te comentei antes") sem manter a consistência do idioma português do Brasil exigido pelo histórico e pela mensagem da cliente.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Qual é o valor do procedimento de lábios?',
+        draftBubbles: [
+          'O Microlips Labios sai por Gs 550.000, como te comentei antes. Se a sua intenção for uniformizar tons mais escuros, temos também a Neutralização por Gs 450.000.',
+          'Você já tem algum procedimento antigo nos lábios ou seria sua primeira vez?',
+        ],
+      }, { ai });
+
+      expect(verdict.approved).toBe(true);
+      expect(verdict.reason).toContain('override determinístico');
+    });
+
+    it('NÃO aprova quando existe mistura real de idioma (conectivo exclusivo de espanhol, não só "te")', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'medium',
+            reason: 'A resposta mistura espanhol e português na mesma frase.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Qual é o valor do procedimento de lábios?',
+        draftBubbles: ['O Microlips Labios sai por Gs 550.000, pero também inclui a avaliação.'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(false);
+    });
+
+    it('NÃO aprova quando o motivo não fala de mistura/idioma nenhuma', async () => {
+      const ai: any = {
+        models: {
+          generateContent: vi.fn().mockResolvedValue({ text: JSON.stringify({
+            approved: false,
+            severity: 'high',
+            reason: 'A resposta promete um reembolso não autorizado.',
+          }) }),
+        },
+      };
+      const verdict = await reviewAutoReplyBeforeSend({
+        customerMessage: 'Qual é o valor do procedimento de lábios?',
+        draftBubbles: ['Vamos te devolver o dinheiro, como te comentei antes.'],
+      }, { ai });
+
+      expect(verdict.approved).toBe(false);
+    });
+  });
 });

@@ -369,6 +369,100 @@ function overrideNameOnlyFalsePositive(verdict: ReplySafetyVerdict, input: Reply
   };
 }
 
+/** Frases que afirmam um agendamento/turno já confirmado — usado pelos overrides abaixo pra nunca aprovar automaticamente um rascunho que finge uma confirmação real. */
+const CONFIRMED_BOOKING_LANGUAGE = /(ya est[áa] agendad[oa]|j[áa] est[áa] agendado|agendamento confirmado|turno confirmado|confirmad[oa] (tu|o seu) (turno|agendamento|hor[áa]rio))/i;
+
+/**
+ * Achado real de produção (04/09/2026, TASK-0293, caso sintético): o
+ * revisor (LLM) reprovou um rascunho que pedia o nome corretamente na
+ * mesma resposta em que avançava pra agenda ("O Combo... sai por Gs
+ * 600.000... Qual é o seu nome? Me conta também qual dia..."), inventando
+ * uma exigência de ORDEM que a regra 24 (autoReply.ts) nunca pediu — ela só
+ * exige o nome "na mesma resposta", nunca "antes de qualquer outro
+ * conteúdo". O reforço de prompt (parágrafo NOME DO CLIENTE) resolve esse
+ * caso específico, mas segue o mesmo padrão de TASK-0277: quando o próprio
+ * julgamento do revisor é o problema (não uma regra ambígua), um override
+ * determinístico é mais durável que confiar no LLM lembrar da clarificação
+ * toda vez.
+ *
+ * Só aprova quando: o motivo cita nome + uma palavra de ordem ("ordem",
+ * "antes de", "primeiro"); o rascunho combinado já contém um pedido de
+ * nome reconhecível (português ou espanhol); e o rascunho não afirma uma
+ * confirmação de agenda que ainda não existe. Qualquer outro problema
+ * citado junto (nome inventado, idioma, pagamento) continua bloqueado — a
+ * função só neutraliza a reclamação de ORDEM, nunca substitui as outras
+ * checagens.
+ */
+function overrideNameOrderFalsePositive(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  if (verdict.approved || verdict.source === 'rules') return verdict;
+  const reason = verdict.reason.toLowerCase();
+  const isNameOrderComplaint = /\bnome\b/.test(reason) && /(ordem|antes de|primeiro)/.test(reason);
+  if (!isNameOrderComplaint) return verdict;
+  const hasOtherIssue = /(invent|alucina|pagamento|reembolso|idioma|espanhol|portugu[êe]s|disponibilidade real|hor[áa]rio confirmado|comprovante|\bdocumento\b|se apresentou como|pr[óo]prio nome)/.test(reason);
+  if (hasOtherIssue) return verdict;
+  const combinedDraft = input.draftBubbles.map((bubble) => String(bubble || '')).join('\n');
+  const asksForName = /(qual\s+[ée]\s+(o\s+)?(seu|teu)\s+nome|como\s+(voc[êe]|tu)?\s*se\s+chama|me\s+(conta|diz|d[áa])\s+(o\s+)?(seu|teu)?\s*nome|c[uú]al\s+es\s+tu\s+nombre|c[oó]mo\s+te\s+llam[aá]s)/i.test(combinedDraft);
+  if (!asksForName) return verdict;
+  if (CONFIRMED_BOOKING_LANGUAGE.test(combinedDraft)) return verdict;
+  return {
+    ...verdict,
+    approved: true,
+    reason: `${verdict.reason} — aprovado por override determinístico (nome pedido na mesma resposta; a regra não exige nenhuma ordem específica dentro dela; ver regra 24 de autoReply.ts e TASK-0293/TASK-0296).`,
+  };
+}
+
+/**
+ * Achado real de produção (04/09/2026, TASK-0294, caso sintético): o
+ * revisor reprovou um rascunho 100% em português ("como te comentei
+ * antes") como "mistura de espanhol/português", confundindo o pronome
+ * "te" — válido nos dois idiomas — com sinal de mistura real. Mesmo
+ * princípio de TASK-0277/TASK-0293: quando o julgamento do revisor erra
+ * de um jeito específico e repetível, um override determinístico resolve
+ * de forma mais durável que reforçar o prompt de novo.
+ *
+ * Só aprova quando o motivo cita mistura/idioma E, removendo os tokens
+ * "te"/"tu" (pronomes compartilhados pelos dois idiomas) do rascunho
+ * normalizado, não sobra nenhuma palavra GRAMATICAL exclusiva de espanhol
+ * — enquanto o sinal de português continua batendo (`hasPortugueseSignal`).
+ * Usa uma lista própria de conectivos/advérbios estruturais ("pero",
+ * "entonces", "así", "vos"...), deliberadamente SEM vocabulário de
+ * conteúdo/catálogo: `hasSpanishSignal` inclui palavras como "labios"/
+ * "cejas"/"pestañas" que são nome de serviço/produto e aparecem
+ * legitimamente dentro de uma resposta em português (ex: "Microlips
+ * Labios"), então reusar essa lista aqui faria o override nunca disparar
+ * pro caso real que motivou esta correção. Uma mistura real, com um
+ * conectivo/estrutura exclusiva de espanhol de verdade, continua sem essa
+ * saída e segue bloqueada.
+ */
+const SPANISH_EXCLUSIVE_GRAMMAR_WORDS = /\b(pero|aunque|entonces|as[ií]|ac[áa]|all[áa]|vos|che|mientras|tambi[ée]n|nada m[áa]s)\b/i;
+
+function overrideSharedWordLanguageFalsePositive(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  if (verdict.approved || verdict.source === 'rules') return verdict;
+  const reason = verdict.reason.toLowerCase();
+  const isLanguageMixComplaint = /(mistur|idioma)/.test(reason);
+  if (!isLanguageMixComplaint) return verdict;
+  const combinedDraft = input.draftBubbles.map((bubble) => String(bubble || '')).join('\n');
+  if (!hasPortugueseSignal(combinedDraft)) return verdict;
+  const withoutSharedPronouns = normalize(combinedDraft).replace(/\b(te|tu)\b/g, ' ');
+  if (SPANISH_EXCLUSIVE_GRAMMAR_WORDS.test(withoutSharedPronouns)) return verdict;
+  return {
+    ...verdict,
+    approved: true,
+    reason: `${verdict.reason} — aprovado por override determinístico (só "te"/"tu", pronomes compartilhados pelos dois idiomas, não é mistura real; ver TASK-0294/TASK-0296).`,
+  };
+}
+
+/** Encadeia os overrides determinísticos aplicados sobre o veredito de um revisor por IA (Groq ou Gemini) — cada um só age no padrão específico de falso-positivo já identificado, preservando o bloqueio em qualquer outro caso. */
+function applyDeterministicOverrides(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  return overrideSharedWordLanguageFalsePositive(
+    overrideNameOrderFalsePositive(
+      overrideNameOnlyFalsePositive(verdict, input),
+      input,
+    ),
+    input,
+  );
+}
+
 function parseReviewerDecision(value: unknown, source: ReplySafetySource): ReplySafetyVerdict {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const approved = data.approved === true;
@@ -392,7 +486,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
   if (deps.groqApiKey) {
     try {
       const result = await callGroqJsonCompletion(deps.groqApiKey, prompt);
-      return overrideNameOnlyFalsePositive(parseReviewerDecision(result.parsed, 'groq-reviewer'), input);
+      return applyDeterministicOverrides(parseReviewerDecision(result.parsed, 'groq-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Groq indisponível, tentando Gemini: ${error?.message || error}`);
     }
@@ -405,7 +499,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0 },
       }), 12_000);
-      return overrideNameOnlyFalsePositive(parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer'), input);
+      return applyDeterministicOverrides(parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Gemini indisponível: ${error?.message || error}`);
     }
