@@ -26,6 +26,7 @@ import { resolveCredentialsForTenant, resolveCredentialsForConversation, resolve
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import {
   getKnowledgeBase,
+  getRuntimeKnowledgeBase,
   setKnowledgeBase,
   collectReferencedVideoIds,
   collectReferencedImageIds,
@@ -299,7 +300,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType, {
       leadName: conv?.name,
-      customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+      customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
     });
 
     // Mesmo critério de /send-media acima e de transcriptionQueue.ts: sem
@@ -884,7 +885,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
         try {
           const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, uploadBase64, uploadMimeType, {
             leadName: conv?.name,
-            customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+            customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
           });
           // Achado real (29/08/2026): sem fala real detectada, transcription
           // vem vazia ("") — gravar isso direto como texto da mensagem
@@ -1139,7 +1140,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!productName) return res.status(400).json({ error: 'Campo "productName" é obrigatório.' });
     const tenantId = tenantOf(req);
 
-    const kb = await getKnowledgeBase(tenantId);
+    const { knowledgeBase: kb } = await getRuntimeKnowledgeBase(tenantId);
     const match = findProductMatch(kb, productName);
     const media = match?.variant?.exampleImageId || match?.variant?.exampleImageBase64 ? match.variant : match?.product;
     if (!media?.exampleImageId && !media?.exampleImageBase64) {
@@ -1218,7 +1219,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!productName) return res.status(400).json({ error: 'Campo "productName" é obrigatório.' });
     const tenantId = tenantOf(req);
 
-    const kb = await getKnowledgeBase(tenantId);
+    const { knowledgeBase: kb } = await getRuntimeKnowledgeBase(tenantId);
     const match = findProductMatch(kb, productName);
     const media = match?.variant?.exampleVideoId ? match.variant : match?.product;
     if (!media?.exampleVideoId) {
@@ -1535,8 +1536,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (!appointment.eventId) return; // sem evento real, sem referência estável pra deduplicar
     try {
       if (!(await financialModuleEnabled())) return;
-      const [kb, conversation] = await Promise.all([
-        getKnowledgeBase(tenantId),
+      const [{ knowledgeBase: kb }, conversation] = await Promise.all([
+        getRuntimeKnowledgeBase(tenantId),
         getConversation(tenantId, phone),
       ]);
       const amount = overrideAmount ?? (resolveProductAmountByName(kb, appointment.summary) ?? 0);
@@ -1694,7 +1695,14 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   // Base de conhecimento real do agente (objetivo, regras, preços, FAQ) —
-  // usada como contexto nos prompts de resposta automática.
+  // usada como contexto nos prompts de resposta automática. TASK-0308: lê
+  // via getRuntimeKnowledgeBase (fonte tipada/publicada, com fallback pro
+  // blob legado quando a publicação estiver incompleta) — antes fazia um
+  // select cru na tabela legada `knowledge_base`, o que fazia esta rota (e
+  // os botões "Dados da conta"/"Localização" da conversa, que consomem o
+  // estado alimentado por ela) devolver texto desatualizado minutos depois
+  // de o usuário editar e publicar uma correção no editor tipado.
+  //
   // Cache condicional por ETag (pedido direto de chat, 25/08/2026 —
   // incidente real de cota do Supabase: a Base de Conhecimento da Monique
   // sozinha pesa ~12MB, quase tudo foto de exemplo de produto inline em
@@ -1703,23 +1711,16 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // painel repetidas vezes durante desenvolvimento/teste já bastou pra
   // estourar a cota gratuita de saída (egress) do projeto.
   //
-  // Em vez de mudar o formato salvo (arriscado — POST /api/knowledge-base
-  // faz upsert do objeto inteiro; qualquer troca de forma aqui exigiria
-  // reconciliar merge/remoção de foto com risco real de apagar imagem por
-  // engano), o fix é só de transporte: manda o `updated_at` como ETag; se o
-  // cliente já tem a versão mais recente (If-None-Match bate), responde 304
-  // sem corpo nenhum — sem mudar NADA do formato/contrato dos dados. Não
-  // altera em nada quem lê `getKnowledgeBase()` direto (autoReply.ts,
-  // publicCatalogStore.ts, firstContactMessage.ts) — só esta rota HTTP.
+  // O ETag não pode mais vir de `updated_at` (não existe mais uma única
+  // linha/timestamp — a fonte pode ser a composição de 8 documentos
+  // tipados ou o blob legado) — agora é um hash do CONTEÚDO devolvido, o
+  // que mantém a mesma finalidade (evitar reenviar o corpo de ~12MB quando
+  // nada mudou) de forma agnóstica à fonte, e continua correto mesmo no
+  // fallback pro legado.
   router.get('/api/knowledge-base', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { data: row, error } = await getDb()
-      .from('knowledge_base')
-      .select('data, updated_at')
-      .eq('tenant_id', tenantOf(req))
-      .maybeSingle();
-    if (error) return res.status(500).json({ error: error.message });
+    const { knowledgeBase } = await getRuntimeKnowledgeBase(tenantOf(req));
 
-    const etag = `"kb-${tenantOf(req)}-${row?.updated_at || 'none'}"`;
+    const etag = `"kb-${crypto.createHash('sha256').update(JSON.stringify(knowledgeBase)).digest('hex').slice(0, 32)}"`;
     res.setHeader('ETag', etag);
     res.setHeader('Cache-Control', 'private, no-cache');
     // Sem isso, o cache HTTP do navegador (que não varia por header custom
@@ -1732,7 +1733,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     if (req.headers['if-none-match'] === etag) {
       return res.status(304).end();
     }
-    res.json({ knowledgeBase: (row?.data as any) || null });
+    res.json({ knowledgeBase: knowledgeBase || null });
   }));
 
   router.post('/api/knowledge-base', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
@@ -2462,7 +2463,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     }
 
     const conversation = await getConversation(tenantId, escalation.phone);
-    const knowledgeBase = await getKnowledgeBase(tenantId);
+    const { knowledgeBase } = await getRuntimeKnowledgeBase(tenantId);
     const safeKnowledgeContext = knowledgeBase
       ? formatKnowledgeBaseForPrompt({
           companyName: knowledgeBase.companyName,

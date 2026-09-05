@@ -13,7 +13,7 @@ import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaS
 import { showEvolutionTyping } from '../services/evolutionSend';
 import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
-import { getRuntimeKnowledgeBase, getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
@@ -568,7 +568,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
                     try {
                       const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, downloaded.base64, downloaded.mimeType, {
                         leadName: msg.contactName,
-                        customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+                        customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
                       });
                       const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
                       await updateMessageText(tenantId, msg.from, msg.messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);

@@ -815,29 +815,45 @@ export const App: React.FC = () => {
     // knowledge_base ainda — o guard abaixo nem troca esse estado, então
     // ficava assim pra sempre, não só "por um instante"). emptyKnowledgeBase
     // é o fallback correto.
-    const cachedForTenant = localStorage.getItem(kbCacheKey(activeTenant.id));
+    const tenantId = activeTenant.id;
+    const cachedForTenant = localStorage.getItem(kbCacheKey(tenantId));
     setKnowledgeBase(cachedForTenant ? JSON.parse(cachedForTenant) : emptyKnowledgeBase);
-    apiFetch('/api/knowledge-base')
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (cancelled) return;
-        if (data?.knowledgeBase) {
-          setKnowledgeBase((prev) => ({
-            ...prev,
-            ...data.knowledgeBase,
-            products: data.knowledgeBase.products || prev.products || [],
-            businessRules: data.knowledgeBase.businessRules || prev.businessRules || [],
-            faqs: data.knowledgeBase.faqs || prev.faqs || [],
-            documents: data.knowledgeBase.documents || prev.documents || [],
-          }));
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setKbLoaded(true);
-      });
+    const fetchKnowledgeBase = () => {
+      apiFetch('/api/knowledge-base')
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (cancelled) return;
+          if (data?.knowledgeBase) {
+            setKnowledgeBase((prev) => ({
+              ...prev,
+              ...data.knowledgeBase,
+              products: data.knowledgeBase.products || prev.products || [],
+              businessRules: data.knowledgeBase.businessRules || prev.businessRules || [],
+              faqs: data.knowledgeBase.faqs || prev.faqs || [],
+              documents: data.knowledgeBase.documents || prev.documents || [],
+            }));
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setKbLoaded(true);
+        });
+    };
+    fetchKnowledgeBase();
+    // TASK-0308: o editor tipado (AgentKnowledgeBase.tsx) publica direto,
+    // sem nunca remontar esta tela — sem isso, este estado (usado por
+    // WhatsAppLeadsSim e PublicCatalogSettings) só refletia uma publicação
+    // depois de um F5 ou de trocar de tenant. Mesmo formato do listener de
+    // universo:entitlements-changed acima, agora com um dispatcher real do
+    // outro lado (ver handlePublishTypedDrafts).
+    const onKnowledgeBasePublished = (event: Event) => {
+      const publishedTenantId = (event as CustomEvent<{ tenantId?: string }>).detail?.tenantId;
+      if (publishedTenantId === tenantId) fetchKnowledgeBase();
+    };
+    window.addEventListener('universo:knowledge-base-published', onKnowledgeBasePublished);
     return () => {
       cancelled = true;
+      window.removeEventListener('universo:knowledge-base-published', onKnowledgeBasePublished);
     };
   }, [activeTenant.id]);
 
