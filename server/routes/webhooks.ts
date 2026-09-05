@@ -330,6 +330,11 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
+        // TASK-0297: quando o revisor corrige em vez de só aprovar/bloquear
+        // (hoje só remove uma bolha isolada de empurrão de agenda depois de
+        // pergunta informativa), envia a versão corrigida — nunca o
+        // rascunho original nesse caso.
+        const bubblesToSend = safety.correctedBubbles ?? result.bubbles;
         const calendarExecution = await executeApprovedCalendarActions(
           tenantId,
           phone,
@@ -365,7 +370,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           }
         }
         try {
-          await sendBubbles(channel, phone, result.bubbles, async (bubbleText) => {
+          await sendBubbles(channel, phone, bubblesToSend, async (bubbleText) => {
             await recordOutgoingMessage(tenantId, phone, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
             console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${phone}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
           }, messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
