@@ -467,6 +467,29 @@ navegador — tecnicamente bloqueado pela Meta, não é uma direção viável.
 |---|---|---|---|
 | 5.4.1–5.4.3 | Dockerfile, env vars validadas no boot (Zod), health check | P1 | M/S |
 
+### Epic 5.5 — Testes de invariante e maturidade do agente de IA
+
+**Origem:** benchmark técnico do agente (04-05/09/2026) contra o `DeskcommCRM`
+(open source, `github.com/mosorrilha-crypto/DeskcommCRM`) — sem cobrir
+agendamento/comprovante (o DeskcommCRM não tem essas duas peças, e são o
+núcleo do negócio da Monique), mas com peças de engenharia mais maduras que
+as nossas em 4 pontos. Detalhe completo na sessão que fez o benchmark; aqui
+só o backlog acionável.
+
+| ID | Item | Prioridade | Esforço | Por quê |
+|---|---|---|---|---|
+| 5.5.1 | Suíte de **testes de invariante** (não "a função X funciona", mas "esta regra nunca pode ser violada, não importa a sequência de ações") — começar por isolamento multi-tenant: criar 2 tenants de teste, simular login em cada, provar que um nunca lê/edita dado do outro (conversas, leads, agendamentos, KB) | **P0** | M | O bug real da TASK-0264 (saas_admin caindo no tenant errado após F5) é exatamente a classe de bug que esse teste pega antes de ir pro ar — hoje só foi pego por print do dono do produto em produção |
+| 5.5.2 | Gate de CI: todo PR que toca `tenantContext`/RBAC/roteamento/atribuição roda a suíte de 5.5.1 antes de poder mergear | **P0** | S | Sem o gate, o teste existe mas depende de alguém lembrar de rodar — o valor real está em ser automático |
+| 5.5.3 | **Guardrails genéricos e configuráveis** pro agente (regex de bloqueio de saída, "só responde se achou respaldo na KB", janela de horário, flag de contato) — hoje só existe 1 gate hardcoded (data de agendamento em `autoReply.ts`) | P1 | M | `CLAUDE.md` já documenta "AI fallbacks never fabricate business data" como classe recorrente de bug, não hipotética — um guardrail genérico fecha a classe inteira em vez de gate novo por caso |
+| 5.5.4 | RAG de verdade (embeddings + busca por similaridade) na base de conhecimento, no lugar de injetar o jsonb inteiro no prompt todo turno | P2 | L (infra nova: pgvector, pipeline de ingestão/chunking) | Baixo ROI *agora* (catálogo da Monique é pequeno) — vira prioritário quando o catálogo/documentação crescer (múltiplos serviços, múltiplas unidades, manuais longos) |
+| 5.5.5 | Mecanismo de auto-aprimoramento (conversa resolvida → vira conhecimento novo na KB, com gate humano antes de publicar) | P3 | L | Só compensa com volume real de conversas resolvidas — hoje é early-stage (1 tenant real) |
+
+Itens **não** incluídos aqui por já serem pontos fortes nossos (confirmado no
+mesmo benchmark, não é regressão nem gap): separação física entre regra
+universal fixa (Layer 1, código) e conteúdo editável pelo tenant (Layer 3,
+KB) — o DeskcommCRM mistura tudo num `system_prompt` de texto livre; e
+escalonamento pra humano — maturidade equivalente dos dois lados.
+
 ---
 
 ## Pendências consolidadas da auditoria pré-lançamento (06/08/2026)
