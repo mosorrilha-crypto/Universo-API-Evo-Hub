@@ -46,7 +46,7 @@ vi.mock('../mediaDownload', () => ({
 vi.mock('../agentStatus', () => ({ isAgentPaused: vi.fn(async () => true) })); // pausado -> não segue pro auto-reply, só precisamos do updateMessageText
 vi.mock('../knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../knowledgeBaseStore')>();
-  return { ...actual, getKnowledgeBase: vi.fn(async () => null) };
+  return { ...actual, getKnowledgeBase: vi.fn(async () => null), getRuntimeKnowledgeBase: vi.fn(async () => ({ knowledgeBase: null, source: 'legacy_blob' as const })) };
 });
 vi.mock('../tenantProfileStore', () => ({ getTenantSegment: vi.fn(async () => 'geral') }));
 vi.mock('../escalationStore', async (importOriginal) => {

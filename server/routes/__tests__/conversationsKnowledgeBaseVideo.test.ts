@@ -25,6 +25,10 @@ const getKnowledgeBase = vi.fn(async () => ({
     { name: 'Sem Vídeo', price: 'R$ 100' },
   ],
 }));
+// TASK-0308: a rota passou a ler via getRuntimeKnowledgeBase — delega pra
+// getKnowledgeBase() acima, então mockResolvedValueOnce por teste (se
+// houver) continua valendo sem precisar duplicar em cada caso.
+const getRuntimeKnowledgeBase = vi.fn(async (tenantId: string) => ({ knowledgeBase: await getKnowledgeBase(), source: 'legacy_blob' as const }));
 
 vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
@@ -37,7 +41,7 @@ vi.mock('../../services/knowledgeBaseVideoStore', async (importOriginal) => {
 vi.mock('../../services/videoTranscode', () => ({ transcodeToWhatsAppVideo }));
 vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/knowledgeBaseStore')>();
-  return { ...actual, getKnowledgeBase, setKnowledgeBase: vi.fn() };
+  return { ...actual, getKnowledgeBase, getRuntimeKnowledgeBase, setKnowledgeBase: vi.fn() };
 });
 
 const { createConversationsRouter } = await import('../conversations');
