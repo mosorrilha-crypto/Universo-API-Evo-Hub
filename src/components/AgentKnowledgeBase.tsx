@@ -843,6 +843,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       setDiffOpenDocumentType(null);
       setIsSavedToast(true);
       setTimeout(() => setIsSavedToast(false), 4000);
+      // TASK-0308: App.tsx só re-busca a Base de Conhecimento no mount/troca
+      // de tenant — sem isso, o estado usado por WhatsAppLeadsSim e
+      // PublicCatalogSettings ficava com o valor antigo até a página ser
+      // recarregada, mesmo minutos depois de publicar aqui.
+      if (activeTenantId) {
+        window.dispatchEvent(new CustomEvent('universo:knowledge-base-published', { detail: { tenantId: activeTenantId } }));
+      }
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Não foi possível publicar todas as alterações. Revise os rascunhos e tente novamente.');
     } finally {

@@ -29,9 +29,11 @@ const transcodeToWhatsAppVoiceNote = vi.fn(async (_base64: string, _mimeType: st
     ? { base64: 'b2dnLW9wdXMtY29udmVydGlkbw==', mimeType: 'audio/ogg; codecs=opus' }
     : { base64: 'bXAzLWNvbnZlcnRpZG8=', mimeType: 'audio/mpeg' }
 ));
-const getKnowledgeBase = vi.fn(async () => ({
+const FAKE_KNOWLEDGE_BASE = {
   products: [{ name: 'Microlips', price: 'R$ 500', exampleImageBase64: 'ZmFrZS1pbWFnZQ==', exampleImageMimeType: 'image/jpeg' }],
-}));
+};
+const getKnowledgeBase = vi.fn(async () => FAKE_KNOWLEDGE_BASE);
+const getRuntimeKnowledgeBase = vi.fn(async () => ({ knowledgeBase: FAKE_KNOWLEDGE_BASE, source: 'legacy_blob' as const }));
 
 vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
@@ -42,7 +44,7 @@ vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveM
 vi.mock('../../services/audioTranscode', () => ({ transcodeToWhatsAppVoiceNote }));
 vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/knowledgeBaseStore')>();
-  return { ...actual, getKnowledgeBase, setKnowledgeBase: vi.fn() };
+  return { ...actual, getKnowledgeBase, getRuntimeKnowledgeBase, setKnowledgeBase: vi.fn() };
 });
 
 const { createConversationsRouter } = await import('../conversations');

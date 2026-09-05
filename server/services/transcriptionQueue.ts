@@ -9,7 +9,7 @@ import { isGeoRestrictedError } from './metaSend';
 import { compensateApprovedCalendarExecution, executeApprovedCalendarActions, generateAutoReplyForText } from './autoReply';
 import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
-import { getKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
+import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { getTenantSegment } from './tenantProfileStore';
 import { logEscalation, isPaymentRelated, looksLikeHarassment } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
@@ -168,7 +168,7 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
 
     const outcome = await transcribeAudioWithGemini(deps.getAi(), audioBase64, mimeType, {
       leadName: message.contactName,
-      customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+      customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
     });
 
     // Achado real de auditoria (29/08/2026): um áudio sem fala nenhuma
@@ -216,7 +216,7 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
         // transcrição como o texto a comparar com os gatilhos configurados.
         await attachCatalogClickIfMatched(tenantId, message.from, outcome.result.transcription);
         if (await shouldBlockForAdsOnlyMode(tenantId, message.from, outcome.result.transcription)) return;
-        const kbContext = formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId));
+        const kbContext = formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase);
         const segment = await getTenantSegment(tenantId);
         // TASK-0209 — achado real de auditoria estrutural (mesma classe do
         // TASK-0172, achada aqui no caminho de ÁUDIO): cortar a última

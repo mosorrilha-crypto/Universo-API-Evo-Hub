@@ -418,10 +418,10 @@ describe('generateAutoReplyForText — captura o nome que a cliente diz na conve
     expect(result?.capturedClientName).toBe('Camila');
   });
 
-  it('IGNORA nomeCapturado quando já existe contactName — nunca deixa a IA sobrescrever o nome real de perfil do WhatsApp', async () => {
+  it('TASK-0305: usa nomeCapturado mesmo quando o perfil do WhatsApp trouxe um valor — esse valor nunca é confiável como nome real (achado: "Pao Fretes" virando "Pao")', async () => {
     const ai = makeFakeAiWithName('Outro Nome');
     const result = await generateAutoReplyForText('tenant-a', ai, 'oi', 'Camila (perfil do WhatsApp)', undefined, []);
-    expect(result?.capturedClientName).toBeUndefined();
+    expect(result?.capturedClientName).toBe('Outro Nome');
   });
 
   it('não define capturedClientName quando o modelo não extraiu nenhum nome', async () => {
