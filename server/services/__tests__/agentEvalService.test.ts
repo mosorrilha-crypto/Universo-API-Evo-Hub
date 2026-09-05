@@ -60,6 +60,21 @@ describe('parseJudgeVerdict', () => {
   it('trata entrada malformada como reprovado sem issues, sem lançar', () => {
     expect(parseJudgeVerdict(null)).toEqual({ passed: false, issues: [], suggestedFix: undefined });
   });
+
+  it('aprova quando o próprio "issues" se autocontradiz concluindo que não há motivo pra reprovar (achado real 05/09/2026, TASK-0302)', () => {
+    const verdict = parseJudgeVerdict({
+      passed: false,
+      issues: ['Vamos reavaliar com extrema atencao: ... Na verdade, a regra 1 diz explicitamente que é correto... Não há motivo para reprovar pelas regras fornecidas.'],
+      suggestedFix: '',
+    });
+    expect(verdict).toEqual({ passed: true, issues: [], suggestedFix: undefined });
+  });
+
+  it('continua reprovando um "issues" normal, sem a autocontradição', () => {
+    const verdict = parseJudgeVerdict({ passed: false, issues: ['Repetiu o preço sem reconhecer que já foi dito antes.'] });
+    expect(verdict.passed).toBe(false);
+    expect(verdict.issues).toEqual(['Repetiu o preço sem reconhecer que já foi dito antes.']);
+  });
 });
 
 describe('isPassingEvalCase', () => {
