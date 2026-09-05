@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 
 import { loadConfig } from './server/config';
@@ -130,13 +131,33 @@ async function startServer() {
     }
   }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  // TASK-0311 (TASK-0249 item 1): o cookie de sessão (`universo_session`,
+  // ver auth.ts) precisa de `req.cookies` pra ser lido pelo middleware de
+  // autenticação — sem cookie assinado/criptografado por dentro do
+  // cookie-parser, porque o próprio valor já é um JWT verificado.
+  //
+  // CodeQL (js/missing-token-validation, "Missing CSRF middleware") sinaliza
+  // isso porque o padrão que reconhece é uma lib de token CSRF (ex: csurf)
+  // — não avalia o atributo SameSite do cookie em si. A defesa real aqui é
+  // `sameSite: 'strict'` no próprio cookie (auth.ts, sessionCookieOptions):
+  // suficiente porque o app é 100% same-origin (mesmo processo Express serve
+  // API e SPA, sem CORS, sem nenhum fluxo cross-site legítimo que precise
+  // deste cookie) — o navegador nunca o anexa numa requisição disparada por
+  // outro site, o que já fecha CSRF clássico. Adicionar uma lib de token
+  // CSRF por cima não fecharia nenhuma lacuna real nesta arquitetura, só
+  // duplicaria a defesa em ~141 rotas sem ganho. Decisão registrada em
+  // docs/task-registry/TASK-0311.md. Regra excluída via
+  // .github/codeql/codeql-config.yml (comentário `// lgtm[...]`/`// codeql[...]`
+  // inline NÃO é honrado pelo github/codeql-action — confirmado nesta mesma
+  // tarefa: um push com esse comentário continuou gerando o alerta).
+  app.use(cookieParser());
 
   // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
   // slug e só publica tenants explicitamente habilitados na migration 0042.
   app.use(createPublicCatalogRouter({ supabaseUrl: config.supabaseUrl, supabaseKey: config.supabaseKey }));
   app.use(createCommercialOfferRouter());
 
-  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase, authenticateToken }));
+  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase, authenticateToken, isProduction: config.isProduction }));
   app.use(createEntitlementsRouter({ authenticateToken }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken }));

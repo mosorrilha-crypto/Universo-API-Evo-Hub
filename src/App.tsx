@@ -33,7 +33,7 @@ import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
-import { getAuthToken, setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
+import { setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
 import { hasRoleAtLeast } from './lib/roles';
 import {
@@ -155,12 +155,15 @@ export const App: React.FC = () => {
   // a plataforma SaaS até que a sessão seja confirmada pelo servidor.
   const [isSaasSessionConfirmed, setIsSaasSessionConfirmed] = useState(false);
 
+  // TASK-0311 (TASK-0249 item 1): a sessão virou cookie httpOnly — o
+  // frontend não tem mais como saber, antes de perguntar, se existe uma
+  // sessão válida (o valor é invisível pro JS por desenho). Antes havia um
+  // guard aqui (`if (!getAuthToken())`) pra nem tentar `/api/auth/session`
+  // sem token; agora sempre tenta, e deixa o backend decidir (cookie
+  // ausente/inválido cai direto no `.catch`/no ramo de campos faltando
+  // abaixo, que já tratavam esse caso).
   useEffect(() => {
     let cancelled = false;
-    if (!getAuthToken()) {
-      setCurrentUser(null);
-      return () => { cancelled = true; };
-    }
 
     apiFetch('/api/auth/session')
       .then((response) => (response.ok ? response.json() : null))
@@ -168,7 +171,6 @@ export const App: React.FC = () => {
         if (cancelled) return;
         const operator = data?.operator;
         if (!operator?.id || !operator?.tenantId || !operator?.role) {
-          setAuthToken(null);
           setCurrentUser(null);
           return;
         }
@@ -714,7 +716,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     setUnauthorizedHandler(() => {
       setCurrentUser(null);
-      setAuthToken(null);
       setIsLoginModalOpen(true);
       clearCachedTenantScopedData();
       showToast('Sessão expirada — faça login novamente.');
@@ -859,14 +860,31 @@ export const App: React.FC = () => {
 
   // Busca o horário de funcionamento real salvo no backend (usado pelo
   // agendamento automático de verdade) e sincroniza no painel, se existir.
+  // TASK-0306 (achado real, pedido direto: "já fizemos várias tentativas mas
+  // os horários ainda não persistem"): confirmado no Supabase que o valor
+  // estava salvo corretamente no tenant (seg-sáb 09:00-18:00) — o problema
+  // nunca foi a gravação, e sim esta busca. Ela tinha `useEffect(..., [])`,
+  // sem depender de `currentUser`: dispara uma ÚNICA vez, no mount, usando o
+  // token/`X-Tenant-Id` que existir NAQUELE instante — se rodar antes da
+  // sessão terminar de resolver (ou antes do saas_admin trocar de empresa),
+  // a resposta vem vazia/errada e NUNCA tenta de novo pelo resto da sessão,
+  // mesmo depois do login terminar ou da troca de tenant. Mesma classe de
+  // bug já encontrada e corrigida 3x neste mesmo arquivo (linhas ~246, ~281,
+  // ~327) — todas guardam com `if (!currentUser) return;` e reagem a
+  // `currentUser`/`activeTenant.id` nas deps; esta busca era a única que
+  // ainda faltava esse tratamento. Também passa a resetar pra `{}` quando o
+  // backend não devolve nada (antes só atualizava se viesse algo, então uma
+  // troca de tenant sem horário configurado continuava mostrando o horário
+  // do tenant anterior).
   useEffect(() => {
+    if (!currentUser) return;
     apiFetch('/api/business-hours')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.businessHours) setBusinessHours(data.businessHours);
+        setBusinessHours(data?.businessHours || {});
       })
       .catch(() => {});
-  }, []);
+  }, [currentUser?.id, activeTenant.id]);
 
   // [CRM] Achado real em produção: OperatorCRM.tsx era 100% mock/localStorage
   // — leads reais que já chegam via WhatsApp nunca apareciam no CRM a menos
@@ -1420,9 +1438,12 @@ export const App: React.FC = () => {
         currentUser={currentUser}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={() => {
+          // TASK-0311 (TASK-0249 item 1): o cookie httpOnly não pode ser
+          // apagado pelo JS — precisa desse POST pro backend limpar de
+          // verdade (senão a sessão "volta" no próximo reload).
+          void apiFetch('/api/auth/logout', { method: 'POST' });
           handleSetActiveTab('whatsapp');
           setCurrentUser(null);
-          setAuthToken(null);
           setIsSaasSessionConfirmed(false);
           setIsLoginModalOpen(true);
           clearCachedTenantScopedData();
@@ -1847,10 +1868,12 @@ export const App: React.FC = () => {
         onClose={() => {
           if (currentUser) setIsLoginModalOpen(false);
         }}
-        onLogin={(usr, token) => {
+        onLogin={(usr) => {
+          // TASK-0311 (TASK-0249 item 1): a sessão já chega via cookie
+          // httpOnly no próprio `Set-Cookie` da resposta de login — não
+          // existe mais token pro frontend guardar/repassar.
           setCurrentUser(usr);
-          setAuthToken(token || null);
-          setIsSaasSessionConfirmed(Boolean(token) && usr.role === 'saas_admin');
+          setIsSaasSessionConfirmed(usr.role === 'saas_admin');
           setIsLoginModalOpen(false);
           showToast(`Bem-vindo, ${usr.name}!`);
         }}

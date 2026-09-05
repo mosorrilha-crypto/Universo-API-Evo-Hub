@@ -1,5 +1,4 @@
 import { Router, type RequestHandler, type Response } from 'express';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import {
   listConversations,
@@ -214,20 +213,20 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
    * o mesmo segredo/algoritmo de authenticateToken (não dá pra reaproveitar
    * o middleware direto, que só lê do header).
    */
-  router.get('/api/conversations/stream', conversationsStreamRateLimiter, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const token = typeof req.query.token === 'string' ? req.query.token : undefined;
-    if (!token) return res.status(401).end();
-    let user: any;
-    try {
-      user = jwt.verify(token, jwtSecret);
-    } catch {
-      return res.status(403).end();
-    }
-    if (!user?.tenantId) return res.status(403).end();
+  // TASK-0311 (TASK-0249 item 1): até aqui esta rota tinha sua PRÓPRIA
+  // verificação de JWT (não passava pelo `authenticateToken` compartilhado)
+  // porque `EventSource` nativo não manda header `Authorization` — o token
+  // vinha por querystring como contorno. Isso deixou de ser necessário: a
+  // sessão agora é um cookie `httpOnly` (`universo_session`), que o
+  // `EventSource` manda sozinho em toda conexão same-origem (mesma regra do
+  // `fetch`, não precisa de `withCredentials` pra same-origin) — a rota
+  // passa a usar o middleware padrão como qualquer outra rota autenticada.
+  router.get('/api/conversations/stream', conversationsStreamRateLimiter, authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const user = req.user!;
     // Mesma exceção de resolveTenantId (middleware/rbac.ts): só saas_admin
     // pode apontar pra outro tenant, aqui via querystring (EventSource
-    // nativo não manda header customizado) — o painel manda isso a partir
-    // do tenant selecionado no seletor.
+    // nativo não manda header customizado como X-Tenant-Id) — o painel
+    // manda isso a partir do tenant selecionado no seletor.
     const requestedTenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId.trim() : undefined;
     const tenantId = user.role === 'saas_admin' && requestedTenantId ? requestedTenantId : user.tenantId;
 

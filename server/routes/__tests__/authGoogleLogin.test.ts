@@ -41,7 +41,7 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase, authenticateToken: createAuthenticateToken('test-secret') }));
+  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase, authenticateToken: createAuthenticateToken('test-secret'), isProduction: false }));
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -69,8 +69,12 @@ describe('POST /api/auth/login-google', () => {
 
     const res = await loginWithGoogle();
     expect(res.status).toBe(200);
+    // TASK-0311 (TASK-0249 item 1): sessão vira cookie httpOnly, não vem mais no corpo.
+    const setCookie = res.headers.get('set-cookie') || '';
+    expect(setCookie).toContain('universo_session=');
+    expect(setCookie).toContain('HttpOnly');
     const body = await res.json();
-    expect(body.token).toBeTruthy();
+    expect(body.token).toBeUndefined();
     expect(body.operator).toEqual({ name: 'Operador Google', email: CADASTRADO_EMAIL, role: 'manager', tenantId: TENANT_UUID });
   });
 
