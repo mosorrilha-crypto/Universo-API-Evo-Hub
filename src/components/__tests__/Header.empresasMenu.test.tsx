@@ -81,22 +81,13 @@ afterEach(() => cleanup());
 // logo e botão de menu parcialmente cobertos, toque no menu não registrava.
 // Fix: `style={{ paddingTop: 'env(safe-area-inset-top)' }}` no <header>.
 describe('grupos de navegação no desktop', () => {
-  it('oculta exclusivamente Financeiro sem ocultar Agenda quando o módulo não foi liberado', () => {
-    renderHeader({ ...fullyEnabledCapabilities, financial: false });
-
-    expect(screen.getByRole('button', { name: 'Agenda' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Financeiro' })).toBeNull();
-  });
-
-  // Achado real, 30/08/2026 (pedido direto do dono do produto): o teste
-  // acima ("mantém todos os recursos visíveis ao SaaS Admin...") validava
-  // exatamente o bug de um commit anterior ("fix: preserva acesso do saas
-  // admin aos recursos", 27/08/2026) — o SaaS Admin passou a ignorar as
-  // capacidades da empresa ativa e via tudo sempre, quebrando a função de
-  // pré-visualizar uma empresa (ex: Clic Piscinas, só 6 recursos
-  // liberados, aparecia com todos). Removido; ver App.tsx/Header.tsx pro
-  // revert completo. O SaaS Admin continua vendo Logs do Sistema sempre
-  // (comportamento intencional à parte, não afetado por este revert).
+  // TASK-0301 (pedido direto): Atendimento, CRM (Vendas), Agenda e
+  // Financeiro saíram do menu superior por completo — Atendimento virou a
+  // tela padrão do sistema (sem botão próprio, o logo clicável leva de
+  // volta pra lá) e os outros três só ficam acessíveis pela caixa de
+  // ferramentas dentro do Atendimento (ver WhatsAppLeadsSim.tsx). O teste
+  // que cobria "esconde Financeiro sem esconder Agenda no topo" ficou sem
+  // objeto — nenhum dos dois existe mais ali, com ou sem capability.
 
   it('remove todos os menus correspondentes às capacidades bloqueadas da empresa ativa', async () => {
     const user = userEvent.setup();
