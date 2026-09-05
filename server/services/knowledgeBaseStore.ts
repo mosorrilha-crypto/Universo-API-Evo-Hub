@@ -442,6 +442,15 @@ export interface AgentKnowledgeBase {
    * que funciona sem precisar de coordenadas exatas.
    */
   locationMapsUrl?: string;
+  /**
+   * TASK-0286 (pedido direto): dados de pagamento (PIX/conta bancária) em
+   * texto livre — mensagem pronta que o OPERADOR manda manualmente pelo
+   * menu de anexos da conversa quando o cliente pede, mesmo padrão do
+   * `locationMapsUrl` acima. Deliberadamente NUNCA lido pelo agente
+   * automático (ver formatKnowledgeBaseForPrompt logo abaixo, que não
+   * inclui este campo) — dado financeiro sensível demais pra automação.
+   */
+  paymentDetailsText?: string;
   /** Sequência fixa de "1º contato" (texto/imagem/vídeo/arquivo, na ordem do array) — ver FirstContactBlock acima. Ausente/vazio = comportamento de sempre. */
   firstContactBlocks?: FirstContactBlock[];
 }
@@ -493,7 +502,7 @@ type KnowledgeBaseDocumentRow = {
 };
 
 const KNOWLEDGE_BASE_DOCUMENT_FIELDS: Record<KnowledgeBaseDocumentType, readonly (keyof AgentKnowledgeBase)[]> = {
-  business_profile: ['companyName', 'agentGoal', 'businessModel', 'locationMapsUrl'],
+  business_profile: ['companyName', 'agentGoal', 'businessModel', 'locationMapsUrl', 'paymentDetailsText'],
   brand_voice: ['toneOfVoice'],
   service_catalog: ['products'],
   pricing_policies: ['pricingAndPolicies', 'businessRules'],

@@ -100,8 +100,6 @@ const kbCacheKey = (tenantId: string) => `saas_agent_kb_${tenantId}`;
 // que WhatsAppLeadsSim.tsx também lê ao montar — contato de um tenant
 // aparecia na lista de outro. Chave por tenant + poda corrigem os dois lados.
 const leadsCacheKey = (tenantId: string) => `saas_crm_leads_${tenantId}`;
-/** Mesmo raciocínio de leadsCacheKey acima, pro cache de transações financeiras. */
-const transactionsCacheKey = (tenantId: string) => `saas_transactions_${tenantId}`;
 
 export const App: React.FC = () => {
   // Navigation & View State
@@ -484,15 +482,17 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Financial Transactions — mesmo raciocínio do fix de leads fake
-  // (12/08/2026): cache vazio nunca deveria cair pro dataset fictício, senão
-  // dado de demonstração "gruda" pra sempre (o merge com transações reais,
-  // GET /api/financial/transactions abaixo, só ADICIONA por id, nunca
-  // remove). Começa vazia.
-  const [transactions, setTransactions] = useState<FinancialTransaction[]>(() => {
-    const saved = localStorage.getItem(transactionsCacheKey(activeTenant.id));
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Financial Transactions — achado real de auditoria (TASK-0249/TASK-0274,
+  // mesmo padrão do CodeQL "Clear text storage of sensitive information" já
+  // corrigido pro cache de leads em WhatsAppLeadsSim.tsx, TASK-0243): esse
+  // estado chegou a persistir em localStorage (nome/telefone do lead, valor,
+  // pixQrCode, paymentLinkUrl) sem nenhuma criptografia. Confirmado que era
+  // só cache-pra-performance (pintura instantânea antes do fetch real
+  // responder) — nenhum comportamento real dependia dele, o merge com dado
+  // real (GET /api/financial/transactions abaixo) sempre sobrescreve. Lista
+  // começa vazia e é populada pelo fetch real a cada carregamento/troca de
+  // tenant, mesma correção aplicada ao cache de leads.
+  const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
 
   // Despesas recorrentes (TASK-0097) — cadastro, não precisa do mesmo cache
   // local otimista dos leads/transações (baixo volume, sem tela offline
@@ -532,6 +532,55 @@ export const App: React.FC = () => {
   // Atendimento enquanto o operador está numa conversa, igual ao app real
   // do WhatsApp (pedido direto, 29/08/2026). Sem efeito no desktop.
   const [isMobileWhatsAppThreadOpen, setIsMobileWhatsAppThreadOpen] = useState(false);
+
+  // TASK-0290 (pedido direto, print do botão físico/gesto de voltar do
+  // Android circulado): "esse botão minimiza o aplicativo e não volta as
+  // páginas dentro do aplicativo". Achado real: o app inteiro nunca chamou
+  // `history.pushState` — sem nenhuma entrada própria no histórico do
+  // navegador/WebView, o botão de voltar do Android não tem nada pra
+  // "desfazer" e cai direto no comportamento padrão (minimizar/fechar a
+  // PWA). Corrigido empilhando uma entrada toda vez que o app fica "mais
+  // fundo" (troca de aba saindo de "Hoje", ou abre uma conversa no mobile)
+  // e escutando `popstate` pra desfazer exatamente um nível por vez — só
+  // quando já está em "Hoje" sem conversa aberta é que sobra pro
+  // comportamento nativo (minimizar), exatamente o pedido.
+  const isMobileWhatsAppThreadOpenRef = useRef(isMobileWhatsAppThreadOpen);
+  useEffect(() => { isMobileWhatsAppThreadOpenRef.current = isMobileWhatsAppThreadOpen; }, [isMobileWhatsAppThreadOpen]);
+  const [closeThreadSignal, setCloseThreadSignal] = useState(0);
+  // Evita que o próprio `setActiveTab`/fechamento disparado pelo popstate
+  // empilhe uma entrada NOVA (o que faria o histórico crescer sem fim e a
+  // volta nunca "andar" de verdade) — sem isso o efeito de push abaixo não
+  // sabe distinguir "usuário navegou pra frente" de "voltamos por causa do
+  // botão de voltar".
+  const suppressTabPushRef = useRef(false);
+  useEffect(() => {
+    if (suppressTabPushRef.current) { suppressTabPushRef.current = false; return; }
+    if (activeTab !== 'home') {
+      window.history.pushState({ universoNav: 'tab', tab: activeTab }, '');
+    }
+  }, [activeTab]);
+  useEffect(() => {
+    if (isMobileWhatsAppThreadOpen) {
+      window.history.pushState({ universoNav: 'thread' }, '');
+    }
+    // Fechar a conversa manualmente (botão "voltar pra lista" dentro do
+    // app, não o botão do Android) não desempilha a entrada — aceito como
+    // limitação conhecida: na pior hipótese sobra 1 aperto de voltar "à
+    // toa" antes de sair de verdade, nunca uma trava sem conseguir sair.
+  }, [isMobileWhatsAppThreadOpen]);
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      if (isMobileWhatsAppThreadOpenRef.current) {
+        setCloseThreadSignal((n) => n + 1);
+        return;
+      }
+      const state = event.state as { universoNav?: string; tab?: ActiveTab } | null;
+      suppressTabPushRef.current = true;
+      handleSetActiveTab(state?.universoNav === 'tab' && state.tab ? state.tab : 'home');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Achado real, 29/08/2026 (TASK-0159 resolveu a cadeia de flex interna do
   // Atendimento, mas a lista de conversas mobile — cabeçalho global visível —
@@ -688,14 +737,22 @@ export const App: React.FC = () => {
   useEffect(() => {
     const cachedLeads = localStorage.getItem(leadsCacheKey(activeTenant.id));
     setLeads(cachedLeads ? JSON.parse(cachedLeads) : []);
-    const cachedTx = localStorage.getItem(transactionsCacheKey(activeTenant.id));
-    setTransactions(cachedTx ? JSON.parse(cachedTx) : []);
+    setTransactions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenant.id]);
 
+  // Purga ativa, uma vez por montagem (mesmo padrão de WhatsAppLeadsSim.tsx,
+  // TASK-0243): navegadores que usaram o painel antes desta correção podem
+  // ter transações financeiras reais em texto puro gravadas de uma sessão
+  // anterior — sem isso, ficariam lá indefinidamente, já que parar de
+  // escrever não apaga o que já foi escrito. Varre todos os tenants (não só
+  // o ativo); a limpeza de logout (clearCachedTenantScopedData) continua
+  // existindo, mas só roda no logout.
   useEffect(() => {
-    safeSetLocalStorage(transactionsCacheKey(activeTenant.id), JSON.stringify(transactions));
-  }, [transactions, activeTenant.id]);
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('saas_transactions_')) localStorage.removeItem(key);
+    }
+  }, []);
 
   // As fotos de exemplo em Base64 legado (Epic 4.5.2) são o que estoura a
   // cota — e não precisam estar no cache: são carregadas de novo, completas,
@@ -1211,6 +1268,7 @@ export const App: React.FC = () => {
           pixQrCode: newTx.pixQrCode,
           paymentLinkUrl: newTx.paymentLinkUrl,
           entryType: newTx.entryType,
+          sourceRef: newTx.sourceRef,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1360,6 +1418,7 @@ export const App: React.FC = () => {
         canAccessSaasAdmin={canSeeSaasMaster}
         escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
         onOpenChangePasswordModal={() => setIsChangePasswordModalOpen(true)}
+        onToast={showToast}
       />
       </div>
       {activeTab !== 'whatsapp' && canSeeConversations && (
@@ -1538,6 +1597,11 @@ export const App: React.FC = () => {
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
             onThreadOpenChange={setIsMobileWhatsAppThreadOpen}
+            financialModuleEnabled={canSeeFinancial}
+            onAddTransaction={handleAddTransaction}
+            operatorName={currentUser?.name}
+            closeThreadSignal={closeThreadSignal}
+            onToast={showToast}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}

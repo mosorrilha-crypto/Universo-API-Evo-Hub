@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
-import { getExistingPushSubscription, enablePushNotifications, disablePushNotifications } from '../lib/pushNotifications';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
@@ -36,7 +35,9 @@ import {
   Calendar as CalendarIcon,
   CalendarPlus,
   FileText,
+  MapPin,
   Mic,
+  Wallet,
   Volume2,
   Paperclip,
   CheckCheck,
@@ -76,8 +77,10 @@ import {
   Video,
   Copy,
   Megaphone,
-  MessageCircle
+  MessageCircle,
+  Receipt
 } from 'lucide-react';
+import { TransactionDialog } from './financial/TransactionDialog';
 
 // Só placeholders/exemplos pro operador do segmento beauty_studio — texto
 // livre, não um enum fixo. O operador pode digitar qualquer coisa.
@@ -174,6 +177,30 @@ interface WhatsAppLeadsSimProps {
       só passa esta prop quando o usuário logado tem permissão pra ver a
       Agenda (`canSeeAgenda`) — se vier `undefined`, o botão nem aparece. */
   onGoToAgenda?: () => void;
+  /** TASK-0284: libera o item "Marcar como comprovante" no menu "⋮" das
+      mensagens de imagem — App.tsx passa canSeeFinancial (mesmo flag que
+      controla a aba Financeiro). Sem isso, nunca oferece a ação. */
+  financialModuleEnabled?: boolean;
+  /** Cria a transação financeira do caminho avulso do comprovante — App.tsx
+      passa handleAddTransaction, a mesma função já usada pelo Financeiro. */
+  onAddTransaction?: (tx: FinancialTransaction) => Promise<boolean>;
+  /** Nome do operador logado, só pra atribuição no lançamento avulso criado a partir de um comprovante. */
+  operatorName?: string;
+  /** TASK-0290 (pedido direto, print do botão "voltar" do Android circulado:
+      "esse botão minimiza o aplicativo e não volta as páginas dentro do
+      aplicativo") — App.tsx empilha uma entrada de histórico (History API)
+      quando a conversa abre no mobile, e usa este contador (mesmo padrão de
+      `openLeadRequestId`: muda de valor mesmo pro "mesmo" pedido, pra
+      disparar o efeito de novo) pra mandar fechar a conversa quando o botão
+      físico/gesto de voltar do Android for pressionado — sem isso, App.tsx
+      não tem nenhuma forma de fechar a conversa que este componente controla
+      internamente (`mobileThreadOpen`). */
+  closeThreadSignal?: number;
+  /** TASK-0292 — confirmação/erro do botão "Ressincronizar" da Ficha do
+      Contato (agendamento desatualizado). Mesmo `showToast` já usado em
+      App.tsx/AgendaFinanceiroCenter; opcional pra não quebrar quem ainda não
+      passa essa prop. */
+  onToast?: (message: string) => void;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -262,8 +289,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   escalations = [],
   onGoToEscalations,
   onGoToAgenda,
+  closeThreadSignal,
   openLeadPhone,
   openLeadRequestId,
+  financialModuleEnabled,
+  onAddTransaction,
+  operatorName,
+  onToast,
 }) => {
   const { t, language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -328,6 +360,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   useEffect(() => {
     onThreadOpenChange?.(mobileThreadOpen);
   }, [mobileThreadOpen, onThreadOpenChange]);
+  // TASK-0290: fecha a conversa aberta no mobile quando App.tsx avisa que o
+  // botão/gesto de voltar do Android foi acionado — mesmo efeito do botão
+  // "voltar pra lista" já existente no cabeçalho (linha ~3790). O `useRef`
+  // evita disparar no primeiro render (closeThreadSignal nasce `undefined`
+  // ou 0, igual o valor inicial — só reage a uma mudança de verdade).
+  const closeThreadSignalRef = useRef(closeThreadSignal);
+  useEffect(() => {
+    if (closeThreadSignal === undefined || closeThreadSignal === closeThreadSignalRef.current) return;
+    closeThreadSignalRef.current = closeThreadSignal;
+    setMobileThreadOpen(false);
+    setMobileAnalysisOpen(false);
+  }, [closeThreadSignal]);
   // Achado real em produção: a coluna 3 (Ficha IA) ficou hidden no mobile
   // (PR #70, evitava sobrepor a lista) mas o botão "Ver Ficha IA" continuou
   // visível e clicável lá, sem fazer nada — parecia quebrado. Este estado é
@@ -377,7 +421,26 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'window_closed'>('all');
+  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'window_open' | 'window_closed'>('all');
+  // Pedido direto (04/09/2026): ícone de filtro ao lado do ícone de Status,
+  // abrindo uma lista com o filtro por janela de 24h — em vez de mais uma
+  // pill disputando espaço na barra (ver TASK-0279, que já tinha rebaixado
+  // "Fora das 24h" por esse motivo).
+  const [isWindowFilterMenuOpen, setIsWindowFilterMenuOpen] = useState(false);
+  // Achado real (05/09/2026, print do dono do produto): a fileira de pills
+  // (Tudo/Não lidos/filtro de 24h/etiqueta) precisa de `overflow-x-auto` pra
+  // rolar horizontalmente, mas o CSS de overflow força overflow-y pro mesmo
+  // valor quando só um eixo é 'visible' — então qualquer popover `absolute`
+  // ancorado num botão desta fileira ficava CORTADO verticalmente pelo
+  // próprio container rolável (o estado abria certinho, só que invisível).
+  // Por isso os dois popovers desta fileira (filtro de 24h e etiqueta) usam
+  // `position: fixed` com coordenadas calculadas no clique, em vez de
+  // `absolute` dentro da fileira.
+  const windowFilterBtnRef = useRef<HTMLButtonElement>(null);
+  const [windowFilterMenuPos, setWindowFilterMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const labelFilterBtnRef = useRef<HTMLButtonElement>(null);
+  const [isLabelFilterMenuOpen, setIsLabelFilterMenuOpen] = useState(false);
+  const [labelFilterMenuPos, setLabelFilterMenuPos] = useState<{ top: number; left: number } | null>(null);
   // Painel lateral de contexto do contato (Referência 1: 3 colunas ativas no desktop)
   const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
   const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis' | 'escalations'>('profile');
@@ -491,6 +554,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [inputMessage]);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [retryingTranscriptionId, setRetryingTranscriptionId] = useState<string | null>(null);
+  // TASK-0284: rascunho aberto quando o operador marca uma imagem do chat
+  // como comprovante — a IA já rodou (ou falhou, extraction fica null) até
+  // aqui; o modal (mesmo usado no Financeiro) deixa o operador revisar/
+  // editar antes de qualquer registro real acontecer.
+  const [analyzingPaymentProofFor, setAnalyzingPaymentProofFor] = useState<string | null>(null);
+  const [paymentProofDraft, setPaymentProofDraft] = useState<{
+    messageId: string;
+    leadName: string;
+    leadPhone: string;
+    extraction: {
+      amount: number | null;
+      method: PaymentMethod | null;
+      bankOrApp: string | null;
+    } | null;
+  } | null>(null);
+  const [submittingPaymentProof, setSubmittingPaymentProof] = useState(false);
   const [isGeneratingReengagement, setIsGeneratingReengagement] = useState(false);
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
   // na conversa") — antes o botão só disparava speechSynthesis lendo o
@@ -731,46 +810,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   useEffect(() => { fetchGoogleCalendarStatus(); }, []);
-
-  // Push notification do PWA do atendente (issue #159) — segundo canal de
-  // alerta pro operador (escalação nova, agente pausado com lead sem
-  // resposta), além do WhatsApp template já existente. `null` = ainda
-  // verificando se já existe assinatura salva no navegador; `false` cobre
-  // tanto "nunca ativou" quanto "navegador não suporta" (a mensagem de erro
-  // específica só aparece se o operador tentar ativar).
-  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
-  const [pushBusy, setPushBusy] = useState(false);
-
-  useEffect(() => {
-    getExistingPushSubscription()
-      .then((sub) => setPushEnabled(!!sub))
-      .catch(() => setPushEnabled(false));
-  }, []);
-
-  const handleTogglePush = async () => {
-    // Achado real em produção: o aviso de erro (setErrorMsg) nunca se
-    // limpava sozinho — se uma tentativa falhasse, o banner laranja ficava
-    // preso na tela pra sempre, mesmo numa tentativa seguinte bem-sucedida,
-    // fazendo parecer que continuava falhando quando na verdade já tinha
-    // ativado. Limpa aqui no início de cada tentativa nova.
-    setErrorMsg(null);
-    setPushBusy(true);
-    try {
-      if (pushEnabled) {
-        await disablePushNotifications();
-        setPushEnabled(false);
-      } else {
-        const result = await enablePushNotifications();
-        if (result.success) {
-          setPushEnabled(true);
-        } else {
-          setErrorMsg(result.error || 'Não foi possível ativar notificações agora.');
-        }
-      }
-    } finally {
-      setPushBusy(false);
-    }
-  };
 
   const handleConnectGoogleCalendar = async () => {
     try {
@@ -1890,6 +1929,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
 
+  // Achado real (pedido do dono do produto, 04/09/2026): o badge "24h" e o
+  // bloqueio de reengajamento congelavam no valor buscado quando a conversa
+  // foi aberta — `serviceWindow.withinWindow`/`hoursRemaining` vêm prontos do
+  // servidor e refreshContactContext só roda de novo em poucos gatilhos
+  // manuais (trocar de lead, editar memória, etc.), nunca sozinho por tempo.
+  // Um operador com a conversa aberta por horas via "aberta"/contagem antiga
+  // mesmo depois da janela real ter fechado. Corrigido recalculando ao vivo
+  // a partir de `windowExpiresAt` (timestamp absoluto, não muda) + um
+  // relógio que atualiza a cada minuto, em vez de confiar nos campos
+  // booleanos já calculados que o servidor devolveu no momento do fetch.
+  const [windowStatusNowTick, setWindowStatusNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setWindowStatusNowTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const getLiveServiceWindowStatus = React.useCallback(
+    (serviceWindow?: ContactAgentContext['serviceWindow'] | null): { isWindowOpen: boolean; hoursRemaining: number } => {
+      if (!serviceWindow) return { isWindowOpen: true, hoursRemaining: 24 };
+      if (!serviceWindow.windowExpiresAt) return { isWindowOpen: false, hoursRemaining: 0 };
+      const msRemaining = new Date(serviceWindow.windowExpiresAt).getTime() - windowStatusNowTick;
+      return {
+        isWindowOpen: msRemaining > 0,
+        hoursRemaining: Math.max(0, Math.ceil(msRemaining / (60 * 60 * 1000))),
+      };
+    },
+    [windowStatusNowTick]
+  );
+
   // Checa 1x por tenant se há WABA configurado, pra já bloquear "Reabrir a
   // conversa" na página quando não há (ver GET /api/conversations/:phone/templates
   // em conversations.ts — reason: 'waba_not_configured'). Falha de rede não
@@ -2140,20 +2207,66 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (!selectedLead?.phone || !(selectedLead as any)?.isReal) {
+  const refreshPaymentAppointment = React.useCallback(async () => {
+    const phone = selectedLead?.phone;
+    if (!phone || !(selectedLead as any)?.isReal) {
       setPaymentAppointment(null);
       return;
     }
+    try {
+      const r = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/appointment`);
+      const data = r.ok ? await r.json() : null;
+      setPaymentAppointment(data?.appointment || null);
+    } catch {
+      // silencioso, igual ao comportamento anterior — a Ficha só fica sem o card de agendamento até a próxima tentativa.
+    }
+  }, [selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  useEffect(() => {
     let cancelled = false;
-    apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/appointment`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    (async () => {
+      if (!selectedLead?.phone || !(selectedLead as any)?.isReal) {
+        setPaymentAppointment(null);
+        return;
+      }
+      try {
+        const r = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/appointment`);
+        const data = r.ok ? await r.json() : null;
         if (!cancelled) setPaymentAppointment(data?.appointment || null);
-      })
-      .catch(() => {});
+      } catch {
+        // silencioso — igual ao comportamento anterior.
+      }
+    })();
     return () => { cancelled = true; };
   }, [selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  // TASK-0292 (pedido direto, print: "este campo não está conectado a
+  // agenda, e eu não consigo editar pois a cliente remarcou") — botão
+  // "Ressincronizar" na Ficha do Contato (ConversationContextSidebar).
+  // Realinha `appointments` com o estado ATUAL do mesmo evento do Google
+  // Calendar (POST .../appointment/resync, nunca cria evento novo nem toca
+  // em pagamento), pra quando o reagendamento aconteceu fora dos fluxos que
+  // já escrevem nessa tabela (ex.: editar o evento direto no Calendar).
+  const [isResyncingAppointment, setIsResyncingAppointment] = useState(false);
+  const handleResyncAppointment = React.useCallback(async () => {
+    const phone = selectedLead?.phone;
+    if (!phone || isResyncingAppointment) return;
+    setIsResyncingAppointment(true);
+    try {
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/appointment/resync`, { method: 'POST' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        onToast?.(data?.error || 'Não foi possível ressincronizar o agendamento agora.');
+        return;
+      }
+      await refreshPaymentAppointment();
+      onToast?.(data?.changed ? 'Agendamento ressincronizado com o horário atual da agenda.' : 'O agendamento já estava sincronizado com a agenda.');
+    } catch {
+      onToast?.('Não foi possível ressincronizar o agendamento agora.');
+    } finally {
+      setIsResyncingAppointment(false);
+    }
+  }, [selectedLead?.phone, isResyncingAppointment, refreshPaymentAppointment, onToast]);
 
   // Achado real (print da Ficha do Contato, "Gisse" com "Agendou? sim" mas
   // "AGENDAMENTOS: Nenhum agendamento ativo"): as duas seções liam fontes
@@ -2305,6 +2418,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return Date.now() - new Date(lastLeadMessageAt).getTime() < CUSTOMER_SERVICE_WINDOW_MS;
   };
   const windowClosedLeadsCount = leads.filter((lead) => (lead as any).isReal && !isWithin24hWindow(lead)).length;
+  const windowOpenLeadsCount = leads.filter((lead) => (lead as any).isReal && isWithin24hWindow(lead)).length;
 
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
@@ -2326,6 +2440,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       if (activeTabFilter === 'unread') {
         return getUnreadCount(lead) > 0;
+      }
+      if (activeTabFilter === 'window_open') {
+        return Boolean((lead as any).isReal) && isWithin24hWindow(lead);
       }
       if (activeTabFilter === 'window_closed') {
         return Boolean((lead as any).isReal) && !isWithin24hWindow(lead);
@@ -2764,16 +2881,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Send a new Text Message to the chat
-  const handleSendTextMessage = async (e?: React.FormEvent) => {
+  // `overrideText` (TASK-0284) — pra mandar um texto pronto (ex: link de
+  // localização fixa do negócio, ver tile "Localização" no menu de anexos)
+  // sem passar pela caixa de digitação: `setInputMessage` é assíncrono, então
+  // chamar `setInputMessage(texto)` seguido de `handleSendTextMessage()` na
+  // mesma função enviaria o valor ANTIGO de `inputMessage` (closure velho),
+  // não o texto recém-setado. Sem override, comportamento idêntico a antes.
+  const handleSendTextMessage = async (e?: React.FormEvent, overrideText?: string) => {
     if (e) e.preventDefault();
-    if (!inputMessage.trim() || !selectedLead) return;
+    const text = overrideText ?? inputMessage.trim();
+    if (!text || !selectedLead) return;
 
-    const replyToMessageId = replyingTo?.id;
+    const replyToMessageId = overrideText ? undefined : replyingTo?.id;
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       sender: senderRole,
       type: 'text',
-      text: inputMessage.trim(),
+      text,
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       replyToMessageId,
     };
@@ -2784,7 +2908,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     };
 
     setLeads((prev) => prev.map((l) => (l.id === selectedLead.id ? updatedLead : l)));
-    setInputMessage('');
+    if (!overrideText) setInputMessage('');
     setReplyingTo(null);
 
     if (senderRole === 'agent' && (selectedLead as any).isReal) {
@@ -2914,6 +3038,83 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       setErrorMsg('Não foi possível tentar transcrever de novo. Tente mais tarde.');
     } finally {
       setRetryingTranscriptionId(null);
+    }
+  };
+
+  // TASK-0284: operador marcou uma imagem do chat como comprovante de
+  // pagamento (menu "⋮" do balão). Analisa via IA (extração estruturada,
+  // nunca confirma nada sozinha) e abre o modal de lançamento financeiro
+  // pré-preenchido — mesmo se a análise falhar (extraction fica null), o
+  // modal abre vazio pro operador preencher à mão, nunca bloqueia o fluxo.
+  const handleFlagAsPaymentProof = async (msg: ChatMessage) => {
+    if (!selectedLead || !(selectedLead as any).isReal) return;
+    setAnalyzingPaymentProofFor(msg.id);
+    let extraction: { amount: number | null; method: PaymentMethod | null; bankOrApp: string | null } | null = null;
+    try {
+      const res = await apiFetch(
+        `/api/conversations/${encodeURIComponent(selectedLead.phone)}/messages/${encodeURIComponent(msg.id)}/analyze-payment-proof`,
+        { method: 'POST' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      if (data.success) extraction = data.extraction;
+      else setErrorMsg('Não foi possível analisar essa imagem automaticamente — preencha os campos manualmente.');
+    } catch (err) {
+      console.error('Falha ao analisar comprovante:', err);
+      setErrorMsg('Não foi possível analisar essa imagem agora. Tente de novo em instantes.');
+    } finally {
+      setAnalyzingPaymentProofFor(null);
+    }
+    setPaymentProofDraft({ messageId: msg.id, leadName: selectedLead.name, leadPhone: selectedLead.phone, extraction });
+  };
+
+  // Duas saídas: com "Vincular a este agendamento" marcado, confirma o
+  // pagamento de verdade pelo mesmo caminho sensível já usado no painel de
+  // Escalonamentos (cria o evento real no Calendar, usa o valor da IA como
+  // valor REAL em vez do preço do catálogo); sem vínculo, cria só um
+  // lançamento financeiro avulso — nunca toca payment_status/appointments.
+  const savePaymentProofTransaction = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!paymentProofDraft) return;
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get('amount') || 0);
+    const description = String(form.get('description') || '').trim();
+    const linkToAppointment = form.get('linkToAppointment') === 'on';
+    if (!description || !Number.isFinite(amount) || amount <= 0) return;
+    setSubmittingPaymentProof(true);
+    try {
+      if (linkToAppointment && paymentAppointment) {
+        const res = await apiFetch(`/api/conversations/${encodeURIComponent(paymentProofDraft.leadPhone)}/verify-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'verified', overrideAmount: amount }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        setPaymentAppointment(data.appointment);
+      } else {
+        const created = await onAddTransaction?.({
+          id: crypto.randomUUID(),
+          leadId: selectedLead?.id || 'chat-image',
+          leadName: paymentProofDraft.leadName,
+          leadPhone: paymentProofDraft.leadPhone,
+          productName: description,
+          amount,
+          paymentMethod: String(form.get('paymentMethod')) as PaymentMethod,
+          status: String(form.get('status') || 'pago') as PaymentStatus,
+          date: new Date().toISOString(),
+          operatorName,
+          channel: 'Comprovante via WhatsApp',
+          entryType: 'income',
+          sourceRef: `chat-image:${paymentProofDraft.messageId}`,
+        } as FinancialTransaction);
+        if (!created) throw new Error('Não foi possível registrar no servidor.');
+      }
+      setPaymentProofDraft(null);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Não foi possível confirmar. Tente de novo.');
+    } finally {
+      setSubmittingPaymentProof(false);
     }
   };
 
@@ -3281,17 +3482,54 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // "Ferramentas" (aba inferior) empurrava a lista de conversas inteira pra
   // baixo — o painel entrava no fluxo normal do documento, dentro do
   // Controls Bar. Conteúdo extraído numa variável pra ser reaproveitado sem
-  // duplicar JSX à mão: no desktop continua inline (ver `hidden sm:flex`
-  // logo abaixo, mesmo lugar de sempre); no mobile vira uma gaveta que sobe
-  // por cima da tela, mesmo padrão já usado pela Ficha IA
-  // (`atendimento-analysis-drawer`, mais abaixo).
-  // Achado real, 29/08/2026 (pedido do dono do produto, print com o painel
-  // de Ferramentas aberto): "Apenas Anúncios"/"Gatilhos" e o botão "Agenda"
-  // (que já existe como ícone próprio na barra inferior) só ocupavam espaço
-  // aqui repetindo controles que já existem em outro lugar mais óbvio —
-  // movidos pra dentro da faixa "Status do agente" (os dois primeiros) e
-  // removida a duplicata do botão Agenda (o ícone da barra inferior já cobre
-  // exatamente a mesma ação em qualquer largura de tela).
+  // duplicar JSX à mão. Desktop não usa mais este conteúdo (a barra de
+  // ferramentas exclusiva de desktop foi removida na TASK-0225) — só a
+  // gaveta mobile (ver `isToolbarSettingsOpen`, mais abaixo) renderiza
+  // `toolbarSettingsBody` hoje.
+  //
+  // Redesenho (pedido direto, 04/09/2026, com prints comparando com o
+  // menu de anexos real do WhatsApp): a gaveta ganhou o Status do agente
+  // (Ativo/Restrito/Pausado), que antes vivia numa faixa fixa sempre visível
+  // no topo da lista de conversas — no desktop essa faixa continua (não tem
+  // gaveta lá), mas no mobile ela ocupava espaço permanente pra uma ação
+  // que o operador só usa de vez em quando. As ações restantes (Somente
+  // anúncios, Gatilhos, Notificações) viraram uma grade de ícones em
+  // círculo + rótulo embaixo, no mesmo estilo do menu de anexos do
+  // WhatsApp real, em vez da fileira de botões retangulares de texto.
+  const renderToolTile = (options: {
+    key: string;
+    icon: React.ReactNode;
+    label: string;
+    onClick: () => void;
+    active?: boolean;
+    disabled?: boolean;
+    badge?: number;
+  }) => (
+    <button
+      key={options.key}
+      type="button"
+      onClick={options.onClick}
+      disabled={options.disabled}
+      className="relative flex flex-col items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+    >
+      <span
+        className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
+          options.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/60 text-slate-300'
+        }`}
+      >
+        {options.icon}
+      </span>
+      {!!options.badge && (
+        <span className="absolute right-1 top-0 min-w-[1.1rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[1.1rem] text-white">
+          {options.badge}
+        </span>
+      )}
+      <span className="max-w-[4.5rem] text-center text-[10px] font-semibold leading-tight text-slate-300">
+        {options.label}
+      </span>
+    </button>
+  );
+
   const toolbarSettingsBody = (
     <>
       {/* Reconectar WhatsApp mudou de lugar (pedido real, 29/08/2026):
@@ -3317,22 +3555,66 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           dentro do componente, tanto na coluna de desktop quanto na gaveta
           mobile. */}
 
-      {/* Push notification do PWA do atendente (issue #159) — pra não
-          depender só de estar olhando o painel pra perceber escalação
-          nova ou agente pausado com lead sem resposta. */}
-      <button
-        onClick={handleTogglePush}
-        disabled={pushBusy}
-        title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-        className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50 ${
-          pushEnabled
-            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 cursor-pointer'
-            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white cursor-pointer'
-        }`}
-      >
-        {pushEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-        <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-      </button>
+      <div className="w-full">
+        <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
+            {(['active', 'restricted', 'paused'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => handleChangeAgentStatus(status)}
+                title={
+                  agentStatus === null
+                    ? 'Confirmando o status real do agente...'
+                    : status === 'active' ? 'Agente responde sempre' :
+                      status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                      'Agente pausado — silêncio total'
+                }
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                  agentStatus === status
+                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+              </button>
+            ))}
+          </div>
+          {agentStatusLoadFailed && (
+            <button
+              type="button"
+              onClick={loadAgentStatus}
+              title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+            >
+              <AlertCircle className="h-3 w-3" />
+              <span>Erro</span>
+              <span className="sr-only">Status incerto — recarregar</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Notificações push do PWA do atendente saíram daqui (TASK-0284,
+          pedido direto): não são uma ação desta conversa/gaveta, são
+          configuração de conta — agora vivem só no Header global (mesmo
+          lugar em qualquer aba, não só dentro do Atendimento). */}
+      <div className="grid w-full grid-cols-4 gap-3 pt-1">
+        {renderToolTile({
+          key: 'ads-only',
+          icon: <Filter className="h-5 w-5" />,
+          label: adsOnly ? 'Somente anúncios (ativo)' : 'Somente anúncios',
+          active: adsOnly,
+          onClick: handleToggleAdsOnly,
+        })}
+        {adsOnly && renderToolTile({
+          key: 'ad-triggers',
+          icon: <Settings className="h-5 w-5" />,
+          label: 'Gatilhos',
+          onClick: openAdTriggersModal,
+          badge: adTriggerMessages.length || undefined,
+        })}
+      </div>
     </>
   );
 
@@ -3567,12 +3849,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Removido o bloco inteiro — o contexto já está estabelecido
               pela aba ativa + barra de controles, sem perda de informação. */}
 
-          {/* Status do agente (Ativo/Restrito/Pausado) — subiu pro topo da
-              coluna, como um cabeçalho fino (pedido direto, 28/08/2026, com
-              print comparando com o app real do WhatsApp): antes ficava no
-              meio da tela, ao lado da busca; agora é a primeira coisa
-              visível, logo abaixo da faixa fina de "Atendimento". */}
-          <div className="flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
+          {/* Status do agente (Ativo/Restrito/Pausado) — visível só no
+              desktop (`hidden lg:flex`, pedido direto 04/09/2026, com print
+              comparando com a gaveta "Ferramentas" do WhatsApp real): no
+              mobile essa faixa fixa ocupava espaço permanente no topo da
+              lista de conversas; o mesmo controle mudou pra dentro da
+              gaveta de Ferramentas (ver `toolbarSettingsBody`), que só
+              aparece quando o operador realmente precisa mexer no status.
+              Desktop não tem gaveta de Ferramentas (removida na TASK-0225),
+              então mantém a faixa fixa aqui, sem mudança. */}
+          <div className="hidden lg:flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
             <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {/* Modo "somente anúncios" + Gatilhos — achado real, 29/08/2026
@@ -3662,7 +3948,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 placeholder={t('searchConversation')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="atendimento-search-input w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none"
               />
               {searchQuery && (
                 <button
@@ -3705,24 +3991,81 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 {t('unread')} ({unreadLeadsCount})
               </button>
-              {/* TASK-0279 (pedido direto, 04/09/2026): "Fora das 24h" não é
-                  mais importante que conversas dentro da janela que
-                  precisam de atenção (essas já ganham destaque de verdade
-                  na seção "ESPERANDO HÁ MAIS DE 30 MIN" da própria lista,
-                  em vermelho/laranja) — rebaixado de pill igual a
-                  Tudo/Não lidos pra estilo secundário/discreto, sem
-                  competir visualmente com o que precisa de atenção agora. */}
-              <button
-                onClick={() => setActiveTabFilter('window_closed')}
-                title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap cursor-pointer border ${
-                  activeTabFilter === 'window_closed'
-                    ? 'border-slate-500 text-slate-200 bg-transparent'
-                    : 'border-slate-700/70 text-slate-500 hover:text-slate-300 bg-transparent'
-                }`}
-              >
-                Fora das 24h ({windowClosedLeadsCount})
-              </button>
+              {/* Pedido direto (04/09/2026): filtro de janela de 24h vira
+                  ícone + lista de opções (ao lado do ícone de Status), em
+                  vez de pill fixa — segue o mesmo rebaixamento visual já
+                  decidido na TASK-0279 (não competir com o que precisa de
+                  atenção agora), mas junto adiciona "Dentro das 24h", que
+                  antes não existia como filtro (só "Fora das 24h"). Mesmo
+                  estado activeTabFilter de sempre, mutuamente exclusivo com
+                  Tudo/Não lidos; clicar na opção já ativa desliga o filtro. */}
+              <div className="relative flex-shrink-0">
+                <button
+                  ref={windowFilterBtnRef}
+                  type="button"
+                  onClick={() => {
+                    if (!isWindowFilterMenuOpen) {
+                      const rect = windowFilterBtnRef.current?.getBoundingClientRect();
+                      if (rect) setWindowFilterMenuPos({ top: rect.bottom + 6, left: rect.left });
+                    }
+                    setIsWindowFilterMenuOpen((v) => !v);
+                  }}
+                  title="Filtrar por janela de atendimento de 24h"
+                  className={`atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
+                    activeTabFilter === 'window_open' || activeTabFilter === 'window_closed'
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white'
+                  }`}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                </button>
+                {isWindowFilterMenuOpen && windowFilterMenuPos && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsWindowFilterMenuOpen(false)} />
+                    {/* `position: fixed` (não `absolute`) de propósito: esta
+                        fileira de pills precisa de `overflow-x-auto` pra
+                        rolar horizontalmente, e o CSS de overflow força
+                        overflow-y pro mesmo valor sempre que só um eixo é
+                        'visible' — um popover `absolute` ancorado aqui dentro
+                        ficava cortado verticalmente pelo próprio container
+                        (achado real, 05/09/2026: o filtro "abria" no estado
+                        mas nada aparecia na tela, "não abre nada"). */}
+                    <div
+                      style={{ top: windowFilterMenuPos.top, left: windowFilterMenuPos.left }}
+                      className="fixed z-50 w-60 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-left animate-pop-in"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTabFilter((prev) => (prev === 'window_open' ? 'all' : 'window_open'));
+                          setIsWindowFilterMenuOpen(false);
+                        }}
+                        title="Contatos com mensagem do cliente nas últimas 24h — o agente/operador ainda pode responder normalmente."
+                        className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                          activeTabFilter === 'window_open' ? 'text-emerald-400 font-semibold' : 'text-slate-200'
+                        }`}
+                      >
+                        <span>Dentro das 24h</span>
+                        <span>{windowOpenLeadsCount}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTabFilter((prev) => (prev === 'window_closed' ? 'all' : 'window_closed'));
+                          setIsWindowFilterMenuOpen(false);
+                        }}
+                        title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
+                        className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                          activeTabFilter === 'window_closed' ? 'text-slate-100 font-semibold' : 'text-slate-400'
+                        }`}
+                      >
+                        <span>Fora das 24h</span>
+                        <span>{windowClosedLeadsCount}</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Status — só aparece pra números conectados via Evolution API
                   (QR Code); na Meta Cloud API oficial nunca funciona, então
@@ -3743,18 +4086,67 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </button>
               )}
 
+              {/* Trocado de <select> nativo pra botão + popover com o mesmo
+                  tema do resto do painel (pedido direto, 05/09/2026, print
+                  mostrando o picker nativo do Android sem nenhum estilo do
+                  app): um <select> sempre renderiza como picker do sistema
+                  operacional no mobile, impossível de estilizar. Mesmo
+                  padrão do filtro de 24h logo acima, inclusive o popover em
+                  `position: fixed` (mesmo motivo: evitar o corte vertical
+                  pelo `overflow-x-auto` desta fileira). */}
               {tenantLabelSuggestions.length > 0 && (
-                <select
-                  value={labelFilter || ''}
-                  onChange={(e) => setLabelFilter(e.target.value || null)}
-                  title="Filtrar por etiqueta"
-                  className="px-2 py-1 rounded-full text-[11px] font-medium bg-[#202c33] text-slate-300 border border-slate-700 cursor-pointer focus:outline-none flex-shrink-0"
-                >
-                  <option value="">🏷️ Todas etiquetas</option>
-                  {tenantLabelSuggestions.map((l) => (
-                    <option key={l} value={l}>{l}</option>
-                  ))}
-                </select>
+                <div className="relative flex-shrink-0">
+                  <button
+                    ref={labelFilterBtnRef}
+                    type="button"
+                    onClick={() => {
+                      if (!isLabelFilterMenuOpen) {
+                        const rect = labelFilterBtnRef.current?.getBoundingClientRect();
+                        if (rect) setLabelFilterMenuPos({ top: rect.bottom + 6, left: rect.left });
+                      }
+                      setIsLabelFilterMenuOpen((v) => !v);
+                    }}
+                    title="Filtrar por etiqueta"
+                    className={`atendimento-label-filter-trigger px-2 py-1 rounded-full text-[11px] font-medium border cursor-pointer whitespace-nowrap max-w-[9.5rem] truncate ${
+                      labelFilter
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-semibold'
+                        : 'bg-[#202c33] text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    🏷️ {labelFilter || 'Todas etiquetas'}
+                  </button>
+                  {isLabelFilterMenuOpen && labelFilterMenuPos && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsLabelFilterMenuOpen(false)} />
+                      <div
+                        style={{ top: labelFilterMenuPos.top, left: labelFilterMenuPos.left }}
+                        className="no-scrollbar fixed z-50 w-52 max-h-[60vh] overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl text-xs origin-top-left animate-pop-in"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => { setLabelFilter(null); setIsLabelFilterMenuOpen(false); }}
+                          className={`w-full flex items-center px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                            !labelFilter ? 'text-emerald-400 font-semibold' : 'text-slate-200'
+                          }`}
+                        >
+                          🏷️ Todas etiquetas
+                        </button>
+                        {tenantLabelSuggestions.map((l) => (
+                          <button
+                            key={l}
+                            type="button"
+                            onClick={() => { setLabelFilter(l); setIsLabelFilterMenuOpen(false); }}
+                            className={`w-full flex items-center px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer truncate ${
+                              labelFilter === l ? 'text-emerald-400 font-semibold' : 'text-slate-200'
+                            }`}
+                          >
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -3967,9 +4359,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           composer mais abaixo. */}
                       {(() => {
                         const serviceWindow = visibleContactContext?.serviceWindow;
-                        const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
+                        const { isWindowOpen, hoursRemaining } = getLiveServiceWindowStatus(serviceWindow);
                         if (!isWindowOpen) return null;
-                        const hoursRemaining = serviceWindow?.hoursRemaining ?? 24;
                         return (
                           <span
                             className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-700/50 px-1.5 py-0.5 rounded-full"
@@ -4269,11 +4660,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       return (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsHeaderMenuOpen(false)} />
+                          {/* Achado real (pedido direto, 04/09/2026, com
+                              print): este menu já abria ancorado no ícone
+                              "⋮" (top-down, `top-10`/`origin-top-right`,
+                              exatamente como pedido) — o problema nunca foi
+                              a posição, e sim a ALTURA: com até 14 itens
+                              (vários condicionais) e nenhum teto, a lista
+                              crescia livremente e cobria quase a tela
+                              inteira. `max-h-[70vh]` + rolagem própria na
+                              lista interna (o `rounded-xl` fica no wrapper
+                              externo, que precisa de `overflow-hidden` pra
+                              recortar os cantos — por isso a rolagem vive
+                              num `<div>` filho, não no mesmo elemento). */}
                           <div className="mobile-header-context-menu absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
+                          <div className="no-scrollbar max-h-[70vh] overflow-y-auto">
                             {(selectedLead as any)?.isReal && !paymentAppointment && (
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsManualAppointmentModalOpen(true); }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title="Cadastrar agendamento manual combinado fora do WhatsApp"
                               >
                                 <CalendarPlus className="w-3.5 h-3.5" />
@@ -4283,7 +4687,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             {(selectedLead as any)?.isReal && activeTenant?.id === CLIC_PISCINAS_TENANT_ID && (
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsContractModalOpen(true); }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title="Gerar contrato"
                               >
                                 <FileText className="w-3.5 h-3.5" />
@@ -4292,34 +4696,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             )}
                             <button
                               onClick={() => { setIsHeaderMenuOpen(false); window.open(`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}`, '_blank', 'noopener,noreferrer'); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Continuar no WhatsApp pessoal do operador"
                             >
                               <Phone className="w-3.5 h-3.5" />
                               <span>Abrir no WhatsApp</span>
                             </button>
-                            {/* TASK-0225: "Ativar notificações" (push do PWA
-                                do atendente, issue #159) mudou de casa — vinha
-                                da barra de ferramentas exclusiva de desktop
-                                que foi removida (só tinha esse item). Mesma
-                                lógica (`handleTogglePush`/`pushEnabled`/
-                                `pushBusy`), agora dentro deste menu — que já é
-                                visível em qualquer largura (sem `hidden
-                                lg:*`), então funciona igual em mobile e
-                                desktop. */}
-                            <button
-                              onClick={() => { void handleTogglePush(); setIsHeaderMenuOpen(false); }}
-                              disabled={pushBusy}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
-                              title={pushEnabled ? 'Desativar notificações push neste dispositivo' : 'Ativar notificações push (escalação nova, agente pausado com lead sem resposta)'}
-                            >
-                              {pushEnabled ? <Bell className="w-3.5 h-3.5 text-emerald-300" /> : <BellOff className="w-3.5 h-3.5" />}
-                              <span>{pushBusy ? 'Aguarde...' : pushEnabled ? 'Notificações ativas' : 'Ativar notificações'}</span>
-                            </button>
+                            {/* TASK-0284 (pedido direto, com print do menu ⋮
+                                real do WhatsApp, compacto e sem item de
+                                configuração de conta): "Ativar notificações"
+                                (push do PWA do atendente) saiu daqui — não é
+                                uma ação desta conversa, é configuração de
+                                conta. Mora agora só no Header global (ver
+                                Header.tsx, usePushNotifications), visível em
+                                qualquer aba. */}
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
-                              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
                               title="A IA para de responder automaticamente só pra esse número (manual ou automático, ex: falha de agenda) — o resto do atendimento continua normal"
                             >
                               <Ban className="w-3.5 h-3.5" />
@@ -4328,7 +4722,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             {!isAiBlocked && (
                               <button
                                 onClick={() => { handleUpdateConversationState(selectedLead.id, { releaseAiNow: true }); setIsHeaderMenuOpen(false); }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora, sem esperar os 5min."
                               >
                                 <RefreshCw className="w-3.5 h-3.5" />
@@ -4342,7 +4736,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   const activated = await handleUpdateConversationState(selectedLead.id, { adLead: true });
                                   if (activated) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
                                 }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title='Libera a IA para as próximas mensagens deste lead e lê o histórico completo para preparar um rascunho contextual no compositor. O rascunho nunca é enviado sem revisão humana.'
                               >
                                 <Megaphone className="w-3.5 h-3.5" />
@@ -4352,7 +4746,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => openOperatorFeedback('operator_idea')}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Enviar uma melhoria contextual para a Central de Qualidade"
                             >
                               <Sparkles className="w-3.5 h-3.5" />
@@ -4360,7 +4754,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             <button
                               onClick={() => openOperatorFeedback('bug')}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Registrar um comportamento inesperado nesta conversa"
                             >
                               <AlertTriangle className="w-3.5 h-3.5" />
@@ -4369,28 +4763,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
                               <span>{isPinned ? (isSpanish ? 'Desfijar conversación' : 'Desafixar conversa') : (isSpanish ? 'Fijar conversación' : 'Fixar conversa')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { unread: !isManuallyUnread }); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               <Mail className="w-3.5 h-3.5" />
                               <span>{isManuallyUnread ? (isSpanish ? 'Marcar como leída' : 'Marcar como lida') : (isSpanish ? 'Marcar como no leída' : 'Marcar como não lida')}</span>
                             </button>
+                            {/* TASK-0284 (pedido direto): rótulo trocado de
+                                "Ativar/Silenciar notificações" (genérico,
+                                colidia em texto com o toggle de push do PWA
+                                que morava logo acima antes de sair daqui)
+                                pra deixar claro que silencia só ESTA
+                                conversa, não notificações do app inteiro. */}
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-                              <span>{isMuted ? (isSpanish ? 'Activar notificaciones' : 'Ativar notificações') : (isSpanish ? 'Silenciar notificaciones' : 'Silenciar notificações')}</span>
+                              <span>{isMuted ? (isSpanish ? 'Reactivar notificaciones de esta conversación' : 'Reativar notificações desta conversa') : (isSpanish ? 'Silenciar esta conversación' : 'Silenciar esta conversa')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setIsHeaderMenuOpen(false); setMobileThreadOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                               <span>{isArchived ? (isSpanish ? 'Desarchivar conversación' : 'Desarquivar conversa') : (isSpanish ? 'Archivar conversación' : 'Arquivar conversa')}</span>
@@ -4398,7 +4798,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleClearChatMessages(selectedLead.id); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Apaga as mensagens desta conversa, mantendo o contato"
                             >
                               <RefreshCw className="w-3.5 h-3.5" />
@@ -4406,12 +4806,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             <button
                               onClick={() => { setIsHeaderMenuOpen(false); handleDeleteConversation(selectedLead.id, selectedLead.name); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
                               title="Exclui a conversa e o contato permanentemente"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Eliminar conversación permanentemente' : 'Excluir conversa permanentemente'}</span>
                             </button>
+                          </div>
                           </div>
                         </>
                       );
@@ -4542,7 +4943,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   </div>
                 )}
 
-                {/* TASK-0276 (achado real, "a cada nova mensagem a página
+                {/* TASK-0276/TASK-0280 (achado real, "a cada nova mensagem a página
                     inteira pisca") — historyLoading só liga na primeira
                     abertura da conversa (loadRealConversationHistory); uma
                     mensagem nova chegando por SSE anexa em silêncio via
@@ -4693,6 +5094,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   <Smile className="w-3.5 h-3.5" />
                                   <span>{isSpanish ? 'Reaccionar' : 'Reagir'}</span>
                                 </button>
+                                {msg.type === 'image' && financialModuleEnabled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setOpenMessageMenuFor(null); handleFlagAsPaymentProof(msg); }}
+                                    disabled={analyzingPaymentProofFor === msg.id}
+                                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    <Receipt className="w-3.5 h-3.5" />
+                                    <span>{analyzingPaymentProofFor === msg.id ? (isSpanish ? 'Analizando...' : 'Analisando...') : (isSpanish ? 'Marcar como comprobante' : 'Marcar como comprovante')}</span>
+                                  </button>
+                                )}
                                 <div className="border-t border-slate-700" />
                                 <button
                                   type="button"
@@ -5080,7 +5492,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     é o sinal que já existe pra distinguir os dois casos. */}
                 {selectedLead && (() => {
                   const serviceWindow = visibleContactContext?.serviceWindow;
-                  const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
+                  const { isWindowOpen } = getLiveServiceWindowStatus(serviceWindow);
                   const isMetaChannel = Boolean((selectedLead as any).phoneNumberId);
 
                   {/* TASK-0258 (pedido direto): janela aberta e sem ação
@@ -5295,73 +5707,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         na linha de composição. Agora é um único menu, com o
                         clipe como gatilho — igual ao WhatsApp real, que
                         também agrupa Documento/Câmera/Galeria atrás de um
-                        clipe só, do lado direito da caixa. */}
-                    <div className="relative flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setShowAttachMenu((v) => !v)}
-                        className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
-                        title={isSpanish ? 'Adjuntar' : 'Anexar'}
-                      >
-                        <Paperclip className="w-5 h-5" />
-                      </button>
-                      {showAttachMenu && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setShowAttachMenu(false)} />
-                          <div className="absolute bottom-full right-0 mb-2 z-50 w-60 max-h-64 overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl p-1.5 origin-bottom-right animate-pop-in">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowAttachMenu(false);
-                                (selectedLead as any).isReal ? fileInputRef.current?.click() : handleSendSampleFile();
-                              }}
-                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                            >
-                              <Paperclip className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                              <span>{isSpanish ? 'Documento o foto' : 'Documento ou foto'}</span>
-                            </button>
-
-                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                              <>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                  {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
-                                </div>
-                                {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                  >
-                                    <ImageIcon className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                    <span className="truncate">{p.name}</span>
-                                  </button>
-                                ))}
-                              </>
-                            )}
-
-                            {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                              <>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                  {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
-                                </div>
-                                {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => { setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-white/10 cursor-pointer text-left"
-                                  >
-                                    <Video className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                                    <span className="truncate">{p.name}</span>
-                                  </button>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
+                        clipe só, do lado direito da caixa. Painel do menu
+                        (ver mais abaixo, fora do <form>) — pedido direto,
+                        04/09/2026, com print do WhatsApp real: o painel
+                        aparece ABAIXO da caixa de texto, não acima; por isso
+                        virou um painel no fluxo normal do documento (depois
+                        do form), não um popup `absolute` ancorado neste
+                        botão. */}
+                    <button
+                      type="button"
+                      onClick={() => setShowAttachMenu((v) => !v)}
+                      className="p-2 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer flex-shrink-0"
+                      title={isSpanish ? 'Adjuntar' : 'Anexar'}
+                    >
+                      <Paperclip className="w-5 h-5" />
+                    </button>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleRealFileSelect} />
 
@@ -5412,6 +5772,103 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     </button>
                   )}
                 </form>
+                )}
+                {/* Painel de anexos — pedido direto (04/09/2026, com print
+                    do menu de anexos real do WhatsApp): fica ABAIXO da
+                    caixa de texto, não flutuando por cima dela — por isso
+                    vive aqui, como irmão do <form> acima (fluxo normal do
+                    documento, empurra a lista de mensagens pra cima, exatamente
+                    como o WhatsApp real faz), em vez de um popup `absolute`
+                    ancorado no botão do clipe. Reaproveita `renderToolTile`
+                    (mesmo helper da gaveta "Ferramentas", TASK-0282). */}
+                {showAttachMenu && (
+                  <div className="rounded-2xl bg-[#233138] border border-slate-700 p-3 animate-page-enter">
+                    <div className="grid grid-cols-4 gap-3">
+                      {renderToolTile({
+                        key: 'attach-document',
+                        icon: <FileText className="h-5 w-5" />,
+                        label: isSpanish ? 'Documento' : 'Documento',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          if ((selectedLead as any).isReal && fileInputRef.current) {
+                            fileInputRef.current.accept = '.pdf,.doc,.docx,.xls,.xlsx,application/pdf';
+                            fileInputRef.current.click();
+                          } else {
+                            handleSendSampleFile();
+                          }
+                        },
+                      })}
+                      {renderToolTile({
+                        key: 'attach-photo',
+                        icon: <ImageIcon className="h-5 w-5" />,
+                        label: isSpanish ? 'Fotos' : 'Fotos',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          if ((selectedLead as any).isReal && fileInputRef.current) {
+                            fileInputRef.current.accept = 'image/*';
+                            fileInputRef.current.click();
+                          } else {
+                            handleSendSampleFile();
+                          }
+                        },
+                      })}
+                      {/* Localização e Dados da conta (pedido direto,
+                          04/09/2026): mensagens prontas que o operador manda
+                          manualmente quando o cliente pede — mesmo padrão,
+                          nunca inventam nada, só aparecem quando o tenant
+                          configurou o texto na Base de Conhecimento. */}
+                      {knowledgeBase.locationMapsUrl && renderToolTile({
+                        key: 'attach-location',
+                        icon: <MapPin className="h-5 w-5" />,
+                        label: isSpanish ? 'Ubicación' : 'Localização',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          void handleSendTextMessage(undefined, knowledgeBase.locationMapsUrl);
+                        },
+                      })}
+                      {knowledgeBase.paymentDetailsText && renderToolTile({
+                        key: 'attach-payment-details',
+                        icon: <Wallet className="h-5 w-5" />,
+                        label: isSpanish ? 'Datos de pago' : 'Dados da conta',
+                        onClick: () => {
+                          setShowAttachMenu(false);
+                          void handleSendTextMessage(undefined, knowledgeBase.paymentDetailsText);
+                        },
+                      })}
+                    </div>
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
+                      <>
+                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => renderToolTile({
+                            key: p.id,
+                            icon: <ImageIcon className="h-5 w-5" />,
+                            label: p.name,
+                            onClick: () => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); },
+                          }))}
+                        </div>
+                      </>
+                    )}
+
+                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
+                      <>
+                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
+                        </div>
+                        <div className="grid grid-cols-4 gap-3">
+                          {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => renderToolTile({
+                            key: p.id,
+                            icon: <Video className="h-5 w-5" />,
+                            label: p.name,
+                            onClick: () => { setShowAttachMenu(false); handleSendExampleVideo(p.name); },
+                          }))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </>
@@ -5487,6 +5944,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 agentStatus={selectedLead?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
                 onClose={() => setShowRightPanel(false)}
+                onResyncAppointment={handleResyncAppointment}
               />
             ) : rightPanelTab === 'escalations' ? (
               renderEscalationHistoryPanel()
@@ -5620,6 +6078,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 agentStatus={(selectedLead as any)?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => handleUpdateConversationState(selectedLead.id, { aiBlocked: !(selectedLead as any).aiBlockedAt })}
                 onClose={() => setMobileAnalysisOpen(false)}
+                onResyncAppointment={handleResyncAppointment}
                 isMobile
               />
             ) : rightPanelTab === 'escalations' ? (
@@ -5661,22 +6120,35 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* Ferramentas no mobile — mesma gaveta deslizante da Ficha IA (ver
-          acima), aberta pela aba inferior "Ferramentas" (ícone de
-          engrenagem) em vez de empurrar a lista de conversas pra baixo
-          (achado real, 29/08/2026, pedido do dono do produto). Conteúdo
-          idêntico ao painel de desktop — reaproveita `toolbarSettingsBody`,
-          definido antes do "return" deste componente, sem duplicar JSX. */}
+      {/* Ferramentas no mobile — gaveta deslizante (aberta pela aba inferior
+          "Ferramentas", ícone de engrenagem) em vez de empurrar a lista de
+          conversas pra baixo (achado real, 29/08/2026, pedido do dono do
+          produto). Conteúdo reaproveita `toolbarSettingsBody`, definido
+          antes do "return" deste componente, sem duplicar JSX.
+          Redesenho (pedido direto, 04/09/2026, com print comparando com o
+          menu de anexos real do WhatsApp): antes o fundo inteiro escurecia
+          (`bg-slate-950/80 backdrop-blur-sm`), dando a impressão de cobrir
+          a tela toda mesmo com a gaveta ocupando só uma fração dela — o
+          WhatsApp real não escurece nada atrás do menu de anexos, a
+          conversa continua visível e legível. Removido o escurecimento
+          (o `fixed inset-0` continua só como área clicável pra fechar ao
+          tocar fora) e adicionada a alcinha de arraste no topo do painel,
+          mesmo afordance visual do WhatsApp pra indicar que é uma gaveta
+          que pode ser puxada. Ficha IA (`atendimento-analysis-drawer`,
+          acima) não mudou — o pedido foi só sobre esta gaveta. */}
       {isToolbarSettingsOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end animate-fade-in"
+          className="lg:hidden fixed inset-0 z-50 flex items-end"
           onClick={() => setIsToolbarSettingsOpen(false)}
         >
           <div
-            className="bg-[#111b21] w-full max-h-[85vh] rounded-t-2xl border-t border-slate-800 flex flex-col"
+            className="w-full max-h-[70vh] rounded-t-2xl border-t border-slate-800 bg-[#111b21] shadow-[0_-12px_32px_rgba(0,0,0,0.5)] flex flex-col animate-page-enter"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-3 border-b border-slate-800 flex-shrink-0">
+            <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
+              <span className="h-1 w-10 rounded-full bg-slate-700" aria-hidden="true" />
+            </div>
+            <div className="flex items-center justify-between px-3 pb-2 flex-shrink-0">
               <h3 className="text-sm font-bold text-white">Ferramentas</h3>
               <button
                 onClick={() => setIsToolbarSettingsOpen(false)}
@@ -5685,7 +6157,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-3 flex flex-wrap items-center gap-2.5 overflow-y-auto">
+            <div className="p-3 pt-1 flex flex-col gap-3 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
               {toolbarSettingsBody}
             </div>
           </div>
@@ -5702,6 +6174,38 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       />
 
       <ImageLightboxModal imageUrl={viewImageUrl} onClose={() => setViewImageUrl(null)} />
+
+      {/* TASK-0284: modal de lançamento financeiro a partir de um comprovante
+          marcado no chat — mesmo componente do Financeiro, pré-preenchido
+          pela IA quando disponível. Cliente travado no contato da conversa
+          (sem seletor de CRM); oferece vincular a um agendamento pendente
+          quando existir (paymentAppointment + acesso à Agenda). */}
+      {paymentProofDraft && (
+        <TransactionDialog
+          kind="income"
+          leads={[]}
+          lockedLead={{ name: paymentProofDraft.leadName, phone: paymentProofDraft.leadPhone }}
+          currency={activeTenant?.currency || 'PYG'}
+          isSpanish={isSpanish}
+          onClose={() => setPaymentProofDraft(null)}
+          onSubmit={savePaymentProofTransaction}
+          submitting={submittingPaymentProof}
+          initialValues={{
+            description: paymentProofDraft.extraction?.bankOrApp
+              ? `Comprovante recebido — ${paymentProofDraft.extraction.bankOrApp}`
+              : 'Comprovante recebido no WhatsApp',
+            amount: paymentProofDraft.extraction?.amount ?? undefined,
+            paymentMethod: paymentProofDraft.extraction?.method ?? undefined,
+          }}
+          linkableAppointment={
+            paymentAppointment &&
+            !!onGoToAgenda &&
+            (paymentAppointment.paymentStatus === 'awaiting_payment' || paymentAppointment.paymentStatus === 'pending_verification')
+              ? { summary: paymentAppointment.summary, startIso: paymentAppointment.startIso }
+              : null
+          }
+        />
+      )}
 
       {/* Add New Lead Modal */}
       <AddLeadModal

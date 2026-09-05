@@ -344,6 +344,13 @@ export interface AgentKnowledgeBase {
   documents: AgentFileDoc[];
   /** Link de localização (Google Maps) que o agente manda quando o cliente pede o endereço — ver server/services/knowledgeBaseStore.ts. */
   locationMapsUrl?: string;
+  /** TASK-0286 (pedido direto): dados de pagamento (PIX/conta bancária) em
+      texto livre, mandado MANUALMENTE pelo operador quando o cliente pede —
+      mesmo padrão do `locationMapsUrl` (mensagem pronta, nunca inventada;
+      só aparece no menu de anexos da conversa quando o tenant configura).
+      Nunca usado pela IA/agente automático — dado financeiro sensível
+      demais pra automação, decisão deliberada. */
+  paymentDetailsText?: string;
   firstContactBlocks?: FirstContactBlock[];
   lastSaved?: string;
 }

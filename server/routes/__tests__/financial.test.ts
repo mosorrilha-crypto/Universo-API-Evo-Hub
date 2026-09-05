@@ -279,6 +279,38 @@ describe('POST /api/financial/transactions', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  // TASK-0284: idempotência do lançamento criado a partir de um comprovante
+  // marcado no chat (sourceRef "chat-image:<messageId>") — reanalisar ou
+  // clicar duas vezes na mesma imagem nunca pode duplicar a transação.
+  it('aceita e persiste sourceRef', async () => {
+    const res = await fetch(`${baseUrl}/api/financial/transactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'tx-comprovante-1',
+        leadId: 'chat-image',
+        leadName: 'Cliente do WhatsApp',
+        leadPhone: '595981111111',
+        productName: 'Comprovante recebido no WhatsApp',
+        amount: 75000,
+        paymentMethod: 'PIX',
+        status: 'pago',
+        date: NOW,
+        entryType: 'income',
+        sourceRef: 'chat-image:msg-123',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.transaction.sourceRef).toBe('chat-image:msg-123');
+  });
+
+  // Nota: o fake Supabase (fakeSupabase.ts) não simula a constraint única
+  // (tenant_id, source_ref) do Postgres real — o caso de duplicidade
+  // (isDuplicateSourceRefError → 409) é coberto isoladamente em
+  // financialSourceRefConflict.test.ts, mockando createFinancialTransaction
+  // diretamente pra simular o erro 23505 real.
 });
 
 describe('PATCH /api/financial/transactions/:id', () => {
