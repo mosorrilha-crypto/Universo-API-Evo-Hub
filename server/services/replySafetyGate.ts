@@ -195,7 +195,7 @@ IDIOMA: julgue o idioma SÓ do RASCUNHO A VALIDAR abaixo — nunca reprove por u
 
 REPETIÇÃO COM RECONHECIMENTO: repetir um preço/dado já dito no histórico enquanto RECONHECE explicitamente que já foi dito (ex: "como te comenté", "como te falei", "como já disse", "te dije recién") é o comportamento CORRETO esperado — NUNCA reprove por "repetição" quando o rascunho já contém essa frase de reconhecimento. Reprove por repetição SOMENTE quando o dado for repetido sem nenhum reconhecimento, como se fosse a primeira vez. Achado real (03/09/2026): dois rascunhos que já diziam "como te comenté recién"/"como te falei" foram reprovados mesmo assim como "repetição" — exatamente o comportamento que a regra 23 da Camada 1 pede pra evitar repetição "burra" foi punido em vez de aprovado.
 
-NOME DO CLIENTE: a regra de negócio real é "solicite ou confirme o nome antes de avançar para a consulta de agenda" — ou seja, o nome só é exigido no momento em que a resposta for checar disponibilidade/horários ou criar um agendamento. Fora desse momento — respondendo dúvida informativa (preço, procedimento, localização, pagamento), fazendo triagem/primeiro contato, ou acolhendo e encaminhando uma reclamação pra equipe humana — NUNCA reprove só porque a resposta ainda não perguntou ou confirmou verbalmente o nome; isso vale pra QUALQUER categoria de resposta, não só dúvida de preço. Achado real (03/09/2026): reprovações por "nome não solicitado" continuaram aparecendo mesmo em triagem e reclamação — categorias que ficaram de fora da lista de exemplos anterior (que citava só preço/procedimento/localização) — por isso a regra agora cobre TODAS as categorias, com exceção única da consulta de agenda. O sinal "fluxo de agendamento: sim" abaixo indica só que o classificador rotulou a CONVERSA como potencial agendamento — NÃO significa que este rascunho específico já avançou pra agenda; leia as BOLHAS do rascunho: se elas só informam preço/detalhe de um serviço/combo (sem consultar disponibilidade, oferecer horário ou criar/remarcar/cancelar algo), o nome continua opcional, mesmo com esse sinal marcado como "sim". Achado real (03/09/2026): 3 rascunhos que só respondiam preço de um combo/serviço (sem tocar em agenda) foram reprovados citando "nome não confirmado" só porque a conversa estava classificada como fluxo de agendamento — exatamente o erro que este parágrafo já pedia pra evitar. Separadamente, reprove SOMENTE se o rascunho usar um nome que não bate com o "NOME JÁ CONHECIDO" informado abaixo (nem com nenhum nome que a própria cliente disse na HISTÓRICO/ÚLTIMA MENSAGEM) — isso é nome inventado, um caso de "informação não sustentada pelo contexto", diferente de simplesmente não ter perguntado o nome ainda.
+NOME DO CLIENTE: a regra de negócio real é "solicite ou confirme o nome antes de avançar para a consulta de agenda" — ou seja, o nome só é exigido no momento em que a resposta for checar disponibilidade/horários ou criar um agendamento. Fora desse momento — respondendo dúvida informativa (preço, procedimento, localização, pagamento), fazendo triagem/primeiro contato, ou acolhendo e encaminhando uma reclamação pra equipe humana — NUNCA reprove só porque a resposta ainda não perguntou ou confirmou verbalmente o nome; isso vale pra QUALQUER categoria de resposta, não só dúvida de preço. Achado real (03/09/2026): reprovações por "nome não solicitado" continuaram aparecendo mesmo em triagem e reclamação — categorias que ficaram de fora da lista de exemplos anterior (que citava só preço/procedimento/localização) — por isso a regra agora cobre TODAS as categorias, com exceção única da consulta de agenda. O sinal "fluxo de agendamento: sim" abaixo indica só que o classificador rotulou a CONVERSA como potencial agendamento — NÃO significa que este rascunho específico já avançou pra agenda; leia as BOLHAS do rascunho: se elas só informam preço/detalhe de um serviço/combo (sem consultar disponibilidade, oferecer horário ou criar/remarcar/cancelar algo), o nome continua opcional, mesmo com esse sinal marcado como "sim". Achado real (03/09/2026): 3 rascunhos que só respondiam preço de um combo/serviço (sem tocar em agenda) foram reprovados citando "nome não confirmado" só porque a conversa estava classificada como fluxo de agendamento — exatamente o erro que este parágrafo já pedia pra evitar. Separadamente, reprove SOMENTE se o rascunho usar um nome que não bate com o "NOME JÁ CONHECIDO" informado abaixo (nem com nenhum nome que a própria cliente disse na HISTÓRICO/ÚLTIMA MENSAGEM) — isso é nome inventado, um caso de "informação não sustentada pelo contexto", diferente de simplesmente não ter perguntado o nome ainda. Se o nome usado no rascunho BATE com o "NOME JÁ CONHECIDO", está correto — mesmo que esse nome coincida por acaso com o nome de apresentação da própria assistente (ex: cliente chamada "Ana" e a assistente também se chama "Ana" na apresentação); não é confusão nem alucinação, é só coincidência de nome, comum na vida real. Achado real (04/09/2026): um rascunho que cumprimentou corretamente "Ana" (nome de perfil real da cliente, batendo com o NOME JÁ CONHECIDO) foi reprovado como se a assistente tivesse se confundido consigo mesma — verifique sempre o campo NOME JÁ CONHECIDO antes de reprovar por esse motivo.
 
 AÇÕES DE AGENDA PLANEJADAS são a única exceção: elas ainda NÃO foram executadas, mas só serão executadas DEPOIS da sua aprovação e com nova verificação de disponibilidade. Quando uma ação planejada específica sustenta o serviço e horário citados, você pode aprovar uma mensagem que informe uma PRÉ-RESERVA pendente de pagamento. Nunca aprove texto que diga que pagamento ou confirmação definitiva já ocorreu.
 
@@ -331,6 +331,44 @@ function matchesCustomerLanguage(customerMessage: string, suggestionText: string
   return true;
 }
 
+/**
+ * Achado real de produção (04/09/2026): mesmo com a regra 24 (autoReply.ts)
+ * e o parágrafo "NOME DO CLIENTE" deste revisor já cobrindo explicitamente
+ * que dúvida informativa/triagem NUNCA precisa de nome — inclusive com
+ * clarificação extra sobre o sinal "fluxo de agendamento" não valer pra
+ * qualquer resposta da conversa (TASK-0257) — o revisor (Groq e Gemini)
+ * continuou bloqueando por "nome não confirmado" em pelo menos 3 casos reais
+ * na mesma tarde, em conversas de clientes de verdade: reforço de prompt
+ * sozinho não bastou pra essa classe específica de bloqueio.
+ *
+ * Correção determinística (não mais uma terceira tentativa de reforçar o
+ * texto do prompt): quando o motivo do bloqueio é EXCLUSIVAMENTE sobre nome
+ * ausente — sem nenhum outro problema junto, como confusão com o nome da
+ * própria assistente, idioma errado, pagamento ou dado inventado — e o
+ * rascunho não empurra pra agenda de verdade (mesma checagem `pushesBooking`
+ * já usada acima nas regras determinísticas), aprova automaticamente. Um
+ * bloqueio que mistura "nome ausente" com qualquer outro problema real
+ * (ex: "se apresentou como Ana, mas... e também não confirmou o nome")
+ * continua bloqueado normalmente — só o caso isolado e comprovadamente
+ * repetido é que vira aprovação automática.
+ */
+function overrideNameOnlyFalsePositive(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  if (verdict.approved || verdict.source === 'rules') return verdict;
+  const reason = verdict.reason.toLowerCase();
+  const isNameComplaint = /\bnome\b/.test(reason) && /(solicit|confirm)/.test(reason);
+  if (!isNameComplaint) return verdict;
+  const hasSelfReferenceIssue = /(se apresentou como|falando com ela mesma|pr[óo]prio nome|nome da assistente|nome do agente)/.test(reason);
+  const hasOtherIssue = /(invent|alucina|pagamento|reembolso|idioma|espanhol|portugu[êe]s|disponibilidade real|hor[áa]rio confirmado|comprovante|\bdocumento\b)/.test(reason);
+  if (hasSelfReferenceIssue || hasOtherIssue) return verdict;
+  const combinedDraft = input.draftBubbles.map((bubble) => String(bubble || '')).join('\n');
+  if (pushesBooking(combinedDraft)) return verdict;
+  return {
+    ...verdict,
+    approved: true,
+    reason: `${verdict.reason} — aprovado por override determinístico (bloqueio só por nome ausente, sem avanço real de agenda; ver regra 24 de autoReply.ts e TASK-0277).`,
+  };
+}
+
 function parseReviewerDecision(value: unknown, source: ReplySafetySource): ReplySafetyVerdict {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const approved = data.approved === true;
@@ -354,7 +392,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
   if (deps.groqApiKey) {
     try {
       const result = await callGroqJsonCompletion(deps.groqApiKey, prompt);
-      return parseReviewerDecision(result.parsed, 'groq-reviewer');
+      return overrideNameOnlyFalsePositive(parseReviewerDecision(result.parsed, 'groq-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Groq indisponível, tentando Gemini: ${error?.message || error}`);
     }
@@ -367,7 +405,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0 },
       }), 12_000);
-      return parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer');
+      return overrideNameOnlyFalsePositive(parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Gemini indisponível: ${error?.message || error}`);
     }

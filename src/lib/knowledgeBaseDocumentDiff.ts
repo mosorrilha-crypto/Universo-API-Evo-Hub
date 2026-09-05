@@ -154,6 +154,7 @@ export function describeKnowledgeBaseDocumentDiff(
         ...diffTextField('Objetivo do agente', published.agentGoal, draft.agentGoal),
         ...diffTextField('Modelo de negócio', published.businessModel, draft.businessModel),
         ...diffTextField('Link do Google Maps', published.locationMapsUrl, draft.locationMapsUrl),
+        ...diffTextField('Dados de pagamento (PIX/conta)', published.paymentDetailsText, draft.paymentDetailsText),
       ];
     case 'brand_voice':
       return diffTextField('Tom de voz', published.toneOfVoice, draft.toneOfVoice);

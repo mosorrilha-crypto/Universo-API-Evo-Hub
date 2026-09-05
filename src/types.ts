@@ -344,6 +344,13 @@ export interface AgentKnowledgeBase {
   documents: AgentFileDoc[];
   /** Link de localização (Google Maps) que o agente manda quando o cliente pede o endereço — ver server/services/knowledgeBaseStore.ts. */
   locationMapsUrl?: string;
+  /** TASK-0286 (pedido direto): dados de pagamento (PIX/conta bancária) em
+      texto livre, mandado MANUALMENTE pelo operador quando o cliente pede —
+      mesmo padrão do `locationMapsUrl` (mensagem pronta, nunca inventada;
+      só aparece no menu de anexos da conversa quando o tenant configura).
+      Nunca usado pela IA/agente automático — dado financeiro sensível
+      demais pra automação, decisão deliberada. */
+  paymentDetailsText?: string;
   firstContactBlocks?: FirstContactBlock[];
   lastSaved?: string;
 }
@@ -368,6 +375,8 @@ export interface ChatMessage {
   mimeType?: string;
   fileName?: string;
   timestamp: string;
+  /** TASK-0281 — timestamp ISO cru (com data completa), só pra mensagens reais de WhatsApp — `timestamp` acima já vem formatado só como "HH:MM" pra exibição, e usar ele pra decidir separador de dia faz qualquer mensagem antiga (de dias atrás) parecer "de hoje" (ver src/lib/chatDate.ts). `undefined` pras mensagens de demonstração/mock, que continuam usando o fallback "sempre hoje" de propósito. */
+  rawTimestamp?: string;
   /** true quando o envio real via Meta Cloud API falhou — a mensagem ficou só local, o cliente nunca recebeu. */
   sendFailed?: boolean;
   /** id de outra mensagem desta conversa que esta responde (quote) — quando a mensagem citada tem id real de provedor, também chega no WhatsApp real do cliente (ver server/services/conversationStore.ts). */

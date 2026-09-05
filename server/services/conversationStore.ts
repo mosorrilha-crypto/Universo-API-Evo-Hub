@@ -702,6 +702,86 @@ export async function getConversation(tenantId: string, phone: string): Promise<
   return conv;
 }
 
+const MESSAGE_PAGE_COLUMNS = 'id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by';
+
+function toStoredMessages(rows: MessageRow[]): StoredMessage[] {
+  return rows.map((m) => ({
+    id: m.id,
+    sender: m.sender,
+    type: m.type,
+    text: m.text || undefined,
+    timestamp: m.created_at,
+    replyToMessageId: m.reply_to_message_id || undefined,
+    forwardedFromMessageId: m.forwarded_from_message_id || undefined,
+    reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
+    sentBy: m.sent_by || undefined,
+  }));
+}
+
+export interface ConversationMessagesPage {
+  messages: StoredMessage[];
+  /** Só relevante numa página "mais antigas" (beforeTimestamp) — indica se ainda existe histórico anterior a paginar. */
+  hasMore: boolean;
+}
+
+/**
+ * Página de mensagens — achado real, 04/09/2026 ("Carregando histórico
+ * completo" toda vez que abre uma conversa, demora e atrapalha em rede
+ * fraca): `getConversation` acima carrega TODO o histórico de uma vez, e o
+ * painel chamava ele inteiro só pra abrir o chat. Este endpoint busca uma
+ * janela por vez, igual ao WhatsApp real — as mais recentes na abertura,
+ * mensagens antigas conforme o operador rola pra cima (`beforeTimestamp`), e
+ * as novas que chegam com a conversa já aberta (`afterTimestamp`, usado pelo
+ * SSE em vez de recarregar a página inteira de novo).
+ * `getConversation` continua intacto e usado pelos outros consumidores
+ * (prompt da IA, backup em planilha, retry de transcrição) que precisam do
+ * histórico completo pra funcionar direito — nunca trocar esses pela versão
+ * paginada.
+ */
+export async function getConversationMessagesPage(
+  tenantId: string,
+  phone: string,
+  opts: { limit?: number; beforeTimestamp?: string; afterTimestamp?: string } = {}
+): Promise<ConversationMessagesPage> {
+  const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
+  const db = getDb();
+  const { data: convRow } = await db
+    .from('conversations')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('phone', phone)
+    .maybeSingle();
+  if (!convRow) return { messages: [], hasMore: false };
+
+  // Ordena em memória (não no banco): a conversa já é buscada inteira por
+  // um índice único (tenant_id, conversation_id) — o volume por conversa
+  // aqui é pequeno o bastante (mensagens de WhatsApp, ritmo humano) pra isso
+  // não pesar, e evita depender de ORDER BY/operador ">" corretos num client
+  // Supabase (real ou fake de teste) que nem sempre garante a ordem sozinho.
+  const { data, error } = await db
+    .from('messages')
+    .select(MESSAGE_PAGE_COLUMNS)
+    .eq('tenant_id', tenantId)
+    .eq('conversation_id', convRow.id);
+  if (error) throw error;
+  const allSorted = ((data || []) as MessageRow[])
+    .slice()
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+
+  if (opts.afterTimestamp) {
+    const after = opts.afterTimestamp;
+    const newer = allSorted.filter((m) => m.created_at > after).slice(0, limit);
+    return { messages: toStoredMessages(newer), hasMore: false };
+  }
+
+  const upperBoundExclusive = opts.beforeTimestamp
+    ? allSorted.filter((m) => m.created_at < opts.beforeTimestamp!)
+    : allSorted;
+  const hasMore = upperBoundExclusive.length > limit;
+  const page = upperBoundExclusive.slice(Math.max(0, upperBoundExclusive.length - limit));
+  return { messages: toStoredMessages(page), hasMore };
+}
+
 /**
  * Marca a conversa como bloqueada por restrição geográfica da Meta (erro
  * 130497 — negócio ainda não passou pela Verificação de Negócio). Chamado

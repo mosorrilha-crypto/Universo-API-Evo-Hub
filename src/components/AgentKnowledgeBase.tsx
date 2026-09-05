@@ -2369,6 +2369,20 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
+                Dados de Pagamento (PIX/conta bancária) — opcional:
+              </label>
+              <AutoResizeTextarea
+                minRows={2}
+                value={formData.paymentDetailsText || ''}
+                onChange={(e) => setFormData({ ...formData, paymentDetailsText: e.target.value })}
+                placeholder="Ex: Chave PIX: 12.345.678/0001-90 (CNPJ) — Titular: Nome da Empresa"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none leading-relaxed"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">Diferente do link de localização acima, isto NUNCA é usado pelo agente automático — quando preenchido, só aparece como um botão manual no menu de anexos da conversa, pro operador mandar sob demanda quando a cliente pedir.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
                 Políticas Comerciais e Formas de Pagamento:
               </label>
               <AutoResizeTextarea

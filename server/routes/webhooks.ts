@@ -28,6 +28,7 @@ import { analyzePaymentReceiptWithGemini } from '../services/paymentReceiptAnaly
 import { resolveTenantByPhoneNumberId, resolveTenantByEvolutionInstance, resolveTenantByInstagramAccountId, type ResolvedTenant } from '../services/tenantResolver';
 import { redactMessageForLog } from '../services/logRedaction';
 import { reviewAutoReplyBeforeSend } from '../services/replySafetyGate';
+import { isPlausiblePersonalName } from '../services/contactNameGuard';
 import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { createQualityReview, recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { runWithTenantDbContext } from '../services/tenantDbContext';
@@ -310,7 +311,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           isBookingFlow: result.agent === 'agendamento',
           needsHumanConfirmation: result.needsHumanConfirmation,
           plannedCalendarActions: result.deferredCalendarActions?.map((action) => action.summary),
-          contactName,
+          contactName: isPlausiblePersonalName(contactName) ? contactName : undefined,
         }, { ai: getAi!(), groqApiKey });
         if (!safety.approved) {
           const blockedDraft = result.bubbles.join(' / ').slice(0, 900);
