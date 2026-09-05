@@ -146,8 +146,11 @@ async function startServer() {
   // outro site, o que já fecha CSRF clássico. Adicionar uma lib de token
   // CSRF por cima não fecharia nenhuma lacuna real nesta arquitetura, só
   // duplicaria a defesa em ~141 rotas sem ganho. Decisão registrada em
-  // docs/task-registry/TASK-0311.md.
-  app.use(cookieParser()); // lgtm[js/missing-token-validation]
+  // docs/task-registry/TASK-0311.md. Regra excluída via
+  // .github/codeql/codeql-config.yml (comentário `// lgtm[...]`/`// codeql[...]`
+  // inline NÃO é honrado pelo github/codeql-action — confirmado nesta mesma
+  // tarefa: um push com esse comentário continuou gerando o alerta).
+  app.use(cookieParser());
 
   // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
   // slug e só publica tenants explicitamente habilitados na migration 0042.
