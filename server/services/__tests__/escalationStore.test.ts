@@ -18,6 +18,7 @@ import {
   resolveEscalation,
   submitOperatorReply,
   reviewerEscalationSourceKey,
+  bookingConfirmationEscalationSourceKey,
 } from '../escalationStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
@@ -57,6 +58,23 @@ describe('governança do caso', () => {
     expect(second.id).toBe(first.id);
     expect(second.reason).toContain('agenda');
     expect(second.lastMessage).toBe('Mensaje B');
+    expect(second.occurrenceCount).toBe(2);
+    expect((await listEscalations(TENANT_A)).filter((item) => item.sourceKey === sourceKey)).toHaveLength(1);
+  });
+
+  // TASK-0314 (pedido direto, com print real da fila de Pendências: "por que
+  // estamos tendo tantos escalonamentos como este de agenda?") — achado
+  // real: sem uma sourceKey estável, webhooks.ts/transcriptionQueue.ts
+  // caíam no default (hash de reason+lastMessage), então cada mensagem nova
+  // da MESMA cliente ainda fechando dados (dia, depois horário) virava um
+  // card NOVO em vez de reabrir o mesmo atendimento pendente.
+  it('consolida mensagens sucessivas de "tentando fechar agendamento" na mesma conversa usando a mesma sourceKey', async () => {
+    const sourceKey = bookingConfirmationEscalationSourceKey(PHONE);
+    const first = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', 'Quiero agendar entonces', 'general', { sourceKey });
+    const second = await logEscalation(TENANT_A, PHONE, 'Cliente', 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', 'El próximo martes', 'general', { sourceKey });
+
+    expect(second.id).toBe(first.id);
+    expect(second.lastMessage).toBe('El próximo martes');
     expect(second.occurrenceCount).toBe(2);
     expect((await listEscalations(TENANT_A)).filter((item) => item.sourceKey === sourceKey)).toHaveLength(1);
   });
