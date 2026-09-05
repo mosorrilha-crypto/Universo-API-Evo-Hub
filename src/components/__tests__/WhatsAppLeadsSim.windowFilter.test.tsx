@@ -79,7 +79,6 @@ vi.mock('../../lib/apiClient', () => ({
     // etc.): resposta neutra, sem crashar.
     return jsonResponse({}, false);
   }),
-  getAuthToken: () => null,
   getTenantOverride: () => null,
 }));
 
@@ -89,6 +88,16 @@ vi.mock('../../lib/apiClient', () => ({
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = vi.fn();
 }
+
+// TASK-0311 (TASK-0249 item 1): o SSE deixou de ser condicional a "havia
+// token" (a sessão virou cookie httpOnly, invisível pro JS) — o componente
+// sempre abre a conexão agora. jsdom 30 já implementa EventSource de
+// verdade e tentaria conectar de fato nesta suíte; um stub inofensivo evita
+// isso, mesmo padrão do polyfill de scrollTo acima.
+class FakeEventSource {
+  close() {}
+}
+vi.stubGlobal('EventSource', FakeEventSource as any);
 
 afterEach(() => {
   cleanup();

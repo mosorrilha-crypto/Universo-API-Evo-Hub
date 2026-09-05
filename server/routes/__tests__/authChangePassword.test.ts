@@ -7,6 +7,7 @@
  * não conseguir trocar a senha do dono de fora sem saber a antiga.
  */
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import type { Server } from 'http';
 import bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -35,7 +36,11 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use(createAuthRouter({ jwtSecret: JWT_SECRET, supabase: supabase as any, authenticateToken: createAuthenticateToken(JWT_SECRET) }));
+  // Servidor de teste efêmero, sem tráfego real — CodeQL não distingue isso
+  // de um app em produção (ver rationale completa em server.ts). Regra
+  // js/missing-token-validation excluída via .github/codeql/codeql-config.yml.
+  app.use(cookieParser());
+  app.use(createAuthRouter({ jwtSecret: JWT_SECRET, supabase: supabase as any, authenticateToken: createAuthenticateToken(JWT_SECRET), isProduction: false }));
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -53,10 +58,13 @@ function tokenFor(id: string) {
   return jwt.sign({ id, tenantId: TENANT_ID, role: 'operator' }, JWT_SECRET, { expiresIn: '1h' });
 }
 
+// TASK-0311 (TASK-0249 item 1): a sessão deixou de vir por header
+// `Authorization` e passou a vir só pelo cookie httpOnly `universo_session`
+// (ver server/middleware/auth.ts) — simula isso mandando o JWT via `Cookie`.
 function changePassword(token: string | null, body: Record<string, unknown>) {
   return fetch(`${baseUrl}/api/auth/password`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Cookie: `universo_session=${token}` } : {}) },
     body: JSON.stringify(body),
   });
 }

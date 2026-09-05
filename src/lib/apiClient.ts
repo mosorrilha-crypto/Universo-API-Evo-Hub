@@ -1,29 +1,12 @@
-const TOKEN_STORAGE_KEY = 'saas_auth_token';
-
-const readStoredToken = (): string | null => {
-  try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-};
-
-let currentToken: string | null = readStoredToken();
-
-export const setAuthToken = (token: string | null) => {
-  currentToken = token;
-  try {
-    if (token) {
-      localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    } else {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-    }
-  } catch {
-    // localStorage indisponível (ex: modo privado) — token só fica em memória.
-  }
-};
-
-export const getAuthToken = () => currentToken;
+// TASK-0311 (TASK-0249 item 1, achado de segurança real): o JWT de sessão
+// morava aqui — em `currentToken`/`localStorage`, texto puro, legível por
+// qualquer JavaScript do cliente (um XSS ou extensão maliciosa lendo essa
+// chave roubava a sessão inteira). Deixou de existir client-side: o backend
+// agora entrega a sessão só via cookie `httpOnly` (`universo_session`, ver
+// server/routes/auth.ts) — o navegador anexa sozinho em toda chamada
+// same-origin (é o comportamento padrão do Fetch API, não precisa de
+// `credentials: 'include'` aqui), e o JavaScript do frontend nunca tem
+// acesso ao valor cru pra vazar.
 
 // Tenant que o seletor do painel (Header.tsx) tem selecionado no momento —
 // só tem efeito de verdade no backend pra saas_admin (ver resolveTenantId
@@ -37,14 +20,14 @@ export const getAuthToken = () => currentToken;
 // outro tenant no seletor, configurou algo lá (achando que estava editando
 // aquele tenant) e a gravação foi silenciosamente pro tenant do PRÓPRIO
 // login — um cliente real chegou a receber conteúdo de outro tenant.
-// Achado real em produção (18/08/2026): diferente do token (linha 11
-// acima), esse valor nunca era restaurado do localStorage no carregamento
-// do módulo — só App.tsx o define, de forma assíncrona, depois que
-// `currentUser`/`activeTenant` terminam de carregar. Qualquer `apiFetch`
-// disparado antes disso (ou, com o bug de ordem de efeitos corrigido em
-// App.tsx, mesmo já sincronizado corretamente) partia de `null`, caindo no
-// tenant do próprio token do saas_admin em vez do tenant selecionado.
-// Restaurar aqui, espelhando `readStoredToken()`, fecha essa janela.
+// Achado real em produção (18/08/2026): esse valor nunca era restaurado do
+// localStorage no carregamento do módulo — só App.tsx o define, de forma
+// assíncrona, depois que `currentUser`/`activeTenant` terminam de carregar.
+// Qualquer `apiFetch` disparado antes disso (ou, com o bug de ordem de
+// efeitos corrigido em App.tsx, mesmo já sincronizado corretamente) partia
+// de `null`, caindo no tenant do próprio token do saas_admin em vez do
+// tenant selecionado. Restaurar aqui, no carregamento do módulo, fecha essa
+// janela.
 const readStoredTenantOverride = (): string | null => {
   try {
     return localStorage.getItem('saas_active_tenant_override');
@@ -92,24 +75,25 @@ export const setUnauthorizedHandler = (handler: (() => void) | null) => {
 };
 
 /**
- * Wrapper de fetch que anexa `Authorization: Bearer <token>` automaticamente
- * quando há um token de sessão salvo. Use no lugar de `fetch` para chamar
- * rotas protegidas do backend (/api/transcribe, /api/analyze-conversation etc).
+ * Wrapper de fetch usado em toda chamada a rota protegida do backend
+ * (/api/transcribe, /api/analyze-conversation etc). TASK-0311: não anexa
+ * mais `Authorization` — a sessão viaja só pelo cookie `httpOnly`
+ * `universo_session`, que o navegador já manda sozinho em toda requisição
+ * same-origin (comportamento padrão do Fetch API).
  */
 export const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
   const headers = new Headers(init.headers || {});
-  if (currentToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${currentToken}`);
-  }
   if (tenantOverride && !headers.has('X-Tenant-Id')) {
     headers.set('X-Tenant-Id', tenantOverride);
   }
   const response = await fetch(input, { ...init, headers });
   // 403 também é a resposta normal de RBAC quando uma sessão válida não tem
-  // papel suficiente. Só o middleware de autenticação marca token inválido;
-  // sem essa distinção, abrir uma área administrativa fazia logout indevido.
-  if (response.status === 403 && currentToken && response.headers.get('X-Auth-Session-Invalid') === 'true') {
-    setAuthToken(null);
+  // papel suficiente. Só o middleware de autenticação marca sessão inválida
+  // (header abaixo) — sem essa distinção, abrir uma área administrativa
+  // fazia logout indevido. TASK-0311: sem `currentToken` client-side pra
+  // saber se "achávamos" que havia sessão (o cookie é httpOnly, invisível
+  // pro JS) — o sinal do servidor já basta sozinho.
+  if (response.status === 403 && response.headers.get('X-Auth-Session-Invalid') === 'true') {
     onUnauthorized?.();
   }
   return response;
