@@ -533,6 +533,55 @@ export const App: React.FC = () => {
   // do WhatsApp (pedido direto, 29/08/2026). Sem efeito no desktop.
   const [isMobileWhatsAppThreadOpen, setIsMobileWhatsAppThreadOpen] = useState(false);
 
+  // TASK-0290 (pedido direto, print do botão físico/gesto de voltar do
+  // Android circulado): "esse botão minimiza o aplicativo e não volta as
+  // páginas dentro do aplicativo". Achado real: o app inteiro nunca chamou
+  // `history.pushState` — sem nenhuma entrada própria no histórico do
+  // navegador/WebView, o botão de voltar do Android não tem nada pra
+  // "desfazer" e cai direto no comportamento padrão (minimizar/fechar a
+  // PWA). Corrigido empilhando uma entrada toda vez que o app fica "mais
+  // fundo" (troca de aba saindo de "Hoje", ou abre uma conversa no mobile)
+  // e escutando `popstate` pra desfazer exatamente um nível por vez — só
+  // quando já está em "Hoje" sem conversa aberta é que sobra pro
+  // comportamento nativo (minimizar), exatamente o pedido.
+  const isMobileWhatsAppThreadOpenRef = useRef(isMobileWhatsAppThreadOpen);
+  useEffect(() => { isMobileWhatsAppThreadOpenRef.current = isMobileWhatsAppThreadOpen; }, [isMobileWhatsAppThreadOpen]);
+  const [closeThreadSignal, setCloseThreadSignal] = useState(0);
+  // Evita que o próprio `setActiveTab`/fechamento disparado pelo popstate
+  // empilhe uma entrada NOVA (o que faria o histórico crescer sem fim e a
+  // volta nunca "andar" de verdade) — sem isso o efeito de push abaixo não
+  // sabe distinguir "usuário navegou pra frente" de "voltamos por causa do
+  // botão de voltar".
+  const suppressTabPushRef = useRef(false);
+  useEffect(() => {
+    if (suppressTabPushRef.current) { suppressTabPushRef.current = false; return; }
+    if (activeTab !== 'home') {
+      window.history.pushState({ universoNav: 'tab', tab: activeTab }, '');
+    }
+  }, [activeTab]);
+  useEffect(() => {
+    if (isMobileWhatsAppThreadOpen) {
+      window.history.pushState({ universoNav: 'thread' }, '');
+    }
+    // Fechar a conversa manualmente (botão "voltar pra lista" dentro do
+    // app, não o botão do Android) não desempilha a entrada — aceito como
+    // limitação conhecida: na pior hipótese sobra 1 aperto de voltar "à
+    // toa" antes de sair de verdade, nunca uma trava sem conseguir sair.
+  }, [isMobileWhatsAppThreadOpen]);
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      if (isMobileWhatsAppThreadOpenRef.current) {
+        setCloseThreadSignal((n) => n + 1);
+        return;
+      }
+      const state = event.state as { universoNav?: string; tab?: ActiveTab } | null;
+      suppressTabPushRef.current = true;
+      handleSetActiveTab(state?.universoNav === 'tab' && state.tab ? state.tab : 'home');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   // Achado real, 29/08/2026 (TASK-0159 resolveu a cadeia de flex interna do
   // Atendimento, mas a lista de conversas mobile — cabeçalho global visível —
   // continuava passando um pouco da tela): o wrapper do Atendimento em
@@ -1551,6 +1600,7 @@ export const App: React.FC = () => {
             financialModuleEnabled={canSeeFinancial}
             onAddTransaction={handleAddTransaction}
             operatorName={currentUser?.name}
+            closeThreadSignal={closeThreadSignal}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}

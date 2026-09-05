@@ -186,6 +186,16 @@ interface WhatsAppLeadsSimProps {
   onAddTransaction?: (tx: FinancialTransaction) => Promise<boolean>;
   /** Nome do operador logado, só pra atribuição no lançamento avulso criado a partir de um comprovante. */
   operatorName?: string;
+  /** TASK-0290 (pedido direto, print do botão "voltar" do Android circulado:
+      "esse botão minimiza o aplicativo e não volta as páginas dentro do
+      aplicativo") — App.tsx empilha uma entrada de histórico (History API)
+      quando a conversa abre no mobile, e usa este contador (mesmo padrão de
+      `openLeadRequestId`: muda de valor mesmo pro "mesmo" pedido, pra
+      disparar o efeito de novo) pra mandar fechar a conversa quando o botão
+      físico/gesto de voltar do Android for pressionado — sem isso, App.tsx
+      não tem nenhuma forma de fechar a conversa que este componente controla
+      internamente (`mobileThreadOpen`). */
+  closeThreadSignal?: number;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -274,6 +284,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   escalations = [],
   onGoToEscalations,
   onGoToAgenda,
+  closeThreadSignal,
   openLeadPhone,
   openLeadRequestId,
   financialModuleEnabled,
@@ -343,6 +354,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   useEffect(() => {
     onThreadOpenChange?.(mobileThreadOpen);
   }, [mobileThreadOpen, onThreadOpenChange]);
+  // TASK-0290: fecha a conversa aberta no mobile quando App.tsx avisa que o
+  // botão/gesto de voltar do Android foi acionado — mesmo efeito do botão
+  // "voltar pra lista" já existente no cabeçalho (linha ~3790). O `useRef`
+  // evita disparar no primeiro render (closeThreadSignal nasce `undefined`
+  // ou 0, igual o valor inicial — só reage a uma mudança de verdade).
+  const closeThreadSignalRef = useRef(closeThreadSignal);
+  useEffect(() => {
+    if (closeThreadSignal === undefined || closeThreadSignal === closeThreadSignalRef.current) return;
+    closeThreadSignalRef.current = closeThreadSignal;
+    setMobileThreadOpen(false);
+    setMobileAnalysisOpen(false);
+  }, [closeThreadSignal]);
   // Achado real em produção: a coluna 3 (Ficha IA) ficou hidden no mobile
   // (PR #70, evitava sobrepor a lista) mas o botão "Ver Ficha IA" continuou
   // visível e clicável lá, sem fazer nada — parecia quebrado. Este estado é
