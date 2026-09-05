@@ -392,7 +392,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // WhatsApp Web Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'window_closed'>('all');
+  const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'unread' | 'window_open' | 'window_closed'>('all');
+  // Pedido direto (04/09/2026): ícone de filtro ao lado do ícone de Status,
+  // abrindo uma lista com o filtro por janela de 24h — em vez de mais uma
+  // pill disputando espaço na barra (ver TASK-0279, que já tinha rebaixado
+  // "Fora das 24h" por esse motivo).
+  const [isWindowFilterMenuOpen, setIsWindowFilterMenuOpen] = useState(false);
   // Painel lateral de contexto do contato (Referência 1: 3 colunas ativas no desktop)
   const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
   const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis' | 'escalations'>('profile');
@@ -1881,6 +1886,34 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
 
+  // Achado real (pedido do dono do produto, 04/09/2026): o badge "24h" e o
+  // bloqueio de reengajamento congelavam no valor buscado quando a conversa
+  // foi aberta — `serviceWindow.withinWindow`/`hoursRemaining` vêm prontos do
+  // servidor e refreshContactContext só roda de novo em poucos gatilhos
+  // manuais (trocar de lead, editar memória, etc.), nunca sozinho por tempo.
+  // Um operador com a conversa aberta por horas via "aberta"/contagem antiga
+  // mesmo depois da janela real ter fechado. Corrigido recalculando ao vivo
+  // a partir de `windowExpiresAt` (timestamp absoluto, não muda) + um
+  // relógio que atualiza a cada minuto, em vez de confiar nos campos
+  // booleanos já calculados que o servidor devolveu no momento do fetch.
+  const [windowStatusNowTick, setWindowStatusNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setWindowStatusNowTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const getLiveServiceWindowStatus = React.useCallback(
+    (serviceWindow?: ContactAgentContext['serviceWindow'] | null): { isWindowOpen: boolean; hoursRemaining: number } => {
+      if (!serviceWindow) return { isWindowOpen: true, hoursRemaining: 24 };
+      if (!serviceWindow.windowExpiresAt) return { isWindowOpen: false, hoursRemaining: 0 };
+      const msRemaining = new Date(serviceWindow.windowExpiresAt).getTime() - windowStatusNowTick;
+      return {
+        isWindowOpen: msRemaining > 0,
+        hoursRemaining: Math.max(0, Math.ceil(msRemaining / (60 * 60 * 1000))),
+      };
+    },
+    [windowStatusNowTick]
+  );
+
   // Checa 1x por tenant se há WABA configurado, pra já bloquear "Reabrir a
   // conversa" na página quando não há (ver GET /api/conversations/:phone/templates
   // em conversations.ts — reason: 'waba_not_configured'). Falha de rede não
@@ -2296,6 +2329,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     return Date.now() - new Date(lastLeadMessageAt).getTime() < CUSTOMER_SERVICE_WINDOW_MS;
   };
   const windowClosedLeadsCount = leads.filter((lead) => (lead as any).isReal && !isWithin24hWindow(lead)).length;
+  const windowOpenLeadsCount = leads.filter((lead) => (lead as any).isReal && isWithin24hWindow(lead)).length;
 
   // Filtered Leads according to search and WhatsApp filter tabs
   const filteredLeads = leads
@@ -2317,6 +2351,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       if (activeTabFilter === 'unread') {
         return getUnreadCount(lead) > 0;
+      }
+      if (activeTabFilter === 'window_open') {
+        return Boolean((lead as any).isReal) && isWithin24hWindow(lead);
       }
       if (activeTabFilter === 'window_closed') {
         return Boolean((lead as any).isReal) && !isWithin24hWindow(lead);
@@ -3865,24 +3902,63 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 {t('unread')} ({unreadLeadsCount})
               </button>
-              {/* TASK-0279 (pedido direto, 04/09/2026): "Fora das 24h" não é
-                  mais importante que conversas dentro da janela que
-                  precisam de atenção (essas já ganham destaque de verdade
-                  na seção "ESPERANDO HÁ MAIS DE 30 MIN" da própria lista,
-                  em vermelho/laranja) — rebaixado de pill igual a
-                  Tudo/Não lidos pra estilo secundário/discreto, sem
-                  competir visualmente com o que precisa de atenção agora. */}
-              <button
-                onClick={() => setActiveTabFilter('window_closed')}
-                title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap cursor-pointer border ${
-                  activeTabFilter === 'window_closed'
-                    ? 'border-slate-500 text-slate-200 bg-transparent'
-                    : 'border-slate-700/70 text-slate-500 hover:text-slate-300 bg-transparent'
-                }`}
-              >
-                Fora das 24h ({windowClosedLeadsCount})
-              </button>
+              {/* Pedido direto (04/09/2026): filtro de janela de 24h vira
+                  ícone + lista de opções (ao lado do ícone de Status), em
+                  vez de pill fixa — segue o mesmo rebaixamento visual já
+                  decidido na TASK-0279 (não competir com o que precisa de
+                  atenção agora), mas junto adiciona "Dentro das 24h", que
+                  antes não existia como filtro (só "Fora das 24h"). Mesmo
+                  estado activeTabFilter de sempre, mutuamente exclusivo com
+                  Tudo/Não lidos; clicar na opção já ativa desliga o filtro. */}
+              <div className="relative flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsWindowFilterMenuOpen((v) => !v)}
+                  title="Filtrar por janela de atendimento de 24h"
+                  className={`flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
+                    activeTabFilter === 'window_open' || activeTabFilter === 'window_closed'
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white'
+                  }`}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                </button>
+                {isWindowFilterMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsWindowFilterMenuOpen(false)} />
+                    <div className="absolute left-0 top-10 z-50 w-60 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-left animate-pop-in">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTabFilter((prev) => (prev === 'window_open' ? 'all' : 'window_open'));
+                          setIsWindowFilterMenuOpen(false);
+                        }}
+                        title="Contatos com mensagem do cliente nas últimas 24h — o agente/operador ainda pode responder normalmente."
+                        className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                          activeTabFilter === 'window_open' ? 'text-emerald-400 font-semibold' : 'text-slate-200'
+                        }`}
+                      >
+                        <span>Dentro das 24h</span>
+                        <span>{windowOpenLeadsCount}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTabFilter((prev) => (prev === 'window_closed' ? 'all' : 'window_closed'));
+                          setIsWindowFilterMenuOpen(false);
+                        }}
+                        title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
+                        className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                          activeTabFilter === 'window_closed' ? 'text-slate-100 font-semibold' : 'text-slate-400'
+                        }`}
+                      >
+                        <span>Fora das 24h</span>
+                        <span>{windowClosedLeadsCount}</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Status — só aparece pra números conectados via Evolution API
                   (QR Code); na Meta Cloud API oficial nunca funciona, então
@@ -4127,9 +4203,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           composer mais abaixo. */}
                       {(() => {
                         const serviceWindow = visibleContactContext?.serviceWindow;
-                        const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
+                        const { isWindowOpen, hoursRemaining } = getLiveServiceWindowStatus(serviceWindow);
                         if (!isWindowOpen) return null;
-                        const hoursRemaining = serviceWindow?.hoursRemaining ?? 24;
                         return (
                           <span
                             className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-700/50 px-1.5 py-0.5 rounded-full"
@@ -5261,7 +5336,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     é o sinal que já existe pra distinguir os dois casos. */}
                 {selectedLead && (() => {
                   const serviceWindow = visibleContactContext?.serviceWindow;
-                  const isWindowOpen = serviceWindow ? serviceWindow.withinWindow : true;
+                  const { isWindowOpen } = getLiveServiceWindowStatus(serviceWindow);
                   const isMetaChannel = Boolean((selectedLead as any).phoneNumberId);
 
                   {/* TASK-0258 (pedido direto): janela aberta e sem ação
