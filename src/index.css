@@ -837,6 +837,16 @@ html[data-theme='clean'] .atendimento-context-strip__action { border-color:#E4E7
    sozinho nunca conseguiria sobrescrever a regra global acima. */
 .atendimento-composer-textarea:focus-visible { outline: none; }
 
+/* Mesmo problema da regra acima (TASK-0259), agora na busca de conversas e
+   no botão de filtro por etiqueta da lista (pedido direto, 05/09/2026, print
+   real mostrando o contorno verde cheio em volta da caixa de busca no toque
+   em Android/Chrome): ambos são controles de formulário (input/button) que
+   o Chrome trata como alvo de "navegação por teclado" mesmo em toque de
+   tela, então herdam o contorno verde global acima sem nunca ter usado
+   teclado de verdade. */
+.atendimento-search-input:focus-visible,
+.atendimento-label-filter-trigger:focus-visible { outline: none; }
+
 /* ──────────────────────────────────────────────────────────────────────────
    Handoff aprovado — Atendimento: tokens neutros, ação única e hierarquia
    sem azul-noite, gradientes ou cor própria para IA.
@@ -2499,7 +2509,7 @@ html[data-theme='clean'] .quality-workspace__control-pill--emerald > p:last-chil
    regra agora só ajusta o tamanho do alvo de toque de cada item (WCAG,
    ainda relevante no mobile) e o tom em temas claros. */
 .mobile-header-context-menu button {
-  min-height: 2.75rem;
+  min-height: 2.25rem;
 }
 html[data-theme='light'] .mobile-header-context-menu {
   background: var(--surface-raised) !important;
