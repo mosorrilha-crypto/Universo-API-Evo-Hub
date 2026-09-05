@@ -1601,6 +1601,7 @@ export const App: React.FC = () => {
             onAddTransaction={handleAddTransaction}
             operatorName={currentUser?.name}
             closeThreadSignal={closeThreadSignal}
+            onToast={showToast}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}

@@ -196,6 +196,11 @@ interface WhatsAppLeadsSimProps {
       não tem nenhuma forma de fechar a conversa que este componente controla
       internamente (`mobileThreadOpen`). */
   closeThreadSignal?: number;
+  /** TASK-0292 — confirmação/erro do botão "Ressincronizar" da Ficha do
+      Contato (agendamento desatualizado). Mesmo `showToast` já usado em
+      App.tsx/AgendaFinanceiroCenter; opcional pra não quebrar quem ainda não
+      passa essa prop. */
+  onToast?: (message: string) => void;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -290,6 +295,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   financialModuleEnabled,
   onAddTransaction,
   operatorName,
+  onToast,
 }) => {
   const { t, language } = useAppPreferences();
   const isSpanish = language === 'es';
@@ -2187,20 +2193,66 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (!selectedLead?.phone || !(selectedLead as any)?.isReal) {
+  const refreshPaymentAppointment = React.useCallback(async () => {
+    const phone = selectedLead?.phone;
+    if (!phone || !(selectedLead as any)?.isReal) {
       setPaymentAppointment(null);
       return;
     }
+    try {
+      const r = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/appointment`);
+      const data = r.ok ? await r.json() : null;
+      setPaymentAppointment(data?.appointment || null);
+    } catch {
+      // silencioso, igual ao comportamento anterior — a Ficha só fica sem o card de agendamento até a próxima tentativa.
+    }
+  }, [selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  useEffect(() => {
     let cancelled = false;
-    apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/appointment`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    (async () => {
+      if (!selectedLead?.phone || !(selectedLead as any)?.isReal) {
+        setPaymentAppointment(null);
+        return;
+      }
+      try {
+        const r = await apiFetch(`/api/conversations/${encodeURIComponent(selectedLead.phone)}/appointment`);
+        const data = r.ok ? await r.json() : null;
         if (!cancelled) setPaymentAppointment(data?.appointment || null);
-      })
-      .catch(() => {});
+      } catch {
+        // silencioso — igual ao comportamento anterior.
+      }
+    })();
     return () => { cancelled = true; };
   }, [selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  // TASK-0292 (pedido direto, print: "este campo não está conectado a
+  // agenda, e eu não consigo editar pois a cliente remarcou") — botão
+  // "Ressincronizar" na Ficha do Contato (ConversationContextSidebar).
+  // Realinha `appointments` com o estado ATUAL do mesmo evento do Google
+  // Calendar (POST .../appointment/resync, nunca cria evento novo nem toca
+  // em pagamento), pra quando o reagendamento aconteceu fora dos fluxos que
+  // já escrevem nessa tabela (ex.: editar o evento direto no Calendar).
+  const [isResyncingAppointment, setIsResyncingAppointment] = useState(false);
+  const handleResyncAppointment = React.useCallback(async () => {
+    const phone = selectedLead?.phone;
+    if (!phone || isResyncingAppointment) return;
+    setIsResyncingAppointment(true);
+    try {
+      const res = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/appointment/resync`, { method: 'POST' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        onToast?.(data?.error || 'Não foi possível ressincronizar o agendamento agora.');
+        return;
+      }
+      await refreshPaymentAppointment();
+      onToast?.(data?.changed ? 'Agendamento ressincronizado com o horário atual da agenda.' : 'O agendamento já estava sincronizado com a agenda.');
+    } catch {
+      onToast?.('Não foi possível ressincronizar o agendamento agora.');
+    } finally {
+      setIsResyncingAppointment(false);
+    }
+  }, [selectedLead?.phone, isResyncingAppointment, refreshPaymentAppointment, onToast]);
 
   // Achado real (print da Ficha do Contato, "Gisse" com "Agendou? sim" mas
   // "AGENDAMENTOS: Nenhum agendamento ativo"): as duas seções liam fontes
@@ -5811,6 +5863,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 agentStatus={selectedLead?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
                 onClose={() => setShowRightPanel(false)}
+                onResyncAppointment={handleResyncAppointment}
               />
             ) : rightPanelTab === 'escalations' ? (
               renderEscalationHistoryPanel()
@@ -5944,6 +5997,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 agentStatus={(selectedLead as any)?.aiBlockedAt ? 'paused' : 'active'}
                 onToggleAgentStatus={() => handleUpdateConversationState(selectedLead.id, { aiBlocked: !(selectedLead as any).aiBlockedAt })}
                 onClose={() => setMobileAnalysisOpen(false)}
+                onResyncAppointment={handleResyncAppointment}
                 isMobile
               />
             ) : rightPanelTab === 'escalations' ? (

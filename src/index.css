@@ -726,6 +726,16 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) { padding: .75rem; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) h2 { font-size: .9rem; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) p { display: none; }
+  /* TASK-0292 (pedido direto, print real: "o calendário pode ocupar melhor
+     a página... pode ficar de ponta a ponta... preencher os espaços
+     vazios igual no desktop e no calendário do google") — só na visão
+     Calendário (não afeta Hoje): padding lateral do card reduzido mais
+     ainda (mais perto de borda a borda) e células da grade de mês mais
+     altas, aproveitando o espaço vertical que sobrava vazio no celular
+     real. */
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:first-child { padding-left: .4rem; padding-right: .4rem; }
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) .grid-cols-7 > div[aria-hidden="true"] { min-height: 3.25rem; }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }

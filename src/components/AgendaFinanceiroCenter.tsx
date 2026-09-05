@@ -431,6 +431,20 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     });
   }, [calendarDate, events]);
 
+  // TASK-0292 (pedido direto, print real: "os agendamentos de agosto só
+  // aparece no calendário como um número mas eu não consigo ver os dados
+  // dele") — achado real: quando um dia tinha 2+ compromissos, o clique só
+  // chamava `setSelectedDate` (destacava a célula) e nada mais lia
+  // `selectedDate` na visão de Mês pra mostrar os dados — dia vazio abria
+  // criação e dia com 1 compromisso abria a edição dele direto, mas 2+ era
+  // um beco sem saída. Lista compacta abaixo da grade (reaproveita
+  // `EventCard` já usado em "Próximos compromissos"/Pendências), clicável
+  // pra abrir a edição de qualquer um deles.
+  const selectedDayAppointments = useMemo(() => {
+    if (calendarViewMode !== 'month') return [];
+    return eventDays.find(({ day }) => dateInputValue(day) === selectedDate)?.appointments ?? [];
+  }, [eventDays, selectedDate, calendarViewMode]);
+
   /** Segunda a domingo da semana que contém `selectedDate`, com os compromissos de cada dia já filtrados e ordenados por horário. */
   const weekDays = useMemo(() => {
     const base = new Date(`${selectedDate}T12:00:00`);
@@ -479,21 +493,34 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
   };
 
   const EventCard = ({ calendarEvent, compact = false }: { calendarEvent: CalendarEvent; compact?: boolean }) => (
-    <article className={`group rounded-2xl border border-slate-800 bg-slate-950/55 p-${compact ? '3' : '4'} transition-colors hover:border-emerald-500/35`}>
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300">
-          <span className="text-[10px] font-bold uppercase">{new Date(calendarEvent.startIso).toLocaleDateString(displayLocale, { weekday: 'short' }).replace('.', '')}</span>
-          <span className="text-sm font-black leading-none">{new Date(calendarEvent.startIso).getDate()}</span>
+    <article className={`group rounded-2xl border border-slate-800 bg-slate-950/55 ${compact ? 'p-2.5' : 'p-4'} transition-colors hover:border-emerald-500/35`}>
+      <div className={`flex items-start ${compact ? 'gap-2' : 'gap-3'}`}>
+        <div className={`mt-0.5 flex shrink-0 flex-col items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300 ${compact ? 'h-8 w-8' : 'h-10 w-10'}`}>
+          <span className={`font-bold uppercase ${compact ? 'text-[8px]' : 'text-[10px]'}`}>{new Date(calendarEvent.startIso).toLocaleDateString(displayLocale, { weekday: 'short' }).replace('.', '')}</span>
+          <span className={`font-black leading-none ${compact ? 'text-xs' : 'text-sm'}`}>{new Date(calendarEvent.startIso).getDate()}</span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h3 className="truncate text-sm font-bold text-white">{calendarEvent.summary}</h3>
-              <p className="mt-1 flex items-center gap-1 text-xs text-slate-400"><Clock3 className="h-3.5 w-3.5" />{new Date(calendarEvent.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}{calendarEvent.endIso ? ` — ${new Date(calendarEvent.endIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+            <div className="min-w-0 flex-1">
+              {/* TASK-0292 (pedido direto, "os cards estão muito grandes exigem
+                  rolar muito a página"): compact junta título+horário numa
+                  única linha truncada, em vez de duas linhas empilhadas — a
+                  variante cheia (Próximos compromissos/semana) continua igual. */}
+              {compact ? (
+                <p className="truncate text-xs font-bold text-white">
+                  {calendarEvent.summary}
+                  <span className="ml-1.5 font-normal text-slate-400">· {new Date(calendarEvent.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}{calendarEvent.endIso ? `–${new Date(calendarEvent.endIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                </p>
+              ) : (
+                <>
+                  <h3 className="truncate text-sm font-bold text-white">{calendarEvent.summary}</h3>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-slate-400"><Clock3 className="h-3.5 w-3.5" />{new Date(calendarEvent.startIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}{calendarEvent.endIso ? ` — ${new Date(calendarEvent.endIso).toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+                </>
+              )}
             </div>
             {calendarEvent.completed && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className={`flex flex-wrap items-center gap-2 ${compact ? 'mt-1.5' : 'mt-3'}`}>
             {financialModuleEnabled && (calendarEvent.payment ? <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusStyle[calendarEvent.payment.status]}`}>{calendarEvent.payment.status === 'pago' ? (isSpanish ? 'Cobrado' : 'Recebido') : calendarEvent.payment.status === 'atrasado' ? (isSpanish ? 'Atrasado' : 'Em atraso') : (isSpanish ? 'Por cobrar' : 'A receber')} · {formatMoney(calendarEvent.payment.amount)}</button> : <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className="rounded-full border border-dashed border-amber-500/35 px-2 py-1 text-[10px] font-bold text-amber-200 hover:bg-amber-500/10">{isSpanish ? 'Vincular cobro' : 'Vincular cobrança'}</button>)}
             {!compact && <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
               <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar agendamiento' : 'Editar agendamento'}><MoreHorizontal className="h-4 w-4" /></button>
@@ -685,6 +712,23 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
                   </button>
                 );
               })}</div>}
+
+          {/* TASK-0292 — dia com 2+ compromissos na visão de Mês: antes o
+              clique só destacava a célula, sem mostrar os dados de nenhum
+              compromisso daquele dia (0 abre criação, 1 abre a edição dele
+              direto, ambos já funcionavam). */}
+          {calendarViewMode === 'month' && selectedDayAppointments.length >= 2 && (
+            <div className="mt-3 space-y-2 border-t border-slate-800/70 pt-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                {selectedDayAppointments.length} {isSpanish ? 'citas el' : 'compromissos em'} {new Date(`${selectedDate}T12:00:00`).toLocaleDateString(displayLocale, { day: '2-digit', month: 'short' })}
+              </p>
+              {selectedDayAppointments.map((calendarEvent) => (
+                <button type="button" key={calendarEvent.id} onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="block w-full text-left">
+                  <EventCard calendarEvent={calendarEvent} compact />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold text-white">{isSpanish ? 'Próximos compromisos' : 'Próximos compromissos'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Acciones que requieren atención a continuación.' : 'Ações que exigem atenção na sequência.'}</p></div><button type="button" onClick={refreshEvents} className="text-xs font-bold text-emerald-300 hover:text-emerald-200">{isSpanish ? 'Actualizar' : 'Atualizar'}</button></div><div className="space-y-3">{nextAppointments.length ? nextAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'No se encontraron compromisos futuros este mes.' : 'Nenhum compromisso futuro encontrado neste mês.'}</p>}</div></div>
       </section>}

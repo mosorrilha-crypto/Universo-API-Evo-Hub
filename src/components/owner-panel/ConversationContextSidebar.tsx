@@ -21,6 +21,8 @@ interface ConversationContextSidebarProps {
   onToggleAgentStatus?: () => void;
   onClose?: () => void;
   isMobile?: boolean;
+  /** TASK-0292 (pedido direto, print: "este campo não está conectado a agenda, e eu não consigo editar pois a cliente remarcou") — o card AGENDAMENTOS é só leitura, sem jeito de corrigir um horário desatualizado quando o reagendamento aconteceu fora dos fluxos que escrevem em `appointments` (ex.: editar o evento direto no Google Calendar). Ressincroniza com o estado atual do mesmo evento (POST /api/conversations/:phone/appointment/resync). */
+  onResyncAppointment?: () => Promise<void> | void;
 }
 
 export const ConversationContextSidebar: React.FC<ConversationContextSidebarProps> = ({
@@ -29,8 +31,20 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
   onToggleAgentStatus,
   onClose,
   isMobile,
+  onResyncAppointment,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
+
+  const handleResync = async () => {
+    if (!onResyncAppointment || isResyncing) return;
+    setIsResyncing(true);
+    try {
+      await onResyncAppointment();
+    } finally {
+      setIsResyncing(false);
+    }
+  };
 
   if (!contact) {
     return (
@@ -181,9 +195,23 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
 
       {/* Bloco: AGENDAMENTOS */}
       <div className="border-t border-slate-800/80 pt-4">
-        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block mb-3">
-          Agendamentos
-        </span>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+            Agendamentos
+          </span>
+          {onResyncAppointment && contact.upcomingAppointments && contact.upcomingAppointments.length > 0 && (
+            <button
+              type="button"
+              onClick={handleResync}
+              disabled={isResyncing}
+              title="Ressincronizar com o horário atual da agenda — use se a cliente remarcou por fora (ex.: direto no Google Calendar) e este card ficou desatualizado."
+              className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 disabled:opacity-50 disabled:cursor-wait"
+            >
+              <RefreshCw className={`w-3 h-3 ${isResyncing ? 'animate-spin' : ''}`} />
+              {isResyncing ? 'Ressincronizando...' : 'Ressincronizar'}
+            </button>
+          )}
+        </div>
 
         {contact.upcomingAppointments && contact.upcomingAppointments.length > 0 ? (
           <div className="space-y-2.5">
