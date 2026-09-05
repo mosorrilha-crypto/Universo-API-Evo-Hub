@@ -1,31 +1,26 @@
 /**
  * Nem todo "nome" que chega no perfil do WhatsApp é um nome de pessoa de
  * verdade — pode ser um status ("Ocupado", "Disponible", "No molestar"), o
- * nome do próprio negócio da cliente, ou só emoji/símbolos. Achado real
- * (04/09/2026, pedido direto do dono do produto): usar esse valor sem
- * checagem nenhuma pra chamar a cliente na saudação ("Hola, {nome}...") é
- * arriscado — o agente pode acabar chamando a cliente de "Ocupado" como se
- * fosse o nome dela.
+ * nome do próprio negócio da cliente, ou só emoji/símbolos. TASK-0278
+ * (04/09/2026) tentou filtrar isso com uma lista de status/negócios
+ * conhecidos, mas uma lista de exclusão nunca cobre todo caso real — achado
+ * real de produção (05/09/2026, TASK-0305): o perfil "Pao Fretes" (nome de
+ * uma empresa de frete/entrega, não de uma pessoa) passou pelo filtro porque
+ * "fretes" não estava na lista, e o agente chamou a cliente de "Pao" como se
+ * fosse o primeiro nome dela.
  *
- * Filtro deliberadamente conservador: só rejeita quando o valor claramente
- * NÃO parece nome de pessoa (sem nenhuma letra, ou bate em status/frase de
- * negócio conhecida). Nomes de verdade — inclusive compostos, com acento,
- * ou em caixa alta como vêm de muitos perfis ("ANA BALBUENA") — passam
- * normalmente; a normalização de maiúsculas/like "só o primeiro nome" já é
- * feita pelo próprio modelo ao escrever a saudação, não aqui.
+ * Decisão do dono do produto diante desse segundo caso real: em vez de
+ * ficar caçando mais uma palavra pra lista (mesmo padrão frágil que já
+ * falhou duas vezes), parar de usar esse campo como referência de nome de
+ * verdade. Sempre retorna `false` — o nome de perfil do WhatsApp nunca mais
+ * é usado pra chamar a cliente; o único nome que o agente usa é o que a
+ * própria cliente disser durante a conversa (`nomeCapturado`, ver
+ * autoReply.ts). O valor de perfil continua disponível pra fins
+ * administrativos que não dependem de ser um nome real (título da conversa
+ * no painel, rótulo de lead, logs de escalonamento) — só não passa mais por
+ * este guard, que hoje só é chamado nos pontos que decidem se o valor entra
+ * no prompt da IA como "Nome do cliente".
  */
-export function isPlausiblePersonalName(name: string | undefined | null): boolean {
-  const trimmed = String(name || '').trim();
-  if (!trimmed) return false;
-  // Nome de pessoa real raramente passa disso — acima disso é mais provável
-  // ser uma frase/status/bio do que um nome.
-  if (trimmed.length > 40) return false;
-  if (!/[a-zA-ZÀ-ÿ]/.test(trimmed)) return false; // só emoji/números/símbolos
-  const normalized = trimmed
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  const statusOrBusinessPattern = /(ocupad|disponible|ausente|no molest|not available|\bbusy\b|\baway\b|whatsapp business|atendimento ao cliente|suporte tecnico|contato comercial|\bdelivery\b|revendedora|consultora|\bstudio\b|estudio|salao|boutique)/;
-  if (statusOrBusinessPattern.test(normalized)) return false;
-  return true;
+export function isPlausiblePersonalName(_name: string | undefined | null): boolean {
+  return false;
 }
