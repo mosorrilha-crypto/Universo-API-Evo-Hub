@@ -8,6 +8,7 @@
  * (case-insensitive), nunca por um tenantId adivinhado pelo cliente.
  */
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import type { Server } from 'http';
 import bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -21,6 +22,18 @@ const MOCK_PRESET_TENANT_ID = 'tenant_004'; // exatamente o valor que o card de 
 let server: Server;
 let baseUrl: string;
 
+// TASK-0311 (TASK-0249 item 1): a sessão deixou de vir no corpo JSON do
+// login e virou um cookie httpOnly (`universo_session`) — extrai o
+// `name=value` do `Set-Cookie` da resposta pra repassar como `Cookie` nas
+// chamadas autenticadas seguintes (fetch() do Node não tem cookie jar
+// automático entre chamadas independentes).
+function extractSessionCookie(res: Response): string {
+  const setCookie = res.headers.get('set-cookie') || '';
+  const pair = setCookie.split(';')[0];
+  if (!pair) throw new Error('Resposta de login sem Set-Cookie de sessão.');
+  return pair;
+}
+
 beforeAll(async () => {
   const passwordHash = await bcrypt.hash('senha-real-123', 10);
   const supabase = createFakeSupabase({
@@ -31,7 +44,8 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json());
-  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase, authenticateToken: createAuthenticateToken('test-secret') }));
+  app.use(cookieParser());
+  app.use(createAuthRouter({ jwtSecret: 'test-secret', supabase, authenticateToken: createAuthenticateToken('test-secret'), isProduction: false }));
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
@@ -46,7 +60,7 @@ afterAll(() => {
 });
 
 describe('POST /api/auth/login', () => {
-  it('loga com sucesso só com e-mail+senha, mesmo sem tenantId (ou com um tenantId de mock incorreto)', async () => {
+  it('loga com sucesso só com e-mail+senha, mesmo sem tenantId (ou com um tenantId de mock incorreto), e devolve a sessão como cookie httpOnly', async () => {
     const res = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,8 +70,15 @@ describe('POST /api/auth/login', () => {
       body: JSON.stringify({ tenantId: MOCK_PRESET_TENANT_ID, email: 'monique@pestanaspormonique.com', password: 'senha-real-123' }),
     });
     expect(res.status).toBe(200);
+    const setCookie = res.headers.get('set-cookie') || '';
+    expect(setCookie).toContain('universo_session=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Strict');
+    // isProduction: false no teste — cookie não deve exigir HTTPS aqui.
+    expect(setCookie).not.toContain('Secure');
+
     const data = await res.json();
-    expect(data.token).toBeTruthy();
+    expect(data.token).toBeUndefined();
     expect(data.operator.email).toBe('monique@pestanaspormonique.com');
     expect(data.operator.tenantId).toBe(REAL_TENANT_UUID);
   });
@@ -92,16 +113,16 @@ describe('POST /api/auth/login', () => {
 
 
 describe('GET /api/auth/session', () => {
-  it('devolve o papel e o tenant do operador associado ao JWT', async () => {
+  it('devolve o papel e o tenant do operador associado à sessão', async () => {
     const login = await fetch(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'monique@pestanaspormonique.com', password: 'senha-real-123' }),
     });
-    const { token } = await login.json();
+    const cookie = extractSessionCookie(login);
 
     const response = await fetch(`${baseUrl}/api/auth/session`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Cookie: cookie },
     });
 
     expect(response.status).toBe(200);
@@ -114,8 +135,32 @@ describe('GET /api/auth/session', () => {
     });
   });
 
-  it('recusa uma consulta sem token de sessão', async () => {
+  it('recusa uma consulta sem cookie de sessão', async () => {
     const response = await fetch(`${baseUrl}/api/auth/session`);
     expect(response.status).toBe(401);
+  });
+});
+
+describe('POST /api/auth/logout', () => {
+  it('apaga o cookie de sessão', async () => {
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'monique@pestanaspormonique.com', password: 'senha-real-123' }),
+    });
+    const cookie = extractSessionCookie(login);
+
+    const logout = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST' });
+    expect(logout.status).toBe(200);
+    const clearedCookie = logout.headers.get('set-cookie') || '';
+    expect(clearedCookie).toContain('universo_session=');
+
+    // A sessão original (obtida antes do logout) precisa continuar sendo um
+    // JWT válido por si só (o logout não revoga o token, só instrui o
+    // navegador que originou o request a apagar o cookie) — o teste real de
+    // "logout funcionou" é no navegador, que para de mandar o cookie depois
+    // do Set-Cookie de expiração; aqui só confirmamos que a rota devolve o
+    // Set-Cookie de limpeza esperado.
+    expect(cookie).toContain('universo_session=');
   });
 });

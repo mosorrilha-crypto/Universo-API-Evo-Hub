@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
-import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
+import { apiFetch, getTenantOverride } from '../lib/apiClient';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
@@ -1646,18 +1646,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     // Aviso em tempo real (SSE) no lugar do polling de 8s — ver
     // server/services/conversationEvents.ts e a rota /api/conversations/stream.
-    // EventSource não manda header Authorization, então o token vai por
-    // query string (a mesma rota valida com jwt.verify no backend).
+    // TASK-0311 (TASK-0249 item 1): a sessão virou cookie httpOnly —
+    // EventSource manda esse cookie sozinho em toda conexão same-origem
+    // (mesma regra do fetch), então a rota autentica pelo cookie igual
+    // qualquer outra rota protegida; não precisa mais do token por
+    // querystring (nem de checar aqui se "havia" um token antes de abrir).
     let source: EventSource | null = null;
-    const token = getAuthToken();
-    if (token) {
-      // EventSource nativo não manda header customizado (nem X-Tenant-Id que
-      // apiFetch já anexa sozinho) — o tenant do seletor (saas_admin) vai por
-      // querystring aqui, mesma exceção de resolveTenantId no backend.
+    {
+      // EventSource nativo não manda header customizado (X-Tenant-Id que
+      // apiFetch já anexa sozinho) — o tenant do seletor (saas_admin) ainda
+      // vai por querystring aqui, mesma exceção de resolveTenantId no backend.
       const tenantOverride = getTenantOverride();
       const streamUrl = tenantOverride
-        ? `/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${encodeURIComponent(tenantOverride)}`
-        : `/api/conversations/stream?token=${encodeURIComponent(token)}`;
+        ? `/api/conversations/stream?tenantId=${encodeURIComponent(tenantOverride)}`
+        : '/api/conversations/stream';
       source = new EventSource(streamUrl);
       // O evento carrega o telefone que mudou — reaproveita o mesmo fetch da
       // lista em vez de montar um merge separado por telefone, então cobre

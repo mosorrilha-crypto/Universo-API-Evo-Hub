@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 
 import { loadConfig } from './server/config';
@@ -130,13 +131,18 @@ async function startServer() {
     }
   }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  // TASK-0311 (TASK-0249 item 1): o cookie de sessão (`universo_session`,
+  // ver auth.ts) precisa de `req.cookies` pra ser lido pelo middleware de
+  // autenticação — sem cookie assinado/criptografado por dentro do
+  // cookie-parser, porque o próprio valor já é um JWT verificado.
+  app.use(cookieParser());
 
   // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
   // slug e só publica tenants explicitamente habilitados na migration 0042.
   app.use(createPublicCatalogRouter({ supabaseUrl: config.supabaseUrl, supabaseKey: config.supabaseKey }));
   app.use(createCommercialOfferRouter());
 
-  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase, authenticateToken }));
+  app.use(createAuthRouter({ jwtSecret: config.jwtSecret, supabase, authenticateToken, isProduction: config.isProduction }));
   app.use(createEntitlementsRouter({ authenticateToken }));
   app.use(createAiRouter({ config, authenticateToken, rateLimiter: aiRateLimiter }));
   app.use(createTelemetryRouter({ authenticateToken }));
