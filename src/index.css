@@ -726,6 +726,16 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) { padding: .75rem; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) h2 { font-size: .9rem; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) p { display: none; }
+  /* TASK-0292 (pedido direto, print real: "o calendário pode ocupar melhor
+     a página... pode ficar de ponta a ponta... preencher os espaços
+     vazios igual no desktop e no calendário do google") — só na visão
+     Calendário (não afeta Hoje): padding lateral do card reduzido mais
+     ainda (mais perto de borda a borda) e células da grade de mês mais
+     altas, aproveitando o espaço vertical que sobrava vazio no celular
+     real. */
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:first-child { padding-left: .4rem; padding-right: .4rem; }
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) .grid-cols-7 > div[aria-hidden="true"] { min-height: 3.25rem; }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }
@@ -836,6 +846,16 @@ html[data-theme='clean'] .atendimento-context-strip__action { border-color:#E4E7
    Tailwind v4, CSS solto sempre vence camada nomeada, então o utilitário
    sozinho nunca conseguiria sobrescrever a regra global acima. */
 .atendimento-composer-textarea:focus-visible { outline: none; }
+
+/* Mesmo problema da regra acima (TASK-0259), agora na busca de conversas e
+   no botão de filtro por etiqueta da lista (pedido direto, 05/09/2026, print
+   real mostrando o contorno verde cheio em volta da caixa de busca no toque
+   em Android/Chrome): ambos são controles de formulário (input/button) que
+   o Chrome trata como alvo de "navegação por teclado" mesmo em toque de
+   tela, então herdam o contorno verde global acima sem nunca ter usado
+   teclado de verdade. */
+.atendimento-search-input:focus-visible,
+.atendimento-label-filter-trigger:focus-visible { outline: none; }
 
 /* ──────────────────────────────────────────────────────────────────────────
    Handoff aprovado — Atendimento: tokens neutros, ação única e hierarquia
@@ -2499,7 +2519,7 @@ html[data-theme='clean'] .quality-workspace__control-pill--emerald > p:last-chil
    regra agora só ajusta o tamanho do alvo de toque de cada item (WCAG,
    ainda relevante no mobile) e o tom em temas claros. */
 .mobile-header-context-menu button {
-  min-height: 2.75rem;
+  min-height: 2.25rem;
 }
 html[data-theme='light'] .mobile-header-context-menu {
   background: var(--surface-raised) !important;

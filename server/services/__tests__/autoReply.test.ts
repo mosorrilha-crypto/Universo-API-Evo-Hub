@@ -286,7 +286,7 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     const systemInstruction: string = calls[1].config.systemInstruction;
     expect(systemInstruction).toContain('Não recorra sempre à mesma fórmula pronta');
     expect(systemInstruction).toContain('tus rasgos');
-    expect(systemInstruction).toContain('nunca deixe "tus rasgos"/"evaluación presencial analiza" virar um reflexo automático');
+    expect(systemInstruction).toContain('nunca deixe uma mesma frase pronta de justificativa');
   });
 
   it('instrui a nunca repetir frase de exemplo do contexto do negócio palavra por palavra (pesquisa de mercado: repetir a mesma frase pronta é um dos sinais mais claros de bot)', async () => {
