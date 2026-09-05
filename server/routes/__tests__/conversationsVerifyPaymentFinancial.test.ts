@@ -113,4 +113,34 @@ describe('POST /api/conversations/:phone/verify-payment — cria transação fin
     const rows = (supabase as any).__tables.financial_transactions || [];
     expect(rows).toHaveLength(0);
   });
+
+  // TASK-0284: quando um comprovante é marcado manualmente na conversa (sem
+  // passar pelo card de Escalonamentos), o valor real lido pela IA na
+  // imagem pode divergir do preço do catálogo (ex: sinal parcial) —
+  // overrideAmount permite usar o valor real em vez do catálogo.
+  it('overrideAmount sobrescreve o preço do catálogo no lançamento criado', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'verified', overrideAmount: 350000 }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = (supabase as any).__tables.financial_transactions;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amount).toBe(350000);
+  });
+
+  it('overrideAmount inválido (negativo, zero, não-número) é ignorado — comportamento idêntico ao de sempre (preço do catálogo)', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/${PHONE}/verify-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'verified', overrideAmount: -10 }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = (supabase as any).__tables.financial_transactions;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amount).toBe(500000);
+  });
 });

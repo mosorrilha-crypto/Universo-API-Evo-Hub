@@ -4,6 +4,7 @@ import {
   createFinancialTransaction,
   updateFinancialTransactionStatus,
   deleteFinancialTransaction,
+  isDuplicateSourceRefError,
   type PaymentMethod,
   type PaymentStatus,
   type FinancialEntryType,
@@ -99,7 +100,7 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
   }));
 
   router.post('/api/financial/transactions', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType, categoryId, accountId, notes } = req.body || {};
+    const { id, leadId, leadName, leadPhone, productName, amount, paymentMethod, status, date, operatorName, channel, pixQrCode, paymentLinkUrl, entryType, categoryId, accountId, notes, sourceRef } = req.body || {};
 
     if (typeof id !== 'string' || !id.trim()) return res.status(400).json({ error: 'id é obrigatório.' });
     if (typeof leadId !== 'string' || !leadId.trim()) return res.status(400).json({ error: 'leadId é obrigatório.' });
@@ -111,26 +112,38 @@ export function createFinancialRouter({ authenticateToken, isFinancialModuleEnab
     const resolvedStatus: PaymentStatus = PAYMENT_STATUSES.includes(status) ? status : 'pendente';
     const resolvedEntryType: FinancialEntryType = ENTRY_TYPES.includes(entryType) ? entryType : 'income';
 
-    const transaction = await createFinancialTransaction(tenantOf(req), {
-      id,
-      leadId,
-      leadName,
-      leadPhone,
-      productName,
-      amount,
-      paymentMethod,
-      status: resolvedStatus,
-      date: typeof date === 'string' && date ? date : new Date().toISOString(),
-      operatorName: typeof operatorName === 'string' ? operatorName : undefined,
-      channel: typeof channel === 'string' ? channel : undefined,
-      pixQrCode: typeof pixQrCode === 'string' ? pixQrCode : undefined,
-      paymentLinkUrl: typeof paymentLinkUrl === 'string' ? paymentLinkUrl : undefined,
-      entryType: resolvedEntryType,
-      categoryId: typeof categoryId === 'string' && categoryId ? categoryId : undefined,
-      accountId: typeof accountId === 'string' && accountId ? accountId : undefined,
-      notes: typeof notes === 'string' && notes.trim() ? notes.trim() : undefined,
-    });
-    res.json({ transaction });
+    // TASK-0284: sourceRef opcional (ex: "chat-image:<messageId>") pra
+    // deduplicar lançamentos criados a partir de um comprovante marcado no
+    // chat — mesmo padrão já usado internamente por "apt:<eventId>"/
+    // "crm-won:<phone>". Duplicidade vira 409 explícito, não 500.
+    try {
+      const transaction = await createFinancialTransaction(tenantOf(req), {
+        id,
+        leadId,
+        leadName,
+        leadPhone,
+        productName,
+        amount,
+        paymentMethod,
+        status: resolvedStatus,
+        date: typeof date === 'string' && date ? date : new Date().toISOString(),
+        operatorName: typeof operatorName === 'string' ? operatorName : undefined,
+        channel: typeof channel === 'string' ? channel : undefined,
+        pixQrCode: typeof pixQrCode === 'string' ? pixQrCode : undefined,
+        paymentLinkUrl: typeof paymentLinkUrl === 'string' ? paymentLinkUrl : undefined,
+        entryType: resolvedEntryType,
+        categoryId: typeof categoryId === 'string' && categoryId ? categoryId : undefined,
+        accountId: typeof accountId === 'string' && accountId ? accountId : undefined,
+        notes: typeof notes === 'string' && notes.trim() ? notes.trim() : undefined,
+        sourceRef: typeof sourceRef === 'string' && sourceRef.trim() ? sourceRef.trim() : undefined,
+      });
+      res.json({ transaction });
+    } catch (error) {
+      if (isDuplicateSourceRefError(error)) {
+        return res.status(409).json({ error: 'Já existe uma transação registrada para esta referência.' });
+      }
+      throw error;
+    }
   }));
 
   router.patch('/api/financial/transactions/:id', authenticateToken, requireFinancialModule(isFinancialModuleEnabled), requireRole('manager'), asyncHandler(async (req: AuthenticatedRequest, res) => {

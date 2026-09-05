@@ -100,8 +100,6 @@ const kbCacheKey = (tenantId: string) => `saas_agent_kb_${tenantId}`;
 // que WhatsAppLeadsSim.tsx também lê ao montar — contato de um tenant
 // aparecia na lista de outro. Chave por tenant + poda corrigem os dois lados.
 const leadsCacheKey = (tenantId: string) => `saas_crm_leads_${tenantId}`;
-/** Mesmo raciocínio de leadsCacheKey acima, pro cache de transações financeiras. */
-const transactionsCacheKey = (tenantId: string) => `saas_transactions_${tenantId}`;
 
 export const App: React.FC = () => {
   // Navigation & View State
@@ -339,9 +337,7 @@ export const App: React.FC = () => {
     // reais do Supabase (só o painel SaaS Master, restrito a saas_admin,
     // busca a lista real via /api/admin/tenants). Sem isso, o badge do
     // cabeçalho ficava preso no nome do mock pra qualquer operador que não
-    // fosse saas_admin, mesmo depois do fix acima. GET /api/tenant é
-    // self-scoped (resolve pelo JWT, sem exigir role nenhuma) e sempre
-    // reflete o tenant real de quem está logado.
+    // fosse saas_admin, mesmo depois do fix acima.
     apiFetch('/api/tenant')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -361,6 +357,27 @@ export const App: React.FC = () => {
         // pra outro tenant.
         const savedOverrideId = currentUser.role === 'saas_admin' ? localStorage.getItem(ACTIVE_TENANT_OVERRIDE_KEY) : null;
         if (savedOverrideId && savedOverrideId !== data.tenant.id) return;
+        // Segundo achado real (04/09/2026, TASK-0264, encontrado testando o
+        // app de verdade num F5): GET /api/tenant NÃO é imune ao seletor de
+        // tenant do saas_admin como o comentário acima (removido) afirmava —
+        // ele usa exatamente o mesmo `tenantOf()`/`resolveTenantId()` de
+        // qualquer outra rota tenant-scoped, então também respeita o header
+        // `X-Tenant-Id` (ver conversations.ts). No F5, `activeTenant` nasce
+        // do primeiro item de `tenants` (cache local, ordem arbitrária vinda
+        // de /api/admin/tenants — não necessariamente o tenant de login) até
+        // este efeito corrigir; nesse intervalo, `setTenantOverride` (chamado
+        // a cada render, ver mais abaixo) já mandou esse id ERRADO pro
+        // apiFetch, e ESTA chamada específica saiu com o `X-Tenant-Id`
+        // errado ainda grudado, embora o bloco síncrono logo acima já tivesse
+        // corrigido `activeTenant` corretamente pro tenant de login. Quando a
+        // resposta chega, ela then reflete o tenant ERRADO (não o de login) —
+        // aplicá-la sem checar desfaz a correção síncrona, prendendo
+        // `activeTenant` (e todo fetch que depende dele — conversas, CRM,
+        // etc.) no tenant errado até o próximo F5 acidentalmente "acertar" a
+        // ordem do cache. Nunca aplica um tenant diferente do tenant de login
+        // real do operador; esta chamada só serve pra enriquecer
+        // currency/locale do tenant que a correção síncrona já escolheu.
+        if (data.tenant.id !== currentUser.tenantId) return;
         // currency/locale entraram aqui (19/08/2026) pro Financeiro formatar
         // valores na moeda real do tenant em vez de R$/pt-BR fixo.
         setActiveTenant((prev) =>
@@ -465,15 +482,17 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Financial Transactions — mesmo raciocínio do fix de leads fake
-  // (12/08/2026): cache vazio nunca deveria cair pro dataset fictício, senão
-  // dado de demonstração "gruda" pra sempre (o merge com transações reais,
-  // GET /api/financial/transactions abaixo, só ADICIONA por id, nunca
-  // remove). Começa vazia.
-  const [transactions, setTransactions] = useState<FinancialTransaction[]>(() => {
-    const saved = localStorage.getItem(transactionsCacheKey(activeTenant.id));
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Financial Transactions — achado real de auditoria (TASK-0249/TASK-0274,
+  // mesmo padrão do CodeQL "Clear text storage of sensitive information" já
+  // corrigido pro cache de leads em WhatsAppLeadsSim.tsx, TASK-0243): esse
+  // estado chegou a persistir em localStorage (nome/telefone do lead, valor,
+  // pixQrCode, paymentLinkUrl) sem nenhuma criptografia. Confirmado que era
+  // só cache-pra-performance (pintura instantânea antes do fetch real
+  // responder) — nenhum comportamento real dependia dele, o merge com dado
+  // real (GET /api/financial/transactions abaixo) sempre sobrescreve. Lista
+  // começa vazia e é populada pelo fetch real a cada carregamento/troca de
+  // tenant, mesma correção aplicada ao cache de leads.
+  const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
 
   // Despesas recorrentes (TASK-0097) — cadastro, não precisa do mesmo cache
   // local otimista dos leads/transações (baixo volume, sem tela offline
@@ -669,14 +688,22 @@ export const App: React.FC = () => {
   useEffect(() => {
     const cachedLeads = localStorage.getItem(leadsCacheKey(activeTenant.id));
     setLeads(cachedLeads ? JSON.parse(cachedLeads) : []);
-    const cachedTx = localStorage.getItem(transactionsCacheKey(activeTenant.id));
-    setTransactions(cachedTx ? JSON.parse(cachedTx) : []);
+    setTransactions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenant.id]);
 
+  // Purga ativa, uma vez por montagem (mesmo padrão de WhatsAppLeadsSim.tsx,
+  // TASK-0243): navegadores que usaram o painel antes desta correção podem
+  // ter transações financeiras reais em texto puro gravadas de uma sessão
+  // anterior — sem isso, ficariam lá indefinidamente, já que parar de
+  // escrever não apaga o que já foi escrito. Varre todos os tenants (não só
+  // o ativo); a limpeza de logout (clearCachedTenantScopedData) continua
+  // existindo, mas só roda no logout.
   useEffect(() => {
-    safeSetLocalStorage(transactionsCacheKey(activeTenant.id), JSON.stringify(transactions));
-  }, [transactions, activeTenant.id]);
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('saas_transactions_')) localStorage.removeItem(key);
+    }
+  }, []);
 
   // As fotos de exemplo em Base64 legado (Epic 4.5.2) são o que estoura a
   // cota — e não precisam estar no cache: são carregadas de novo, completas,
@@ -1192,6 +1219,7 @@ export const App: React.FC = () => {
           pixQrCode: newTx.pixQrCode,
           paymentLinkUrl: newTx.paymentLinkUrl,
           entryType: newTx.entryType,
+          sourceRef: newTx.sourceRef,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1341,6 +1369,7 @@ export const App: React.FC = () => {
         canAccessSaasAdmin={canSeeSaasMaster}
         escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
         onOpenChangePasswordModal={() => setIsChangePasswordModalOpen(true)}
+        onToast={showToast}
       />
       </div>
       {activeTab !== 'whatsapp' && canSeeConversations && (
@@ -1515,9 +1544,13 @@ export const App: React.FC = () => {
             // achar e manter visível o escalonamento aberto do lead atual.
             escalations={escalations}
             onGoToEscalations={() => handleSetActiveTab('escalations')}
+            onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
             openLeadPhone={whatsAppOpenLead?.phone}
             openLeadRequestId={whatsAppOpenLead?.requestId}
             onThreadOpenChange={setIsMobileWhatsAppThreadOpen}
+            financialModuleEnabled={canSeeFinancial}
+            onAddTransaction={handleAddTransaction}
+            operatorName={currentUser?.name}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}
@@ -1546,6 +1579,7 @@ export const App: React.FC = () => {
             description="Transforme oportunidades em horários confirmados e acompanhe a próxima ação comercial."
             accent="green"
             compact
+            hideHeader
           >
           <AgendaWorkspace
             transactions={transactions}
@@ -1568,6 +1602,7 @@ export const App: React.FC = () => {
             description="Acompanhe receitas, despesas e cobranças em aberto em uma área dedicada."
             accent="blue"
             compact
+            hideHeader
           >
           <FinancialWorkspace
             transactions={transactions}

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import {
   listConversations,
   getConversation,
+  getConversationMessagesPage,
   getConversationPhoneNumberId,
   updateMessageText,
   recordOutgoingMessage,
@@ -63,6 +64,7 @@ import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
+import { extractPaymentProofDataWithGemini } from '../services/paymentReceiptAnalysis';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { queueLeadSheetSync } from '../services/googleSheetsSync';
@@ -308,6 +310,38 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ success: outcome.source === 'gemini', source: outcome.source, transcription: outcome.result.transcription });
   }));
 
+  // Análise sob demanda de uma imagem do chat marcada pelo operador como
+  // comprovante de pagamento (menu "⋮" do balão) — TASK-0284. Só analisa e
+  // devolve os campos extraídos; nunca cria/confirma nada sozinha. Mesmo
+  // formato de retry-transcription acima. Gate só authenticateToken (é
+  // leitura/análise, não move dinheiro) — quem efetivamente restringe é o
+  // POST /api/financial/transactions (requireFinancialModule+manager) ou o
+  // POST .../verify-payment (requireAgendaModule) chamados depois, quando o
+  // operador de fato confirmar no modal.
+  router.post('/api/conversations/:phone/messages/:messageId/analyze-payment-proof', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const { messageId } = req.params;
+
+    // Mesmo padrão de GET /api/media/:messageId acima: valida tenant direto
+    // na tabela messages antes de tocar o Storage, id é opaco.
+    const { data: message } = await getDb()
+      .from('messages')
+      .select('type')
+      .eq('tenant_id', tenantId)
+      .eq('id', messageId)
+      .maybeSingle();
+    if (!message) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    if (message.type !== 'image') return res.status(400).json({ error: 'Esta mensagem não é uma imagem.' });
+
+    const media = await getMediaImage(supabaseUrl, supabaseKey, messageId);
+    if (!media) {
+      return res.status(404).json({ error: 'Imagem original não está mais disponível.' });
+    }
+
+    const extraction = await extractPaymentProofDataWithGemini(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType);
+    res.json({ success: !!extraction, extraction: extraction ?? null });
+  }));
+
   router.get('/api/conversations', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const includeArchived = req.query.archived === 'true';
     res.json({ conversations: await listConversations(tenantOf(req), { includeArchived }) });
@@ -527,6 +561,29 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const conv = await getConversation(tenantOf(req), req.params.phone);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada.' });
     res.json({ conversation: conv });
+  }));
+
+  /**
+   * TASK-0280 (pedido direto, 04/09/2026, "não precisa carregar tudo só as
+   * últimas msg... antigas vai sendo carregada conforme o usuário vai
+   * rolando"): página de mensagens em vez do histórico inteiro — usada pelo
+   * painel ao abrir uma conversa (sem `before`/`after`, as mais recentes) e
+   * ao rolar pra cima (`before`, mensagens anteriores a esse timestamp) ou
+   * quando chega mensagem nova via SSE numa conversa já aberta (`after`, só
+   * o que é mais novo que o já carregado — evita rebuscar tudo de novo a
+   * cada mensagem). `limit` no máximo 100, padrão 30.
+   */
+  router.get('/api/conversations/:phone/messages', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const limitParam = Number.parseInt(String(req.query.limit ?? ''), 10);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 30;
+    const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+    const after = typeof req.query.after === 'string' ? req.query.after : undefined;
+    const page = await getConversationMessagesPage(tenantOf(req), req.params.phone, {
+      limit,
+      beforeTimestamp: before,
+      afterTimestamp: after,
+    });
+    res.json(page);
   }));
 
   // Marca a conversa como lida — chamado quando o operador abre a conversa
@@ -1336,6 +1393,56 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.status(201).json({ appointment });
   }));
 
+  // TASK-0270 (pedido direto, print da Ficha do Contato de "Noelia Esquivel":
+  // "Esta cliente foi agendada pelo google como eu posso vincular o
+  // agendamento no sistema para aparecer aqui na ficha de acompanhamento?")
+  // — um agendamento criado direto no Google Calendar (fora do WhatsApp, sem
+  // passar por criar_agendamento nem pelo manual-appointment acima) nunca
+  // gera uma linha em `appointments`, então a Ficha do Contato desse
+  // telefone nunca sabe que ele existe ("Agendou? não", sem card em
+  // AGENDAMENTOS), mesmo o evento real já estando na agenda e visível na
+  // aba Agenda. Diferente do endpoint acima, este NUNCA cria um evento novo
+  // (create=duplicaria o evento real que o operador está vinculando) nem
+  // chama checkFreeBusy (o evento já ocupa o horário) — só grava o vínculo
+  // telefone↔evento já existente, usando o eventId que o painel já tem em
+  // mãos (veio da própria listagem de eventos do Google Calendar deste
+  // tenant, GET /api/google-calendar/upcoming-events).
+  router.post('/api/conversations/:phone/link-appointment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const { eventId, summary, startIso, endIso } = req.body || {};
+    if (!eventId?.trim() || !summary?.trim() || !startIso || !endIso) {
+      return res.status(400).json({ error: 'Campos "eventId", "summary", "startIso" e "endIso" são obrigatórios.' });
+    }
+
+    // Mesmo guard do manual-appointment: nunca sobrescreve silenciosamente
+    // um agendamento ativo diferente já rastreado pra este telefone (evita
+    // vincular o evento errado por engano e perder a referência do real).
+    const existing = await getAppointmentForPhone(tenantId, phone);
+    const { naive: nowNaiveForCheck } = getNowLocalNaive(BUSINESS_TIMEZONE);
+    const existingIsUpcoming = existing && existing.eventId !== eventId && Date.parse(`${existing.endIso}Z`) > Date.parse(`${nowNaiveForCheck}Z`);
+    if (existingIsUpcoming) {
+      return res.status(409).json({ error: `Este contato já tem um agendamento ativo diferente ("${existing!.summary}" em ${existing!.startIso}).` });
+    }
+
+    await setAppointmentForPhone(tenantId, phone, { eventId: eventId.trim(), summary: summary.trim(), startIso, endIso, source: 'manual' }, { resetPaymentState: !existing });
+
+    // TASK-0185 — mesmo backup em Google Sheets do manual-appointment: um
+    // agendamento vinculado aqui também precisa refletir "Agendou?" sem
+    // esperar a cliente mandar mensagem nova.
+    const conversationForSheet = await getConversation(tenantId, phone).catch(() => undefined);
+    queueLeadSheetSync(tenantId, calendarConfig, {
+      phone,
+      name: conversationForSheet?.name,
+      firstContactIso: conversationForSheet?.messages?.[0]?.timestamp || new Date().toISOString(),
+      interest: conversationForSheet?.interest || conversationForSheet?.adHeadline,
+      scheduled: true,
+    });
+
+    const appointment = await getAppointmentForPhone(tenantId, phone);
+    res.status(200).json({ appointment });
+  }));
+
   /**
    * Achado real em produção (19/08/2026, pedido direto do dono do produto):
    * o fluxo real de venda (WhatsApp → agendamento → comprovante aprovado) e
@@ -1450,10 +1557,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // como caminho de API (coberto por testes, ver
   // conversationsVerifyPayment*.test.ts) por precaução, não removido.
   router.post('/api/conversations/:phone/verify-payment', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { status } = req.body || {};
+    const { status, overrideAmount } = req.body || {};
     if (status !== 'verified' && status !== 'rejected') {
       return res.status(400).json({ error: 'Campo "status" precisa ser "verified" ou "rejected".' });
     }
+    // TASK-0284: permite passar o valor REAL lido pela IA no comprovante
+    // (ex: sinalizado direto de uma imagem do chat), em vez de sempre usar
+    // o preço do catálogo — mesmo campo que resolve-payment/manual-appointment
+    // já suportam via recordFinancialTransactionForVerifiedPayment.
+    const resolvedOverrideAmount =
+      typeof overrideAmount === 'number' && Number.isFinite(overrideAmount) && overrideAmount > 0
+        ? overrideAmount
+        : undefined;
     const operatorId = req.user?.id;
     if (!operatorId) return res.status(401).json({ error: 'Sessão sem operador identificado.' });
 
@@ -1493,7 +1608,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const updated = await setPaymentVerification(tenantId, phone, status, operatorId);
     if (!updated) return res.status(404).json({ error: 'Nenhum agendamento ativo encontrado pra este contato.' });
     const calendarReleased = status === 'rejected' ? await releaseSlotOnRejectedPayment(tenantId, phone, updated) : false;
-    if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, updated);
+    if (status === 'verified') await recordFinancialTransactionForVerifiedPayment(tenantId, phone, updated, resolvedOverrideAmount);
     await recordPaymentDecisionAudit(tenantId, phone, status, operatorId, updated);
     res.json({ success: true, appointment: updated, calendarReleased });
   }));
