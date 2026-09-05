@@ -141,6 +141,35 @@ describe('POST /api/ai/reply-from-hint', () => {
     expect(lastPrompt.value.toLowerCase()).toContain('se apresente');
     expect(lastPrompt.value.toLowerCase()).toContain('repita uma informa');
   });
+
+  // TASK-0315 (pedido direto: "as vezes me parecem fora de contexto com o
+  // histórico do chat, principalmente o de retomada") — achado real: este
+  // endpoint mandava o histórico como JSON.stringify cru, sem nenhuma
+  // marcação de ordem/quem falou, diferente do formato numerado e claro
+  // (CLIENTE/ATENDIMENTO) que /api/analyze-conversation já usava. Este
+  // teste garante que o histórico enviado ao Gemini é o mesmo formato
+  // estruturado do agente principal, não uma regressão pro JSON cru.
+  it('o histórico enviado ao Gemini é o formato cronológico numerado, não JSON cru', async () => {
+    mockResponse.shouldFail = false;
+    mockResponse.text = JSON.stringify({ reply: 'ok', detectedLanguage: 'Português', translation: '' });
+
+    await fetch(`${baseUrl}/api/ai/reply-from-hint`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        leadInfo: { name: 'Cliente Teste', phone: '595981828280' },
+        messages: [
+          { sender: 'lead', text: '¿Cuánto cuesta?', timestamp: '2026-08-21T20:48:00Z' },
+          { sender: 'agent', text: 'Gs 550.000', timestamp: '2026-08-21T20:49:00Z' },
+        ],
+        hint: 'reforça o preço',
+      }),
+    });
+
+    expect(lastPrompt.value).toContain('1. CLIENTE: ¿Cuánto cuesta?');
+    expect(lastPrompt.value).toContain('2. ATENDIMENTO: Gs 550.000');
+    expect(lastPrompt.value).not.toContain('"sender":"lead"');
+  });
 });
 
 describe('POST /api/ai/ask', () => {
@@ -203,5 +232,27 @@ describe('POST /api/ai/ask', () => {
     expect(data.source).toBe('fallback');
     expect(data.answer).toBe('');
     expect(data.error).toBeTruthy();
+  });
+
+  // TASK-0315 — mesmo achado do reply-from-hint acima: este endpoint também
+  // mandava JSON.stringify cru do histórico, sem ordem/quem falou explícitos.
+  it('o histórico enviado ao Gemini é o formato cronológico numerado, não JSON cru', async () => {
+    mockResponse.shouldFail = false;
+    mockResponse.text = JSON.stringify({ answer: 'ok' });
+
+    await fetch(`${baseUrl}/api/ai/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        leadInfo: { name: 'Cliente Teste' },
+        messages: [
+          { sender: 'lead', text: 'Meu orçamento é Gs 5.000.000', timestamp: '2026-08-21T20:48:00Z' },
+        ],
+        question: 'esse cliente já falou de orçamento antes?',
+      }),
+    });
+
+    expect(lastPrompt.value).toContain('1. CLIENTE: Meu orçamento é Gs 5.000.000');
+    expect(lastPrompt.value).not.toContain('"sender":"lead"');
   });
 });
