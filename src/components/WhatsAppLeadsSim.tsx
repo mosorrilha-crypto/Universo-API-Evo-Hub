@@ -421,6 +421,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // pill disputando espaço na barra (ver TASK-0279, que já tinha rebaixado
   // "Fora das 24h" por esse motivo).
   const [isWindowFilterMenuOpen, setIsWindowFilterMenuOpen] = useState(false);
+  // Achado real (05/09/2026, print do dono do produto): a fileira de pills
+  // (Tudo/Não lidos/filtro de 24h/etiqueta) precisa de `overflow-x-auto` pra
+  // rolar horizontalmente, mas o CSS de overflow força overflow-y pro mesmo
+  // valor quando só um eixo é 'visible' — então qualquer popover `absolute`
+  // ancorado num botão desta fileira ficava CORTADO verticalmente pelo
+  // próprio container rolável (o estado abria certinho, só que invisível).
+  // Por isso os dois popovers desta fileira (filtro de 24h e etiqueta) usam
+  // `position: fixed` com coordenadas calculadas no clique, em vez de
+  // `absolute` dentro da fileira.
+  const windowFilterBtnRef = useRef<HTMLButtonElement>(null);
+  const [windowFilterMenuPos, setWindowFilterMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const labelFilterBtnRef = useRef<HTMLButtonElement>(null);
+  const [isLabelFilterMenuOpen, setIsLabelFilterMenuOpen] = useState(false);
+  const [labelFilterMenuPos, setLabelFilterMenuPos] = useState<{ top: number; left: number } | null>(null);
   // Painel lateral de contexto do contato (Referência 1: 3 colunas ativas no desktop)
   const [showRightPanel, setShowRightPanel] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1200 : false));
   const [rightPanelTab, setRightPanelTab] = useState<'profile' | 'analysis' | 'escalations'>('profile');
@@ -3882,7 +3896,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 placeholder={t('searchConversation')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="atendimento-search-input w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none"
               />
               {searchQuery && (
                 <button
@@ -3935,10 +3949,17 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   Tudo/Não lidos; clicar na opção já ativa desliga o filtro. */}
               <div className="relative flex-shrink-0">
                 <button
+                  ref={windowFilterBtnRef}
                   type="button"
-                  onClick={() => setIsWindowFilterMenuOpen((v) => !v)}
+                  onClick={() => {
+                    if (!isWindowFilterMenuOpen) {
+                      const rect = windowFilterBtnRef.current?.getBoundingClientRect();
+                      if (rect) setWindowFilterMenuPos({ top: rect.bottom + 6, left: rect.left });
+                    }
+                    setIsWindowFilterMenuOpen((v) => !v);
+                  }}
                   title="Filtrar por janela de atendimento de 24h"
-                  className={`flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
+                  className={`atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
                     activeTabFilter === 'window_open' || activeTabFilter === 'window_closed'
                       ? 'bg-emerald-500 text-slate-950'
                       : 'bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white'
@@ -3946,10 +3967,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 >
                   <Filter className="w-3.5 h-3.5" />
                 </button>
-                {isWindowFilterMenuOpen && (
+                {isWindowFilterMenuOpen && windowFilterMenuPos && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setIsWindowFilterMenuOpen(false)} />
-                    <div className="absolute left-0 top-10 z-50 w-60 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-left animate-pop-in">
+                    {/* `position: fixed` (não `absolute`) de propósito: esta
+                        fileira de pills precisa de `overflow-x-auto` pra
+                        rolar horizontalmente, e o CSS de overflow força
+                        overflow-y pro mesmo valor sempre que só um eixo é
+                        'visible' — um popover `absolute` ancorado aqui dentro
+                        ficava cortado verticalmente pelo próprio container
+                        (achado real, 05/09/2026: o filtro "abria" no estado
+                        mas nada aparecia na tela, "não abre nada"). */}
+                    <div
+                      style={{ top: windowFilterMenuPos.top, left: windowFilterMenuPos.left }}
+                      className="fixed z-50 w-60 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-left animate-pop-in"
+                    >
                       <button
                         type="button"
                         onClick={() => {
@@ -3957,7 +3989,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           setIsWindowFilterMenuOpen(false);
                         }}
                         title="Contatos com mensagem do cliente nas últimas 24h — o agente/operador ainda pode responder normalmente."
-                        className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                        className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
                           activeTabFilter === 'window_open' ? 'text-emerald-400 font-semibold' : 'text-slate-200'
                         }`}
                       >
@@ -3971,7 +4003,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           setIsWindowFilterMenuOpen(false);
                         }}
                         title="Contatos sem mensagem do cliente há mais de 24h — na Meta isso exige modelo aprovado pra reabrir; no Evolution não é uma restrição técnica, mas reengajar aumenta o risco de o número ser sinalizado."
-                        className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                        className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
                           activeTabFilter === 'window_closed' ? 'text-slate-100 font-semibold' : 'text-slate-400'
                         }`}
                       >
@@ -4002,18 +4034,67 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 </button>
               )}
 
+              {/* Trocado de <select> nativo pra botão + popover com o mesmo
+                  tema do resto do painel (pedido direto, 05/09/2026, print
+                  mostrando o picker nativo do Android sem nenhum estilo do
+                  app): um <select> sempre renderiza como picker do sistema
+                  operacional no mobile, impossível de estilizar. Mesmo
+                  padrão do filtro de 24h logo acima, inclusive o popover em
+                  `position: fixed` (mesmo motivo: evitar o corte vertical
+                  pelo `overflow-x-auto` desta fileira). */}
               {tenantLabelSuggestions.length > 0 && (
-                <select
-                  value={labelFilter || ''}
-                  onChange={(e) => setLabelFilter(e.target.value || null)}
-                  title="Filtrar por etiqueta"
-                  className="px-2 py-1 rounded-full text-[11px] font-medium bg-[#202c33] text-slate-300 border border-slate-700 cursor-pointer focus:outline-none flex-shrink-0"
-                >
-                  <option value="">🏷️ Todas etiquetas</option>
-                  {tenantLabelSuggestions.map((l) => (
-                    <option key={l} value={l}>{l}</option>
-                  ))}
-                </select>
+                <div className="relative flex-shrink-0">
+                  <button
+                    ref={labelFilterBtnRef}
+                    type="button"
+                    onClick={() => {
+                      if (!isLabelFilterMenuOpen) {
+                        const rect = labelFilterBtnRef.current?.getBoundingClientRect();
+                        if (rect) setLabelFilterMenuPos({ top: rect.bottom + 6, left: rect.left });
+                      }
+                      setIsLabelFilterMenuOpen((v) => !v);
+                    }}
+                    title="Filtrar por etiqueta"
+                    className={`atendimento-label-filter-trigger px-2 py-1 rounded-full text-[11px] font-medium border cursor-pointer whitespace-nowrap max-w-[9.5rem] truncate ${
+                      labelFilter
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-semibold'
+                        : 'bg-[#202c33] text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    🏷️ {labelFilter || 'Todas etiquetas'}
+                  </button>
+                  {isLabelFilterMenuOpen && labelFilterMenuPos && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsLabelFilterMenuOpen(false)} />
+                      <div
+                        style={{ top: labelFilterMenuPos.top, left: labelFilterMenuPos.left }}
+                        className="no-scrollbar fixed z-50 w-52 max-h-[60vh] overflow-y-auto bg-[#233138] border border-slate-700 rounded-xl shadow-2xl text-xs origin-top-left animate-pop-in"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => { setLabelFilter(null); setIsLabelFilterMenuOpen(false); }}
+                          className={`w-full flex items-center px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${
+                            !labelFilter ? 'text-emerald-400 font-semibold' : 'text-slate-200'
+                          }`}
+                        >
+                          🏷️ Todas etiquetas
+                        </button>
+                        {tenantLabelSuggestions.map((l) => (
+                          <button
+                            key={l}
+                            type="button"
+                            onClick={() => { setLabelFilter(l); setIsLabelFilterMenuOpen(false); }}
+                            className={`w-full flex items-center px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer truncate ${
+                              labelFilter === l ? 'text-emerald-400 font-semibold' : 'text-slate-200'
+                            }`}
+                          >
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -4544,7 +4625,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             {(selectedLead as any)?.isReal && !paymentAppointment && (
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsManualAppointmentModalOpen(true); }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title="Cadastrar agendamento manual combinado fora do WhatsApp"
                               >
                                 <CalendarPlus className="w-3.5 h-3.5" />
@@ -4554,7 +4635,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             {(selectedLead as any)?.isReal && activeTenant?.id === CLIC_PISCINAS_TENANT_ID && (
                               <button
                                 onClick={() => { setIsHeaderMenuOpen(false); setIsContractModalOpen(true); }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title="Gerar contrato"
                               >
                                 <FileText className="w-3.5 h-3.5" />
@@ -4563,7 +4644,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             )}
                             <button
                               onClick={() => { setIsHeaderMenuOpen(false); window.open(`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}`, '_blank', 'noopener,noreferrer'); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Continuar no WhatsApp pessoal do operador"
                             >
                               <Phone className="w-3.5 h-3.5" />
@@ -4580,7 +4661,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
-                              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
                               title="A IA para de responder automaticamente só pra esse número (manual ou automático, ex: falha de agenda) — o resto do atendimento continua normal"
                             >
                               <Ban className="w-3.5 h-3.5" />
@@ -4589,7 +4670,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             {!isAiBlocked && (
                               <button
                                 onClick={() => { handleUpdateConversationState(selectedLead.id, { releaseAiNow: true }); setIsHeaderMenuOpen(false); }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora, sem esperar os 5min."
                               >
                                 <RefreshCw className="w-3.5 h-3.5" />
@@ -4603,7 +4684,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                   const activated = await handleUpdateConversationState(selectedLead.id, { adLead: true });
                                   if (activated) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
                                 }}
-                                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
                                 title='Libera a IA para as próximas mensagens deste lead e lê o histórico completo para preparar um rascunho contextual no compositor. O rascunho nunca é enviado sem revisão humana.'
                               >
                                 <Megaphone className="w-3.5 h-3.5" />
@@ -4613,7 +4694,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => openOperatorFeedback('operator_idea')}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Enviar uma melhoria contextual para a Central de Qualidade"
                             >
                               <Sparkles className="w-3.5 h-3.5" />
@@ -4621,7 +4702,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             <button
                               onClick={() => openOperatorFeedback('bug')}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Registrar um comportamento inesperado nesta conversa"
                             >
                               <AlertTriangle className="w-3.5 h-3.5" />
@@ -4630,14 +4711,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
                               <span>{isPinned ? (isSpanish ? 'Desfijar conversación' : 'Desafixar conversa') : (isSpanish ? 'Fijar conversación' : 'Fixar conversa')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { unread: !isManuallyUnread }); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               <Mail className="w-3.5 h-3.5" />
                               <span>{isManuallyUnread ? (isSpanish ? 'Marcar como leída' : 'Marcar como lida') : (isSpanish ? 'Marcar como no leída' : 'Marcar como não lida')}</span>
@@ -4650,14 +4731,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 conversa, não notificações do app inteiro. */}
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { muted: !isMuted }); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
                               <span>{isMuted ? (isSpanish ? 'Reactivar notificaciones de esta conversación' : 'Reativar notificações desta conversa') : (isSpanish ? 'Silenciar esta conversación' : 'Silenciar esta conversa')}</span>
                             </button>
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { archived: !isArchived }); setIsHeaderMenuOpen(false); setMobileThreadOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                             >
                               {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                               <span>{isArchived ? (isSpanish ? 'Desarchivar conversación' : 'Desarquivar conversa') : (isSpanish ? 'Archivar conversación' : 'Arquivar conversa')}</span>
@@ -4665,7 +4746,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleClearChatMessages(selectedLead.id); setIsHeaderMenuOpen(false); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
                               title="Apaga as mensagens desta conversa, mantendo o contato"
                             >
                               <RefreshCw className="w-3.5 h-3.5" />
@@ -4673,7 +4754,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             <button
                               onClick={() => { setIsHeaderMenuOpen(false); handleDeleteConversation(selectedLead.id, selectedLead.name); }}
-                              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
                               title="Exclui a conversa e o contato permanentemente"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
