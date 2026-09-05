@@ -68,7 +68,7 @@ import { extractPaymentProofDataWithGemini } from '../services/paymentReceiptAna
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { queueLeadSheetSync } from '../services/googleSheetsSync';
-import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, type CalendarConfig } from '../services/googleCalendar';
+import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, listUpcomingEvents, type CalendarConfig } from '../services/googleCalendar';
 import { getNowLocalNaive } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
 import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
@@ -1441,6 +1441,59 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
 
     const appointment = await getAppointmentForPhone(tenantId, phone);
     res.status(200).json({ appointment });
+  }));
+
+  // TASK-0292 (pedido direto, print da Ficha do Contato — "este campo não
+  // está conectado a agenda, e eu não consigo editar pois a cliente
+  // remarcou"): `appointments` guarda só um snapshot (startIso/endIso) do
+  // evento vinculado ao telefone, atualizado apenas pelos fluxos acima
+  // (criar/remarcar pela IA, manual-appointment, link-appointment). Se o
+  // reagendamento aconteceu por qualquer OUTRO canal (ex.: editar o evento
+  // direto no Google Calendar, fora deste app), essa linha fica congelada no
+  // horário antigo e a Ficha (100% leitura) não tinha nenhum jeito de
+  // corrigir. Busca o estado ATUAL do mesmo eventId já rastreado numa janela
+  // ampla (não limitada ao mês em exibição na Agenda) e realinha — nunca cria
+  // evento novo nem toca em pagamento (é o mesmo agendamento, só corrigindo
+  // o rastreamento).
+  router.post('/api/conversations/:phone/appointment/resync', authenticateToken, requireAgendaModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const existing = await getAppointmentForPhone(tenantId, phone);
+    if (!existing?.eventId) {
+      return res.status(400).json({ error: 'Nenhum agendamento vinculado a este contato para ressincronizar.' });
+    }
+    if (!calendarConfig) {
+      return res.status(503).json({ error: 'Google Calendar não configurado neste servidor.' });
+    }
+
+    const timeMinIso = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const timeMaxIso = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString();
+    let liveEvents;
+    try {
+      liveEvents = await listUpcomingEvents(tenantId, calendarConfig, timeMinIso, timeMaxIso);
+    } catch (err: any) {
+      return res.status(502).json({ error: `Falha ao consultar a agenda: ${err.message}` });
+    }
+
+    const found = liveEvents.find((ev) => ev.id === existing.eventId);
+    if (!found) {
+      return res.status(404).json({ error: 'Evento não encontrado na agenda — pode ter sido excluído ou movido para fora da janela de busca.' });
+    }
+
+    const foundEndIso = found.endIso || existing.endIso;
+    const changed = found.summary !== existing.summary || found.startIso !== existing.startIso || foundEndIso !== existing.endIso;
+    if (changed) {
+      await setAppointmentForPhone(tenantId, phone, {
+        eventId: existing.eventId,
+        summary: found.summary,
+        startIso: found.startIso,
+        endIso: foundEndIso,
+        source: existing.source,
+      }, { resetPaymentState: false });
+    }
+
+    const appointment = await getAppointmentForPhone(tenantId, phone);
+    res.status(200).json({ appointment, changed });
   }));
 
   /**
