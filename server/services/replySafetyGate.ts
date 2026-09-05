@@ -35,6 +35,16 @@ export interface ReplySafetyVerdict {
   source: ReplySafetySource;
   severity: 'low' | 'medium' | 'high';
   reason: string;
+  /**
+   * TASK-0297 — quando presente, o chamador deve enviar ESTAS bolhas em vez
+   * do rascunho original: uma correção determinística removeu a parte
+   * problemática (hoje só o caso "empurrou agenda depois de pergunta
+   * informativa", ver `ruleVerdict`) em vez de bloquear a resposta inteira
+   * e escalar pra humano — mesmo espírito do gate anti-alucinação de
+   * horário em `autoReply.ts` (corrige em vez de só bloquear). `undefined`
+   * = nenhuma correção, comportamento normal (usa o rascunho original).
+   */
+  correctedBubbles?: string[];
 }
 
 export interface ReplySuggestionInput {
@@ -173,6 +183,23 @@ function ruleVerdict(input: ReplySafetyInput): ReplySafetyVerdict | null {
     return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta não preserva o idioma espanhol usado pela cliente.' };
   }
   if (isInformationalQuestion(input.customerMessage) && !hasExplicitBookingIntent(input.customerMessage) && pushesBooking(combinedDraft)) {
+    // TASK-0297 (achado real, Soledad/TASK-0287): quando o empurrão de
+    // agenda está isolado numa segunda bolha separada da resposta
+    // informativa (a primeira não menciona agenda), a correção certa é só
+    // remover essa bolha — a informação real já foi respondida direito na
+    // primeira. Corrigir aqui evita bloquear/escalar uma resposta que já
+    // estava 90% certa por causa de UMA bolha a mais. Rascunho de 1 bolha
+    // só (informação e empurrão misturados na mesma frase) não é seguro de
+    // recortar por regex — continua bloqueado/escalado normalmente.
+    if (bubbles.length === 2 && pushesBooking(bubbles[1]) && !pushesBooking(bubbles[0])) {
+      return {
+        approved: true,
+        source: 'rules',
+        severity: 'medium',
+        reason: 'A resposta tentava conduzir para agenda após uma pergunta somente informativa — corrigido automaticamente removendo a bolha que empurrava agenda (ver regra 14 de autoReply.ts e TASK-0297).',
+        correctedBubbles: [bubbles[0]],
+      };
+    }
     return { approved: false, source: 'rules', severity: 'medium', reason: 'A resposta tenta conduzir para agenda após uma pergunta somente informativa.' };
   }
   if (isPaymentOrSensitive(input.customerMessage)) {
@@ -191,11 +218,11 @@ function buildReviewerPrompt(input: ReplySafetyInput): string {
 
 Reprove se houver qualquer uma destas situações: informação não sustentada pelo contexto/base, preço/duração/serviço inventado, afirmação de agendamento ou pagamento sem confirmação, repetição ou nova apresentação numa conversa em andamento, idioma inadequado, tom inadequado, promessa indevida, pedido de dados sensíveis, pressão para agendar após uma pergunta apenas informativa, ou dúvida relevante sem base suficiente. Para espanhol, preserve espanhol paraguaio e voseo quando a cliente usar espanhol — mas quando a ÚLTIMA MENSAGEM da cliente misturar os dois idiomas (ex: "buenas tardes, queria saber mais..."), decida pelo idioma PREDOMINANTE da frase (a maioria das palavras), não por uma única saudação ou palavra isolada do outro idioma. Achado real (03/09/2026): uma mensagem quase inteiramente em português ("queria saber mais sobre o design de sobrancelha"), com só "buenas tardes" em espanhol, foi tratada como "a cliente escreveu em espanhol" — a resposta em português (idioma predominante da mensagem) foi reprovada por isso, quando na verdade estava certa.
 
-IDIOMA: julgue o idioma SÓ do RASCUNHO A VALIDAR abaixo — nunca reprove por um erro de idioma (mistura de português/espanhol, conectivo errado) que apareceu numa mensagem ANTERIOR do próprio atendente dentro do HISTÓRICO; aquela mensagem já foi enviada, não é o rascunho sendo avaliado agora. Achado real (03/09/2026): um rascunho 100% correto e num só idioma foi reprovado citando um erro de mistura de idioma que só existia numa resposta anterior do histórico — o rascunho atual não tinha esse problema. O idioma "certo" pra este turno é decidido pela ÚLTIMA MENSAGEM DA CLIENTE (e pelo padrão das mensagens DELA no histórico) — nunca pelo idioma que o ATENDENTE usou antes; se o atendente respondeu em espanhol num turno anterior mas a cliente sempre escreveu em português (inclusive na última mensagem), o idioma certo agora é português, e o erro real foi aquela resposta anterior em espanhol, não o rascunho atual que corrige pra português. Achado real (03/09/2026): um rascunho em português, correto porque respondia a uma cliente que só escreve em português, foi reprovado com o motivo "a conversa estava em espanhol" — citando só uma resposta anterior ERRADA do próprio atendente como se fosse o idioma de referência da cliente.
+IDIOMA: julgue o idioma SÓ do RASCUNHO A VALIDAR abaixo — nunca reprove por um erro de idioma (mistura de português/espanhol, conectivo errado) que apareceu numa mensagem ANTERIOR do próprio atendente dentro do HISTÓRICO; aquela mensagem já foi enviada, não é o rascunho sendo avaliado agora. Achado real (03/09/2026): um rascunho 100% correto e num só idioma foi reprovado citando um erro de mistura de idioma que só existia numa resposta anterior do histórico — o rascunho atual não tinha esse problema. O idioma "certo" pra este turno é decidido pela ÚLTIMA MENSAGEM DA CLIENTE (e pelo padrão das mensagens DELA no histórico) — nunca pelo idioma que o ATENDENTE usou antes; se o atendente respondeu em espanhol num turno anterior mas a cliente sempre escreveu em português (inclusive na última mensagem), o idioma certo agora é português, e o erro real foi aquela resposta anterior em espanhol, não o rascunho atual que corrige pra português. Achado real (03/09/2026): um rascunho em português, correto porque respondia a uma cliente que só escreve em português, foi reprovado com o motivo "a conversa estava em espanhol" — citando só uma resposta anterior ERRADA do próprio atendente como se fosse o idioma de referência da cliente. PALAVRAS/PRONOMES COMPARTILHADOS NÃO SÃO MISTURA DE IDIOMA: "te" é pronome válido tanto em espanhol quanto em português coloquial brasileiro (ex: "como te comentei", "eu te explico") — a simples presença de "te" (ou de outras palavras que existem nos dois idiomas, como "mais"/"más" sonoramente parecidas mas graficamente diferentes) NUNCA configura mistura de idioma sozinha; só reprove por mistura quando houver uma palavra ou construção que existe EXCLUSIVAMENTE no outro idioma (ex: "e" espanhol dentro de frase portuguesa seria "y", conectivo "pero" dentro de frase em português). Achado real (04/09/2026, caso sintético): o rascunho 100% em português "O Microlips Labios sai por Gs 550.000, como te comentei antes. Se a sua intenção for uniformizar tons mais escuros, temos também a Neutralização por Gs 450.000. / Você já tem algum procedimento antigo nos lábios ou seria sua primeira vez?" foi reprovado citando "como te comentei antes" como mistura de espanhol/português — não existe nenhuma palavra espanhola nessa frase, "te" e "comentei" são português correto; o revisor confundiu um pronome comum aos dois idiomas com mistura real.
 
 REPETIÇÃO COM RECONHECIMENTO: repetir um preço/dado já dito no histórico enquanto RECONHECE explicitamente que já foi dito (ex: "como te comenté", "como te falei", "como já disse", "te dije recién") é o comportamento CORRETO esperado — NUNCA reprove por "repetição" quando o rascunho já contém essa frase de reconhecimento. Reprove por repetição SOMENTE quando o dado for repetido sem nenhum reconhecimento, como se fosse a primeira vez. Achado real (03/09/2026): dois rascunhos que já diziam "como te comenté recién"/"como te falei" foram reprovados mesmo assim como "repetição" — exatamente o comportamento que a regra 23 da Camada 1 pede pra evitar repetição "burra" foi punido em vez de aprovado.
 
-NOME DO CLIENTE: a regra de negócio real é "solicite ou confirme o nome antes de avançar para a consulta de agenda" — ou seja, o nome só é exigido no momento em que a resposta for checar disponibilidade/horários ou criar um agendamento. Fora desse momento — respondendo dúvida informativa (preço, procedimento, localização, pagamento), fazendo triagem/primeiro contato, ou acolhendo e encaminhando uma reclamação pra equipe humana — NUNCA reprove só porque a resposta ainda não perguntou ou confirmou verbalmente o nome; isso vale pra QUALQUER categoria de resposta, não só dúvida de preço. Achado real (03/09/2026): reprovações por "nome não solicitado" continuaram aparecendo mesmo em triagem e reclamação — categorias que ficaram de fora da lista de exemplos anterior (que citava só preço/procedimento/localização) — por isso a regra agora cobre TODAS as categorias, com exceção única da consulta de agenda. O sinal "fluxo de agendamento: sim" abaixo indica só que o classificador rotulou a CONVERSA como potencial agendamento — NÃO significa que este rascunho específico já avançou pra agenda; leia as BOLHAS do rascunho: se elas só informam preço/detalhe de um serviço/combo (sem consultar disponibilidade, oferecer horário ou criar/remarcar/cancelar algo), o nome continua opcional, mesmo com esse sinal marcado como "sim". Achado real (03/09/2026): 3 rascunhos que só respondiam preço de um combo/serviço (sem tocar em agenda) foram reprovados citando "nome não confirmado" só porque a conversa estava classificada como fluxo de agendamento — exatamente o erro que este parágrafo já pedia pra evitar. Separadamente, reprove SOMENTE se o rascunho usar um nome que não bate com o "NOME JÁ CONHECIDO" informado abaixo (nem com nenhum nome que a própria cliente disse na HISTÓRICO/ÚLTIMA MENSAGEM) — isso é nome inventado, um caso de "informação não sustentada pelo contexto", diferente de simplesmente não ter perguntado o nome ainda. Se o nome usado no rascunho BATE com o "NOME JÁ CONHECIDO", está correto — mesmo que esse nome coincida por acaso com o nome de apresentação da própria assistente (ex: cliente chamada "Ana" e a assistente também se chama "Ana" na apresentação); não é confusão nem alucinação, é só coincidência de nome, comum na vida real. Achado real (04/09/2026): um rascunho que cumprimentou corretamente "Ana" (nome de perfil real da cliente, batendo com o NOME JÁ CONHECIDO) foi reprovado como se a assistente tivesse se confundido consigo mesma — verifique sempre o campo NOME JÁ CONHECIDO antes de reprovar por esse motivo.
+NOME DO CLIENTE: a regra de negócio real é "solicite ou confirme o nome antes de avançar para a consulta de agenda" — ou seja, o nome só é exigido no momento em que a resposta for checar disponibilidade/horários ou criar um agendamento. Fora desse momento — respondendo dúvida informativa (preço, procedimento, localização, pagamento), fazendo triagem/primeiro contato, ou acolhendo e encaminhando uma reclamação pra equipe humana — NUNCA reprove só porque a resposta ainda não perguntou ou confirmou verbalmente o nome; isso vale pra QUALQUER categoria de resposta, não só dúvida de preço. Achado real (03/09/2026): reprovações por "nome não solicitado" continuaram aparecendo mesmo em triagem e reclamação — categorias que ficaram de fora da lista de exemplos anterior (que citava só preço/procedimento/localização) — por isso a regra agora cobre TODAS as categorias, com exceção única da consulta de agenda. O sinal "fluxo de agendamento: sim" abaixo indica só que o classificador rotulou a CONVERSA como potencial agendamento — NÃO significa que este rascunho específico já avançou pra agenda; leia as BOLHAS do rascunho: se elas só informam preço/detalhe de um serviço/combo (sem consultar disponibilidade, oferecer horário ou criar/remarcar/cancelar algo), o nome continua opcional, mesmo com esse sinal marcado como "sim". Achado real (03/09/2026): 3 rascunhos que só respondiam preço de um combo/serviço (sem tocar em agenda) foram reprovados citando "nome não confirmado" só porque a conversa estava classificada como fluxo de agendamento — exatamente o erro que este parágrafo já pedia pra evitar. Separadamente, reprove SOMENTE se o rascunho usar um nome que não bate com o "NOME JÁ CONHECIDO" informado abaixo (nem com nenhum nome que a própria cliente disse na HISTÓRICO/ÚLTIMA MENSAGEM) — isso é nome inventado, um caso de "informação não sustentada pelo contexto", diferente de simplesmente não ter perguntado o nome ainda. Se o nome usado no rascunho BATE com o "NOME JÁ CONHECIDO", está correto — mesmo que esse nome coincida por acaso com o nome de apresentação da própria assistente (ex: cliente chamada "Ana" e a assistente também se chama "Ana" na apresentação); não é confusão nem alucinação, é só coincidência de nome, comum na vida real. Achado real (04/09/2026): um rascunho que cumprimentou corretamente "Ana" (nome de perfil real da cliente, batendo com o NOME JÁ CONHECIDO) foi reprovado como se a assistente tivesse se confundido consigo mesma — verifique sempre o campo NOME JÁ CONHECIDO antes de reprovar por esse motivo. A ORDEM dentro da resposta NÃO importa: a regra pede o nome "NA MESMA resposta em que avança pra agenda", nunca "antes de qualquer outro conteúdo" — um rascunho que primeiro informa preço/detalhe do serviço e SÓ DEPOIS pergunta o nome (ou pede o nome junto com o dia/horário desejado) está tão correto quanto um que pergunta o nome logo na saudação; ambos cumprem a regra, porque o nome foi pedido na mesma resposta antes de qualquer consulta de disponibilidade real acontecer. Achado real (04/09/2026, caso sintético): um rascunho que respondia "O Combo de Micro Sobrancelhas + Cílios sai por Gs 600.000 e já inclui a avaliação inicial. Qual é o seu nome? Me conta também qual dia ou horário da semana que vem você prefere pra eu verificar a agenda" foi reprovado com o motivo "informou o preço antes de solicitar o nome, violando a ordem das etapas" — não existe essa exigência de ordem; o nome foi pedido corretamente na mesma resposta, antes de qualquer verificação de agenda de verdade.
 
 AÇÕES DE AGENDA PLANEJADAS são a única exceção: elas ainda NÃO foram executadas, mas só serão executadas DEPOIS da sua aprovação e com nova verificação de disponibilidade. Quando uma ação planejada específica sustenta o serviço e horário citados, você pode aprovar uma mensagem que informe uma PRÉ-RESERVA pendente de pagamento. Nunca aprove texto que diga que pagamento ou confirmação definitiva já ocorreu.
 
@@ -369,6 +396,100 @@ function overrideNameOnlyFalsePositive(verdict: ReplySafetyVerdict, input: Reply
   };
 }
 
+/** Frases que afirmam um agendamento/turno já confirmado — usado pelos overrides abaixo pra nunca aprovar automaticamente um rascunho que finge uma confirmação real. */
+const CONFIRMED_BOOKING_LANGUAGE = /(ya est[áa] agendad[oa]|j[áa] est[áa] agendado|agendamento confirmado|turno confirmado|confirmad[oa] (tu|o seu) (turno|agendamento|hor[áa]rio))/i;
+
+/**
+ * Achado real de produção (04/09/2026, TASK-0293, caso sintético): o
+ * revisor (LLM) reprovou um rascunho que pedia o nome corretamente na
+ * mesma resposta em que avançava pra agenda ("O Combo... sai por Gs
+ * 600.000... Qual é o seu nome? Me conta também qual dia..."), inventando
+ * uma exigência de ORDEM que a regra 24 (autoReply.ts) nunca pediu — ela só
+ * exige o nome "na mesma resposta", nunca "antes de qualquer outro
+ * conteúdo". O reforço de prompt (parágrafo NOME DO CLIENTE) resolve esse
+ * caso específico, mas segue o mesmo padrão de TASK-0277: quando o próprio
+ * julgamento do revisor é o problema (não uma regra ambígua), um override
+ * determinístico é mais durável que confiar no LLM lembrar da clarificação
+ * toda vez.
+ *
+ * Só aprova quando: o motivo cita nome + uma palavra de ordem ("ordem",
+ * "antes de", "primeiro"); o rascunho combinado já contém um pedido de
+ * nome reconhecível (português ou espanhol); e o rascunho não afirma uma
+ * confirmação de agenda que ainda não existe. Qualquer outro problema
+ * citado junto (nome inventado, idioma, pagamento) continua bloqueado — a
+ * função só neutraliza a reclamação de ORDEM, nunca substitui as outras
+ * checagens.
+ */
+function overrideNameOrderFalsePositive(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  if (verdict.approved || verdict.source === 'rules') return verdict;
+  const reason = verdict.reason.toLowerCase();
+  const isNameOrderComplaint = /\bnome\b/.test(reason) && /(ordem|antes de|primeiro)/.test(reason);
+  if (!isNameOrderComplaint) return verdict;
+  const hasOtherIssue = /(invent|alucina|pagamento|reembolso|idioma|espanhol|portugu[êe]s|disponibilidade real|hor[áa]rio confirmado|comprovante|\bdocumento\b|se apresentou como|pr[óo]prio nome)/.test(reason);
+  if (hasOtherIssue) return verdict;
+  const combinedDraft = input.draftBubbles.map((bubble) => String(bubble || '')).join('\n');
+  const asksForName = /(qual\s+[ée]\s+(o\s+)?(seu|teu)\s+nome|como\s+(voc[êe]|tu)?\s*se\s+chama|me\s+(conta|diz|d[áa])\s+(o\s+)?(seu|teu)?\s*nome|c[uú]al\s+es\s+tu\s+nombre|c[oó]mo\s+te\s+llam[aá]s)/i.test(combinedDraft);
+  if (!asksForName) return verdict;
+  if (CONFIRMED_BOOKING_LANGUAGE.test(combinedDraft)) return verdict;
+  return {
+    ...verdict,
+    approved: true,
+    reason: `${verdict.reason} — aprovado por override determinístico (nome pedido na mesma resposta; a regra não exige nenhuma ordem específica dentro dela; ver regra 24 de autoReply.ts e TASK-0293/TASK-0296).`,
+  };
+}
+
+/**
+ * Achado real de produção (04/09/2026, TASK-0294, caso sintético): o
+ * revisor reprovou um rascunho 100% em português ("como te comentei
+ * antes") como "mistura de espanhol/português", confundindo o pronome
+ * "te" — válido nos dois idiomas — com sinal de mistura real. Mesmo
+ * princípio de TASK-0277/TASK-0293: quando o julgamento do revisor erra
+ * de um jeito específico e repetível, um override determinístico resolve
+ * de forma mais durável que reforçar o prompt de novo.
+ *
+ * Só aprova quando o motivo cita mistura/idioma E, removendo os tokens
+ * "te"/"tu" (pronomes compartilhados pelos dois idiomas) do rascunho
+ * normalizado, não sobra nenhuma palavra GRAMATICAL exclusiva de espanhol
+ * — enquanto o sinal de português continua batendo (`hasPortugueseSignal`).
+ * Usa uma lista própria de conectivos/advérbios estruturais ("pero",
+ * "entonces", "así", "vos"...), deliberadamente SEM vocabulário de
+ * conteúdo/catálogo: `hasSpanishSignal` inclui palavras como "labios"/
+ * "cejas"/"pestañas" que são nome de serviço/produto e aparecem
+ * legitimamente dentro de uma resposta em português (ex: "Microlips
+ * Labios"), então reusar essa lista aqui faria o override nunca disparar
+ * pro caso real que motivou esta correção. Uma mistura real, com um
+ * conectivo/estrutura exclusiva de espanhol de verdade, continua sem essa
+ * saída e segue bloqueada.
+ */
+const SPANISH_EXCLUSIVE_GRAMMAR_WORDS = /\b(pero|aunque|entonces|as[ií]|ac[áa]|all[áa]|vos|che|mientras|tambi[ée]n|nada m[áa]s)\b/i;
+
+function overrideSharedWordLanguageFalsePositive(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  if (verdict.approved || verdict.source === 'rules') return verdict;
+  const reason = verdict.reason.toLowerCase();
+  const isLanguageMixComplaint = /(mistur|idioma)/.test(reason);
+  if (!isLanguageMixComplaint) return verdict;
+  const combinedDraft = input.draftBubbles.map((bubble) => String(bubble || '')).join('\n');
+  if (!hasPortugueseSignal(combinedDraft)) return verdict;
+  const withoutSharedPronouns = normalize(combinedDraft).replace(/\b(te|tu)\b/g, ' ');
+  if (SPANISH_EXCLUSIVE_GRAMMAR_WORDS.test(withoutSharedPronouns)) return verdict;
+  return {
+    ...verdict,
+    approved: true,
+    reason: `${verdict.reason} — aprovado por override determinístico (só "te"/"tu", pronomes compartilhados pelos dois idiomas, não é mistura real; ver TASK-0294/TASK-0296).`,
+  };
+}
+
+/** Encadeia os overrides determinísticos aplicados sobre o veredito de um revisor por IA (Groq ou Gemini) — cada um só age no padrão específico de falso-positivo já identificado, preservando o bloqueio em qualquer outro caso. */
+function applyDeterministicOverrides(verdict: ReplySafetyVerdict, input: ReplySafetyInput): ReplySafetyVerdict {
+  return overrideSharedWordLanguageFalsePositive(
+    overrideNameOrderFalsePositive(
+      overrideNameOnlyFalsePositive(verdict, input),
+      input,
+    ),
+    input,
+  );
+}
+
 function parseReviewerDecision(value: unknown, source: ReplySafetySource): ReplySafetyVerdict {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const approved = data.approved === true;
@@ -392,7 +513,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
   if (deps.groqApiKey) {
     try {
       const result = await callGroqJsonCompletion(deps.groqApiKey, prompt);
-      return overrideNameOnlyFalsePositive(parseReviewerDecision(result.parsed, 'groq-reviewer'), input);
+      return applyDeterministicOverrides(parseReviewerDecision(result.parsed, 'groq-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Groq indisponível, tentando Gemini: ${error?.message || error}`);
     }
@@ -405,7 +526,7 @@ export async function reviewAutoReplyBeforeSend(input: ReplySafetyInput, deps: {
         contents: prompt,
         config: { responseMimeType: 'application/json', temperature: 0 },
       }), 12_000);
-      return overrideNameOnlyFalsePositive(parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer'), input);
+      return applyDeterministicOverrides(parseReviewerDecision(safeParseGeminiJson(response.text), 'gemini-reviewer'), input);
     } catch (error: any) {
       console.warn(`⚠️ [Revisor pré-envio] Gemini indisponível: ${error?.message || error}`);
     }

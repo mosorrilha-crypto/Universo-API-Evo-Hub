@@ -288,6 +288,11 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
             emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
+          // TASK-0297: quando o revisor corrige em vez de só aprovar/bloquear
+          // (hoje só remove uma bolha isolada de empurrão de agenda depois de
+          // pergunta informativa), envia a versão corrigida — nunca o
+          // rascunho original nesse caso.
+          const bubblesToSend = safety.correctedBubbles ?? result.bubbles;
           const calendarExecution = await executeApprovedCalendarActions(
             tenantId,
             message.from,
@@ -308,7 +313,7 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
           }
           try {
-            await sendBubbles(channel, message.from, result.bubbles, async (bubbleText) => {
+            await sendBubbles(channel, message.from, bubblesToSend, async (bubbleText) => {
               await recordOutgoingMessage(tenantId, message.from, { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }, 'ai');
               console.log(`🤖 [Resposta Automática] tenant=${tenantId} Enviado pra ${message.from}: ${redactMessageForLog(bubbleText)} (agente: ${result.agent})`);
             }, message.messageId, result.phase, result.routerElapsedMs, result.quickReplyOptions);
