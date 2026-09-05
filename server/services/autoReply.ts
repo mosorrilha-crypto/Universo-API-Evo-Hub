@@ -256,7 +256,7 @@ async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<ty
  * depois de semanas) continuar causando isso, o próximo passo é replicar o
  * padrão de capturedClientName pro serviço identificado.
  */
-const HISTORY_WINDOW_SIZE = 24;
+export const HISTORY_WINDOW_SIZE = 24;
 
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
   return (history || [])
