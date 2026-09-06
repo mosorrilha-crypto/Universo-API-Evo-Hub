@@ -1,0 +1,30 @@
+-- TASK-0327 — elimina a tabela legada `knowledge_base` (1 registro jsonb por
+-- tenant), substituída pelos 8 documentos tipados/versionados de
+-- `knowledge_base_documents` (migration 0057) desde o corte de runtime da
+-- PR4 (ISSUE-0096).
+--
+-- Verificado antes de eliminar (sessão de auditoria, 06/09/2026):
+-- 1) Nenhum código em produção ainda ESCREVE nesta tabela — o único caminho
+--    de escrita ainda alcançável (upload de "Documentos Anexados") foi
+--    migrado pro Storage tipado (POST /api/knowledge-base/document-storage,
+--    já existia, nunca era chamado pelo frontend); o resto (POST
+--    /api/knowledge-base legado) já era código morto, o único ponto de
+--    renderização real do editor sempre usa o fluxo tipado.
+-- 2) Os 3 tenants reais (Monique (Meta), Monique - Evolution, Clic Piscinas -
+--    Evolution) já tinham publicação COMPLETA dos 8 tipos — nenhuma leitura
+--    real dependia mais do fallback.
+-- 3) O conteúdo real que só existia no blob legado (`firstContactBlocks` de
+--    2 dos 3 tenants) já estava replicado (ou era superset) no documento
+--    tipado `media_assets` correspondente — confirmado campo a campo antes
+--    desta migration.
+-- 4) A causa concreta que motivou esta limpeza: um dado bancário desatualizado
+--    (conta antiga da Sara, já trocada pela conta da Monique) sobrevivia
+--    isolado neste blob, gerando confusão real entre o que o painel tipado
+--    mostrava e o que ainda existia aqui — corrigido pontualmente antes desta
+--    migration, mas a causa raiz (dois sistemas de KB coexistindo) só se
+--    resolve eliminando o legado.
+--
+-- `getRuntimeKnowledgeBase()` não tem mais fallback: publicação incompleta
+-- agora devolve `unavailable` (sem contexto) em vez de servir dado legado
+-- potencialmente desatualizado — falha visível, nunca silenciosa.
+drop table if exists knowledge_base;
