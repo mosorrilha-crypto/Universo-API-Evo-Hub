@@ -344,11 +344,23 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    // TASK-0323 — achado real (usuário reportou "não vejo nenhuma mudança"
+    // logo após um deploy confirmado ao vivo no Render): nem os arquivos
+    // estáticos nem o index.html tinham `Cache-Control` explícito, então o
+    // navegador podia manter uma cópia antiga do index.html em cache e
+    // continuar carregando os nomes de arquivo JS/CSS (com hash) da build
+    // anterior mesmo com o deploy novo já no ar. `index: false` impede que
+    // express.static sirva o index.html com o `maxAge` longo abaixo (ele só
+    // deve valer pros arquivos com hash no nome, que são imutáveis por
+    // definição — o build do Vite gera um hash novo sempre que o conteúdo
+    // muda); o index.html continua batendo só na rota de fallback logo
+    // abaixo, que agora força `no-cache` (sempre revalida com o servidor).
+    app.use(express.static(distPath, { index: false, maxAge: '1y', immutable: true }));
     // Express 5/path-to-regexp não aceita mais o wildcard literal `*`.
     // A expressão regular mantém o fallback GET da SPA sem depender da sintaxe
     // específica do parser de rotas.
     app.get(/.*/, spaFallbackRateLimiter, (_req, res) => {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
