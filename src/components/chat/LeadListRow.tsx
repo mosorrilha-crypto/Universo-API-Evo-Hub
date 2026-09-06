@@ -104,10 +104,16 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           <p className={`text-xs truncate flex items-center pr-2 ${isUnread ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
             {lastMsg ? (
               <>
+                {/* TASK-0326 (pedido direto, print anotado à mão): os ícones de
+                    confirmação/áudio usavam a cor verde da marca (--action)
+                    sempre — o WhatsApp real nunca usa verde aqui, só cinza
+                    (entregue) ou azul (lido); sem rastreio real de leitura
+                    nesta lista, cinza neutro é a leitura correta pros dois
+                    casos (evita fabricar um estado "lido" que não existe). */}
                 {lastMsg.sender === 'agent' && (
-                  <CheckCheck className="w-4 h-4 text-[var(--action)] mr-1 flex-shrink-0" />
+                  <CheckCheck className="w-4 h-4 text-[var(--text-secondary)] mr-1 flex-shrink-0" />
                 )}
-                {lastMsg.type === 'audio' && <Mic className="w-3.5 h-3.5 text-[var(--action)] mr-1 flex-shrink-0" />}
+                {lastMsg.type === 'audio' && <Mic className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 {lastMsg.type === 'image' && <ImageIcon className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 {lastMsg.type === 'file' && <FileText className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 <span className="truncate">

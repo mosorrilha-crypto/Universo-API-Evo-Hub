@@ -537,6 +537,21 @@ export const App: React.FC = () => {
   // do WhatsApp (pedido direto, 29/08/2026). Sem efeito no desktop.
   const [isMobileWhatsAppThreadOpen, setIsMobileWhatsAppThreadOpen] = useState(false);
 
+  // TASK-0326 (pedido direto, comparando prints anotados): o botão "Agenda"
+  // da barra inferior abria coisas diferentes dependendo de onde o operador
+  // estava — dentro de Conversas abria um popup rápido de próximos eventos
+  // (handleOpenUpcomingEvents, estado local de WhatsAppLeadsSim); dentro de
+  // Pendências (AtendimentoSecondaryNav, componente irmão, fora da árvore de
+  // WhatsAppLeadsSim) navegava pra página completa da Agenda. Decisão do
+  // dono do produto: sempre o popup rápido, em qualquer tela. Como o popup
+  // é estado local de WhatsAppLeadsSim, a única forma seguro sem içar toda a
+  // lógica de Google Calendar pra cá é: navegar pra Conversas e sinalizar
+  // aqui qual ação pendente ela deve dar 1 vez ao montar/perceber o sinal
+  // (mesmo padrão de `openLeadRequestId` — WhatsAppLeadsSim consome e avisa
+  // de volta). Também cobre "Ferramentas", que também só existia dentro de
+  // Conversas e não tinha equivalente em Pendências/Agenda.
+  const [pendingConversasAction, setPendingConversasAction] = useState<'openAgenda' | 'openTools' | null>(null);
+
   // TASK-0290 (pedido direto, print do botão físico/gesto de voltar do
   // Android circulado): "esse botão minimiza o aplicativo e não volta as
   // páginas dentro do aplicativo". Achado real: o app inteiro nunca chamou
@@ -1478,7 +1493,8 @@ export const App: React.FC = () => {
           activeTab={activeTab}
           onGoToConversas={() => handleSetActiveTab('whatsapp')}
           onGoToEscalations={() => handleSetActiveTab('escalations')}
-          onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
+          onGoToAgenda={canSeeAgenda ? () => { handleSetActiveTab('whatsapp'); setPendingConversasAction('openAgenda'); } : undefined}
+          onGoToTools={() => { handleSetActiveTab('whatsapp'); setPendingConversasAction('openTools'); }}
           escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
         />
       )}
@@ -1672,6 +1688,8 @@ export const App: React.FC = () => {
             onAddTransaction={handleAddTransaction}
             operatorName={currentUser?.name}
             closeThreadSignal={closeThreadSignal}
+            pendingConversasAction={pendingConversasAction}
+            onPendingConversasActionHandled={() => setPendingConversasAction(null)}
             onToast={showToast}
           />
           </AtendimentoWorkspaceFrame>

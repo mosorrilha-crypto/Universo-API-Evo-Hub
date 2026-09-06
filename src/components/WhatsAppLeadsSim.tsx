@@ -206,6 +206,17 @@ interface WhatsAppLeadsSimProps {
       não tem nenhuma forma de fechar a conversa que este componente controla
       internamente (`mobileThreadOpen`). */
   closeThreadSignal?: number;
+  /** TASK-0326 — ação disparada de fora (App.tsx/AtendimentoSecondaryNav,
+      barra de Pendências/Agenda) que este componente deve executar 1 vez
+      assim que "Conversas" ficar ativa: 'openAgenda' abre o mesmo popup
+      rápido de próximos eventos do botão "Agenda" da barra inferior local
+      (nunca navega pra página completa — decisão do dono do produto, pra
+      manter o botão consistente em qualquer tela); 'openTools' abre a
+      gaveta de Ferramentas. `onPendingConversasActionHandled` avisa
+      App.tsx que já processou, pra ele zerar o sinal (mesmo padrão de
+      `openLeadRequestId`/`closeThreadSignal`). */
+  pendingConversasAction?: 'openAgenda' | 'openTools' | null;
+  onPendingConversasActionHandled?: () => void;
   /** TASK-0292 — confirmação/erro do botão "Ressincronizar" da Ficha do
       Contato (agendamento desatualizado). Mesmo `showToast` já usado em
       App.tsx/AgendaFinanceiroCenter; opcional pra não quebrar quem ainda não
@@ -302,6 +313,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onGoToCrm,
   onGoToFinancial,
   closeThreadSignal,
+  pendingConversasAction,
+  onPendingConversasActionHandled,
   openLeadPhone,
   openLeadRequestId,
   financialModuleEnabled,
@@ -1148,6 +1161,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // menu; só o que o operador mexe com frequência (status do agente,
   // escalonamentos, novo lead) continua sempre visível.
   const [isToolbarSettingsOpen, setIsToolbarSettingsOpen] = useState(false);
+
+  // TASK-0326 — consome a ação pendente sinalizada por App.tsx quando o
+  // operador toca "Agenda"/"Ferramentas" na barra de Pendências/Agenda
+  // (AtendimentoSecondaryNav, fora desta árvore de componente). Roda só
+  // quando o sinal chega (não em todo render) e avisa de volta assim que
+  // processa, pra App.tsx zerar o sinal (mesmo padrão de openLeadRequestId).
+  useEffect(() => {
+    if (!pendingConversasAction) return;
+    if (pendingConversasAction === 'openAgenda') {
+      if (googleCalendarConnected) handleOpenUpcomingEvents();
+      else handleConnectGoogleCalendar();
+    } else if (pendingConversasAction === 'openTools') {
+      setIsToolbarSettingsOpen(true);
+    }
+    onPendingConversasActionHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingConversasAction]);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
