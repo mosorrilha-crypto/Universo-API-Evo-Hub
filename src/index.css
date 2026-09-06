@@ -4223,3 +4223,51 @@ html[data-theme='light'] .border-violet-500\/30 {
     color: var(--app-text-primary) !important;
   }
 }
+
+/* Correção pós-captura: a primeira versão deixou a linha alta demais e o
+   placeholder longo cortava a composição. Mantém o escopo na lista mobile. */
+@media (max-width: 640px) {
+  html[data-theme='light'] .atendimento-search-input {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  html[data-theme='light'] .atendimento-filters {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-padding-inline: 0.9rem;
+  }
+
+  html[data-theme='light'] .atendimento-contact-list > section > .atendimento-contact-row,
+  html[data-theme='light'] .atendimento-contact-list > .atendimento-archived-section .atendimento-contact-row {
+    min-height: 0;
+  }
+
+  html[data-theme='light'] .atendimento-contact-row {
+    min-height: 4.35rem;
+    padding: 0.52rem 0.9rem;
+  }
+
+  html[data-theme='light'] .atendimento-contact-avatar {
+    width: 2.9rem;
+    height: 2.9rem;
+    min-width: 2.9rem;
+  }
+
+  html[data-theme='light'] .atendimento-contact-name {
+    font-size: 0.95rem;
+  }
+
+  html[data-theme='light'] .atendimento-contact-preview {
+    font-size: 0.82rem;
+  }
+
+  html[data-theme='light'] .atendimento-contact-row .inline-flex.rounded-full {
+    padding: 0.12rem 0.35rem;
+    font-size: 0.58rem;
+  }
+}
