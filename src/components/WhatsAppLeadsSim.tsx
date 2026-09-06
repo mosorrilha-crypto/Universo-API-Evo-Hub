@@ -4002,7 +4002,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Pesquisar..."
+                placeholder={t('searchConversation')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="atendimento-search-input w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none"
@@ -4209,10 +4209,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
 
           {/* WhatsApp Web Chat List */}
-          <div className="atendimento-contact-list flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
             {/* Seção "Arquivadas" — colapsável, fixa no topo da lista, igual ao WhatsApp Web real */}
             {archivedLeads.length > 0 && (
-              <div className="atendimento-archived-section border-b border-slate-800/40">
+              <div className="border-b border-slate-800/40">
                 <button
                   onClick={() => setShowArchived((v) => !v)}
                   className="w-full flex items-center justify-between px-3 py-2.5 text-slate-300 hover:bg-[#202c33] transition-colors cursor-pointer"
