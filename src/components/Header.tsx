@@ -23,8 +23,8 @@ import {
   Radio,
   ScrollText,
   LogOut,
-  Menu,
   MessageSquare,
+  MoreVertical,
   Moon,
   ShieldCheck,
   Settings2,
@@ -385,7 +385,16 @@ export const Header: React.FC<HeaderProps> = ({
             Crescimento/Configurar/Empresas não teria mais nenhum jeito de
             voltar pro atendimento pelo cabeçalho. */}
         <button type="button" onClick={() => selectTab('whatsapp')} className="flex min-w-0 items-center gap-2 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70" title={isSpanish ? 'Ir a Atención' : 'Ir para o Atendimento'}><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-5 h-5" /></div><span className="truncate text-lg font-bold text-white">Universo</span></button>
-        <div className="flex items-center gap-1.5"><button type="button" onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')} className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-bold text-slate-200" title={isSpanish ? 'Português' : 'Español'}>{isSpanish ? 'PT' : 'ES'}</button>{renderThemeMenu('mobile')}<button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setOpenToolsMenu(null); setIsMobileTenantMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}</button></div>
+        {/* TASK-XXXX (pedido direto, print anotado): seletor de idioma (ES/PT)
+            e o botão de tema saíram daqui — moraram pro topo do cabeçalho
+            desde sempre, mas o pedido foi deixar essa linha só com o
+            essencial (logo + menu) e levar idioma/tema pra dentro da gaveta
+            "Ferramentas" do Atendimento (WhatsAppLeadsSim.tsx,
+            toolbarSettingsBody), discretos igual "Status do agente" já é
+            lá. O ícone de menu também trocou de ☰ pra ⋮ (MoreVertical),
+            mesmo ícone do menu "⋮" real do WhatsApp (já citado no comentário
+            da TASK-0284 acima). */}
+        <button type="button" onClick={() => { setIsMobileMenuOpen((value) => !value); setOpenToolsMenu(null); setIsMobileTenantMenuOpen(false); }} className="rounded-md p-1.5 text-slate-200 hover:bg-slate-800" title={copy.menu}>{isMobileMenuOpen ? <X className="w-6 h-6" /> : <MoreVertical className="w-6 h-6" />}</button>
       </div>
       {isMobileMenuOpen && (
         <>
