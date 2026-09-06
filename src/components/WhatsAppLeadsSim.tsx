@@ -3997,7 +3997,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Business real): texto e altura ficavam bem menores que o
               campo de busca do app real, mesma proporção do ajuste já
               feito na caixa de digitação da conversa aberta (TASK-0164). */}
-          <div className="p-2 bg-[#111b21] border-b border-slate-800/30">
+          <div className="atendimento-search p-2 bg-[#111b21] border-b border-slate-800/30">
             <div className="relative flex items-center min-w-0">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
               <input
@@ -4027,12 +4027,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 lidos" não dependem de análise nenhuma, continuam confiáveis.
                 "Esperando você" removido (pedido direto, 28/08/2026: "eu não
                 sei qual a finalidade dele"). */}
-            <div className="flex items-center gap-2 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <div className="atendimento-filters flex items-center gap-2 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-xs">
               <button
                 onClick={() => setActiveTabFilter('all')}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`atendimento-filter px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'all'
-                    ? 'bg-emerald-500 text-slate-950 font-bold'
+                    ? 'is-active bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
@@ -4040,9 +4040,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
               <button
                 onClick={() => setActiveTabFilter('unread')}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`atendimento-filter px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'unread'
-                    ? 'bg-emerald-500 text-slate-950 font-bold'
+                    ? 'is-active bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
@@ -4068,9 +4068,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     setIsWindowFilterMenuOpen((v) => !v);
                   }}
                   title="Filtrar por janela de atendimento de 24h"
-                  className={`atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
+                  className={`atendimento-filter atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
                     activeTabFilter === 'window_open' || activeTabFilter === 'window_closed'
-                      ? 'bg-emerald-500 text-slate-950'
+                      ? 'is-active bg-emerald-500 text-slate-950'
                       : 'bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white'
                   }`}
                 >
@@ -4164,9 +4164,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       setIsLabelFilterMenuOpen((v) => !v);
                     }}
                     title="Filtrar por etiqueta"
-                    className={`atendimento-label-filter-trigger px-2 py-1 rounded-full text-[11px] font-medium border cursor-pointer whitespace-nowrap max-w-[9.5rem] truncate ${
+                    className={`atendimento-filter atendimento-label-filter-trigger px-2 py-1 rounded-full text-[11px] font-medium border cursor-pointer whitespace-nowrap max-w-[9.5rem] truncate ${
                       labelFilter
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-semibold'
+                        ? 'is-active bg-emerald-500 text-slate-950 border-emerald-500 font-semibold'
                         : 'bg-[#202c33] text-slate-300 border-slate-700'
                     }`}
                   >
