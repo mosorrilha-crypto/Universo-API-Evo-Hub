@@ -241,6 +241,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('Nunca use parênteses nem dois-pontos explicativos dentro da mensagem');
   });
 
+  it('reforça a regra pra nunca inventar cidade/bairro ao mandar o link de localização (achado real em produção, TASK-0329: agente disse "Estamos en Asunción" sem esse dado estar no contexto, e o studio fica em Luque)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('NUNCA INVENTE CIDADE, BAIRRO OU QUALQUER DESCRIÇÃO DO LUGAR');
+    expect(systemInstruction).toContain('Coordenadas geográficas não são um dado que você consegue ler/traduzir pra nome de lugar com precisão');
+  });
+
   it('reforça a regra anti-repetição de pergunta já respondida (achado real em produção: agente perguntava "cejas, pestañas o labios?" de novo logo depois do cliente responder "Las cejas")', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
