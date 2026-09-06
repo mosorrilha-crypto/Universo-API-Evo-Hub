@@ -34,6 +34,31 @@
 }
 
 /*
+ * TASK-0318 — tokens estruturais `--app-*`. Namespace deliberadamente
+ * diferente do `--radius-*` do @theme acima: aquele gera classes utilitárias
+ * Tailwind (`rounded-control`, etc.) e é consumido no JSX; este é consumido
+ * só via `var()` em CSS novo (BEM/light-theme), nunca vira classe utilitária.
+ * Valores também diferem de propósito (arredondamento um pouco maior, no
+ * espírito do print de referência do WhatsApp mobile) — não confundir os
+ * dois sistemas nem tentar unificá-los.
+ * Compartilhados por todos os temas (spacing/radius/shadow, sem cor), mas
+ * hoje só são referenciados por regras novas escopadas a
+ * html[data-theme='light'], então dark/blue/clean ficam visualmente
+ * intocados até decidirem adotá-los.
+ */
+:root {
+  --app-radius-control: 0.85rem;
+  --app-radius-card: 1.15rem;
+  --app-radius-panel: 1.35rem;
+  --app-radius-pill: 9999px;
+  --app-spacing-page: 1rem;
+  --app-spacing-section: 1.25rem;
+  --app-touch-target: 2.75rem;
+  --app-shadow-card: 0 2px 10px rgba(15, 23, 42, 0.06);
+  --app-shadow-modal: 0 12px 38px rgba(15, 23, 42, 0.16);
+}
+
+/*
  * Sombra — convenção por contexto (não geramos classe nomeada nova aqui,
  * risco de reproduzir um box-shadow ligeiramente diferente do valor real
  * do Tailwind pra zero ganho; a classe padrão já é a fonte da verdade).
@@ -599,6 +624,21 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
 .atendimento-workspace__content { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; min-height: 0; }
 @media (max-width: 640px) { .atendimento-workspace__header--compact { padding:.5rem .7rem; } .atendimento-workspace__tenant { max-width:8.5rem; } }
 
+/* TASK-0318 — cabeçalho global (Header.tsx) mais compacto no mobile, tema
+   claro, no espírito do print de referência (WhatsApp mobile). Header.tsx
+   não tem classe própria no <header> (só utilitárias Tailwind já
+   recoloridas pelo remapeamento genérico de .bg-slate-900/.border-slate-800
+   mais abaixo neste arquivo) — seletor aqui segue a mesma convenção de
+   "utilitária + tema" do resto do arquivo. Escopo restrito só ao próprio
+   <header> (não a `button`, que também casaria com a gaveta do menu mobile
+   renderizada dentro do mesmo elemento — arredondar em pill os botões de
+   lista da gaveta quebraria o layout deles). */
+@media (max-width: 640px) {
+  html[data-theme='light'] header.bg-slate-900 {
+    padding-top: calc(env(safe-area-inset-top) + .35rem);
+  }
+}
+
 /* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
    Ferramentas) — só no mobile, onde a tela de Atendimento é a única coisa
    visível; no desktop as mesmas ações já ficam na barra de controles. */
@@ -622,6 +662,15 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
 .atendimento-bottom-nav__item.is-active { color: var(--action); }
 .atendimento-bottom-nav__item:disabled { opacity: .45; cursor: default; }
 .atendimento-bottom-nav__badge { position: absolute; top: .02rem; right: 18%; min-width: 1.25rem; height: 1.25rem; padding: 0 .28rem; border-radius: 999px; background: var(--danger, #ef4444); color: #fff; font-size: .66rem; font-weight: 800; line-height: 1.25rem; text-align: center; }
+
+/* TASK-0318 — aba ativa da barra inferior ganha uma "pill" de fundo no tema
+   claro, como no print de referência (WhatsApp mobile). Aditivo só pro
+   light: dark/blue/clean continuam só com a mudança de cor do texto. */
+html[data-theme='light'] .atendimento-bottom-nav__item.is-active {
+  background: var(--app-chip-active-bg);
+  border-radius: var(--app-radius-pill);
+  margin: 0 .35rem;
+}
 
 /* Frame compartilhado para módulos de Agenda e Financeiro */
 .operations-module-frame { display:flex; flex-direction:column; gap:1rem; }
@@ -809,6 +858,19 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .operations-center__metrics > * > span:last-child { font-size: .85rem; }
 }
 
+/* TASK-0318 — `.financial-workspace__mobile-detail-close` (definida acima)
+   usa hex fixo (#102018/#5ebf92) sem escopo de tema nenhum — só "parece
+   certo" no dark por coincidência (mesmos tons de --action/--action-contrast
+   de lá). Fix restrito ao light; blue/clean ficam com o mesmo bug latente,
+   fora do escopo desta tarefa (mudar a regra base afetaria os dois). */
+@media (max-width: 639px) {
+  html[data-theme='light'] .financial-workspace__mobile-detail-close {
+    color: var(--app-action-dark);
+    background: var(--app-action-soft);
+    border: 1px solid var(--app-action);
+  }
+}
+
 /* Modelo estrutural 6a: contexto essencial dentro da conversa, sem terceira coluna permanente */
 /* TASK-0259 (pedido direto): "diminui as caixa de contexto com uma fonte
    menor" — padding e tipografia reduzidos, mesmo conteúdo/lógica. */
@@ -920,6 +982,47 @@ html[data-theme='light'] {
   --bubble-ai-border: #CFE0D6;
   --bubble-client: #F1EFE9;
   --shadow-premium: 0 1px 2px rgba(0, 0, 0, .06);
+
+  /* TASK-0318 — tokens semânticos `--app-*`, camada nova alinhada ao
+     print de referência (WhatsApp mobile). Nome `--app-*` (não `--light-*`)
+     é proposital: um futuro html[data-theme='whatsapp-dark'] pode reusar os
+     mesmos nomes com valores escuros, sem precisar renomear nada. Os que
+     aliasam pra var(...) mantêm uma única fonte de verdade com os tokens
+     canônicos acima; os demais são genuinamente novos (esta paleta ainda
+     não tinha search bar / chip / bolha de mensagem dedicados). */
+  --app-page: #F7F8F7;
+  --app-surface: var(--surface-panel);
+  --app-surface-soft: #F5F5F3;
+  --app-surface-muted: #EFEFEC;
+  --app-surface-control: #E9E9E6;
+  --app-text-primary: var(--text-primary);
+  --app-text-secondary: var(--text-secondary);
+  --app-text-muted: var(--text-muted);
+  --app-text-disabled: #A5ABAD;
+  --app-border: var(--border);
+  --app-border-strong: #D2D5D3;
+  --app-action: var(--action);
+  --app-action-dark: #126447;
+  --app-action-soft: #E5F2EB;
+  --app-action-subtle: #F0F8F3;
+  --app-success: #168B68;
+  --app-success-soft: #E4F5EC;
+  --app-success-border: #9CD4B8;
+  --app-warning: #98702B;
+  --app-warning-soft: #FFF4DF;
+  --app-warning-border: #E6BB58;
+  --app-danger: #A44842;
+  --app-danger-soft: #FBE9E7;
+  --app-danger-border: #E6B8AC;
+  --app-info: #32758C;
+  --app-info-soft: #E5F2F6;
+  --app-info-border: #9BCFD6;
+  --app-input-bg: #FFFFFF;
+  --app-search-bg: #F1F0EE;
+  --app-chip-bg: #FFFFFF;
+  --app-chip-active-bg: #E5F2EB;
+  --app-message-incoming: #FFFFFF;
+  --app-message-outgoing: #D9FDD3;
 }
 
 html[data-theme='clean'] {
@@ -950,7 +1053,17 @@ html[data-theme='clean'] {
 }
 
 html[data-theme='light'] body {
-  background: var(--surface-deep);
+  background: var(--app-page);
+}
+
+/* TASK-0318 — mobile: garante altura real de viewport (dvh) e mantém o
+   fundo --app-page também no #root, escopado só ao light. */
+@media (max-width: 640px) {
+  html[data-theme='light'] body,
+  html[data-theme='light'] #root {
+    min-height: 100dvh;
+    background: var(--app-page);
+  }
 }
 
 html[data-theme='clean'] body {
@@ -3674,4 +3787,178 @@ html[data-theme='clean'] {
   .knowledge-workspace__audit {
     box-shadow: none !important;
   }
+}
+
+/* TASK-0318 — Agenda/Financeiro (`AgendaFinanceiroCenter.tsx`): EventCard,
+   botão "Novo agendamento", Metric e FinancialTransactionCard eram Tailwind
+   puro sem nenhum hook — classes abaixo foram adicionadas ao JSX de forma
+   aditiva (sem remover nada), então dark/blue/clean continuam exatamente
+   como estavam. */
+html[data-theme='light'] .agenda-financeiro-workspace__event-card {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+  box-shadow: var(--app-shadow-card);
+  border-radius: var(--app-radius-card);
+}
+html[data-theme='light'] .agenda-financeiro-workspace__primary-action {
+  background: var(--app-action);
+  color: #ffffff;
+  border-radius: var(--app-radius-pill);
+}
+html[data-theme='light'] .agenda-financeiro-workspace__metric-card,
+html[data-theme='light'] .agenda-financeiro-workspace__transaction-card {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+  box-shadow: var(--app-shadow-card);
+}
+
+/* TASK-0318 — CRM (`OperatorCRM.tsx`): header de coluna do kanban e card de
+   lead também eram Tailwind puro sem hook; mesma estratégia aditiva acima. */
+html[data-theme='light'] .crm-workspace__stage-header {
+  background: var(--app-surface-soft);
+}
+html[data-theme='light'] .crm-workspace__lead-card {
+  background: var(--app-surface);
+  border-color: var(--app-border);
+}
+html[data-theme='light'] .crm-workspace__lead-card--selected {
+  background: var(--app-action-subtle);
+  border-color: var(--app-action);
+}
+
+/*
+ * TASK-0318 — correção de gap de opacidade baixa (5–30%) da família
+ * emerald/sky/blue/cyan/indigo/violet/amber/orange/yellow/rose/red em `-400`
+ * e `-500`, usada como fundo/borda de badges e pills. Achado por auditoria:
+ * nenhuma regra genérica existente no arquivo cobre essa faixa fora de
+ * contextos aninhados específicos (ex: `.knowledge-workspace__audit`) — só
+ * o `-950` (bem mais escuro) e a família `slate` têm cobertura exaustiva.
+ * Em telas com fundo escuro essas cores em baixa opacidade já ficam
+ * legíveis; no tema claro (fundo branco) o mesmo tom quase desaparece.
+ * Afeta, entre outros: badge do logo no Header, badge de data do
+ * EventCard (Agenda), STAGES_BASE do CRM, pill de probabilidade do
+ * Growth/CAPI, badges de status da Qualidade da IA.
+ * Escopo deliberadamente restrito a opacidade baixa (≤30%): valores mais
+ * altos (`/40` pra cima) em geral são bordas de foco em inputs escuros,
+ * indicadores de toggle, ou botões sólidos com texto branco fixo — já
+ * legíveis em qualquer tema, remapeá-los à toa arriscaria texto claro
+ * sobre fundo claro. Agrupado por família semântica (sucesso/aviso/perigo/
+ * informação), reaproveitando os tokens --app-*-soft/-border já definidos.
+ */
+html[data-theme='light'] .bg-emerald-400\/10,
+html[data-theme='light'] .bg-emerald-400\/15,
+html[data-theme='light'] .bg-emerald-400\/30,
+html[data-theme='light'] .bg-emerald-500\/5,
+html[data-theme='light'] .bg-emerald-500\/10,
+html[data-theme='light'] .bg-emerald-500\/12,
+html[data-theme='light'] .bg-emerald-500\/15,
+html[data-theme='light'] .bg-emerald-500\/20,
+html[data-theme='light'] .bg-emerald-500\/25,
+html[data-theme='light'] .bg-emerald-600\/20,
+html[data-theme='light'] .bg-emerald-600\/30 {
+  background-color: var(--app-success-soft) !important;
+}
+html[data-theme='light'] .border-emerald-400\/15,
+html[data-theme='light'] .border-emerald-400\/20,
+html[data-theme='light'] .border-emerald-400\/25,
+html[data-theme='light'] .border-emerald-400\/30,
+html[data-theme='light'] .border-emerald-400\/35,
+html[data-theme='light'] .border-emerald-500\/15,
+html[data-theme='light'] .border-emerald-500\/20,
+html[data-theme='light'] .border-emerald-500\/25,
+html[data-theme='light'] .border-emerald-500\/30,
+html[data-theme='light'] .border-emerald-500\/35 {
+  border-color: var(--app-success-border) !important;
+}
+
+html[data-theme='light'] .bg-amber-400\/5,
+html[data-theme='light'] .bg-amber-400\/15,
+html[data-theme='light'] .bg-amber-500\/5,
+html[data-theme='light'] .bg-amber-500\/15,
+html[data-theme='light'] .bg-amber-500\/20,
+html[data-theme='light'] .bg-orange-400\/10,
+html[data-theme='light'] .bg-orange-500\/10,
+html[data-theme='light'] .bg-orange-500\/20,
+html[data-theme='light'] .bg-yellow-500\/20 {
+  background-color: var(--app-warning-soft) !important;
+}
+html[data-theme='light'] .border-amber-400\/15,
+html[data-theme='light'] .border-amber-400\/20,
+html[data-theme='light'] .border-amber-400\/25,
+html[data-theme='light'] .border-amber-400\/30,
+html[data-theme='light'] .border-amber-400\/35,
+html[data-theme='light'] .border-amber-500\/15,
+html[data-theme='light'] .border-amber-500\/35,
+html[data-theme='light'] .border-orange-400\/20,
+html[data-theme='light'] .border-orange-400\/25,
+html[data-theme='light'] .border-orange-400\/30,
+html[data-theme='light'] .border-orange-400\/35,
+html[data-theme='light'] .border-orange-500\/30 {
+  border-color: var(--app-warning-border) !important;
+}
+
+html[data-theme='light'] .bg-red-500\/10,
+html[data-theme='light'] .bg-red-500\/20,
+html[data-theme='light'] .bg-rose-400\/10,
+html[data-theme='light'] .bg-rose-500\/5,
+html[data-theme='light'] .bg-rose-500\/10,
+html[data-theme='light'] .bg-rose-500\/15 {
+  background-color: var(--app-danger-soft) !important;
+}
+html[data-theme='light'] .border-red-500\/30,
+html[data-theme='light'] .border-rose-400\/20,
+html[data-theme='light'] .border-rose-400\/25,
+html[data-theme='light'] .border-rose-400\/30,
+html[data-theme='light'] .border-rose-400\/35,
+html[data-theme='light'] .border-rose-500\/20,
+html[data-theme='light'] .border-rose-500\/25,
+html[data-theme='light'] .border-rose-500\/35 {
+  border-color: var(--app-danger-border) !important;
+}
+
+html[data-theme='light'] .bg-blue-500\/10,
+html[data-theme='light'] .bg-blue-500\/15,
+html[data-theme='light'] .bg-blue-500\/20,
+html[data-theme='light'] .bg-cyan-400\/10,
+html[data-theme='light'] .bg-cyan-500\/5,
+html[data-theme='light'] .bg-cyan-500\/10,
+html[data-theme='light'] .bg-cyan-500\/20,
+html[data-theme='light'] .bg-indigo-500\/15,
+html[data-theme='light'] .bg-sky-400\/10,
+html[data-theme='light'] .bg-sky-500\/5,
+html[data-theme='light'] .bg-sky-500\/12,
+html[data-theme='light'] .bg-sky-500\/15,
+html[data-theme='light'] .bg-sky-500\/25,
+html[data-theme='light'] .bg-violet-400\/10,
+html[data-theme='light'] .bg-violet-500\/5,
+html[data-theme='light'] .bg-violet-500\/10,
+html[data-theme='light'] .bg-violet-500\/20 {
+  background-color: var(--app-info-soft) !important;
+}
+html[data-theme='light'] .border-blue-500\/15,
+html[data-theme='light'] .border-blue-500\/20,
+html[data-theme='light'] .border-blue-500\/25,
+html[data-theme='light'] .border-blue-500\/30,
+html[data-theme='light'] .border-cyan-400\/15,
+html[data-theme='light'] .border-cyan-400\/20,
+html[data-theme='light'] .border-cyan-400\/25,
+html[data-theme='light'] .border-cyan-400\/30,
+html[data-theme='light'] .border-cyan-400\/35,
+html[data-theme='light'] .border-cyan-500\/20,
+html[data-theme='light'] .border-indigo-500\/30,
+html[data-theme='light'] .border-sky-400\/20,
+html[data-theme='light'] .border-sky-400\/25,
+html[data-theme='light'] .border-sky-400\/30,
+html[data-theme='light'] .border-sky-400\/35,
+html[data-theme='light'] .border-sky-500\/20,
+html[data-theme='light'] .border-sky-500\/30,
+html[data-theme='light'] .border-sky-500\/35,
+html[data-theme='light'] .border-violet-400\/20,
+html[data-theme='light'] .border-violet-400\/25,
+html[data-theme='light'] .border-violet-400\/30,
+html[data-theme='light'] .border-violet-400\/35,
+html[data-theme='light'] .border-violet-500\/20,
+html[data-theme='light'] .border-violet-500\/25,
+html[data-theme='light'] .border-violet-500\/30 {
+  border-color: var(--app-info-border) !important;
 }
