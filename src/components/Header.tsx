@@ -375,7 +375,7 @@ export const Header: React.FC<HeaderProps> = ({
   // TASK-0231 (03/09/2026): mesma lógica estendida pra "Qualidade da IA"
   // (`app-main--quality`, index.css) — agora também borda a borda.
   const headerInnerClassName = activeTab === 'whatsapp' || activeTab === 'quality' ? 'px-4 sm:px-6 lg:px-8' : 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8';
-  return <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+  return <header className="app-header sticky top-0 z-30 border-b border-slate-800 bg-slate-900 shadow-md" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
     <div className={headerInnerClassName}>
       <div className="flex items-center justify-between gap-3 py-3 md:hidden">
         {/* Escala aumentada (pedido real, 01/09/2026, com print comparando lado a lado com o WhatsApp Business real): o logo+nome ficava bem menor que o wordmark "WhatsApp" do app real, mesma proporção do ajuste já feito na conversa aberta (TASK-0164).

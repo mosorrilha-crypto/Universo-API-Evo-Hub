@@ -624,19 +624,45 @@ html[data-theme='blue'] .ring-emerald-400 { --tw-ring-color: #0b78b5 !important;
 .atendimento-workspace__content { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; min-height: 0; }
 @media (max-width: 640px) { .atendimento-workspace__header--compact { padding:.5rem .7rem; } .atendimento-workspace__tenant { max-width:8.5rem; } }
 
-/* TASK-0318 — cabeçalho global (Header.tsx) mais compacto no mobile, tema
-   claro, no espírito do print de referência (WhatsApp mobile). Header.tsx
-   não tem classe própria no <header> (só utilitárias Tailwind já
-   recoloridas pelo remapeamento genérico de .bg-slate-900/.border-slate-800
-   mais abaixo neste arquivo) — seletor aqui segue a mesma convenção de
-   "utilitária + tema" do resto do arquivo. Escopo restrito só ao próprio
-   <header> (não a `button`, que também casaria com a gaveta do menu mobile
-   renderizada dentro do mesmo elemento — arredondar em pill os botões de
-   lista da gaveta quebraria o layout deles). */
+/* TASK-0318/TASK-0320 — cabeçalho global (Header.tsx) mais compacto no
+   mobile, tema claro, no espírito do print de referência (WhatsApp mobile).
+   Header.tsx agora carrega a classe `app-header` (TASK-0320, aditiva, ao
+   lado das utilitárias Tailwind que o remapeamento genérico de
+   .bg-slate-900/.border-slate-800 mais abaixo neste arquivo já recolore).
+   `!important` no padding-top é necessário: o <header> também tem
+   `style={{ paddingTop: 'env(safe-area-inset-top)' }}` inline, e um estilo
+   inline sempre vence uma regra de stylesheet sem !important — sem isso
+   esta regra nunca tinha efeito visual (achado real, TASK-0320). Escopo
+   restrito só ao próprio <header> (não a `button`, que também casaria com a
+   gaveta do menu mobile renderizada dentro do mesmo elemento — arredondar
+   em pill os botões de lista da gaveta quebraria o layout deles). */
 @media (max-width: 640px) {
-  html[data-theme='light'] header.bg-slate-900 {
-    padding-top: calc(env(safe-area-inset-top) + .35rem);
+  html[data-theme='light'] .app-header {
+    padding-top: calc(env(safe-area-inset-top) + .35rem) !important;
   }
+}
+
+/* TASK-0320 — busca e chips de filtro do Atendimento ganham a forma "pill"
+   e os tokens dedicados de busca/chip do print de referência. As cores já
+   funcionavam antes (bg-[#202c33]/bg-emerald-500 já são recoloridas pelo
+   remapeamento genérico mais abaixo) — o que faltava era a forma (raio
+   total em vez de rounded-lg) e um fundo consistente com --app-search-bg
+   em vez de depender só do hex do WhatsApp remapeado. */
+html[data-theme='light'] .atendimento-search-input {
+  border-radius: var(--app-radius-pill) !important;
+  background: var(--app-search-bg) !important;
+}
+html[data-theme='light'] .atendimento-filter {
+  border-radius: var(--app-radius-pill);
+}
+html[data-theme='light'] .atendimento-filter:not(.is-active) {
+  background: var(--app-chip-bg) !important;
+  border: 1px solid var(--app-border-strong);
+  color: var(--app-text-secondary) !important;
+}
+html[data-theme='light'] .atendimento-filter.is-active {
+  background: var(--app-action) !important;
+  color: #ffffff !important;
 }
 
 /* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
@@ -3536,6 +3562,46 @@ html[data-theme='clean'] .border-slate-800\/60,
 html[data-theme='clean'] .border-slate-800\/70,
 html[data-theme='clean'] .border-slate-800\/80,
 html[data-theme='clean'] .border-slate-800\/90 {
+  border-color: var(--border) !important;
+}
+
+/* TASK-0320 — `divide-slate-700/800` (Tailwind `divide-y divide-{cor}`,
+   usado como divisória entre linhas de lista — Atendimento, Financeiro,
+   CRM, Qualidade da IA, CAPI, Catálogo) gera um seletor diferente de
+   `.border-slate-800` (`.divide-slate-800\/40 > :not([hidden]) ~
+   :not([hidden])`), então a auditoria de borda acima nunca cobria essas
+   divisórias — ficavam cinza-escuro (dark) sobre fundo branco no claro.
+   Achado real auditando a lista de conversas do Atendimento (linha
+   divisória escura entre linhas brancas). */
+html[data-theme='light'] .divide-slate-700 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-700\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/30 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/40 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='light'] .divide-slate-800\/90 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border) !important;
+}
+
+html[data-theme='clean'] .divide-slate-700 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-700\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/30 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/40 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/70 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='clean'] .divide-slate-800\/90 > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--border) !important;
 }
 
