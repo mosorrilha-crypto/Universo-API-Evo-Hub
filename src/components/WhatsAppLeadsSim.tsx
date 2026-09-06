@@ -4209,10 +4209,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           </div>
 
           {/* WhatsApp Web Chat List */}
-          <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
+          <div className="atendimento-contact-list flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/40 scrollbar-thin">
             {/* Seção "Arquivadas" — colapsável, fixa no topo da lista, igual ao WhatsApp Web real */}
             {archivedLeads.length > 0 && (
-              <div className="border-b border-slate-800/40">
+              <div className="atendimento-archived-section border-b border-slate-800/40">
                 <button
                   onClick={() => setShowArchived((v) => !v)}
                   className="w-full flex items-center justify-between px-3 py-2.5 text-slate-300 hover:bg-[#202c33] transition-colors cursor-pointer"

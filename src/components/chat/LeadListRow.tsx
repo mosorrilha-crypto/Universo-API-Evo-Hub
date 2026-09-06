@@ -41,7 +41,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
     <div
       key={lead.id}
       onClick={onSelect}
-      className={`px-3 py-2.5 transition-colors cursor-pointer relative flex items-start space-x-3 ${
+      className={`atendimento-contact-row px-3 py-2.5 transition-colors cursor-pointer relative flex items-start space-x-3 ${
         isSelected
           ? 'bg-[var(--surface-raised)] border-l-4 border-[var(--action)]'
           : isUnread
@@ -56,7 +56,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           (TASK-0164). */}
       <div className="relative flex-shrink-0">
         <div
-          className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xs border border-[var(--line-subtle)] ${avatarColorClasses(lead.name || lead.phone)}`}
+          className={`atendimento-contact-avatar w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xs border border-[var(--line-subtle)] ${avatarColorClasses(lead.name || lead.phone)}`}
         >
           {getInitials(lead.name || lead.phone)}
         </div>
@@ -65,7 +65,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
-          <h4 className="text-sm font-bold text-[var(--text-primary)] truncate flex items-center gap-1">
+          <h4 className="atendimento-contact-name text-sm font-bold text-[var(--text-primary)] truncate flex items-center gap-1">
             <span className="truncate">{lead.name}</span>
           </h4>
           <div className="flex items-center space-x-1">
@@ -81,7 +81,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
                 <span>Silenciada</span>
               </span>
             )}
-            <span className={`text-xs ${isSelected || isUnread ? 'text-[var(--action)] font-bold' : 'text-[var(--text-secondary)]'}`}>
+              <span className={`atendimento-contact-time text-xs ${isSelected || isUnread ? 'text-[var(--action)] font-bold' : 'text-[var(--text-secondary)]'}`}>
               {lead.timestamp}
             </span>
             <button
@@ -96,7 +96,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
 
         {/* Message Preview */}
           <div className="flex items-center justify-between mt-1">
-          <p className={`text-xs truncate flex items-center pr-2 ${isUnread ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
+          <p className={`atendimento-contact-preview text-xs truncate flex items-center pr-2 ${isUnread ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
             {lastMsg ? (
               <>
                 {lastMsg.sender === 'agent' && (
@@ -161,7 +161,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           />
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-2 top-10 z-50 w-52 bg-[var(--surface-raised)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in"
+            className="atendimento-contact-menu absolute right-2 top-10 z-50 w-52 bg-[var(--surface-raised)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in"
           >
             <button
               onClick={() => { onCloseMenu(); onRename(); }}
