@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AtendimentoSecondaryNav } from '../AtendimentoSecondaryNav';
 
 /**
- * TASK-XXXX: `.atendimento-bottom-nav` (Conversas/Pendências/Agenda/Ferramentas)
+ * TASK-0319: `.atendimento-bottom-nav` (Conversas/Pendências/Agenda/Ferramentas)
  * só existe dentro de WhatsAppLeadsSim.tsx, montado sempre mas escondido via
  * `hidden` no wrapper de App.tsx sempre que a aba ativa não é 'whatsapp' —
  * ao abrir Escalonamentos/Agenda no celular, o menu inferior some por

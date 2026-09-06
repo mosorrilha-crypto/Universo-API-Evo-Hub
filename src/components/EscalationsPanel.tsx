@@ -117,7 +117,7 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
 
   return (
     <div className="space-y-3">
-      {/* TASK-XXXX (pedido direto, print anotado — "ajusta os botões e
+      {/* TASK-0319 (pedido direto, print anotado — "ajusta os botões e
           tamanhos dos itens" + "tira estas caixa"): header, filtros e cards
           reduzidos (menos padding/gap, textos mais compactos); o
           estado-vazio deixou de ter borda tracejada em caixa própria — só
@@ -129,7 +129,7 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
               <span className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-1.5 text-amber-300"><AlertTriangle className="h-3.5 w-3.5" /></span>
               <div>
                 <h2 className="text-sm font-bold text-white">Escalonamentos</h2>
-                {/* TASK-XXXX: texto do antigo cabeçalho duplicado
+                {/* TASK-0319: texto do antigo cabeçalho duplicado
                     (OperationsModuleFrame, App.tsx) — migrado pra cá em vez
                     de duplicar os dois. */}
                 <p className="mt-0.5 text-[11px] text-slate-400">Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você.</p>

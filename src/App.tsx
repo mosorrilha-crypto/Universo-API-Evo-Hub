@@ -1460,7 +1460,7 @@ export const App: React.FC = () => {
         onToast={showToast}
       />
       </div>
-      {/* TASK-XXXX (pedido direto, 2 prints anotados do celular): em
+      {/* TASK-0319 (pedido direto, 2 prints anotados do celular): em
           Escalonamentos/Agenda o `AtendimentoSecondaryNav` abaixo já cobre
           a volta pra Conversas com o mesmo "menu de baixo" que o usuário
           pediu de volta — manter o atalho flutuante redundante ali também
@@ -1520,7 +1520,7 @@ export const App: React.FC = () => {
       <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${
         activeTab === 'whatsapp' ? ' app-main--atendimento'
         : activeTab === 'quality' ? ' app-main--quality'
-        // TASK-XXXX (pedido direto, "o sistema utiliza páginas de borda a
+        // TASK-0319 (pedido direto, "o sistema utiliza páginas de borda a
         // borda" comparando Escalonamentos com Atendimento/Qualidade da
         // IA): mesmo tratamento — `OperationsModuleFrame` (hideHeader) já
         // dá o próprio respiro via card com borda/padding, então zerar o
@@ -1865,7 +1865,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'escalations' && (
-          // TASK-XXXX (pedido direto, print anotado — "tira o cabeçalho
+          // TASK-0319 (pedido direto, print anotado — "tira o cabeçalho
           // duplo, coloca a descrição de cima no de baixo"): `EscalationsPanel`
           // já renderiza o próprio `<header>` (título + descrição + filtros),
           // igual Agenda/Financeiro fazem com `AgendaFinanceiroCenter`/

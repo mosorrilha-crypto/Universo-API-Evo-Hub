@@ -1775,7 +1775,7 @@ html[data-theme='clean'] .operations-module-frame__header {
   padding: 0;
 }
 
-/* TASK-XXXX (pedido direto, 2 prints anotados do celular): "Pendências"
+/* TASK-0319 (pedido direto, 2 prints anotados do celular): "Pendências"
    ganhou o mesmo tratamento borda a borda acima, mas o `AtendimentoSecondaryNav`
    (App.tsx, nav fixa no rodapé restaurando "Conversas"/"Pendências"/"Agenda"
    quando o menu antigo some) fica sobreposto ao fim da lista sem um respiro
