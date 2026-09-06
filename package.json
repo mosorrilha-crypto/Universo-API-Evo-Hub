@@ -39,7 +39,7 @@
     "jspdf": "^4.2.1",
     "lucide-react": "^1.39.0",
     "motion": "^13.2.0",
-    "pdf-parse": "^1.1.1",
+    "pdf-parse": "^2.4.5",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.10.1",

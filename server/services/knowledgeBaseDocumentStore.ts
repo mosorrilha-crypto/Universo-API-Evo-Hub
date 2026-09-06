@@ -6,7 +6,7 @@
  * "app-data" já usado por mediaImageStore.ts, sob o prefixo
  * kb-docs/{tenantId}/{docId} — nunca público, autenticado por rota.
  */
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 
 const BUCKET = 'app-data';
 
@@ -25,8 +25,17 @@ const TEXT_MIME_TYPES = new Set(['text/plain', 'text/csv', 'application/json', '
 export async function extractTextFromDocument(buffer: Buffer, mimeType: string, fileName: string): Promise<string | undefined> {
   try {
     if (mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
-      const parsed = await pdfParse(buffer);
-      return parsed.text?.trim().slice(0, MAX_EXTRACTED_TEXT_CHARS) || undefined;
+      // pdf-parse v2 trocou a função direta por uma classe (`PDFParse`) — o
+      // `pageJoiner: ''` evita o novo marcador de fim de página que a lib
+      // passou a inserir por padrão ("-- N of M --"), mantendo o texto
+      // extraído limpo (mesmo formato que ia pro prompt do agente antes).
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const parsed = await parser.getText({ pageJoiner: '' });
+        return parsed.text?.trim().slice(0, MAX_EXTRACTED_TEXT_CHARS) || undefined;
+      } finally {
+        await parser.destroy();
+      }
     }
     if (TEXT_MIME_TYPES.has(mimeType) || /\.(txt|csv|json|md)$/i.test(fileName)) {
       return buffer.toString('utf-8').trim().slice(0, MAX_EXTRACTED_TEXT_CHARS) || undefined;
