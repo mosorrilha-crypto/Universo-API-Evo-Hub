@@ -39,7 +39,6 @@ afterEach(() => initDb(null));
 describe('getRuntimeKnowledgeBase', () => {
   it('compõe exclusivamente os oito documentos publicados e preserva catálogo, variantes, preços, mídia e FAQ', async () => {
     const supabase = createFakeSupabase({
-      knowledge_base: [{ tenant_id: TENANT_A, data: { companyName: 'Legado que não deve vencer' } }],
       knowledge_base_documents: [
         ...publishedDocuments(TENANT_A, 'Empresa publicada'),
         { ...publishedDocuments(TENANT_A, 'Ignorar rascunho')[0], id: 'draft-profile', version: 2, status: 'draft', data: { companyName: 'Empresa em rascunho' } },
@@ -65,16 +64,15 @@ describe('getRuntimeKnowledgeBase', () => {
     expect(result.knowledgeBase?.firstContactBlocks).toEqual([{ id: 'block-1', type: 'text', text: 'Olá!' }]);
   });
 
-  it('recusa uma publicação incompleta e retorna ao blob legado sem expor rascunho ao agente', async () => {
+  it('recusa uma publicação incompleta e não expõe rascunho nem dado parcial ao agente', async () => {
     const supabase = createFakeSupabase({
-      knowledge_base: [{ tenant_id: TENANT_A, data: { companyName: 'Base legado segura', products: [{ name: 'Legado', price: 'R$ 90' }] } }],
       knowledge_base_documents: publishedDocuments(TENANT_A, 'Incompleta').slice(0, 7),
     });
     initDb(supabase as any);
 
     await expect(getRuntimeKnowledgeBase(TENANT_A)).resolves.toEqual({
-      knowledgeBase: { companyName: 'Base legado segura', products: [{ name: 'Legado', price: 'R$ 90' }] },
-      source: 'legacy_blob',
+      knowledgeBase: null,
+      source: 'unavailable',
       fallbackReason: 'published_documents_incomplete',
     });
   });

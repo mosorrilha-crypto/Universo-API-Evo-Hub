@@ -1,13 +1,17 @@
 /**
  * Base de conhecimento do agente (objetivo, tom de voz, regras de negócio,
  * catálogo de preços, FAQ) — usada como contexto real nos prompts do Gemini
- * pra resposta automática. Migrado pra tabela Postgres `knowledge_base`
- * (Bloco 2.A), 1 registro (jsonb) por tenant_id.
+ * pra resposta automática. Fonte única: os oito documentos tipados da tabela
+ * `knowledge_base_documents` (draft/publicação/RLS, ver mais abaixo).
  *
- * ISSUE-0096 — `getKnowledgeBase` mantém o acesso explícito ao blob de
- * rollback. O runtime do agente usa `getRuntimeKnowledgeBase`, que só aceita
- * a fonte tipada se os oito documentos publicados estiverem completos; em
- * qualquer lacuna, volta ao legado de modo rastreável para preservar serviço.
+ * TASK-0327 — a tabela legada `knowledge_base` (1 registro jsonb por tenant,
+ * ISSUE-0096) foi eliminada: nenhuma rota grava mais nela (o único caminho de
+ * escrita ainda vivo em produção, o upload de "Documentos Anexados", foi
+ * migrado pro Storage tipado — server/routes/conversations.ts) e a leitura
+ * dos 3 tenants reais já tinha publicação completa dos 8 tipos havia semanas.
+ * `getRuntimeKnowledgeBase` agora só devolve `published_documents` (completo)
+ * ou `unavailable` (lacuna/erro) — sem fallback silencioso pra um blob que
+ * ninguém mais escreve.
  */
 import { getDb, getPlatformDb } from './db';
 
@@ -306,59 +310,6 @@ export function resolveProductAmountByName(kb: AgentKnowledgeBase | null, produc
     return resolveVariantPriceAmount(match.variant, timezone);
   }
   return resolveProductPriceAmount(match.product, timezone);
-}
-
-/**
- * Todos os `videoId` (Storage, knowledgeBaseVideoStore.ts) referenciados
- * nesta KB — issue #261: usado pra só apagar um vídeo do Storage depois que
- * a troca foi salva de fato (POST /api/knowledge-base em conversations.ts),
- * nunca no momento do upload em si. Antes, trocar o vídeo de um produto/bloco
- * de 1º contato sem clicar em "Salvar Regras no Agente" (fechar a aba,
- * queda de conexão etc.) apagava o vídeo ANTIGO do Storage imediatamente no
- * upload, mesmo que a referência NOVA nunca chegasse a ser persistida —
- * deixando a KB salva com uma referência órfã, apontando pra um arquivo que
- * não existe mais.
- */
-export function collectReferencedVideoIds(kb: AgentKnowledgeBase | null): Set<string> {
-  const ids = new Set<string>();
-  for (const product of kb?.products || []) {
-    if (product.exampleVideoId) ids.add(product.exampleVideoId);
-    for (const variant of product.variants || []) {
-      if (variant.exampleVideoId) ids.add(variant.exampleVideoId);
-    }
-  }
-  for (const block of kb?.firstContactBlocks || []) {
-    if (block.videoId) ids.add(block.videoId);
-  }
-  return ids;
-}
-
-/**
- * TASK-0218 — mesmo papel de collectReferencedVideoIds acima, pra `imageId`
- * (Storage, knowledgeBaseImageStore.ts): só apaga uma imagem do Storage
- * depois que a troca foi salva de fato, nunca no momento do upload. Cobre
- * também `beforeAfter` (antes/depois), que não existe pra vídeo.
- */
-export function collectReferencedImageIds(kb: AgentKnowledgeBase | null): Set<string> {
-  const ids = new Set<string>();
-  const addBeforeAfter = (pairs: BeforeAfterPair[] | undefined) => {
-    for (const pair of pairs || []) {
-      if (pair.beforeImageId) ids.add(pair.beforeImageId);
-      if (pair.afterImageId) ids.add(pair.afterImageId);
-    }
-  };
-  for (const product of kb?.products || []) {
-    if (product.exampleImageId) ids.add(product.exampleImageId);
-    addBeforeAfter(product.beforeAfter);
-    for (const variant of product.variants || []) {
-      if (variant.exampleImageId) ids.add(variant.exampleImageId);
-      addBeforeAfter(variant.beforeAfter);
-    }
-  }
-  for (const block of kb?.firstContactBlocks || []) {
-    if (block.imageId) ids.add(block.imageId);
-  }
-  return ids;
 }
 
 export type FirstContactBlockType = 'text' | 'image' | 'video' | 'file';
@@ -678,25 +629,23 @@ export async function composePublishedKnowledgeBase(tenantId: string): Promise<A
   return composeKnowledgeBaseDocuments(await getPublishedKnowledgeBaseDocuments(tenantId));
 }
 
-export type RuntimeKnowledgeBaseSource = 'published_documents' | 'legacy_blob' | 'unavailable';
+export type RuntimeKnowledgeBaseSource = 'published_documents' | 'unavailable';
 
 export interface RuntimeKnowledgeBaseResult {
   knowledgeBase: AgentKnowledgeBase | null;
   source: RuntimeKnowledgeBaseSource;
   /** Motivo controlado, próprio para log; nunca contém conteúdo comercial ou do cliente. */
-  fallbackReason?: 'published_documents_incomplete' | 'published_documents_unavailable' | 'legacy_blob_unavailable';
+  fallbackReason?: 'published_documents_incomplete' | 'published_documents_unavailable';
 }
 
 /**
- * Fonte efetiva do agente após a PR4. Não fixa a KB por conversa: cada chamada
- * consulta novamente as versões publicadas. Rascunhos e históricos arquivados
- * ficam fora desta função por construção.
+ * Fonte efetiva do agente após a PR4/TASK-0327. Não fixa a KB por conversa:
+ * cada chamada consulta novamente as versões publicadas. Rascunhos e
+ * históricos arquivados ficam fora desta função por construção. Sem os oito
+ * tipos publicados, não há mais fallback (a tabela legada foi removida) —
+ * devolve `unavailable` de forma explícita/rastreável em vez de servir dado
+ * desatualizado silenciosamente.
  */
-async function getKnowledgeBaseFromDb(tenantId: string, db: ReturnType<typeof getDb>): Promise<AgentKnowledgeBase | null> {
-  const { data } = await db.from('knowledge_base').select('data').eq('tenant_id', tenantId).maybeSingle();
-  return (data?.data as AgentKnowledgeBase | undefined) || null;
-}
-
 async function getRuntimeKnowledgeBaseFromDb(
   tenantId: string,
   db: ReturnType<typeof getDb>,
@@ -708,19 +657,9 @@ async function getRuntimeKnowledgeBaseFromDb(
     if (hasCompletePublication) {
       return { knowledgeBase: composeKnowledgeBaseDocuments(publishedDocuments), source: 'published_documents' };
     }
-
-    const legacyKnowledgeBase = await getKnowledgeBaseFromDb(tenantId, db);
-    return legacyKnowledgeBase
-      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_incomplete' }
-      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+    return { knowledgeBase: null, source: 'unavailable', fallbackReason: 'published_documents_incomplete' };
   } catch {
-    // A indisponibilidade de uma leitura nova não pode derrubar atendimento
-    // enquanto a base legada ainda existe. autoReply registra esta fonte em
-    // log estruturado para que a recuperação não fique silenciosa.
-    const legacyKnowledgeBase = await getKnowledgeBaseFromDb(tenantId, db).catch(() => null);
-    return legacyKnowledgeBase
-      ? { knowledgeBase: legacyKnowledgeBase, source: 'legacy_blob', fallbackReason: 'published_documents_unavailable' }
-      : { knowledgeBase: null, source: 'unavailable', fallbackReason: 'legacy_blob_unavailable' };
+    return { knowledgeBase: null, source: 'unavailable', fallbackReason: 'published_documents_unavailable' };
   }
 }
 
@@ -868,18 +807,6 @@ export async function listKnowledgeBaseDocumentEvents(tenantId: string, document
     .order('created_at', { ascending: false });
   if (error) throw error;
   return ((data || []) as KnowledgeBaseDocumentEventRow[]).map(normalizeKnowledgeBaseDocumentEvent);
-}
-
-export async function getKnowledgeBase(tenantId: string): Promise<AgentKnowledgeBase | null> {
-  return getKnowledgeBaseFromDb(tenantId, getDb());
-}
-
-export async function setKnowledgeBase(tenantId: string, kb: AgentKnowledgeBase): Promise<void> {
-  const db = getDb();
-  const { error } = await db
-    .from('knowledge_base')
-    .upsert({ tenant_id: tenantId, data: kb, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id' });
-  if (error) throw error;
 }
 
 /**

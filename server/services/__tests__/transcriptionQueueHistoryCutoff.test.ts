@@ -53,7 +53,7 @@ vi.mock('../agentStatus', () => ({ isAgentPaused }));
 
 vi.mock('../knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../knowledgeBaseStore')>();
-  return { ...actual, getKnowledgeBase: vi.fn(async () => null), getRuntimeKnowledgeBase: vi.fn(async () => ({ knowledgeBase: null, source: 'legacy_blob' as const })) };
+  return { ...actual, getRuntimeKnowledgeBase: vi.fn(async () => ({ knowledgeBase: null, source: 'published_documents' as const })) };
 });
 
 vi.mock('../tenantProfileStore', () => ({ getTenantSegment: vi.fn(async () => 'geral') }));

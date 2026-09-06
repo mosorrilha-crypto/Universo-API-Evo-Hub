@@ -33,7 +33,7 @@ const FAKE_KNOWLEDGE_BASE = {
   products: [{ name: 'Microlips', price: 'R$ 500', exampleImageBase64: 'ZmFrZS1pbWFnZQ==', exampleImageMimeType: 'image/jpeg' }],
 };
 const getKnowledgeBase = vi.fn(async () => FAKE_KNOWLEDGE_BASE);
-const getRuntimeKnowledgeBase = vi.fn(async () => ({ knowledgeBase: FAKE_KNOWLEDGE_BASE, source: 'legacy_blob' as const }));
+const getRuntimeKnowledgeBase = vi.fn(async () => ({ knowledgeBase: await getKnowledgeBase(), source: 'published_documents' as const }));
 
 vi.mock('../../services/metaSend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/metaSend')>();
@@ -44,7 +44,7 @@ vi.mock('../../services/mediaImageStore', () => ({ getMediaImage: vi.fn(), saveM
 vi.mock('../../services/audioTranscode', () => ({ transcodeToWhatsAppVoiceNote }));
 vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/knowledgeBaseStore')>();
-  return { ...actual, getKnowledgeBase, getRuntimeKnowledgeBase, setKnowledgeBase: vi.fn() };
+  return { ...actual, getRuntimeKnowledgeBase };
 });
 
 const { createConversationsRouter } = await import('../conversations');

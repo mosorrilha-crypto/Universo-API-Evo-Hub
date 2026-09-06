@@ -42,20 +42,7 @@ const BUSINESS_TIMEZONE = 'America/Asuncion';
  * log informa apenas fonte e motivo de fallback, nunca conteúdo de negócio.
  */
 async function getRuntimeKnowledgeBaseForReply(tenantId: string): Promise<AgentKnowledgeBase | null> {
-  // Alguns testes unitários antigos simulam somente o carregador legado. A
-  // aplicação real sempre exporta getRuntimeKnowledgeBase; este fallback é
-  // exclusivo para mocks isolados e evita reescrever suítes não relacionadas.
-  let runtimeLoader: typeof knowledgeBaseStore.getRuntimeKnowledgeBase | undefined;
-  try {
-    runtimeLoader = knowledgeBaseStore.getRuntimeKnowledgeBase;
-  } catch {
-    // O proxy de alguns mocks do Vitest lança quando se consulta um export
-    // ausente, em vez de devolver undefined como um namespace ESM comum.
-    runtimeLoader = undefined;
-  }
-  const result = runtimeLoader
-    ? await runtimeLoader(tenantId)
-    : { knowledgeBase: await knowledgeBaseStore.getKnowledgeBase(tenantId), source: 'legacy_blob' as const, fallbackReason: 'published_documents_unavailable' as const };
+  const result = await knowledgeBaseStore.getRuntimeKnowledgeBase(tenantId);
   logStructured({
     tenantId,
     area: 'knowledgeBase',

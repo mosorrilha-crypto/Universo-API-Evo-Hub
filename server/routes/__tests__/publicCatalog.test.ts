@@ -59,17 +59,24 @@ describe('GET /api/public/catalog/:slug', () => {
         public_whatsapp_phone: '595981436141',
         public_instagram_url: 'https://instagram.com/pestanaspormonique',
       }],
-      knowledge_base: [{
-        tenant_id: 'tenant-monique',
-        data: {
-          agentGoal: 'não publicar',
-          pricingAndPolicies: 'não publicar',
-          products: [
-            { name: 'Microlips', price: 'Gs 550.000', priceAmount: 550000, category: 'Labios', description: 'Serviço público' },
-            { name: 'Pausado', price: 'Gs 1', active: false },
-          ],
+      knowledge_base_documents: [
+        { id: 'tenant-monique-business_profile', tenant_id: 'tenant-monique', document_type: 'business_profile', version: 1, status: 'published', data: { agentGoal: 'não publicar' } },
+        { id: 'tenant-monique-brand_voice', tenant_id: 'tenant-monique', document_type: 'brand_voice', version: 1, status: 'published', data: {} },
+        {
+          id: 'tenant-monique-service_catalog', tenant_id: 'tenant-monique', document_type: 'service_catalog', version: 1, status: 'published',
+          data: {
+            products: [
+              { name: 'Microlips', price: 'Gs 550.000', priceAmount: 550000, category: 'Labios', description: 'Serviço público' },
+              { name: 'Pausado', price: 'Gs 1', active: false },
+            ],
+          },
         },
-      }],
+        { id: 'tenant-monique-pricing_policies', tenant_id: 'tenant-monique', document_type: 'pricing_policies', version: 1, status: 'published', data: { pricingAndPolicies: 'não publicar' } },
+        { id: 'tenant-monique-opening_hours', tenant_id: 'tenant-monique', document_type: 'opening_hours', version: 1, status: 'published', data: {} },
+        { id: 'tenant-monique-faq', tenant_id: 'tenant-monique', document_type: 'faq', version: 1, status: 'published', data: {} },
+        { id: 'tenant-monique-human_handoff_rules', tenant_id: 'tenant-monique', document_type: 'human_handoff_rules', version: 1, status: 'published', data: {} },
+        { id: 'tenant-monique-media_assets', tenant_id: 'tenant-monique', document_type: 'media_assets', version: 1, status: 'published', data: {} },
+      ],
     }));
 
     const response = await fetch(`${baseUrl}/api/public/catalog/monique`);
