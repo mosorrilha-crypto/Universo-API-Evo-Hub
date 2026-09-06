@@ -665,6 +665,21 @@ html[data-theme='light'] .atendimento-filter.is-active {
   color: #ffffff !important;
 }
 
+/* TASK-0322 — achado real auditando a tela de conversa aberta: o fundo do
+   corpo da conversa usa DUAS classes `bg-*` separadas — `bg-[#0b141a]`
+   (background-color, já recolorida pelo remapeamento genérico mais abaixo
+   neste arquivo) e `bg-[radial-gradient(#1e293b_1px,transparent_1px)]`
+   (background-image, o padrão de pontinhos estilo papel de parede do
+   WhatsApp) — como são propriedades CSS diferentes, elas se somam, e só a
+   primeira tinha cobertura. Sem esta regra, o tema claro mostrava pontinhos
+   azul-marinho escuros espalhados sobre um fundo claro. */
+html[data-theme='light'] [class~='bg-[radial-gradient(#1e293b_1px,transparent_1px)]'] {
+  background-image: radial-gradient(var(--app-border) 1px, transparent 1px) !important;
+}
+html[data-theme='clean'] [class~='bg-[radial-gradient(#1e293b_1px,transparent_1px)]'] {
+  background-image: radial-gradient(var(--border) 1px, transparent 1px) !important;
+}
+
 /* Barra inferior estilo WhatsApp (Conversas/Pendências/Agenda/Ficha IA/
    Ferramentas) — só no mobile, onde a tela de Atendimento é a única coisa
    visível; no desktop as mesmas ações já ficam na barra de controles. */
