@@ -79,7 +79,10 @@ import {
   Megaphone,
   MessageCircle,
   Receipt,
-  Kanban
+  Kanban,
+  Moon,
+  Sun,
+  Layers
 } from 'lucide-react';
 import { TransactionDialog } from './financial/TransactionDialog';
 
@@ -322,7 +325,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   operatorName,
   onToast,
 }) => {
-  const { t, language } = useAppPreferences();
+  const { t, language, setLanguage, theme, setTheme } = useAppPreferences();
   const isSpanish = language === 'es';
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
@@ -3646,6 +3649,52 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       </div>
 
+      {/* TASK-0328 (pedido direto, print anotado do cabeçalho): idioma e
+          tema saíram do cabeçalho global (Header.tsx, linha mobile) e
+          vieram pra cá, discretos igual "Status do agente" acima — mesmo
+          padrão visual (rótulo maiúsculo + grupo de pills num fundo
+          bg-slate-950/55). */}
+      <div className="w-full">
+        <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Idioma e tema</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
+            {(['pt', 'es'] as const).map((lang) => (
+              <button
+                key={lang}
+                type="button"
+                onClick={() => setLanguage(lang)}
+                title={lang === 'pt' ? 'Português' : 'Español'}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  language === lang ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {lang.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
+            {([
+              { id: 'dark' as const, label: 'Escuro', Icon: Moon },
+              { id: 'light' as const, label: 'Claro', Icon: Sun },
+              { id: 'blue' as const, label: 'Azul', Icon: Layers },
+              { id: 'clean' as const, label: 'Limpo', Icon: Sparkles },
+            ]).map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTheme(id)}
+                title={label}
+                className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                  theme === id ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Notificações push do PWA do atendente saíram daqui (TASK-0284,
           pedido direto): não são uma ação desta conversa/gaveta, são
           configuração de conta — agora vivem só no Header global (mesmo
@@ -6256,8 +6305,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           que pode ser puxada. Ficha IA (`atendimento-analysis-drawer`,
           acima) não mudou — o pedido foi só sobre esta gaveta. */}
       {isToolbarSettingsOpen && (
+        // TASK-0328 (pedido direto, prints comparando a barra inferior
+        // sumida): esta área clicável cobria `inset-0` (toda a viewport),
+        // inclusive a faixa de `.atendimento-bottom-nav` — `bottom-[...]`
+        // reserva a altura real da nav (mesmo valor de index.css/
+        // UpcomingEventsPanel) pra ela continuar visível/clicável com a
+        // gaveta aberta, em vez de sumir por trás.
         <div
-          className="lg:hidden fixed inset-0 z-50 flex items-end"
+          className="lg:hidden fixed inset-x-0 top-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-50 flex items-end"
           onClick={() => setIsToolbarSettingsOpen(false)}
         >
           <div

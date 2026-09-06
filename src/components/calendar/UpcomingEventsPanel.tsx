@@ -469,7 +469,15 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
     // partir do breakpoint `sm` (telas maiores, que já sobra espaço do
     // lado) volta a ser um modal centralizado — mesmo padrão de todo modal
     // deste painel.
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center sm:p-4">
+    // TASK-0328 (pedido direto, 2 prints comparando a barra inferior sumida):
+    // este overlay cobria 100% da viewport no mobile (`inset-0`), inclusive a
+    // faixa onde `.atendimento-bottom-nav` (Conversas/Pendências/Agenda/
+    // Ferramentas) fica — pra reabrir Pendências/Conversas era preciso
+    // fechar este popup primeiro. `bottom-[...]` reserva a altura real da
+    // nav (mesmo valor usado em index.css pra Escalonamentos) só abaixo de
+    // `sm` (640px), onde este painel já vira um card centralizado com
+    // margem — a nav nunca fica coberta por baixo dele nessa faixa.
+    <div className="fixed inset-x-0 top-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] sm:inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center sm:p-4">
       <div className={`bg-slate-900 sm:border sm:border-slate-800 rounded-none sm:rounded-2xl p-6 w-full h-full sm:h-auto shadow-2xl sm:max-h-[85vh] flex flex-col transition-all ${viewMode === 'calendar' && !isPickingLead ? 'sm:max-w-lg' : 'sm:max-w-md'}`}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
