@@ -4002,7 +4002,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
               <input
                 type="text"
-                placeholder={t('searchConversation')}
+                placeholder="Pesquisar..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="atendimento-search-input w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none"
