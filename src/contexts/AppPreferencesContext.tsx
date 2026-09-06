@@ -19,22 +19,28 @@ const AppPreferencesContext = createContext<AppPreferencesValue | null>(null);
 const LANGUAGE_STORAGE_KEY = 'universo_language';
 const THEME_STORAGE_KEY = 'universo_theme';
 
-// TASK-0320 — achado real (print comparando lado a lado com o WhatsApp
-// Business real): `index.html`/`manifest.json` fixam `theme-color` em
-// #111b21 (o --surface-panel do tema escuro) pra sempre, então a barra de
-// status do Android/PWA fica escura mesmo com o tema claro/azul/limpo
-// selecionado — cria uma tarja escura colada no topo do cabeçalho branco
-// que o WhatsApp real não tem (o app nativo dele sincroniza a cor da barra
-// de status com o próprio tema). Mesma cor que `--surface-panel` de cada
-// tema em index.css (não dá pra ler a custom property do CSS daqui sem
-// forçar um reflow só pra isso, então os hex ficam espelhados à mão; se um
-// desses tokens mudar de cor de fundo do cabeçalho, atualizar aqui também).
+// TASK-0321 tentou sincronizar `theme-color` com o tema pra deixar a barra
+// de status branca no claro — regressão real (TASK-0324, print comparando
+// com o WhatsApp nativo NO MESMO APARELHO): fora do modo instalado
+// (standalone/PWA), o Android/Chrome não repinta a barra de status de
+// verdade numa aba de navegador comum, mas alguns navegadores AINDA usam a
+// luminância do `theme-color` pra decidir a cor do ícone/relógio (claro vs
+// escuro) — resultado: `theme-color` branco pro tema claro fez o ícone
+// ficar escuro, só que a barra continuou preta (porque não dava pra pintar
+// mesmo), virando texto escuro sobre fundo escuro, ilegível. Prova real: o
+// WhatsApp nativo, no mesmo celular, também tem a barra de status preta —
+// ele só garante ícone/relógio SEMPRE branco, nunca tenta deixar a barra
+// branca. TASK-0324 reverte pra esse comportamento (ícone sempre claro);
+// só ativa a troca de cor de verdade quando o app está instalado como PWA
+// (`display-mode: standalone`), único modo em que o Android realmente
+// pinta a barra com a cor do tema.
 const THEME_COLOR: Record<AppTheme, string> = {
   dark: '#151C22',
   light: '#FFFFFF',
   blue: '#0B2B47',
   clean: '#FFFFFF',
 };
+const STANDALONE_QUERY = '(display-mode: standalone)';
 
 function readPreference<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -52,8 +58,17 @@ export const AppPreferencesProvider: React.FC<React.PropsWithChildren> = ({ chil
   useEffect(() => {
     document.documentElement.lang = language === 'es' ? 'es-PY' : 'pt-BR';
     document.documentElement.dataset.theme = theme;
-    const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-    if (themeColorMeta) themeColorMeta.setAttribute('content', THEME_COLOR[theme]);
+    // Só troca a cor de verdade quando o app está instalado (standalone) —
+    // fora daí, o Android não repinta a barra mesmo, e mudar `theme-color`
+    // só arriscava trocar a cor do ícone pra escuro sem a barra acompanhar
+    // (ver comentário do THEME_COLOR acima). Em aba de navegador comum, o
+    // valor estático de index.html (#111b21, ícone sempre claro) já é o
+    // comportamento correto e não precisa ser tocado aqui.
+    const isStandalone = typeof window.matchMedia === 'function' && window.matchMedia(STANDALONE_QUERY).matches;
+    if (isStandalone) {
+      const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeColorMeta) themeColorMeta.setAttribute('content', THEME_COLOR[theme]);
+    }
     try {
       localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
       localStorage.setItem(THEME_STORAGE_KEY, theme);
