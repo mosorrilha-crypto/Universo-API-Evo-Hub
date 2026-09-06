@@ -3649,7 +3649,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       </div>
 
-      {/* TASK-XXXX (pedido direto, print anotado do cabeçalho): idioma e
+      {/* TASK-0328 (pedido direto, print anotado do cabeçalho): idioma e
           tema saíram do cabeçalho global (Header.tsx, linha mobile) e
           vieram pra cá, discretos igual "Status do agente" acima — mesmo
           padrão visual (rótulo maiúsculo + grupo de pills num fundo
@@ -6305,7 +6305,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           que pode ser puxada. Ficha IA (`atendimento-analysis-drawer`,
           acima) não mudou — o pedido foi só sobre esta gaveta. */}
       {isToolbarSettingsOpen && (
-        // TASK-XXXX (pedido direto, prints comparando a barra inferior
+        // TASK-0328 (pedido direto, prints comparando a barra inferior
         // sumida): esta área clicável cobria `inset-0` (toda a viewport),
         // inclusive a faixa de `.atendimento-bottom-nav` — `bottom-[...]`
         // reserva a altura real da nav (mesmo valor de index.css/

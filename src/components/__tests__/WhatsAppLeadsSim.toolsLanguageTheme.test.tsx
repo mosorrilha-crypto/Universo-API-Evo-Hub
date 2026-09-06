@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * TASK-XXXX (pedido direto, print anotado do cabeçalho): idioma (PT/ES) e
+ * TASK-0328 (pedido direto, print anotado do cabeçalho): idioma (PT/ES) e
  * tema saíram do cabeçalho global (Header.tsx) e vieram pra dentro da
  * gaveta "Ferramentas" do Atendimento, discretos igual "Status do agente".
  */

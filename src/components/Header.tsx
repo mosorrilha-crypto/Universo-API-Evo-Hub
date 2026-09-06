@@ -385,7 +385,7 @@ export const Header: React.FC<HeaderProps> = ({
             Crescimento/Configurar/Empresas não teria mais nenhum jeito de
             voltar pro atendimento pelo cabeçalho. */}
         <button type="button" onClick={() => selectTab('whatsapp')} className="flex min-w-0 items-center gap-2 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70" title={isSpanish ? 'Ir a Atención' : 'Ir para o Atendimento'}><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-5 h-5" /></div><span className="truncate text-lg font-bold text-white">Universo</span></button>
-        {/* TASK-XXXX (pedido direto, print anotado): seletor de idioma (ES/PT)
+        {/* TASK-0328 (pedido direto, print anotado): seletor de idioma (ES/PT)
             e o botão de tema saíram daqui — moraram pro topo do cabeçalho
             desde sempre, mas o pedido foi deixar essa linha só com o
             essencial (logo + menu) e levar idioma/tema pra dentro da gaveta

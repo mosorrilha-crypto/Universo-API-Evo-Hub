@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * TASK-XXXX (pedido direto, print anotado do cabeçalho): seletor de idioma
+ * TASK-0328 (pedido direto, print anotado do cabeçalho): seletor de idioma
  * (ES/PT) e o botão de tema saíram da linha mobile do cabeçalho — mudaram
  * pra dentro da gaveta "Ferramentas" do Atendimento (WhatsAppLeadsSim.tsx),
  * e o botão de menu passou de ☰ (Menu) pra ⋮ (MoreVertical).

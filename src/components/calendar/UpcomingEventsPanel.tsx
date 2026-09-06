@@ -469,7 +469,7 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
     // partir do breakpoint `sm` (telas maiores, que já sobra espaço do
     // lado) volta a ser um modal centralizado — mesmo padrão de todo modal
     // deste painel.
-    // TASK-XXXX (pedido direto, 2 prints comparando a barra inferior sumida):
+    // TASK-0328 (pedido direto, 2 prints comparando a barra inferior sumida):
     // este overlay cobria 100% da viewport no mobile (`inset-0`), inclusive a
     // faixa onde `.atendimento-bottom-nav` (Conversas/Pendências/Agenda/
     // Ferramentas) fica — pra reabrir Pendências/Conversas era preciso
