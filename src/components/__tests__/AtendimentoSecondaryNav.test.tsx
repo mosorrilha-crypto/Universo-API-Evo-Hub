@@ -16,10 +16,11 @@ import { AtendimentoSecondaryNav } from '../AtendimentoSecondaryNav';
 describe('AtendimentoSecondaryNav', () => {
   afterEach(() => cleanup());
 
-  it('permite voltar para Conversas e navegar entre Pendências/Agenda', () => {
+  it('permite voltar para Conversas e navegar entre Pendências/Agenda/Ferramentas', () => {
     const onGoToConversas = vi.fn();
     const onGoToEscalations = vi.fn();
     const onGoToAgenda = vi.fn();
+    const onGoToTools = vi.fn();
 
     render(
       <AtendimentoSecondaryNav
@@ -27,6 +28,7 @@ describe('AtendimentoSecondaryNav', () => {
         onGoToConversas={onGoToConversas}
         onGoToEscalations={onGoToEscalations}
         onGoToAgenda={onGoToAgenda}
+        onGoToTools={onGoToTools}
         escalationsPendingCount={3}
       />
     );
@@ -37,20 +39,27 @@ describe('AtendimentoSecondaryNav', () => {
     fireEvent.click(screen.getByText('Agenda'));
     expect(onGoToAgenda).toHaveBeenCalledTimes(1);
 
+    // TASK-0326: "Ferramentas" precisa estar sempre presente aqui, mesmo
+    // padrão dos 4 ícones da barra inferior de Conversas.
+    fireEvent.click(screen.getByText('Ferramentas'));
+    expect(onGoToTools).toHaveBeenCalledTimes(1);
+
     expect(screen.getByText('3')).toBeTruthy();
   });
 
-  it('marca a aba ativa e omite Agenda quando o operador não tem acesso ao módulo', () => {
+  it('marca a aba ativa, omite Agenda quando o operador não tem acesso ao módulo, mas mantém Ferramentas', () => {
     render(
       <AtendimentoSecondaryNav
         activeTab="agenda"
         onGoToConversas={() => undefined}
         onGoToEscalations={() => undefined}
+        onGoToTools={() => undefined}
         escalationsPendingCount={0}
       />
     );
 
     expect(screen.queryByText('Agenda')).toBeNull();
     expect(screen.queryByText('0')).toBeNull();
+    expect(screen.getByText('Ferramentas')).toBeTruthy();
   });
 });
