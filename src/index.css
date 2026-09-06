@@ -1769,9 +1769,21 @@ html[data-theme='clean'] .operations-module-frame__header {
    zerar o padding do `.app-main` aqui não deixa o conteúdo colado sem
    respiro nenhum — só remove a faixa de fundo vazia ao redor do card. */
 .app-main.app-main--atendimento,
-.app-main.app-main--quality {
+.app-main.app-main--quality,
+.app-main.app-main--escalations {
   max-width: none;
   padding: 0;
+}
+
+/* TASK-XXXX (pedido direto, 2 prints anotados do celular): "Pendências"
+   ganhou o mesmo tratamento borda a borda acima, mas o `AtendimentoSecondaryNav`
+   (App.tsx, nav fixa no rodapé restaurando "Conversas"/"Pendências"/"Agenda"
+   quando o menu antigo some) fica sobreposto ao fim da lista sem um respiro
+   reservado — só no mobile, onde essa nav aparece (`lg:!hidden`). */
+@media (max-width: 1023.98px) {
+  .app-main.app-main--escalations {
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
 }
 
 @media (max-width: 640px) {

@@ -116,50 +116,58 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
   }, [escalations, filter]);
 
   return (
-    <div className="space-y-4">
-      <header className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-3">
+      {/* TASK-XXXX (pedido direto, print anotado — "ajusta os botões e
+          tamanhos dos itens" + "tira estas caixa"): header, filtros e cards
+          reduzidos (menos padding/gap, textos mais compactos); o
+          estado-vazio deixou de ter borda tracejada em caixa própria — só
+          o ícone + texto, sem moldura. */}
+      <header className="rounded-xl border border-slate-800 bg-slate-900/80 p-3 shadow-lg shadow-slate-950/20">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <div className="flex items-center gap-2">
-              <span className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-amber-300"><AlertTriangle className="h-4 w-4" /></span>
+              <span className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-1.5 text-amber-300"><AlertTriangle className="h-3.5 w-3.5" /></span>
               <div>
-                <h2 className="text-base font-bold text-white">Escalonamentos</h2>
-                <p className="mt-0.5 text-xs text-slate-400">Fila completa ordenada por estado, prioridade e prazo. Cada caso preserva responsável e histórico de decisão.</p>
+                <h2 className="text-sm font-bold text-white">Escalonamentos</h2>
+                {/* TASK-XXXX: texto do antigo cabeçalho duplicado
+                    (OperationsModuleFrame, App.tsx) — migrado pra cá em vez
+                    de duplicar os dois. */}
+                <p className="mt-0.5 text-[11px] text-slate-400">Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você.</p>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-              <span className="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 font-semibold text-slate-300">{pending.length} pendente{pending.length === 1 ? '' : 's'}</span>
-              {overdue > 0 && <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 font-semibold text-rose-200">{overdue} com SLA vencido</span>}
-              <span className="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-slate-400">Exibindo {visible.length} de {filter === 'pending' ? pending.length : resolved.length}</span>
+            <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
+              <span className="rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 font-semibold text-slate-300">{pending.length} pendente{pending.length === 1 ? '' : 's'}</span>
+              {overdue > 0 && <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 font-semibold text-rose-200">{overdue} com SLA vencido</span>}
+              <span className="rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 text-slate-400">Exibindo {visible.length} de {filter === 'pending' ? pending.length : resolved.length}</span>
             </div>
           </div>
-          <div className="flex rounded-xl border border-slate-700 bg-slate-950 p-1">
-            <button onClick={() => setFilter('pending')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>Pendentes ({pending.length})</button>
-            <button onClick={() => setFilter('resolved')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'resolved' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>Resolvidos ({resolved.length})</button>
-            <button onClick={() => setFilter('archived')} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${filter === 'archived' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>Arquivados ({archived.length})</button>
+          <div className="flex rounded-lg border border-slate-700 bg-slate-950 p-0.5">
+            <button onClick={() => setFilter('pending')} className={`rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors ${filter === 'pending' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>Pendentes ({pending.length})</button>
+            <button onClick={() => setFilter('resolved')} className={`rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors ${filter === 'resolved' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>Resolvidos ({resolved.length})</button>
+            <button onClick={() => setFilter('archived')} className={`rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors ${filter === 'archived' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}>Arquivados ({archived.length})</button>
           </div>
         </div>
       </header>
 
       {visible.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 p-10 text-center">
-          <CheckCircle2 className="mx-auto h-7 w-7 text-emerald-400" />
-          <p className="mt-3 text-sm font-bold text-slate-100">{filter === 'pending' ? 'Nenhum escalonamento pendente.' : filter === 'resolved' ? 'Nenhum escalonamento resolvido ainda.' : 'Nenhum escalonamento arquivado.'}</p>
+        <div className="py-8 text-center">
+          <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-400" />
+          <p className="mt-2 text-sm font-bold text-slate-100">{filter === 'pending' ? 'Nenhum escalonamento pendente.' : filter === 'resolved' ? 'Nenhum escalonamento resolvido ainda.' : 'Nenhum escalonamento arquivado.'}</p>
           <p className="mt-1 text-xs text-slate-500">A fila será atualizada quando houver uma nova decisão humana necessária.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {visible.map((e) => {
             const priority = priorityMeta[e.priority || 'medium'];
             const isPending = !e.resolved && e.status !== 'resolved' && e.status !== 'archived';
             const isArchived = e.status === 'archived';
             const isOverdue = Boolean(isPending && e.dueAt && new Date(e.dueAt).getTime() < Date.now());
             return (
-              <article key={e.id} className={`rounded-2xl border bg-slate-900/90 p-4 shadow-md shadow-slate-950/15 ${isOverdue ? 'border-rose-500/35' : 'border-slate-800'}`}>
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <article key={e.id} className={`rounded-xl border bg-slate-900/90 p-3 shadow-md shadow-slate-950/15 ${isOverdue ? 'border-rose-500/35' : 'border-slate-800'}`}>
+                <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-bold text-white">{e.contactName || e.phone}</h3>
+                      <h3 className="text-sm font-bold text-white">{e.contactName || e.phone}</h3>
                       <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${priority.className}`}>{priority.label}</span>
                       <span className="rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] font-semibold text-slate-300">{statusLabel(e.status)}</span>
                       {(e.occurrenceCount || 1) > 1 && <span title="Ocorrências reunidas no mesmo caso" className="inline-flex items-center gap-1 rounded-md border border-violet-500/25 bg-violet-500/10 px-2 py-0.5 text-[10px] font-bold text-violet-200"><Layers3 className="h-3 w-3" /> {e.occurrenceCount} ocorrências</span>}
@@ -172,7 +180,7 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                         <span><span className="font-bold">Rascunho da IA (bloqueado):</span> “{e.blockedDraft}”</span>
                       </div>
                     )}
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                       <span className="inline-flex items-center gap-1 text-slate-500"><Clock className="h-3 w-3" /> Criado {timeAgo(e.createdAt)}</span>
                       {isPending && e.dueAt && <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-semibold ${isOverdue ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : 'border-slate-700 bg-slate-950 text-slate-300'}`}><AlertTriangle className="h-3 w-3" /> SLA {formatRemaining(e.dueAt)}</span>}
                       {isPending && e.serviceWindowExpiresAt && <span title="Janela de atendimento do WhatsApp" className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${e.withinServiceWindow ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/25 bg-amber-500/10 text-amber-200'}`}><TimerReset className="h-3 w-3" /> Janela {formatRemaining(e.serviceWindowExpiresAt, 'fechada')}</span>}
@@ -239,24 +247,24 @@ export const EscalationsPanel: React.FC<EscalationsPanelProps> = ({
                     )}
                   </div>
                   <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
-                    {onGoToConversation && <button onClick={() => onGoToConversation(e.phone)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500/35 hover:text-emerald-200"><MessageCircle className="h-3.5 w-3.5" /> Conversa</button>}
-                    <a href={toWaMeLink(e.phone)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500/35 hover:text-emerald-200"><ExternalLink className="h-3.5 w-3.5" /> WhatsApp</a>
-                    {isPending && !e.assignedOperatorId && onAssignSelf && <button onClick={() => onAssignSelf(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-200 hover:bg-violet-500/20"><UserRoundCheck className="h-3.5 w-3.5" /> Assumir</button>}
+                    {onGoToConversation && <button onClick={() => onGoToConversation(e.phone)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-200 hover:border-emerald-500/35 hover:text-emerald-200"><MessageCircle className="h-3.5 w-3.5" /> Conversa</button>}
+                    <a href={toWaMeLink(e.phone)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-200 hover:border-emerald-500/35 hover:text-emerald-200"><ExternalLink className="h-3.5 w-3.5" /> WhatsApp</a>
+                    {isPending && !e.assignedOperatorId && onAssignSelf && <button onClick={() => onAssignSelf(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-bold text-violet-200 hover:bg-violet-500/20"><UserRoundCheck className="h-3.5 w-3.5" /> Assumir</button>}
                     {isPending && e.kind === 'payment_proof' && onResolvePayment ? <>
-                      <button onClick={() => onResolvePayment(e.id, e.phone, 'verified')} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar pagamento</button>
-                      <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/20"><XCircle className="h-3.5 w-3.5" /> Rejeitar</button>
+                      <button onClick={() => onResolvePayment(e.id, e.phone, 'verified')} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar pagamento</button>
+                      <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-bold text-rose-200 hover:bg-rose-500/20"><XCircle className="h-3.5 w-3.5" /> Rejeitar</button>
                     </> : isPending ? <>
-                      {onGenerateReplySuggestion && onReplySuggestionFeedback && <button onClick={async () => { const shouldOpen = openSuggestionId !== e.id; setOpenSuggestionId(shouldOpen ? e.id : null); if (!shouldOpen || e.suggestedReply || e.blockedDraft) return; setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} disabled={suggestionBusyId === e.id} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> {e.blockedDraft ? 'Revisar rascunho' : e.suggestedReply ? 'Revisar sugestão' : 'Gerar sugestão'}</button>}
-                      {onSubmitOperatorReply && <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20"><MessageCircleReply className="h-3.5 w-3.5" /> Orientar IA</button>}
-                      <button onClick={() => onResolve(e.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Resolver</button>
+                      {onGenerateReplySuggestion && onReplySuggestionFeedback && <button onClick={async () => { const shouldOpen = openSuggestionId !== e.id; setOpenSuggestionId(shouldOpen ? e.id : null); if (!shouldOpen || e.suggestedReply || e.blockedDraft) return; setSuggestionBusyId(e.id); try { const updated = await onGenerateReplySuggestion(e.id); if (updated) setSuggestionDraftById((previous) => ({ ...previous, [e.id]: updated.suggestedReply || '' })); } finally { setSuggestionBusyId(null); } }} disabled={suggestionBusyId === e.id} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-bold text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> {e.blockedDraft ? 'Revisar rascunho' : e.suggestedReply ? 'Revisar sugestão' : 'Gerar sugestão'}</button>}
+                      {onSubmitOperatorReply && <button onClick={() => setOpenReplyId(openReplyId === e.id ? null : e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-bold text-amber-100 hover:bg-amber-500/20"><MessageCircleReply className="h-3.5 w-3.5" /> Orientar IA</button>}
+                      <button onClick={() => onResolve(e.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" /> Resolver</button>
                     </> : null}
                     {isArchived && onRestore ? (
-                      <button onClick={() => onRestore(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-emerald-500/35 hover:text-emerald-200"><ArchiveRestore className="h-3.5 w-3.5" /> Restaurar</button>
+                      <button onClick={() => onRestore(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:border-emerald-500/35 hover:text-emerald-200"><ArchiveRestore className="h-3.5 w-3.5" /> Restaurar</button>
                     ) : !isArchived ? (
-                      <button onClick={() => onDelete(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500 hover:text-white"><Archive className="h-3.5 w-3.5" /> Arquivar</button>
+                      <button onClick={() => onDelete(e.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:border-slate-500 hover:text-white"><Archive className="h-3.5 w-3.5" /> Arquivar</button>
                     ) : null}
                     {onPermanentDelete && (
-                      <button onClick={() => onPermanentDelete(e.id, e.contactName || e.phone)} title="Apaga o caso e o histórico de auditoria de vez — não passa pela aba Arquivados. Use só pra teste do próprio time." className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-bold text-rose-200 hover:bg-rose-500/20"><Trash2 className="h-3.5 w-3.5" /> Excluir</button>
+                      <button onClick={() => onPermanentDelete(e.id, e.contactName || e.phone)} title="Apaga o caso e o histórico de auditoria de vez — não passa pela aba Arquivados. Use só pra teste do próprio time." className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-bold text-rose-200 hover:bg-rose-500/20"><Trash2 className="h-3.5 w-3.5" /> Excluir</button>
                     )}
                   </div>
                 </div>
