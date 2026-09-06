@@ -54,13 +54,18 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           da mensagem ficavam visivelmente menores que a lista de conversas
           do app real, mesma proporção do ajuste já feito na conversa aberta
           (TASK-0164). */}
+      {/* O ponto verde "online" que existia aqui foi removido (achado real,
+          comparando com o print do WhatsApp de verdade): não tinha nenhum
+          dado por trás (renderizava fixo em TODO avatar, sempre), e o
+          WhatsApp real nunca mostra indicador de presença na lista de
+          conversas — só dentro de uma conversa aberta, e mesmo esse recurso
+          já tinha sido removido daqui de propósito (TASK-0259/TASK-0185). */}
       <div className="relative flex-shrink-0">
         <div
           className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xs border border-[var(--line-subtle)] ${avatarColorClasses(lead.name || lead.phone)}`}
         >
           {getInitials(lead.name || lead.phone)}
         </div>
-        <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-[var(--action)] border-2 border-[var(--surface-deep)]" />
       </div>
 
       <div className="flex-1 min-w-0">
