@@ -31,6 +31,7 @@ import { TenantActivationChecklist } from './components/TenantActivationChecklis
 import { evaluateTenantActivation } from './lib/tenantActivation';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
+import { AtendimentoSecondaryNav } from './components/AtendimentoSecondaryNav';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
@@ -1459,10 +1460,26 @@ export const App: React.FC = () => {
         onToast={showToast}
       />
       </div>
-      {activeTab !== 'whatsapp' && canSeeConversations && (
+      {/* TASK-0319 (pedido direto, 2 prints anotados do celular): em
+          Escalonamentos/Agenda o `AtendimentoSecondaryNav` abaixo já cobre
+          a volta pra Conversas com o mesmo "menu de baixo" que o usuário
+          pediu de volta — manter o atalho flutuante redundante ali também
+          só duplicaria/sobreporia UI no mobile (os dois são `fixed` perto
+          do rodapé). Nos demais módulos (CRM, Financeiro, Qualidade, Logs,
+          Disparo) o atalho continua sendo o único caminho de volta. */}
+      {activeTab !== 'whatsapp' && activeTab !== 'escalations' && activeTab !== 'agenda' && canSeeConversations && (
         <FloatingAttendanceButton
           storageKey={`floating_attendance_position:${currentUser?.id || 'guest'}`}
           onOpen={() => handleSetActiveTab('whatsapp')}
+        />
+      )}
+      {(activeTab === 'escalations' || activeTab === 'agenda') && canSeeConversations && (
+        <AtendimentoSecondaryNav
+          activeTab={activeTab}
+          onGoToConversas={() => handleSetActiveTab('whatsapp')}
+          onGoToEscalations={() => handleSetActiveTab('escalations')}
+          onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
+          escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
         />
       )}
 
@@ -1500,7 +1517,22 @@ export const App: React.FC = () => {
           arredondados — não depende do padding do `.app-main` pra ter
           respiro, então zerar aqui é seguro (mesma lógica já validada no
           Atendimento). */}
-      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' ? ' app-main--atendimento' : activeTab === 'quality' ? ' app-main--quality' : ''}`}>
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${
+        activeTab === 'whatsapp' ? ' app-main--atendimento'
+        : activeTab === 'quality' ? ' app-main--quality'
+        // TASK-0319 (pedido direto, "o sistema utiliza páginas de borda a
+        // borda" comparando Escalonamentos com Atendimento/Qualidade da
+        // IA): mesmo tratamento — `OperationsModuleFrame` (hideHeader) já
+        // dá o próprio respiro via card com borda/padding, então zerar o
+        // padding do `.app-main` aqui é seguro (mesma lógica das duas
+        // abas acima). `pb-*` extra (regra dedicada em index.css) evita o
+        // `AtendimentoSecondaryNav` fixo cobrir o fim da lista no mobile.
+        : activeTab === 'escalations' ? ' app-main--escalations'
+        // Agenda não pediu tratamento borda a borda — só precisa do
+        // mesmo respiro extra embaixo pro AtendimentoSecondaryNav fixo.
+        : activeTab === 'agenda' ? ' pb-24 lg:pb-8'
+        : ''
+      }`}>
         
         {/* Toast Alert */}
         {toastMsg && (
@@ -1833,7 +1865,14 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'escalations' && (
-          <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green">
+          // TASK-0319 (pedido direto, print anotado — "tira o cabeçalho
+          // duplo, coloca a descrição de cima no de baixo"): `EscalationsPanel`
+          // já renderiza o próprio `<header>` (título + descrição + filtros),
+          // igual Agenda/Financeiro fazem com `AgendaFinanceiroCenter`/
+          // `FinancialWorkspace` — mesmo `hideHeader` usado lá. A descrição
+          // deste frame ("Resolva pendências...") migrou pro header interno
+          // do EscalationsPanel em vez de sumir.
+          <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green" compact hideHeader>
           <EscalationsPanel
             escalations={escalations}
             onResolve={handleResolveEscalation}
