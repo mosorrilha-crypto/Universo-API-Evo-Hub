@@ -10,7 +10,7 @@
  * id (ex: exampleImageId + exampleImageMimeType + ...), pelo mesmo motivo já
  * valendo pra vídeo: metadado é pequeno, só o binário precisava sair do JSON.
  *
- * TASK-XXXX (achado real, 07/09/2026): o MESMO tipo de estouro de egress
+ * TASK-0332 (achado real, 07/09/2026): o MESMO tipo de estouro de egress
  * voltou a acontecer — desta vez não mais no JSON, mas no próprio bucket
  * "app-data" do Supabase Storage (fotos de exemplo do catálogo, ~91% do
  * egress do ciclo de faturamento). Migrado pra Cloudflare R2 (S3-compatível,

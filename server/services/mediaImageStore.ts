@@ -9,7 +9,7 @@
  * público, já que pode conter dados sensíveis (ex: número de conta bancária
  * num comprovante).
  *
- * TASK-XXXX (achado real, 07/09/2026): esta é a maior fonte de egress real
+ * TASK-0332 (achado real, 07/09/2026): esta é a maior fonte de egress real
  * de produção (mídia de conversa é reaberta/rebaixada toda vez que o
  * operador abre o chat) — migrado pra Cloudflare R2 junto com
  * knowledgeBaseImageStore.ts/knowledgeBaseVideoStore.ts/knowledgeBaseDocumentStore.ts.

@@ -1,5 +1,5 @@
 /**
- * TASK-XXXX — módulo de storage compatível com S3 (Cloudflare R2), criado
+ * TASK-0332 — módulo de storage compatível com S3 (Cloudflare R2), criado
  * pra eliminar o egress do Supabase Storage (mídia de WhatsApp/Base de
  * Conhecimento respondia por ~91% do egress do ciclo de faturamento).
  */

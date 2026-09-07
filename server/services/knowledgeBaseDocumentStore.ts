@@ -5,7 +5,7 @@
  * existiram de verdade, achado real numa auditoria). Sob o prefixo
  * kb-docs/{tenantId}/{docId} — nunca público, autenticado por rota.
  *
- * TASK-XXXX (achado real, 07/09/2026): migrado pra Cloudflare R2 junto com
+ * TASK-0332 (achado real, 07/09/2026): migrado pra Cloudflare R2 junto com
  * knowledgeBaseImageStore.ts/knowledgeBaseVideoStore.ts/mediaImageStore.ts
  * — mesmo motivo (egress do Supabase Storage estourando a cota do plano
  * Free). Ver comentário completo em knowledgeBaseImageStore.ts.

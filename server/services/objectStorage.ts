@@ -1,5 +1,5 @@
 /**
- * TASK-XXXX (pedido direto, achado real de egress em produção): o bucket
+ * TASK-0332 (pedido direto, achado real de egress em produção): o bucket
  * privado "app-data" do Supabase Storage (mídia de WhatsApp — fotos/áudios/
  * vídeos recebidos, fotos de exemplo/vídeos/documentos da Base de
  * Conhecimento) sozinho respondeu por ~91% do egress do ciclo de
