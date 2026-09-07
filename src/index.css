@@ -198,7 +198,18 @@ html, body {
 }
 
 body {
-  min-height: 100vh;
+  /* TASK-0333 (pedido direto, prints comparando Escalonamentos/Conversas
+     "normais" com uma faixa vazia aparecendo embaixo da barra inferior ao
+     abrir Agenda/Ferramentas no mobile): `vh` no mobile não acompanha o
+     chrome dinâmico do navegador (barra de endereço escondendo/reaparecendo)
+     — o conteúdo real do app já usa `dvh` em toda parte (inclusive o cálculo
+     de altura do Atendimento em App.tsx), que acompanha corretamente. Como
+     este `body` ficava só em `vh`, ele não encolhia junto quando a barra do
+     navegador reaparecia (heurística que os popups fixed em tela cheia,
+     Agenda/Ferramentas, disparam), sobrando um vão do tamanho da diferença
+     — exatamente a "faixa embaixo" relatada. O `#root` já tinha esse mesmo
+     ajuste (TASK-0318), mas só para o tema light; aqui cobre todos os temas. */
+  min-height: 100dvh;
   background:
     radial-gradient(circle at 8% -10%, rgba(16, 185, 129, 0.10), transparent 28rem),
     radial-gradient(circle at 94% 5%, rgba(79, 70, 229, 0.08), transparent 24rem),
