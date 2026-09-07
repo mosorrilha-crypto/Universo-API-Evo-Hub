@@ -4,44 +4,32 @@
  * genérico "📷 Imagem recebida" e o conteúdo real se perde. Mesmo conceito
  * do saveMediaImage/getMediaImage do whatsapp-agent-monique.
  *
- * Guardado no bucket privado "app-data" (mesmo das conversas/KB), indexado
- * pelo message_id da Meta — só acessível via rota autenticada
+ * Indexado pelo message_id da Meta — só acessível via rota autenticada
  * (GET /api/media/:messageId em server/routes/conversations.ts), nunca
  * público, já que pode conter dados sensíveis (ex: número de conta bancária
  * num comprovante).
+ *
+ * TASK-0332 (achado real, 07/09/2026): esta é a maior fonte de egress real
+ * de produção (mídia de conversa é reaberta/rebaixada toda vez que o
+ * operador abre o chat) — migrado pra Cloudflare R2 junto com
+ * knowledgeBaseImageStore.ts/knowledgeBaseVideoStore.ts/knowledgeBaseDocumentStore.ts.
+ * Ver comentário completo em knowledgeBaseImageStore.ts.
  */
-const BUCKET = 'app-data';
+import { getObjectStorageConfig, putObject, getObject } from './objectStorage';
 
-/**
- * TASK-0200 — CodeQL sinalizou "File data in outbound network request"
- * (Medium, `js/file-data-in-outbound-network-request`): dado binário
- * recebido do cliente (`buffer`) é enviado a `supabaseUrl` sem validar essa
- * URL antes. `supabaseUrl` vem sempre de configuração do servidor (env
- * `SUPABASE_URL`), nunca de input por requisição — mesma checagem
- * estrutural (URL bem-formada, protocolo http/https) já usada como segunda
- * camada em `evolutionSend.ts`/`admin.ts` (TASK-0197).
- */
-function assertValidHttpUrl(url: string): void {
-  let protocol: string;
-  try {
-    protocol = new URL(url).protocol;
-  } catch {
-    throw new Error(`URL do Storage inválida: "${url}".`);
-  }
-  if (protocol !== 'http:' && protocol !== 'https:') {
-    throw new Error(`Protocolo não permitido para o Storage: "${protocol}".`);
-  }
+function storagePath(messageId: string): string {
+  return `media/${encodeURIComponent(messageId)}`;
 }
 
 export async function saveMediaImage(
-  supabaseUrl: string | undefined,
-  supabaseKey: string | undefined,
+  _supabaseUrl: string | undefined,
+  _supabaseKey: string | undefined,
   messageId: string,
   base64: string,
   mimeType: string
 ): Promise<void> {
-  if (!supabaseUrl || !supabaseKey) return;
-  assertValidHttpUrl(supabaseUrl);
+  const config = getObjectStorageConfig();
+  if (!config) return;
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 
@@ -50,37 +38,21 @@ export async function saveMediaImage(
   // "terminava com sucesso" sem logar nada. Uma foto de comprovante de
   // pagamento podia se perder silenciosamente, sem nenhum aviso no log.
   try {
-    const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/media/${encodeURIComponent(messageId)}`, {
-      method: 'POST',
-      headers: {
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-        'Content-Type': mimeType,
-        'x-upsert': 'true',
-      },
-      body: buffer as any,
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.warn(`⚠️  [Mídia] Falha ao salvar imagem recebida (message_id=${messageId}): HTTP ${res.status} — ${body.slice(0, 300)}`);
-    }
+    await putObject(config, storagePath(messageId), buffer, mimeType);
   } catch (err: any) {
     console.warn(`⚠️  [Mídia] Falha ao salvar imagem recebida (message_id=${messageId}):`, err.message);
   }
 }
 
 export async function getMediaImage(
-  supabaseUrl: string | undefined,
-  supabaseKey: string | undefined,
+  _supabaseUrl: string | undefined,
+  _supabaseKey: string | undefined,
   messageId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
-  if (!supabaseUrl || !supabaseKey) return null;
-  assertValidHttpUrl(supabaseUrl);
-  const res = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/media/${encodeURIComponent(messageId)}`, {
-    headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
-  });
-  if (!res.ok) return null;
-  const buffer = Buffer.from(await res.arrayBuffer());
-  const contentType = res.headers.get('content-type') || (messageId.startsWith('wa-') ? 'audio/ogg; codecs=opus' : 'image/jpeg');
-  return { buffer, contentType };
+  const config = getObjectStorageConfig();
+  if (!config) return null;
+  const result = await getObject(config, storagePath(messageId));
+  if (!result) return null;
+  const contentType = result.contentType || (messageId.startsWith('wa-') ? 'audio/ogg; codecs=opus' : 'image/jpeg');
+  return { buffer: result.buffer, contentType };
 }

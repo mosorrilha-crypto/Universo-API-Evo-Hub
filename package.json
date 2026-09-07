@@ -20,6 +20,7 @@
     "task:start": "tsx scripts/start-task.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
     "@google/genai": "^2.21.0",
     "@supabase/supabase-js": "^2.114.0",
     "@tailwindcss/vite": "^4.1.14",
