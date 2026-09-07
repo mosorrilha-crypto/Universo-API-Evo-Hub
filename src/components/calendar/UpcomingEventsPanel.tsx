@@ -473,10 +473,17 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
     // faixa onde `.atendimento-bottom-nav` (Conversas/Pendências/Agenda/
     // Ferramentas) fica — pra reabrir Pendências/Conversas era preciso
     // fechar este popup primeiro. `bottom-[...]` reserva a altura real da
-    // nav (mesmo valor usado em index.css pra Escalonamentos) só abaixo de
-    // `sm` (640px), onde este painel já vira um card centralizado com
-    // margem — a nav nunca fica coberta por baixo dele nessa faixa.
-    <div className="fixed inset-x-0 top-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] sm:inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center sm:p-4">
+    // nav só abaixo de `sm` (640px), onde este painel já vira um card
+    // centralizado com margem — a nav nunca fica coberta por baixo dele
+    // nessa faixa.
+    //
+    // TASK-0336 (achado real, print anotado): "4.75rem" era um chute que não
+    // batia com a altura real do nav (vão visível entre o popup e o nav) —
+    // agora usa `--atendimento-bottom-nav-h`, medida de verdade via
+    // ResizeObserver em WhatsAppLeadsSim.tsx (mesmo valor que a gaveta
+    // Ferramentas passou a usar). Sem `+ env(safe-area-inset-bottom)`: a
+    // altura medida já inclui esse padding, que o CSS do nav já aplica.
+    <div className="fixed inset-x-0 top-0 bottom-[var(--atendimento-bottom-nav-h,4.75rem)] sm:inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center sm:p-4">
       <div className={`bg-slate-900 sm:border sm:border-slate-800 rounded-none sm:rounded-2xl p-6 w-full h-full sm:h-auto shadow-2xl sm:max-h-[85vh] flex flex-col transition-all ${viewMode === 'calendar' && !isPickingLead ? 'sm:max-w-lg' : 'sm:max-w-md'}`}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
