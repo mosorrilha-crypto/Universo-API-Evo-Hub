@@ -2,8 +2,11 @@
 /**
  * TASK-0328 (pedido direto, print anotado do cabeçalho): seletor de idioma
  * (ES/PT) e o botão de tema saíram da linha mobile do cabeçalho — mudaram
- * pra dentro da gaveta "Ferramentas" do Atendimento (WhatsAppLeadsSim.tsx),
- * e o botão de menu passou de ☰ (Menu) pra ⋮ (MoreVertical).
+ * pra dentro da gaveta "Ferramentas" do Atendimento (WhatsAppLeadsSim.tsx).
+ * TASK-0331 (pedido direto, prints anotados): o próprio menu "⋮" (gaveta
+ * com Crescimento/Configurar/Empresas/Empresa ativa/Sair/Notificações) foi
+ * eliminado — todo esse conteúdo também mudou pra dentro da gaveta
+ * "Ferramentas". A linha mobile do cabeçalho fica só com o logo.
  */
 import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -54,8 +57,8 @@ const capabilities: TenantNavigationCapabilities = {
 
 afterEach(() => cleanup());
 
-describe('Header — linha mobile sem idioma/tema, menu vira ⋮', () => {
-  it('não mostra os antigos seletores de idioma/tema na linha mobile', () => {
+describe('Header — linha mobile sem idioma/tema nem menu "⋮"', () => {
+  it('não mostra os antigos seletores de idioma/tema nem o menu "⋮" na linha mobile — só o logo', () => {
     render(
       <AppPreferencesProvider>
         <Header
@@ -76,6 +79,10 @@ describe('Header — linha mobile sem idioma/tema, menu vira ⋮', () => {
 
     expect(screen.queryByTitle('Español')).toBeNull();
     expect(screen.queryByTitle('Português')).toBeNull();
-    expect(screen.getByTitle('Menu')).not.toBeNull();
+    // TASK-0331 — o menu "⋮" foi eliminado; nenhum jeito de abri-lo continua a existir.
+    expect(screen.queryByTitle('Menu')).toBeNull();
+    // Logo aparece 2x no DOM (linha mobile + linha desktop, ambas
+    // renderizadas — só a responsividade via CSS decide qual aparece).
+    expect(screen.getAllByTitle('Ir para o Atendimento').length).toBeGreaterThan(0);
   });
 });
