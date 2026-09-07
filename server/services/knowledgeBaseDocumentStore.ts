@@ -12,6 +12,7 @@
  */
 import { PDFParse } from 'pdf-parse';
 import { getObjectStorageConfig, putObject, getObject, deleteObject } from './objectStorage';
+import { getLegacySupabaseStorageObject } from './legacySupabaseStorage';
 
 /** Tamanho máximo do texto extraído guardado por documento — o teto de prompt real (DOCUMENTS_PROMPT_CHAR_BUDGET, knowledgeBaseStore.ts) já limita o que entra no Gemini; isso só evita guardar um texto gigante no banco à toa. */
 const MAX_EXTRACTED_TEXT_CHARS = 8000;
@@ -70,16 +71,17 @@ export async function uploadKnowledgeBaseDocument(
 }
 
 export async function getKnowledgeBaseDocument(
-  _supabaseUrl: string | undefined,
-  _supabaseKey: string | undefined,
+  supabaseUrl: string | undefined,
+  supabaseKey: string | undefined,
   tenantId: string,
   docId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
   const config = getObjectStorageConfig();
-  if (!config) return null;
-  const result = await getObject(config, storagePath(tenantId, docId));
-  if (!result) return null;
-  return { buffer: result.buffer, contentType: result.contentType || 'application/octet-stream' };
+  const result = config ? await getObject(config, storagePath(tenantId, docId)) : null;
+  const legacy = result ? null : await getLegacySupabaseStorageObject(supabaseUrl, supabaseKey, storagePath(tenantId, docId));
+  const found = result || legacy;
+  if (!found) return null;
+  return { buffer: found.buffer, contentType: found.contentType || 'application/octet-stream' };
 }
 
 export async function deleteKnowledgeBaseDocument(

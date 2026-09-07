@@ -16,6 +16,7 @@
  * Ver comentário completo em knowledgeBaseImageStore.ts.
  */
 import { getObjectStorageConfig, putObject, getObject } from './objectStorage';
+import { getLegacySupabaseStorageObject } from './legacySupabaseStorage';
 
 function storagePath(messageId: string): string {
   return `media/${encodeURIComponent(messageId)}`;
@@ -45,14 +46,15 @@ export async function saveMediaImage(
 }
 
 export async function getMediaImage(
-  _supabaseUrl: string | undefined,
-  _supabaseKey: string | undefined,
+  supabaseUrl: string | undefined,
+  supabaseKey: string | undefined,
   messageId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
   const config = getObjectStorageConfig();
-  if (!config) return null;
-  const result = await getObject(config, storagePath(messageId));
-  if (!result) return null;
-  const contentType = result.contentType || (messageId.startsWith('wa-') ? 'audio/ogg; codecs=opus' : 'image/jpeg');
-  return { buffer: result.buffer, contentType };
+  const result = config ? await getObject(config, storagePath(messageId)) : null;
+  const legacy = result ? null : await getLegacySupabaseStorageObject(supabaseUrl, supabaseKey, storagePath(messageId));
+  const found = result || legacy;
+  if (!found) return null;
+  const contentType = found.contentType || (messageId.startsWith('wa-') ? 'audio/ogg; codecs=opus' : 'image/jpeg');
+  return { buffer: found.buffer, contentType };
 }
