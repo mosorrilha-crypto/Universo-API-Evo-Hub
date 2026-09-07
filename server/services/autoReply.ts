@@ -10,7 +10,7 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold, type TrackedAppointment } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, formatKnowledgeBaseForPrompt, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import * as knowledgeBaseStore from './knowledgeBaseStore';
 import { createPreReservation, updatePreReservationStatus } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
@@ -19,7 +19,7 @@ import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
 import { resolveKnowledgeBaseImageBinary } from './knowledgeBaseImageStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
 import { resolveEffectiveGlobalLayer } from './tenantPromptLayerStore';
-import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
+import { recordOutgoingMessage, getConversationCtwaClid, getConversation } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
@@ -42,20 +42,7 @@ const BUSINESS_TIMEZONE = 'America/Asuncion';
  * log informa apenas fonte e motivo de fallback, nunca conteúdo de negócio.
  */
 async function getRuntimeKnowledgeBaseForReply(tenantId: string): Promise<AgentKnowledgeBase | null> {
-  // Alguns testes unitários antigos simulam somente o carregador legado. A
-  // aplicação real sempre exporta getRuntimeKnowledgeBase; este fallback é
-  // exclusivo para mocks isolados e evita reescrever suítes não relacionadas.
-  let runtimeLoader: typeof knowledgeBaseStore.getRuntimeKnowledgeBase | undefined;
-  try {
-    runtimeLoader = knowledgeBaseStore.getRuntimeKnowledgeBase;
-  } catch {
-    // O proxy de alguns mocks do Vitest lança quando se consulta um export
-    // ausente, em vez de devolver undefined como um namespace ESM comum.
-    runtimeLoader = undefined;
-  }
-  const result = runtimeLoader
-    ? await runtimeLoader(tenantId)
-    : { knowledgeBase: await knowledgeBaseStore.getKnowledgeBase(tenantId), source: 'legacy_blob' as const, fallbackReason: 'published_documents_unavailable' as const };
+  const result = await knowledgeBaseStore.getRuntimeKnowledgeBase(tenantId);
   logStructured({
     tenantId,
     area: 'knowledgeBase',
@@ -676,6 +663,78 @@ async function generateSpecialistReply(
   const awaitingCustomerChoice = typeof parsed.aguardandoCliente === 'string' && parsed.aguardandoCliente.trim() ? parsed.aguardandoCliente.trim() : undefined;
   const interestedService = typeof parsed.servicoInteresse === 'string' && parsed.servicoInteresse.trim() ? parsed.servicoInteresse.trim() : undefined;
   return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName, pendingOwnerReview, awaitingCustomerChoice, interestedService };
+}
+
+export interface PromptAuditView {
+  agent: AgentType;
+  /** Texto EXATO enviado como `systemInstruction` ao Gemini — Camada 1 (regras fixas + global) e Camada 3 (Base de Conhecimento) já combinadas, byte a byte igual ao que o especialista real usa (mesma função, buildCachedSystemInstruction). */
+  systemInstruction: string;
+  /** Só a Camada 3 (Base de Conhecimento do tenant já composta), isolada, pra conferir separado do restante. */
+  knowledgeBaseContext: string;
+  /** Horário de funcionamento formatado — entra dentro de knowledgeBaseContext no prompt real (fullKnowledgeBaseContext), mostrado à parte aqui só pra clareza. */
+  businessHoursForPrompt: string;
+  /** Fonte real da Base de Conhecimento nesta consulta — 'unavailable' explica por que knowledgeBaseContext pode vir vazio. */
+  knowledgeBaseSource: string;
+  /** Preenchido só quando `phone` foi informado e a conversa existe — o texto de histórico exatamente como `buildHistoryText` monta pra Camada 4. */
+  conversationPreview?: {
+    contactName?: string;
+    historyText: string;
+    /** Preâmbulo de contents.text, sem o campo "Ações reais já executadas"/anúncio/orientação do operador (só existem durante uma mensagem real, ver dynamicNotShown). */
+    contentsPreamble: string;
+  };
+  /** Pedaços da Camada 4 que só existem durante uma mensagem real (resultado de ferramentas, contexto de anúncio, orientação do operador, exemplos aprovados) — não têm como ser reconstruídos aqui sem simular uma mensagem de verdade. */
+  dynamicNotShown: string[];
+}
+
+/**
+ * Auditoria SOMENTE LEITURA do prompt real enviado ao Gemini pro
+ * especialista — pedido direto (06/09/2026): depois de eliminar a rota de
+ * salvar a KB inteira (TASK-0327), o dono do produto precisava de outro
+ * jeito de conferir "quais informações estão chegando e como estão
+ * chegando no agente", sem reabrir escrita direta na Base de Conhecimento.
+ *
+ * Reaproveita as MESMAS funções que o turno real usa (buildCachedSystemInstruction,
+ * buildHistoryText, formatKnowledgeBaseForPrompt) — nunca reimplementa a
+ * montagem do prompt em paralelo, pra não arriscar a auditoria mostrar algo
+ * diferente do que de fato é mandado. `phone` é opcional: sem ele, mostra só
+ * as camadas estáveis (1 e 3); com ele, também mostra o histórico real da
+ * conversa (Camada 4, parte reconstruível sem side effect).
+ */
+export async function getPromptAuditView(tenantId: string, agent: AgentType, phone?: string): Promise<PromptAuditView> {
+  const runtimeKnowledgeBase = await knowledgeBaseStore.getRuntimeKnowledgeBase(tenantId);
+  const knowledgeBaseContext = formatKnowledgeBaseForPrompt(runtimeKnowledgeBase.knowledgeBase);
+  const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
+  const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, fullKnowledgeBaseContext);
+
+  let conversationPreview: PromptAuditView['conversationPreview'];
+  if (phone) {
+    const conversation = await getConversation(tenantId, phone);
+    if (conversation) {
+      const historyText = buildHistoryText(conversation.messages);
+      const contactName = conversation.name;
+      conversationPreview = {
+        contactName,
+        historyText,
+        contentsPreamble: `${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`,
+      };
+    }
+  }
+
+  return {
+    agent,
+    systemInstruction,
+    knowledgeBaseContext,
+    businessHoursForPrompt,
+    knowledgeBaseSource: runtimeKnowledgeBase.source,
+    conversationPreview,
+    dynamicNotShown: [
+      'A "Nova mensagem do cliente" em si — o texto literal que dispara o turno.',
+      'Ações reais já executadas nesta mensagem (disponibilidade consultada, evento de agenda criado/remarcado/cancelado, foto/vídeo enviado) — só existem durante uma mensagem real, geradas pelas ferramentas de agenda/mídia.',
+      'Contexto de anúncio (Clique para WhatsApp) — só aparece no primeiro contato de uma lead vinda de campanha.',
+      'Orientação do operador e exemplos de resposta aprovados — variam por escalonamento resolvido.',
+    ],
+  };
 }
 
 /**

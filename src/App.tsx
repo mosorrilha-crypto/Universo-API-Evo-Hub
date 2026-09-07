@@ -1802,23 +1802,6 @@ export const App: React.FC = () => {
                 return false;
               }
             }}
-            onSaveKnowledgeBase={async (updatedKb) => {
-              setKnowledgeBase(updatedKb);
-              try {
-                const res = await apiFetch('/api/knowledge-base', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ knowledgeBase: updatedKb }),
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Base de conhecimento do Agente salva!');
-                return true;
-              } catch (err) {
-                console.error('Falha ao salvar base de conhecimento no backend:', err);
-                showToast('Não foi possível salvar no servidor — o agente pode continuar respondendo com a base antiga. Tente novamente.');
-                return false;
-              }
-            }}
             canUseBusinessTemplates={canSeeSaasMaster}
             publicCatalogSlug={activeTenant.slug}
             onGoToWhatsAppSim={() => handleSetActiveTab('whatsapp')}

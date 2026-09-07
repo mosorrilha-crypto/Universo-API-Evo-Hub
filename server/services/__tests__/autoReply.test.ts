@@ -43,7 +43,12 @@ const findProductMatch = vi.fn((kb: { products: { name: string }[] } | null, nam
   const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
   return product ? { product } : undefined;
 });
-vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined), findProductMatch }));
+// TASK-0327: a store real não exporta mais getKnowledgeBase (tabela legada
+// eliminada) — getRuntimeKnowledgeBase aqui só delega pro mock acima, então
+// os .mockResolvedValueOnce(...) espalhados pelo arquivo continuam valendo
+// sem precisar duplicar em cada caso.
+const getRuntimeKnowledgeBase = vi.fn(async () => ({ knowledgeBase: await getKnowledgeBase(), source: 'published_documents' as const }));
+vi.mock('../knowledgeBaseStore', () => ({ getRuntimeKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined), findProductMatch }));
 vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone,
   setAppointmentForPhone: vi.fn(async () => undefined),
