@@ -44,10 +44,12 @@ import {
   ChevronDown,
   GripVertical,
   ExternalLink,
-  Pencil
+  Pencil,
+  Search
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 import { KnowledgeBaseDocumentation } from './KnowledgeBaseDocumentation';
+import { PromptAuditView } from './PromptAuditView';
 import {
   type KnowledgeBaseDocumentState,
   listKnowledgeBaseDocumentStates,
@@ -579,6 +581,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isBusinessTemplatesOpen, setIsBusinessTemplatesOpen] = useState(false);
   const [showKnowledgeBaseDocumentation, setShowKnowledgeBaseDocumentation] = useState(false);
+  const [showPromptAudit, setShowPromptAudit] = useState(false);
   const [showHoursEditor, setShowHoursEditor] = useState(false);
   const [typedDocumentStates, setTypedDocumentStates] = useState<KnowledgeBaseDocumentState[]>([]);
   const [isLoadingTypedDocuments, setIsLoadingTypedDocuments] = useState(false);
@@ -1919,6 +1922,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     if (firstSection) window.setTimeout(() => document.getElementById(`knowledge-base-section-${firstSection}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
 
+  if (showPromptAudit) {
+    return <PromptAuditView onBack={() => setShowPromptAudit(false)} />;
+  }
+
   if (showKnowledgeBaseDocumentation) {
     return <KnowledgeBaseDocumentation isRuntimePublished={usesPublishedKnowledgeBase} onBack={() => setShowKnowledgeBaseDocumentation(false)} />;
   }
@@ -1959,6 +1966,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Documentação</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPromptAudit(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition-all hover:bg-fuchsia-500/20"
+            title="Ver exatamente o prompt (regras + Base de Conhecimento + conversa) que é mandado ao Gemini"
+            aria-label="Auditar prompt do agente"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Auditar Prompt</span>
           </button>
           <button
             type="button"

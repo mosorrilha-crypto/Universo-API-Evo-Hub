@@ -65,7 +65,7 @@ import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, listUpcomingEvents, type CalendarConfig } from '../services/googleCalendar';
-import { getNowLocalNaive } from '../services/autoReply';
+import { getNowLocalNaive, getPromptAuditView, type AgentType } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
 import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
 import { subscribeTenant } from '../services/conversationEvents';
@@ -1812,6 +1812,24 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.delete('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await clearTenantPromptLayer(tenantOf(req));
     res.json(await getTenantPromptLayerRow(tenantOf(req)));
+  }));
+
+  // TASK-0330 — auditoria SOMENTE LEITURA do prompt real mandado ao Gemini
+  // (Camada 1 fixa + Camada 3 Base de Conhecimento, já combinadas
+  // idênticas ao que o especialista de verdade usa; Camada 4 real da
+  // conversa quando `phone` é informado). Pedido direto: depois de eliminar
+  // a rota de salvar a KB inteira (TASK-0327), o dono do produto precisava
+  // de outro jeito de conferir "quais informações estão chegando e como
+  // estão chegando no agente" — nunca escreve nada, só lê e reaproveita a
+  // mesma montagem de prompt do turno real (getPromptAuditView).
+  const VALID_AUDIT_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
+  router.get('/api/tenant-prompt-audit', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const agent = req.query.agent as string;
+    if (!VALID_AUDIT_AGENTS.includes(agent as AgentType)) {
+      return res.status(400).json({ error: `Campo "agent" precisa ser um destes: ${VALID_AUDIT_AGENTS.join(', ')}.` });
+    }
+    const phone = typeof req.query.phone === 'string' && req.query.phone.trim() ? req.query.phone.trim() : undefined;
+    res.json(await getPromptAuditView(tenantOf(req), agent as AgentType, phone));
   }));
 
   // Horário de funcionamento real do tenant (tabela `tenants`, não a base de
