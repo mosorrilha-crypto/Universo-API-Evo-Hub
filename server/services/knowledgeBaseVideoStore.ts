@@ -20,6 +20,7 @@
  * criar um produto novo e já anexar o vídeo numa passada só.
  */
 import { getObjectStorageConfig, putObject, getObject, deleteObject } from './objectStorage';
+import { getLegacySupabaseStorageObject } from './legacySupabaseStorage';
 
 /**
  * Formatos que a Meta Cloud API aceita DIRETO pra mensagem de vídeo do
@@ -61,16 +62,17 @@ export async function uploadKnowledgeBaseVideo(
 }
 
 export async function getKnowledgeBaseVideo(
-  _supabaseUrl: string | undefined,
-  _supabaseKey: string | undefined,
+  supabaseUrl: string | undefined,
+  supabaseKey: string | undefined,
   tenantId: string,
   videoId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
   const config = getObjectStorageConfig();
-  if (!config) return null;
-  const result = await getObject(config, storagePath(tenantId, videoId));
-  if (!result) return null;
-  return { buffer: result.buffer, contentType: result.contentType || 'video/mp4' };
+  const result = config ? await getObject(config, storagePath(tenantId, videoId)) : null;
+  const legacy = result ? null : await getLegacySupabaseStorageObject(supabaseUrl, supabaseKey, storagePath(tenantId, videoId));
+  const found = result || legacy;
+  if (!found) return null;
+  return { buffer: found.buffer, contentType: found.contentType || 'video/mp4' };
 }
 
 /** Melhor esforço: chamado ao trocar o vídeo de um produto por outro, pra não acumular lixo no Storage a cada troca. Nunca deve travar o upload novo se falhar. */

@@ -26,6 +26,7 @@
  */
 import { logStructured } from './structuredLog';
 import { getObjectStorageConfig, putObject, getObject, deleteObject } from './objectStorage';
+import { getLegacySupabaseStorageObject } from './legacySupabaseStorage';
 
 /** JPEG/PNG/WebP — os três formatos que a Meta Cloud API aceita direto pra mensagem de imagem do WhatsApp, sem conversão nenhuma (diferente de vídeo, que às vezes precisa de transcode). */
 export const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -51,16 +52,17 @@ export async function uploadKnowledgeBaseImage(
 }
 
 export async function getKnowledgeBaseImage(
-  _supabaseUrl: string | undefined,
-  _supabaseKey: string | undefined,
+  supabaseUrl: string | undefined,
+  supabaseKey: string | undefined,
   tenantId: string,
   imageId: string
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
   const config = getObjectStorageConfig();
-  if (!config) return null;
-  const result = await getObject(config, storagePath(tenantId, imageId));
-  if (!result) return null;
-  return { buffer: result.buffer, contentType: result.contentType || 'image/jpeg' };
+  const result = config ? await getObject(config, storagePath(tenantId, imageId)) : null;
+  const legacy = result ? null : await getLegacySupabaseStorageObject(supabaseUrl, supabaseKey, storagePath(tenantId, imageId));
+  const found = result || legacy;
+  if (!found) return null;
+  return { buffer: found.buffer, contentType: found.contentType || 'image/jpeg' };
 }
 
 /**
