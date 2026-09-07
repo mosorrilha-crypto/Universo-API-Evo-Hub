@@ -208,8 +208,15 @@ body {
      navegador reaparecia (heurística que os popups fixed em tela cheia,
      Agenda/Ferramentas, disparam), sobrando um vão do tamanho da diferença
      — exatamente a "faixa embaixo" relatada. O `#root` já tinha esse mesmo
-     ajuste (TASK-0318), mas só para o tema light; aqui cobre todos os temas. */
-  min-height: 100dvh;
+     ajuste (TASK-0318), mas só para o tema light; aqui cobre todos os temas.
+
+     TASK-0337 (achado real, mesmo bug persistindo mesmo depois do ajuste
+     acima em pelo menos um aparelho Android real): `dvh` sozinho não é
+     suficiente — suporte inconsistente entre navegadores/skins Android.
+     `--real-vh` (App.tsx, medida via `window.visualViewport`) é o valor
+     preferido agora; `100dvh` continua só como fallback antes do primeiro
+     measure (SSR/primeiro paint) ou em navegadores sem `visualViewport`. */
+  min-height: var(--real-vh, 100dvh);
   background:
     radial-gradient(circle at 8% -10%, rgba(16, 185, 129, 0.10), transparent 28rem),
     radial-gradient(circle at 94% 5%, rgba(79, 70, 229, 0.08), transparent 24rem),
@@ -1109,11 +1116,14 @@ html[data-theme='light'] body {
 }
 
 /* TASK-0318 — mobile: garante altura real de viewport (dvh) e mantém o
-   fundo --app-page também no #root, escopado só ao light. */
+   fundo --app-page também no #root, escopado só ao light.
+   TASK-0337: `--real-vh` (medida via visualViewport, ver App.tsx) é o valor
+   preferido agora, `dvh` só de fallback — mesmo motivo do ajuste em `body`
+   acima. */
 @media (max-width: 640px) {
   html[data-theme='light'] body,
   html[data-theme='light'] #root {
-    min-height: 100dvh;
+    min-height: var(--real-vh, 100dvh);
     background: var(--app-page);
   }
 }
