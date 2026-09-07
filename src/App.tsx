@@ -601,6 +601,41 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  // TASK-0337 (pedido direto, prints reais mostrando que a TASK-0333 —
+  // trocar vh por dvh — não resolveu de verdade): a "faixa vazia" embaixo
+  // da barra inferior, ao abrir a Agenda, continuou aparecendo mesmo depois
+  // da troca pra `dvh`. `dvh`/`svh`/`env(safe-area-inset-bottom)` têm
+  // suporte inconsistente entre navegadores/skins Android (ex: MIUI) — o
+  // valor que `100dvh` resolve nem sempre bate com a altura real e visível
+  // da viewport nesse aparelho. Em vez de confiar só em unidades CSS,
+  // mede a altura real via `window.visualViewport` (o padrão mais robusto
+  // pra esse problema, atualizado a cada resize/scroll do teclado/barra do
+  // navegador) e alimenta `--real-vh`, usada como valor preferido (com
+  // `dvh` só de fallback) no `body` (index.css) e no wrapper raiz abaixo.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const applyRealVh = () => {
+      const height = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--real-vh', `${height}px`);
+    };
+    applyRealVh();
+    const viewport = window.visualViewport;
+    if (viewport) {
+      viewport.addEventListener('resize', applyRealVh);
+      viewport.addEventListener('scroll', applyRealVh);
+    }
+    window.addEventListener('resize', applyRealVh);
+    window.addEventListener('orientationchange', applyRealVh);
+    return () => {
+      if (viewport) {
+        viewport.removeEventListener('resize', applyRealVh);
+        viewport.removeEventListener('scroll', applyRealVh);
+      }
+      window.removeEventListener('resize', applyRealVh);
+      window.removeEventListener('orientationchange', applyRealVh);
+    };
+  }, []);
+
   // Achado real, 29/08/2026 (TASK-0159 resolveu a cadeia de flex interna do
   // Atendimento, mas a lista de conversas mobile — cabeçalho global visível —
   // continuava passando um pouco da tela): o wrapper do Atendimento em
@@ -1463,8 +1498,10 @@ export const App: React.FC = () => {
     // com a barra escondida), sobrava um vão do tamanho da diferença sempre
     // que algo (como os popups fixed em tela cheia de Agenda/Ferramentas)
     // fazia o navegador reexibir a barra — exatamente a "faixa embaixo"
-    // relatada. Trocado por `min-h-dvh`, que acompanha de verdade.
-    <div className="min-h-dvh bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
+    // relatada. Trocado por `min-h-dvh` — mas isso sozinho não resolveu de
+    // verdade em todo aparelho Android (ver TASK-0337 acima, `--real-vh`
+    // medido via `visualViewport`, mais robusto que `dvh` puro).
+    <div className="min-h-[var(--real-vh,100dvh)] bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
 
       {/* Header Navigation — escondido no mobile enquanto uma conversa está
           aberta no Atendimento (pedido direto, 29/08/2026: "esse menu e
