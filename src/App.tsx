@@ -1453,8 +1453,19 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
-      
+    // TASK-0333 (pedido direto, prints comparando Escalonamentos/Conversas
+    // "normais" com uma faixa vazia embaixo da barra inferior ao abrir
+    // Agenda/Ferramentas no mobile): `min-h-screen` (100vh) não acompanha o
+    // chrome dinâmico do navegador mobile — o resto do app já mede altura
+    // via `dvh` (App.tsx mais abaixo, .atendimento-workspace etc.), que
+    // encolhe/cresce junto quando a barra de endereço reaparece/some. Como
+    // este wrapper raiz ficava preso em `100vh` (o valor "grande", medido
+    // com a barra escondida), sobrava um vão do tamanho da diferença sempre
+    // que algo (como os popups fixed em tela cheia de Agenda/Ferramentas)
+    // fazia o navegador reexibir a barra — exatamente a "faixa embaixo"
+    // relatada. Trocado por `min-h-dvh`, que acompanha de verdade.
+    <div className="min-h-dvh bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
+
       {/* Header Navigation — escondido no mobile enquanto uma conversa está
           aberta no Atendimento (pedido direto, 29/08/2026: "esse menu e
           cabeçalho não precisa em cima"; o seletor de idioma/tema também
