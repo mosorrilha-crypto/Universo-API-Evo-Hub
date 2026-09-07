@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ActiveTab, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getTenantOverride } from '../lib/apiClient';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
@@ -21,6 +21,7 @@ import { ReopenConversationModal } from './owner-panel/ReopenConversationModal';
 import { ConversationContextSidebar } from './owner-panel/ConversationContextSidebar';
 import type { ContactProfileData } from './owner-panel/ownerPanelTypes';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 import {
   Play,
   Sparkles,
@@ -82,7 +83,15 @@ import {
   Kanban,
   Moon,
   Sun,
-  Layers
+  Layers,
+  Target,
+  Brain,
+  Link2,
+  ShieldCheck,
+  ScrollText,
+  Radio,
+  Settings2,
+  LogOut
 } from 'lucide-react';
 import { TransactionDialog } from './financial/TransactionDialog';
 
@@ -225,6 +234,30 @@ interface WhatsAppLeadsSimProps {
       App.tsx/AgendaFinanceiroCenter; opcional pra não quebrar quem ainda não
       passa essa prop. */
   onToast?: (message: string) => void;
+  /** TASK-0331 (pedido direto, prints anotados): o menu "⋮" do cabeçalho
+      (Header.tsx) foi eliminado — Crescimento, a lista de "Configurar"
+      (Base de Conhecimento/Catálogo público/Qualidade/Logs do sistema/
+      Disparo em Massa), Empresas, o seletor de Empresa ativa, Sair e
+      Notificações push mudaram todos pra dentro da gaveta "Ferramentas"
+      (toolbarSettingsBody, abaixo). `onSelectTab` é a navegação genérica
+      (mesmo `setActiveTab` que Header.tsx já usava) — cada `canSee*` só
+      libera o item correspondente quando App.tsx manda `true` (mesmos
+      flags já usados pra gatear as próprias abas em App.tsx), replicando
+      o mesmo gate que Header.tsx sempre teve. */
+  onSelectTab?: (tab: ActiveTab) => void;
+  canSeeGrowth?: boolean;
+  canManageAgent?: boolean;
+  canSeeCatalog?: boolean;
+  canSeeQuality?: boolean;
+  canSeeSystemLogs?: boolean;
+  canSeeBroadcast?: boolean;
+  /** Libera o item "Empresas" (navega pra administração de tenants) dentro
+      de "Configurações", e a caixa de troca rápida "Empresa ativa" — mesmo
+      papel do antigo `canSeeSaasMaster` de Header.tsx. */
+  canSeeSaasMaster?: boolean;
+  tenants?: Tenant[];
+  onSelectTenant?: (tenant: Tenant) => void;
+  onLogout?: () => void;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -324,9 +357,32 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   onAddTransaction,
   operatorName,
   onToast,
+  onSelectTab,
+  canSeeGrowth,
+  canManageAgent,
+  canSeeCatalog,
+  canSeeQuality,
+  canSeeSystemLogs,
+  canSeeBroadcast,
+  canSeeSaasMaster,
+  tenants = [],
+  onSelectTenant,
+  onLogout,
 }) => {
   const { t, language, setLanguage, theme, setTheme } = useAppPreferences();
   const isSpanish = language === 'es';
+  // TASK-0331 — Notificações push mudaram do Header.tsx (menu ⋮, eliminado)
+  // pra dentro da gaveta Ferramentas. Mesmo hook (usePushNotifications,
+  // extraído no TASK-0284 exatamente pra ser reaproveitado em mais de um
+  // lugar sem duplicar a lógica de ativar/desativar) — cada instância só
+  // reflete o mesmo estado real do navegador, seguro chamar aqui de novo.
+  const { pushEnabled, pushBusy, pushError, togglePush } = usePushNotifications();
+  useEffect(() => {
+    if (pushError) onToast?.(pushError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushError]);
+  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
@@ -888,8 +944,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const handleOpenUpcomingEvents = () => {
+    setIsToolbarSettingsOpen(false);
     setIsUpcomingEventsPanelOpen(true);
     fetchUpcomingEvents();
+  };
+
+  // TASK-0331 (pedido direto, 2 prints anotados): a Agenda e a Ferramentas
+  // são dois overlays independentes (mesmo z-index, mesma faixa reservada
+  // pra barra inferior) — abrir um sem fechar o outro fazia a Ferramentas
+  // "abrir embaixo" da Agenda quando as duas ficavam montadas ao mesmo
+  // tempo. Agora mutuamente exclusivos: abrir um sempre fecha o outro.
+  // Também vira toggle (clicar de novo no ícone "Agenda" fecha), mesmo
+  // padrão que "Ferramentas" já tinha — pedido direto pra tirar o X do
+  // cabeçalho da Agenda e fechar só pelo ícone do menu inferior.
+  const toggleUpcomingEventsPanel = () => {
+    if (isUpcomingEventsPanelOpen) { setIsUpcomingEventsPanelOpen(false); return; }
+    handleOpenUpcomingEvents();
   };
 
   const changeCalendarMonth = (delta: number) => {
@@ -1176,6 +1246,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       if (googleCalendarConnected) handleOpenUpcomingEvents();
       else handleConnectGoogleCalendar();
     } else if (pendingConversasAction === 'openTools') {
+      setIsUpcomingEventsPanelOpen(false);
       setIsToolbarSettingsOpen(true);
     }
     onPendingConversasActionHandled?.();
@@ -3721,8 +3792,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           sistema, então esses módulos precisam de um jeito de acesso daqui
           de dentro. Cada tile só aparece se App.tsx passou a prop
           correspondente (usuário logado tem permissão pro módulo) — mesmo
-          padrão de onGoToAgenda no ícone do cabeçalho da conversa aberta. */}
-      {(onGoToCrm || onGoToAgenda || onGoToFinancial) && (
+          padrão de onGoToAgenda no ícone do cabeçalho da conversa aberta.
+          TASK-0331 (pedido direto): "Crescimento" entrou nesta mesma grade
+          — saiu do menu ⋮ (Header.tsx, eliminado), ganhou ícone próprio
+          aqui igual Vendas/Agenda completa/Financeiro. */}
+      {(onGoToCrm || onGoToAgenda || onGoToFinancial || (onSelectTab && canSeeGrowth)) && (
         <div className="w-full border-t border-slate-800 pt-3">
           <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Módulos</p>
           <div className="grid w-full grid-cols-4 gap-3">
@@ -3748,6 +3822,138 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               label: 'Financeiro',
               onClick: () => { setIsToolbarSettingsOpen(false); onGoToFinancial(); },
             })}
+            {onSelectTab && canSeeGrowth && renderToolTile({
+              key: 'go-to-growth',
+              icon: <Target className="h-5 w-5" />,
+              label: isSpanish ? 'Crecimiento' : 'Crescimento',
+              onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('attribution'); },
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* TASK-0331 (pedido direto, prints anotados): "Configurar" (Base de
+          Conhecimento, Catálogo público, Qualidade, Logs do sistema,
+          Disparo em Massa) e "Empresas" saíram do menu ⋮ do cabeçalho
+          (Header.tsx, eliminado) — viram uma seção expansível aqui, mesmo
+          conjunto de itens/gates (`canManageAgent`/`canSeeCatalog`/
+          `canSeeQuality`/`canSeeSystemLogs`/`canSeeBroadcast`/
+          `canSeeSaasMaster`) que Header.tsx sempre usou pra decidir o que
+          aparece. */}
+      {onSelectTab && (canManageAgent || canSeeCatalog || canSeeQuality || canSeeSystemLogs || canSeeBroadcast || canSeeSaasMaster) && (
+        <div className="w-full border-t border-slate-800 pt-3">
+          <button
+            type="button"
+            onClick={() => setIsSettingsMenuOpen((value) => !value)}
+            aria-expanded={isSettingsMenuOpen}
+            className="flex w-full items-center justify-between rounded-lg px-0.5 py-1 text-left"
+          >
+            <span className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              <Settings2 className="h-3.5 w-3.5" />
+              {isSpanish ? 'Configuración' : 'Configurações'}
+            </span>
+            <ChevronDown className={`h-3.5 w-3.5 text-slate-500 transition-transform ${isSettingsMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {isSettingsMenuOpen && (
+            <div className="mt-1.5 space-y-1">
+              {canManageAgent && (
+                <button type="button" onClick={() => { setIsToolbarSettingsOpen(false); onSelectTab('knowledge'); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                  <Brain className="h-3.5 w-3.5 text-slate-400" /><span>{isSpanish ? 'Agente y catálogo' : 'Agente & catálogo'}</span>
+                </button>
+              )}
+              {canSeeCatalog && (
+                <button type="button" onClick={() => { setIsToolbarSettingsOpen(false); onSelectTab('catalog'); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                  <Link2 className="h-3.5 w-3.5 text-slate-400" /><span>{isSpanish ? 'Catálogo público' : 'Catálogo público'}</span>
+                </button>
+              )}
+              {canSeeQuality && (
+                <button type="button" onClick={() => { setIsToolbarSettingsOpen(false); onSelectTab('quality'); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                  <ShieldCheck className="h-3.5 w-3.5 text-slate-400" /><span>{isSpanish ? 'Calidad del agente' : 'Qualidade do agente'}</span>
+                </button>
+              )}
+              {canSeeSystemLogs && (
+                <button type="button" onClick={() => { setIsToolbarSettingsOpen(false); onSelectTab('system_logs'); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                  <ScrollText className="h-3.5 w-3.5 text-slate-400" /><span>{isSpanish ? 'Logs del sistema' : 'Logs do sistema'}</span>
+                </button>
+              )}
+              {canSeeBroadcast && (
+                <button type="button" onClick={() => { setIsToolbarSettingsOpen(false); onSelectTab('broadcast'); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                  <Radio className="h-3.5 w-3.5 text-slate-400" /><span>{isSpanish ? 'Envío Masivo' : 'Disparo em Massa'}</span>
+                </button>
+              )}
+              {canSeeSaasMaster && (
+                <button type="button" onClick={() => { setIsToolbarSettingsOpen(false); onSelectTab('saas'); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                  <Layers className="h-3.5 w-3.5 text-slate-400" /><span>{isSpanish ? 'Empresas' : 'Empresas'}</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TASK-0331 (pedido direto): "Empresa ativa" (troca rápida de
+          tenant, só saas_admin), "Sair" e "Notificações push" saíram do
+          menu ⋮ do cabeçalho (Header.tsx, eliminado) — mesma caixa
+          separada que já existia lá, agora dentro de Ferramentas. */}
+      {(onLogout || onSelectTenant) && (
+        <div className="relative w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            {canSeeSaasMaster && onSelectTenant && tenants.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setIsTenantMenuOpen((value) => !value)}
+                aria-haspopup="menu"
+                aria-expanded={isTenantMenuOpen}
+                aria-label={`${isSpanish ? 'Empresa activa' : 'Empresa ativa'}: ${activeTenant?.name || ''}`}
+                className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md text-left touch-manipulation"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[10px] text-slate-500">{isSpanish ? 'Empresa activa' : 'Empresa ativa'}</span>
+                  <span className="block truncate text-xs font-semibold text-slate-200">{activeTenant?.name}</span>
+                </span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isTenantMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+              </button>
+            ) : (
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-500">{isSpanish ? 'Empresa activa' : 'Empresa ativa'}</p>
+                <p className="truncate text-xs font-semibold text-slate-200">{activeTenant?.name}</p>
+              </div>
+            )}
+            {onLogout && (
+              <button type="button" onClick={onLogout} className="inline-flex min-h-10 shrink-0 items-center gap-1 text-xs font-semibold text-rose-300">
+                <LogOut className="w-3.5 h-3.5" />{isSpanish ? 'Salir' : 'Sair'}
+              </button>
+            )}
+          </div>
+          {canSeeSaasMaster && onSelectTenant && tenants.length > 1 && isTenantMenuOpen && (
+            <div className="mt-2 space-y-1 border-t border-slate-800 pt-2" role="menu" aria-label={isSpanish ? 'Empresa activa' : 'Empresa ativa'}>
+              <div className="max-h-52 space-y-1 overflow-y-auto">
+                {tenants.map((tenant) => (
+                  <button
+                    key={tenant.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { onSelectTenant(tenant); setIsTenantMenuOpen(false); }}
+                    className={`flex min-h-10 w-full items-center justify-between rounded-md px-2 py-2 text-left text-xs font-semibold transition-colors ${tenant.id === activeTenant?.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}
+                  >
+                    <span className="truncate">{tenant.name}</span>
+                    {tenant.id === activeTenant?.id && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800 pt-2">
+            <span className="text-[10px] text-slate-500">{isSpanish ? 'Notificaciones push' : 'Notificações push'}</span>
+            <button
+              type="button"
+              onClick={() => void togglePush()}
+              disabled={pushBusy}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-bold transition-colors disabled:opacity-50 ${pushEnabled ? 'text-emerald-300' : 'text-slate-400 hover:text-white'}`}
+            >
+              {pushEnabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
+              {pushBusy ? '...' : pushEnabled ? (isSpanish ? 'Activas' : 'Ativas') : (isSpanish ? 'Activar' : 'Ativar')}
+            </button>
           </div>
         </div>
       )}
@@ -4395,15 +4601,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </button>
             <button
               type="button"
-              onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
-              className="atendimento-bottom-nav__item"
+              onClick={googleCalendarConnected ? toggleUpcomingEventsPanel : handleConnectGoogleCalendar}
+              className={`atendimento-bottom-nav__item${isUpcomingEventsPanelOpen ? ' is-active' : ''}`}
             >
               <CalendarIcon className="w-6 h-6" />
               <span>Agenda</span>
             </button>
             <button
               type="button"
-              onClick={() => setIsToolbarSettingsOpen((v) => !v)}
+              onClick={() => setIsToolbarSettingsOpen((v) => { const next = !v; if (next) setIsUpcomingEventsPanelOpen(false); return next; })}
               className={`atendimento-bottom-nav__item${isToolbarSettingsOpen ? ' is-active' : ''}`}
             >
               <Settings className="w-6 h-6" />
@@ -6535,7 +6741,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       <UpcomingEventsPanel
         isOpen={isUpcomingEventsPanelOpen}
-        onClose={() => setIsUpcomingEventsPanelOpen(false)}
         events={upcomingEvents}
         isLoading={isLoadingUpcomingEvents}
         error={upcomingEventsError}

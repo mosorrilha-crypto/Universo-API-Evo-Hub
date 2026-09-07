@@ -139,7 +139,6 @@ const EventPaymentAction: React.FC<{
 
 interface UpcomingEventsPanelProps {
   isOpen: boolean;
-  onClose: () => void;
   events: UpcomingEvent[];
   isLoading: boolean;
   error: string | null;
@@ -381,7 +380,7 @@ const EventRowControls: React.FC<{
 };
 
 export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
-  isOpen, onClose, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
+  isOpen, events, isLoading, error, onRefresh, leads, onPickLeadForNewAppointment, onCreateAdHocContactForAppointment,
   monthLabel, calendarYear, calendarMonthNumber, onPrevMonth, onNextMonth, onToggleCompleted, onEditSummary, onReschedule, onDelete, onRegisterPayment, onEditPayment,
   googleCalendarConnected, backupSheetUrl,
 }) => {
@@ -529,9 +528,10 @@ export const UpcomingEventsPanel: React.FC<UpcomingEventsPanelProps> = ({
                 <ExternalLink className="w-4 h-4" />
               </a>
             )}
-            <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer">
-              <X className="w-4 h-4" />
-            </button>
+            {/* TASK-0331 (pedido direto): removido o X — fecha só tocando
+                de novo no ícone "Agenda" da barra inferior (mesmo padrão
+                de toggle que "Ferramentas" já tinha), nunca por um botão
+                dentro do próprio painel. */}
           </div>
         </div>
         <p className="text-xs text-slate-400 mb-3">

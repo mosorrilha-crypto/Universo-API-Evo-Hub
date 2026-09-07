@@ -1426,6 +1426,22 @@ export const App: React.FC = () => {
     showToast(`Empresa alterada para: ${tenant.name}`);
   };
 
+  // TASK-0331 (pedido direto): extraído de dentro do JSX do <Header> pra
+  // ser reaproveitado também por <WhatsAppLeadsSim> — o botão "Sair" saiu
+  // do menu ⋮ (eliminado) e mudou pra dentro da gaveta Ferramentas.
+  const handleLogout = () => {
+    // TASK-0311 (TASK-0249 item 1): o cookie httpOnly não pode ser
+    // apagado pelo JS — precisa desse POST pro backend limpar de
+    // verdade (senão a sessão "volta" no próximo reload).
+    void apiFetch('/api/auth/logout', { method: 'POST' });
+    handleSetActiveTab('whatsapp');
+    setCurrentUser(null);
+    setIsSaasSessionConfirmed(false);
+    setIsLoginModalOpen(true);
+    clearCachedTenantScopedData();
+    showToast('Sessão encerrada');
+  };
+
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
     if (!canSeeFinancial) {
@@ -1453,18 +1469,7 @@ export const App: React.FC = () => {
         savedCount={savedTranscripts.length}
         currentUser={currentUser}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
-        onLogout={() => {
-          // TASK-0311 (TASK-0249 item 1): o cookie httpOnly não pode ser
-          // apagado pelo JS — precisa desse POST pro backend limpar de
-          // verdade (senão a sessão "volta" no próximo reload).
-          void apiFetch('/api/auth/logout', { method: 'POST' });
-          handleSetActiveTab('whatsapp');
-          setCurrentUser(null);
-          setIsSaasSessionConfirmed(false);
-          setIsLoginModalOpen(true);
-          clearCachedTenantScopedData();
-          showToast('Sessão encerrada');
-        }}
+        onLogout={handleLogout}
         tenants={tenants}
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
@@ -1691,6 +1696,17 @@ export const App: React.FC = () => {
             pendingConversasAction={pendingConversasAction}
             onPendingConversasActionHandled={() => setPendingConversasAction(null)}
             onToast={showToast}
+            onSelectTab={handleSetActiveTab}
+            canSeeGrowth={canSeeGrowth}
+            canManageAgent={canManageAgent}
+            canSeeCatalog={canSeeCatalog}
+            canSeeQuality={canSeeQuality}
+            canSeeSystemLogs={canSeeSystemLogs}
+            canSeeBroadcast={canSeeBroadcast}
+            canSeeSaasMaster={canSeeSaasMaster}
+            tenants={tenants}
+            onSelectTenant={handleSelectTenant}
+            onLogout={handleLogout}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}
