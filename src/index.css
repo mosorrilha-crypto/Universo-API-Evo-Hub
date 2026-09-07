@@ -1947,7 +1947,13 @@ html[data-theme='clean'] .operations-module-frame__header {
    reservado — só no mobile, onde essa nav aparece (`lg:!hidden`). */
 @media (max-width: 1023.98px) {
   .app-main.app-main--escalations {
-    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    /* TASK-0336 (mesma causa raiz do vão visto no popup de Ferramentas/
+       Agenda): "4.75rem" era um chute que não batia com a altura real do
+       nav — agora usa a custom property medida de verdade via
+       ResizeObserver (WhatsAppLeadsSim.tsx, `--atendimento-bottom-nav-h`).
+       Sem `+ env(safe-area-inset-bottom)`: a altura medida já inclui esse
+       padding, que o CSS do próprio nav já aplica. */
+    padding-bottom: var(--atendimento-bottom-nav-h, 4.75rem);
   }
 }
 
