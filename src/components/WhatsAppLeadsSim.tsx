@@ -2687,6 +2687,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     if ((lead as any).isReal) {
       if (!(lead as any).historyLoaded && !(lead as any).historyLoading) {
         void loadRealConversationHistory(lead.phone, lead.id);
+      } else if ((lead as any).historyLoaded) {
+        // TASK-0341 (achado real, "ao abrir uma conversa não abre na última
+        // msg"): loadNewerMessages só era chamado pelo handler de SSE, e só
+        // pra conversa ATUALMENTE aberta (`phone === activeLeadPhoneRef.current`,
+        // ver useEffect do EventSource). Enquanto o operador estava em OUTRA
+        // conversa, mensagens novas desta aqui nunca chegavam — e ao
+        // reabri-la, o guard acima (`!historyLoaded`) nunca refazia a busca
+        // (já tinha sido carregada uma vez nesta sessão), então a lista
+        // ficava presa na última mensagem de quando foi vista pela ÚLTIMA
+        // vez, não a real. Sincroniza pra frente (busca só o que é mais novo
+        // que o já carregado, via cursor) toda vez que a conversa é
+        // reaberta, não só na primeira vez.
+        void loadNewerMessages(lead.phone, lead.id);
       }
       if ((lead as any).manuallyUnread) {
         handleUpdateConversationState(lead.id, { unread: false });
