@@ -1796,6 +1796,7 @@ export const App: React.FC = () => {
             locale={activeTenant.locale}
             financialModuleEnabled={canSeeFinancial}
             onToast={showToast}
+            catalogProducts={knowledgeBase.products}
           />
           </OperationsModuleFrame>
         )}
