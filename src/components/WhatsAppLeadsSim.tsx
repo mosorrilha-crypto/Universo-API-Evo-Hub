@@ -221,14 +221,16 @@ interface WhatsAppLeadsSimProps {
   closeThreadSignal?: number;
   /** TASK-0326 — ação disparada de fora (App.tsx/AtendimentoSecondaryNav,
       barra de Pendências/Agenda) que este componente deve executar 1 vez
-      assim que "Conversas" ficar ativa: 'openAgenda' abre o mesmo popup
-      rápido de próximos eventos do botão "Agenda" da barra inferior local
-      (nunca navega pra página completa — decisão do dono do produto, pra
-      manter o botão consistente em qualquer tela); 'openTools' abre a
-      gaveta de Ferramentas. `onPendingConversasActionHandled` avisa
-      App.tsx que já processou, pra ele zerar o sinal (mesmo padrão de
+      assim que "Conversas" ficar ativa: 'openTools' abre a gaveta de
+      Ferramentas. (Havia também 'openAgenda', que reabria o popup rápido
+      de próximos eventos — removido na TASK-0343 quando a Agenda virou
+      página completa em todo lugar no mobile: `AtendimentoSecondaryNav`
+      agora navega direto pra `activeTab === 'agenda'`, igual ao botão
+      "Agenda" da barra inferior local, em vez de voltar pra Conversas e
+      reabrir o popup.) `onPendingConversasActionHandled` avisa App.tsx
+      que já processou, pra ele zerar o sinal (mesmo padrão de
       `openLeadRequestId`/`closeThreadSignal`). */
-  pendingConversasAction?: 'openAgenda' | 'openTools' | null;
+  pendingConversasAction?: 'openTools' | null;
   onPendingConversasActionHandled?: () => void;
   /** TASK-0292 — confirmação/erro do botão "Ressincronizar" da Ficha do
       Contato (agendamento desatualizado). Mesmo `showToast` já usado em
@@ -1288,10 +1290,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // processa, pra App.tsx zerar o sinal (mesmo padrão de openLeadRequestId).
   useEffect(() => {
     if (!pendingConversasAction) return;
-    if (pendingConversasAction === 'openAgenda') {
-      if (googleCalendarConnected) handleOpenUpcomingEvents();
-      else handleConnectGoogleCalendar();
-    } else if (pendingConversasAction === 'openTools') {
+    if (pendingConversasAction === 'openTools') {
       setIsUpcomingEventsPanelOpen(false);
       setIsToolbarSettingsOpen(true);
     }
