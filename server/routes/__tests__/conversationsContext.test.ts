@@ -182,3 +182,29 @@ describe('PATCH /api/conversations/:phone/context/memory', () => {
     expect(supabase.__tables.quality_audit_events).toHaveLength(0);
   });
 });
+
+describe('GET /api/conversations/:phone/journey', () => {
+  it('mescla agendamentos e mudanças de estágio, mais recente primeiro, isolado por tenant', async () => {
+    supabase.__tables.appointment_journey_events = [
+      { id: 'j1', tenant_id: TENANT_A, phone: PHONE, event_type: 'created', service_summary: 'Cílios', actor: 'ai', created_at: '2026-08-22T10:00:00.000Z' },
+      { id: 'j2', tenant_id: TENANT_B, phone: PHONE, event_type: 'created', service_summary: 'Outro tenant', actor: 'ai', created_at: '2026-08-22T10:00:00.000Z' },
+    ];
+    supabase.__tables.crm_lead_stage_history = [
+      { id: 's1', tenant_id: TENANT_A, phone: PHONE, from_stage: null, to_stage: 'novo', created_at: '2026-08-22T09:00:00.000Z' },
+      { id: 's2', tenant_id: TENANT_A, phone: PHONE, from_stage: 'novo', to_stage: 'contato', created_at: '2026-08-22T11:00:00.000Z' },
+    ];
+
+    const response = await fetch(`${baseUrl}/api/conversations/${PHONE}/journey`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.events.map((e: any) => e.id)).toEqual(['s2', 'j1', 's1']);
+    expect(JSON.stringify(body)).not.toContain('Outro tenant');
+  });
+
+  it('lista vazia quando o contato não tem nenhum evento de jornada', async () => {
+    const response = await fetch(`${baseUrl}/api/conversations/595982222222/journey`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.events).toEqual([]);
+  });
+});

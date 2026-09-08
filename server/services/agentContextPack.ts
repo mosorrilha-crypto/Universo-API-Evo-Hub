@@ -45,6 +45,18 @@ export interface DeriveContactMemoryInput {
       Clic Piscinas). Opcional — sem catálogo (tenant ainda sem produtos
       cadastrados), cai no fallback antigo (ver `inferServiceInterest`). */
   knowledgeBase?: AgentKnowledgeBase | null;
+  /** TASK-0355 — o próprio especialista já extrai isso (campo "servicoInteresse"
+      do JSON de resposta), lendo a conversa inteira com muito mais precisão
+      que o regex de `inferServiceInterest` (que só olha a mensagem atual).
+      Sem chamada extra: já vem de graça na mesma resposta usada pra gerar o
+      texto pro cliente — só nunca tinha sido aproveitado aqui. Quando ausente
+      (ex: nenhum serviço específico mencionado ainda), cai no fallback de sempre. */
+  interestedService?: string;
+  /** TASK-0355 — idem: a fase da conversa ("abertura"|"informacao"|"objecao"|
+      "fechamento") também já vem de graça na mesma resposta do especialista.
+      Usada só pra registrar que uma objeção real ocorreu nesta mensagem —
+      nunca decide nada sozinha, é só um fato observado. */
+  phase?: 'abertura' | 'informacao' | 'objecao' | 'fechamento';
 }
 
 function compactText(value: string | null | undefined, maxLength = 180): string | null {
@@ -268,18 +280,29 @@ function deriveNextBestAction(input: DeriveContactMemoryInput): string | undefin
  * agenda/pagamento/escalonamento para facts_confirmed.
  */
 export function deriveContactMemoryPatch(input: DeriveContactMemoryInput): ContactAgentMemoryPatch {
-  const serviceInterest = input.existingMemory?.service_interest || inferServiceInterest(input.text, input.knowledgeBase);
+  // TASK-0355: prefere o servicoInteresse que o próprio especialista já
+  // extraiu (lê a conversa inteira, nome exato do catálogo) ao regex de
+  // inferServiceInterest (só olha a mensagem atual) — mesma prioridade de
+  // antes em relação à memória já existente (sticky, uma vez registrado).
+  const serviceInterest = input.existingMemory?.service_interest || input.interestedService || inferServiceInterest(input.text, input.knowledgeBase);
   const nextBestAction = deriveNextBestAction(input);
   const conversationSummary = [
     serviceInterest ? `Interesse: ${serviceInterest}.` : null,
     nextBestAction ? `Próximo passo: ${nextBestAction}` : null,
   ].filter(Boolean).join(' ') || undefined;
+  // TASK-0355: a fase "objecao" já vem de graça na mesma resposta do
+  // especialista — registra a mensagem que gerou a objeção como um fato
+  // observável. Acrescenta à lista existente (nunca substitui — ver
+  // replaceObjections em contactAgentMemoryStore.ts, reservado pra correção
+  // humana), então uma objeção nova nunca apaga uma anterior.
+  const newObjection = input.phase === 'objecao' ? compactText(input.text, 200) : null;
 
   return {
     preferredLanguage: input.existingMemory?.preferred_language || detectExplicitLanguage(input.text),
     preferredName: input.capturedClientName || input.existingMemory?.preferred_name || undefined,
     currentIntent: input.agent,
     serviceInterest,
+    objections: newObjection ? [newObjection] : undefined,
     openLoops: buildOpenLoops(input),
     nextBestAction,
     conversationSummary,
