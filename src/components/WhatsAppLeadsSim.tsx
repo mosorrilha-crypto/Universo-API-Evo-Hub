@@ -3681,7 +3681,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     onClick: () => void;
     active?: boolean;
     disabled?: boolean;
-    badge?: number;
     // TASK-0336 (pedido direto, print anotado): status do agente precisa de
     // 3 cores diferentes (verde/âmbar/vermelho), não só o binário
     // ativo/inativo que `active` já cobria — `toneClass` sobrescreve a
@@ -3702,11 +3701,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       >
         {options.icon}
       </span>
-      {!!options.badge && (
-        <span className="absolute right-1 top-0 min-w-[1.1rem] rounded-full bg-red-500 px-1 text-center text-[10px] font-bold leading-[1.1rem] text-white">
-          {options.badge}
-        </span>
-      )}
       <span className="max-w-[4.5rem] text-center text-[10px] font-semibold leading-tight text-slate-300">
         {options.label}
       </span>
@@ -3777,17 +3771,37 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           {/* TASK-0343 (pedido direto): "Somente anúncios" é conceitualmente
               parte do status de atendimento do agente (que tipo de contato
               ele responde agora), então mudou de uma fileira própria de
-              ícone em círculo pra virar a 4ª pill desta mesma seção. */}
-          <button
-            type="button"
-            onClick={handleToggleAdsOnly}
-            title={adsOnly ? 'Agente só responde contatos vindos de anúncio — toque pra desligar' : 'Restringir o agente a só responder contatos vindos de anúncio'}
-            className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
-              adsOnly ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
-            }`}
-          >
-            {isSpanish ? 'Anuncios' : 'Anúncios'}
-          </button>
+              ícone em círculo pra virar a 4ª pill desta mesma seção.
+              TASK-0348 (pedido direto, print anotado): "Gatilhos" — que
+              vivia numa fileira própria só quando "Anúncios" estava ligado —
+              virou o badge desta MESMA pill, sempre visível quando há
+              mensagem pendente de revisão (independe do toggle estar ligado
+              ou não). O corpo da pill continua ligando/desligando "somente
+              anúncios" (`handleToggleAdsOnly`); o badge é um botão à parte
+              (não aninhado — <button> dentro de <button> é HTML inválido)
+              que abre o modal de gatilhos. */}
+          <div className={`flex flex-1 items-stretch overflow-hidden rounded-lg transition-colors ${adsOnly ? 'bg-emerald-500/20' : 'bg-slate-950/50'}`}>
+            <button
+              type="button"
+              onClick={handleToggleAdsOnly}
+              title={adsOnly ? 'Agente só responde contatos vindos de anúncio — toque pra desligar' : 'Restringir o agente a só responder contatos vindos de anúncio'}
+              className={`flex-1 px-2 py-1.5 text-left text-[11px] font-semibold transition-colors cursor-pointer ${
+                adsOnly ? 'text-emerald-300' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {isSpanish ? 'Anuncios' : 'Anúncios'}
+            </button>
+            {adTriggerMessages.length > 0 && (
+              <button
+                type="button"
+                onClick={openAdTriggersModal}
+                title={isSpanish ? 'Ver gatillos de anuncio pendientes' : 'Ver gatilhos de anúncio pendentes'}
+                className="flex shrink-0 items-center justify-center bg-red-500 px-1.5 text-[10px] font-bold text-white transition-colors hover:bg-red-400"
+              >
+                {adTriggerMessages.length}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -3877,32 +3891,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         )}
       </div>
 
-      {/* "Somente anúncios" virou pill dentro de "Status do agente" acima
-          (TASK-0343) — "Gatilhos" (só existe quando o toggle está ligado)
-          fica na sua própria fileira aqui, em vez de dividir grade com um
-          tile que não existe mais. */}
-      {adsOnly && (
-        <div className="grid w-full grid-cols-4 gap-2">
-          {renderToolTile({
-            key: 'ad-triggers',
-            icon: <Settings className="h-4 w-4" />,
-            label: 'Gatilhos',
-            onClick: openAdTriggersModal,
-            badge: adTriggerMessages.length || undefined,
-          })}
-        </div>
-      )}
-
-      {/* TASK-0301 (pedido direto): CRM, Agenda e Financeiro saíram do menu
-          superior (Header.tsx) — Atendimento virou a tela padrão do
-          sistema, então esses módulos precisam de um jeito de acesso daqui
-          de dentro. Cada tile só aparece se App.tsx passou a prop
-          correspondente (usuário logado tem permissão pro módulo) — mesmo
-          padrão de onGoToAgenda no ícone do cabeçalho da conversa aberta.
+      {/* TASK-0301 (pedido direto): CRM e Financeiro saíram do menu superior
+          (Header.tsx) — Atendimento virou a tela padrão do sistema, então
+          esses módulos precisam de um jeito de acesso daqui de dentro. Cada
+          tile só aparece se App.tsx passou a prop correspondente (usuário
+          logado tem permissão pro módulo).
           TASK-0331 (pedido direto): "Crescimento" entrou nesta mesma grade
           — saiu do menu ⋮ (Header.tsx, eliminado), ganhou ícone próprio
-          aqui igual Vendas/Agenda completa/Financeiro. */}
-      {(onGoToCrm || onGoToAgenda || onGoToFinancial || (onSelectTab && canSeeGrowth)) && (
+          aqui igual Vendas/Agenda completa/Financeiro.
+          TASK-0348 (pedido direto, print anotado): "Agenda completa" saiu
+          desta grade — ficou redundante depois da TASK-0343/0344 (o ícone
+          "Agenda" da própria barra inferior já navega direto pra essa
+          página). "Crescimento" renomeado pra "Anúncios" (nome mais direto
+          do que a tela realmente mostra — desempenho de anúncios). */}
+      {(onGoToCrm || onGoToFinancial || (onSelectTab && canSeeGrowth)) && (
         <div className="w-full border-t border-slate-800 pt-2.5">
           <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Módulos</p>
           <div className="grid w-full grid-cols-4 gap-2">
@@ -3914,16 +3916,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               label: 'CRM',
               onClick: () => { setIsToolbarSettingsOpen(false); onGoToCrm(); },
             })}
-            {onGoToAgenda && renderToolTile({
-              key: 'go-to-agenda',
-              icon: <CalendarPlus className="h-4 w-4" />,
-              // "Agenda completa" (não só "Agenda") pra não confundir com o
-              // tile de mesmo nome na barra inferior, que abre só o popup
-              // de próximos eventos (handleOpenUpcomingEvents) — este vai
-              // pra aba Agenda de verdade (mês/semana, financeiro da agenda).
-              label: 'Agenda completa',
-              onClick: () => { setIsToolbarSettingsOpen(false); onGoToAgenda(); },
-            })}
             {onGoToFinancial && renderToolTile({
               key: 'go-to-financial',
               icon: <Wallet className="h-4 w-4" />,
@@ -3933,7 +3925,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             {onSelectTab && canSeeGrowth && renderToolTile({
               key: 'go-to-growth',
               icon: <Target className="h-4 w-4" />,
-              label: isSpanish ? 'Crecimiento' : 'Crescimento',
+              label: isSpanish ? 'Anuncios' : 'Anúncios',
               onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('attribution'); },
             })}
           </div>
@@ -6661,62 +6653,60 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* Ferramentas no mobile — gaveta deslizante (aberta pela aba inferior
-          "Ferramentas", ícone de engrenagem) em vez de empurrar a lista de
-          conversas pra baixo (achado real, 29/08/2026, pedido do dono do
-          produto). Conteúdo reaproveita `toolbarSettingsBody`, definido
-          antes do "return" deste componente, sem duplicar JSX.
+      {/* Ferramentas no mobile — página cheia (aberta pela aba inferior
+          "Ferramentas", ícone de engrenagem), não mais gaveta. Conteúdo
+          reaproveita `toolbarSettingsBody`, definido antes do "return"
+          deste componente, sem duplicar JSX.
           Redesenho (pedido direto, 04/09/2026, com print comparando com o
           menu de anexos real do WhatsApp): antes o fundo inteiro escurecia
-          (`bg-slate-950/80 backdrop-blur-sm`), dando a impressão de cobrir
-          a tela toda mesmo com a gaveta ocupando só uma fração dela — o
-          WhatsApp real não escurece nada atrás do menu de anexos, a
-          conversa continua visível e legível. Removido o escurecimento
-          (o `fixed inset-0` continua só como área clicável pra fechar ao
-          tocar fora) e adicionada a alcinha de arraste no topo do painel,
-          mesmo afordance visual do WhatsApp pra indicar que é uma gaveta
-          que pode ser puxada. Ficha IA (`atendimento-analysis-drawer`,
-          acima) não mudou — o pedido foi só sobre esta gaveta. */}
+          (`bg-slate-950/80 backdrop-blur-sm`) — removido, mesmo padrão do
+          menu de anexos real do WhatsApp.
+
+          TASK-0348 (pedido direto, print anotado com X na área de cima:
+          "não está funcional abrir como gaveta a parte de cima não fica
+          útil... vamos transformar essa aba em uma página igual a
+          agenda") — a versão em gaveta (`max-h-[70vh]`, ancorada embaixo)
+          deixava ~30% da tela em cima mostrando a busca/lista de conversas
+          por trás, mas sem dar pra interagir (um toque ali só fechava a
+          gaveta) — exatamente a mesma classe de bug de "área morta" que a
+          Agenda teve (TASK-0343/0344). Virou página cheia de verdade
+          (`h-full`, sem `items-end`/alcinha de arraste/cantos
+          arredondados), preenchendo TODO o espaço entre o topo e a barra
+          inferior — mesmo princípio da Agenda, só que sem precisar virar
+          uma aba própria em App.tsx (o conteúdo já depende de estado local
+          deste componente: status do agente, idioma/tema, etc.), então a
+          troca aqui é só de altura/estilo, mantendo a mesma barra inferior
+          já usada (dentro de `.atendimento-queue`, ver mais abaixo) e o
+          mesmo mecanismo de fechar tocando fora/no X/trocando de aba. */}
       {isToolbarSettingsOpen && (
         // TASK-0328 (pedido direto, prints comparando a barra inferior
         // sumida): esta área clicável cobria `inset-0` (toda a viewport),
         // inclusive a faixa de `.atendimento-bottom-nav` — `bottom-[...]`
         // reserva a altura real da nav (mesmo valor de UpcomingEventsPanel)
-        // pra ela continuar visível/clicável com a gaveta aberta, em vez de
+        // pra ela continuar visível/clicável com a página aberta, em vez de
         // sumir por trás.
         //
         // TASK-0336 (achado real, print anotado): esse "4.75rem" era um
         // chute que não batia com a altura real renderizada do nav, deixando
-        // um vão visível entre o fundo da gaveta e o topo do nav — agora usa
+        // um vão visível entre o fundo da página e o topo do nav — agora usa
         // `--atendimento-bottom-nav-h`, medida de verdade via ResizeObserver
         // (ver o `bottomNavRef` acima). Sem `+ env(safe-area-inset-bottom)`
         // aqui: a altura medida (`getBoundingClientRect`) já inclui esse
         // padding, que o CSS do próprio nav já aplica — somar de novo
         // reservaria espaço a mais. "4.75rem" continua só como fallback
         // pro instante antes do primeiro measure (SSR/primeiro paint).
-        <div
-          className="lg:hidden fixed inset-x-0 top-0 bottom-[var(--atendimento-bottom-nav-h,4.75rem)] z-50 flex items-end"
-          onClick={() => setIsToolbarSettingsOpen(false)}
-        >
-          <div
-            className="w-full max-h-[70vh] rounded-t-2xl border-t border-slate-800 bg-[#111b21] shadow-[0_-12px_32px_rgba(0,0,0,0.5)] flex flex-col animate-page-enter"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
-              <span className="h-1 w-10 rounded-full bg-slate-700" aria-hidden="true" />
-            </div>
-            <div className="flex items-center justify-between px-3 pb-2 flex-shrink-0">
-              <h3 className="text-sm font-bold text-white">Ferramentas</h3>
-              <button
-                onClick={() => setIsToolbarSettingsOpen(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-3 pt-1 flex flex-col gap-2.5 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-              {toolbarSettingsBody}
-            </div>
+        <div className="lg:hidden fixed inset-x-0 top-0 bottom-[var(--atendimento-bottom-nav-h,4.75rem)] z-50 flex flex-col bg-[#111b21] animate-page-enter">
+          <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2.5 flex-shrink-0">
+            <h3 className="text-sm font-bold text-white">Ferramentas</h3>
+            <button
+              onClick={() => setIsToolbarSettingsOpen(false)}
+              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 p-3 flex flex-col gap-2.5 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            {toolbarSettingsBody}
           </div>
         </div>
       )}
