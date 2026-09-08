@@ -4,10 +4,11 @@
  * tema saíram do cabeçalho global (Header.tsx) e vieram pra dentro da
  * gaveta "Ferramentas" do Atendimento, discretos igual "Status do agente".
  *
- * TASK-0336 (pedido direto, print anotado): idioma/tema deixaram de ser 2
- * fileiras de pills sempre abertas — cada um virou um ícone único (rótulo =
- * valor atual, ex: "PT"/"Escuro") que precisa ser tocado pra expandir as
- * opções antes de poder escolher outra.
+ * TASK-0336 tinha colapsado idioma/tema num ícone único que precisava ser
+ * tocado pra expandir. TASK-0341/0342 reverteram pra pills sempre visíveis.
+ * TASK-0343 (pedido direto): meio-termo — a pill do valor ATUAL (idioma e
+ * tema) fica sempre visível; tocar nela expande as outras opções como
+ * pills de texto (não um ícone isolado, como era na TASK-0336).
  */
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -60,8 +61,8 @@ describe('WhatsAppLeadsSim — idioma e tema dentro da gaveta "Ferramentas"', ()
       fireEvent.click(screen.getByText('Ferramentas'));
     });
 
-    // Idioma vira um ícone único (rótulo = idioma atual, "PT") — precisa
-    // tocar nele pra expandir as opções antes de poder escolher "Español".
+    // Idioma vira uma pill com o valor atual ("PT") — precisa tocar nela
+    // pra expandir as opções antes de poder escolher "Español".
     await waitFor(() => expect(screen.getByText('PT')).not.toBeNull());
     await act(async () => {
       fireEvent.click(screen.getByText('PT'));
@@ -71,7 +72,7 @@ describe('WhatsAppLeadsSim — idioma e tema dentro da gaveta "Ferramentas"', ()
     });
     expect(document.documentElement.lang).toBe('es-PY');
 
-    // Mesmo padrão pro tema (rótulo = tema atual, "Escuro" por padrão).
+    // Mesmo padrão pro tema (pill com o valor atual, "Escuro" por padrão).
     await waitFor(() => expect(screen.getByText('Escuro')).not.toBeNull());
     await act(async () => {
       fireEvent.click(screen.getByText('Escuro'));

@@ -384,12 +384,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [pushError]);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
   const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
-  // TASK-0336 (pedido direto, print anotado à mão): "Status do agente"/
-  // "Idioma"/"Tema" ocupavam 3 fileiras inteiras de pills sempre visíveis na
-  // gaveta Ferramentas, mesmo sendo ajustes usados raramente — cada um vira
-  // um único ícone (valor atual já visível nele) que expande as outras
-  // opções ao tocar, igual um seletor nativo. Só um grupo expandido por vez.
-  const [expandedQuickSetting, setExpandedQuickSetting] = useState<'status' | 'language' | 'theme' | null>(null);
+  // TASK-0336 tinha colapsado "Status do agente"/"Idioma"/"Tema" num ícone
+  // único por ajuste (expandia opções ao tocar) pra ocupar menos espaço —
+  // TASK-0341/0342 (pedido direto) reverteram pra pills sempre visíveis.
+  // TASK-0343 (pedido direto): meio-termo pra Idioma/Tema especificamente —
+  // "não quero ícones, quero botões, só recolhe os inativos, aparecem só
+  // quando solicitado" — a pill do valor ATUAL fica sempre visível, tocar
+  // nela expande as outras opções (mesma pill de texto, não ícone isolado).
+  // "Status do agente" continua sem recolher — sem reclamação sobre ele.
+  const [expandedLangOrTheme, setExpandedLangOrTheme] = useState<'language' | 'theme' | null>(null);
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
@@ -3677,6 +3680,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // anúncios, Gatilhos, Notificações) viraram uma grade de ícones em
   // círculo + rótulo embaixo, no mesmo estilo do menu de anexos do
   // WhatsApp real, em vez da fileira de botões retangulares de texto.
+  //
+  // TASK-0340 (pedido direto, print anotado): os círculos de 56px (h-14
+  // w-14) com ícone de 20px deixavam a gaveta grande demais no mobile —
+  // muito espaço vazio entre botões e a gaveta ocupando altura maior do
+  // que o necessário. Reduzido pra 48px (h-12 w-12) com ícone de 16px,
+  // gap menor entre ícone/rótulo e entre colunas, e menos respiro vertical
+  // entre as seções (Status/Idioma/Tema/Anúncios, Módulos, Configurações)
+  // — mesma quantidade de opções, ocupando bem menos tela.
   const renderToolTile = (options: {
     key: string;
     icon: React.ReactNode;
@@ -3696,10 +3707,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       type="button"
       onClick={options.onClick}
       disabled={options.disabled}
-      className="relative flex flex-col items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+      className="relative flex flex-col items-center gap-1 disabled:opacity-50 cursor-pointer"
     >
       <span
-        className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
+        className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
           options.toneClass ?? (options.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/60 text-slate-300')
         }`}
       >
@@ -3742,54 +3753,56 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           mobile. */}
 
       {/* TASK-0336 (pedido direto, print anotado à mão comparando com o
-          menu de anexos do WhatsApp real): Status do agente, Idioma e Tema
-          ocupavam 3 fileiras inteiras de pills sempre visíveis — ajustes
-          usados raramente, mas sempre abertos. Cada um virou um único ícone
-          (já mostrando o valor atual — cor do status, "PT"/"ES", ícone do
-          tema escolhido); tocar nele expande as opções logo abaixo, e
-          escolher uma aplica e recolhe de volta. Só um grupo expandido por
-          vez (`expandedQuickSetting`). "Somente anúncios" entrou nessa
-          mesma fileira de 4 — já era um ícone único (é um toggle
-          liga/desliga, não tem outras opções pra expandir). */}
-      <div className="grid w-full grid-cols-4 gap-3">
-        {renderToolTile({
-          key: 'quick-status',
-          icon: <span className="h-3 w-3 rounded-full bg-current" aria-hidden="true" />,
-          label: agentStatus === null ? '...' : agentStatus === 'active' ? 'Ativo' : agentStatus === 'restricted' ? 'Restrito' : 'Pausado',
-          active: true,
-          toneClass:
-            agentStatus === 'paused' ? 'bg-red-500/20 text-red-300' :
-            agentStatus === 'restricted' ? 'bg-amber-500/20 text-amber-300' :
-            agentStatus === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
-            'bg-slate-950/60 text-slate-300',
-          onClick: () => setExpandedQuickSetting((v) => (v === 'status' ? null : 'status')),
-        })}
-        {renderToolTile({
-          key: 'quick-language',
-          icon: <Globe className="h-5 w-5" />,
-          label: language.toUpperCase(),
-          active: expandedQuickSetting === 'language',
-          onClick: () => setExpandedQuickSetting((v) => (v === 'language' ? null : 'language')),
-        })}
-        {renderToolTile({
-          key: 'quick-theme',
-          icon: {
-            dark: <Moon className="h-5 w-5" />,
-            light: <Sun className="h-5 w-5" />,
-            blue: <Layers className="h-5 w-5" />,
-            clean: <Sparkles className="h-5 w-5" />,
-          }[theme],
-          label: { dark: 'Escuro', light: 'Claro', blue: 'Azul', clean: 'Limpo' }[theme],
-          active: expandedQuickSetting === 'theme',
-          onClick: () => setExpandedQuickSetting((v) => (v === 'theme' ? null : 'theme')),
-        })}
-        {renderToolTile({
-          key: 'ads-only',
-          icon: <Filter className="h-5 w-5" />,
-          label: adsOnly ? 'Anúncios (ativo)' : 'Somente anúncios',
-          active: adsOnly,
-          onClick: handleToggleAdsOnly,
-        })}
+          menu de anexos do WhatsApp real) tinha colapsado Status/Idioma/
+          Tema num ícone único por ajuste, expandindo as opções só ao
+          tocar. TASK-0341 (pedido direto, comparando com a versão ainda
+          em produção nesse momento): o dono do produto preferiu a versão
+          anterior — pills sempre visíveis, sem precisar de um toque extra
+          pra ver/trocar — só pedindo mais compacta do que a original.
+          Volta a mostrar Status do agente e Idioma+Tema sempre abertos,
+          em pills menores (padding e fonte reduzidos) — sem o estado
+          `expandedQuickSetting`/toque-pra-expandir. "Somente anúncios"
+          continua como ícone em círculo (mesmo estilo de Módulos), já que
+          é só um toggle liga/desliga, não tem opções pra escolher. */}
+      <div className="flex flex-col gap-1">
+        <p className="pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          {isSpanish ? 'Estado del agente' : 'Status do agente'}
+        </p>
+        <div className="flex gap-1">
+          {(['active', 'restricted', 'paused'] as const).map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => handleChangeAgentStatus(status)}
+              title={
+                status === 'active' ? 'Agente responde sempre' :
+                status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                'Agente pausado — silêncio total'
+              }
+              className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+                agentStatus === status
+                  ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                  : 'bg-slate-950/50 text-slate-400 hover:text-white'
+              }`}
+            >
+              {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+            </button>
+          ))}
+          {/* TASK-0343 (pedido direto): "Somente anúncios" é conceitualmente
+              parte do status de atendimento do agente (que tipo de contato
+              ele responde agora), então mudou de uma fileira própria de
+              ícone em círculo pra virar a 4ª pill desta mesma seção. */}
+          <button
+            type="button"
+            onClick={handleToggleAdsOnly}
+            title={adsOnly ? 'Agente só responde contatos vindos de anúncio — toque pra desligar' : 'Restringir o agente a só responder contatos vindos de anúncio'}
+            className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+              adsOnly ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
+            }`}
+          >
+            {isSpanish ? 'Anuncios' : 'Anúncios'}
+          </button>
+        </div>
       </div>
 
       {agentStatusLoadFailed && (
@@ -3804,79 +3817,89 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </button>
       )}
 
-      {expandedQuickSetting === 'status' && (
-        <div className="flex items-center justify-center gap-0.5 rounded-lg bg-slate-950/55 p-0.5">
-          {(['active', 'restricted', 'paused'] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => { handleChangeAgentStatus(status); setExpandedQuickSetting(null); }}
-              title={
-                status === 'active' ? 'Agente responde sempre' :
-                status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                'Agente pausado — silêncio total'
-              }
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
-                agentStatus === status
-                  ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
-            </button>
-          ))}
+      {/* TASK-0343 (pedido direto): idioma/tema voltam a ficar recolhidos —
+          só o valor ATUAL aparece (uma pill de idioma + uma pill de tema),
+          e tocar numa delas expande as outras opções logo abaixo, igual
+          era antes de TASK-0342 — mas mantendo o visual de "pill" com
+          texto (pedido explícito: "não quero ícones, quero botões"), não o
+          ícone redondo isolado que existia na TASK-0336. */}
+      <div className="flex flex-col gap-1">
+        <p className="pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          {isSpanish ? 'Idioma y tema' : 'Idioma e tema'}
+        </p>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setExpandedLangOrTheme((v) => (v === 'language' ? null : 'language'))}
+            className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold transition-all cursor-pointer ${
+              expandedLangOrTheme === 'language' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-300 hover:text-white'
+            }`}
+          >
+            {language.toUpperCase()}
+            <ChevronDown className={`h-3 w-3 transition-transform ${expandedLangOrTheme === 'language' ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpandedLangOrTheme((v) => (v === 'theme' ? null : 'theme'))}
+            className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+              expandedLangOrTheme === 'theme' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-300 hover:text-white'
+            }`}
+          >
+            {{ dark: 'Escuro', light: 'Claro', blue: 'Azul', clean: 'Limpo' }[theme]}
+            <ChevronDown className={`h-3 w-3 transition-transform ${expandedLangOrTheme === 'theme' ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </button>
         </div>
-      )}
+        {expandedLangOrTheme === 'language' && (
+          <div className="flex items-center gap-1">
+            {(['pt', 'es'] as const).map((lang) => (
+              <button
+                key={lang}
+                type="button"
+                onClick={() => { setLanguage(lang); setExpandedLangOrTheme(null); }}
+                title={lang === 'pt' ? 'Português' : 'Español'}
+                className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition-all cursor-pointer ${
+                  language === lang ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
+                }`}
+              >
+                {lang.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        )}
+        {expandedLangOrTheme === 'theme' && (
+          <div className="flex items-center gap-1">
+            {([
+              { id: 'dark' as const, label: 'Escuro', Icon: Moon },
+              { id: 'light' as const, label: 'Claro', Icon: Sun },
+              { id: 'blue' as const, label: 'Azul', Icon: Layers },
+              { id: 'clean' as const, label: 'Limpo', Icon: Sparkles },
+            ]).map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { setTheme(id); setExpandedLangOrTheme(null); }}
+                title={label}
+                className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+                  theme === id ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-      {expandedQuickSetting === 'language' && (
-        <div className="flex items-center justify-center gap-0.5 rounded-lg bg-slate-950/55 p-0.5">
-          {(['pt', 'es'] as const).map((lang) => (
-            <button
-              key={lang}
-              type="button"
-              onClick={() => { setLanguage(lang); setExpandedQuickSetting(null); }}
-              title={lang === 'pt' ? 'Português' : 'Español'}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                language === lang ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {lang.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {expandedQuickSetting === 'theme' && (
-        <div className="flex items-center justify-center gap-0.5 rounded-lg bg-slate-950/55 p-0.5">
-          {([
-            { id: 'dark' as const, label: 'Escuro', Icon: Moon },
-            { id: 'light' as const, label: 'Claro', Icon: Sun },
-            { id: 'blue' as const, label: 'Azul', Icon: Layers },
-            { id: 'clean' as const, label: 'Limpo', Icon: Sparkles },
-          ]).map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => { setTheme(id); setExpandedQuickSetting(null); }}
-              title={label}
-              className={`px-2.5 py-1.5 rounded-lg transition-all cursor-pointer ${
-                theme === id ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Notificações push do PWA do atendente saíram daqui (TASK-0284,
-          pedido direto): não são uma ação desta conversa/gaveta, são
-          configuração de conta — agora vivem só no Header global (mesmo
-          lugar em qualquer aba, não só dentro do Atendimento). */}
+      {/* "Somente anúncios" virou pill dentro de "Status do agente" acima
+          (TASK-0343) — "Gatilhos" (só existe quando o toggle está ligado)
+          fica na sua própria fileira aqui, em vez de dividir grade com um
+          tile que não existe mais. */}
       {adsOnly && (
-        <div className="grid w-full grid-cols-4 gap-3">
+        <div className="grid w-full grid-cols-4 gap-2">
           {renderToolTile({
             key: 'ad-triggers',
-            icon: <Settings className="h-5 w-5" />,
+            icon: <Settings className="h-4 w-4" />,
             label: 'Gatilhos',
             onClick: openAdTriggersModal,
             badge: adTriggerMessages.length || undefined,
@@ -3894,18 +3917,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           — saiu do menu ⋮ (Header.tsx, eliminado), ganhou ícone próprio
           aqui igual Vendas/Agenda completa/Financeiro. */}
       {(onGoToCrm || onGoToAgenda || onGoToFinancial || (onSelectTab && canSeeGrowth)) && (
-        <div className="w-full border-t border-slate-800 pt-3">
+        <div className="w-full border-t border-slate-800 pt-2.5">
           <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Módulos</p>
-          <div className="grid w-full grid-cols-4 gap-3">
+          <div className="grid w-full grid-cols-4 gap-2">
             {onGoToCrm && renderToolTile({
               key: 'go-to-crm',
-              icon: <Kanban className="h-5 w-5" />,
-              label: 'Vendas',
+              icon: <Kanban className="h-4 w-4" />,
+              // TASK-0343 (pedido direto): "Vendas" renomeado pra "CRM" —
+              // nome mais direto do que o módulo realmente é/mostra.
+              label: 'CRM',
               onClick: () => { setIsToolbarSettingsOpen(false); onGoToCrm(); },
             })}
             {onGoToAgenda && renderToolTile({
               key: 'go-to-agenda',
-              icon: <CalendarPlus className="h-5 w-5" />,
+              icon: <CalendarPlus className="h-4 w-4" />,
               // "Agenda completa" (não só "Agenda") pra não confundir com o
               // tile de mesmo nome na barra inferior, que abre só o popup
               // de próximos eventos (handleOpenUpcomingEvents) — este vai
@@ -3915,13 +3940,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             })}
             {onGoToFinancial && renderToolTile({
               key: 'go-to-financial',
-              icon: <Wallet className="h-5 w-5" />,
+              icon: <Wallet className="h-4 w-4" />,
               label: 'Financeiro',
               onClick: () => { setIsToolbarSettingsOpen(false); onGoToFinancial(); },
             })}
             {onSelectTab && canSeeGrowth && renderToolTile({
               key: 'go-to-growth',
-              icon: <Target className="h-5 w-5" />,
+              icon: <Target className="h-4 w-4" />,
               label: isSpanish ? 'Crecimiento' : 'Crescimento',
               onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('attribution'); },
             })}
@@ -3945,63 +3970,82 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           mais linhas de texto) com cada opção, igual pedido: "pode virar um
           icon com outros ícones dentro". */}
       {onSelectTab && (canManageAgent || canSeeCatalog || canSeeQuality || canSeeSystemLogs || canSeeBroadcast || canSeeSaasMaster) && (
-        <div className="w-full border-t border-slate-800 pt-3">
-          <div className="grid w-full grid-cols-4 gap-3">
+        <div className="w-full border-t border-slate-800 pt-2.5">
+          <div className="grid w-full grid-cols-4 gap-2">
             {renderToolTile({
               key: 'settings-toggle',
-              icon: <Settings2 className="h-5 w-5" />,
+              icon: <Settings2 className="h-4 w-4" />,
               label: isSpanish ? 'Configuración' : 'Configurações',
               active: isSettingsMenuOpen,
               onClick: () => setIsSettingsMenuOpen((value) => !value),
             })}
           </div>
           {isSettingsMenuOpen && (
-            <div className="mt-3 grid w-full grid-cols-4 gap-3">
+            <div className="mt-2 grid w-full grid-cols-4 gap-2">
               {canManageAgent && renderToolTile({
                 key: 'settings-knowledge',
-                icon: <Brain className="h-5 w-5" />,
+                icon: <Brain className="h-4 w-4" />,
                 label: isSpanish ? 'Agente y catálogo' : 'Agente & catálogo',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('knowledge'); },
               })}
               {canSeeCatalog && renderToolTile({
                 key: 'settings-catalog',
-                icon: <Link2 className="h-5 w-5" />,
+                icon: <Link2 className="h-4 w-4" />,
                 label: 'Catálogo público',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('catalog'); },
               })}
               {canSeeQuality && renderToolTile({
                 key: 'settings-quality',
-                icon: <ShieldCheck className="h-5 w-5" />,
+                icon: <ShieldCheck className="h-4 w-4" />,
                 label: isSpanish ? 'Calidad del agente' : 'Qualidade do agente',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('quality'); },
               })}
               {canSeeSystemLogs && renderToolTile({
                 key: 'settings-logs',
-                icon: <ScrollText className="h-5 w-5" />,
+                icon: <ScrollText className="h-4 w-4" />,
                 label: isSpanish ? 'Logs del sistema' : 'Logs do sistema',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('system_logs'); },
               })}
               {canSeeBroadcast && renderToolTile({
                 key: 'settings-broadcast',
-                icon: <Radio className="h-5 w-5" />,
+                icon: <Radio className="h-4 w-4" />,
                 label: isSpanish ? 'Envío Masivo' : 'Disparo em Massa',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('broadcast'); },
               })}
               {canSeeSaasMaster && renderToolTile({
                 key: 'settings-saas',
-                icon: <Layers className="h-5 w-5" />,
+                icon: <Layers className="h-4 w-4" />,
                 label: 'Empresas',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('saas'); },
               })}
+            </div>
+          )}
+          {/* TASK-0343 (pedido direto): "Notificações push" mudou de lugar
+              DE NOVO — morava na caixa "Empresa ativa"/"Sair" (TASK-0331),
+              mas é uma configuração de verdade, não uma ação de conta —
+              faz mais sentido dentro de "Configurações". */}
+          {isSettingsMenuOpen && (
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800 pt-2">
+              <span className="text-[10px] text-slate-500">{isSpanish ? 'Notificaciones push' : 'Notificações push'}</span>
+              <button
+                type="button"
+                onClick={() => void togglePush()}
+                disabled={pushBusy}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-bold transition-colors disabled:opacity-50 ${pushEnabled ? 'text-emerald-300' : 'text-slate-400 hover:text-white'}`}
+              >
+                {pushEnabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
+                {pushBusy ? '...' : pushEnabled ? (isSpanish ? 'Activas' : 'Ativas') : (isSpanish ? 'Activar' : 'Ativar')}
+              </button>
             </div>
           )}
         </div>
       )}
 
       {/* TASK-0331 (pedido direto): "Empresa ativa" (troca rápida de
-          tenant, só saas_admin), "Sair" e "Notificações push" saíram do
-          menu ⋮ do cabeçalho (Header.tsx, eliminado) — mesma caixa
-          separada que já existia lá, agora dentro de Ferramentas. */}
+          tenant, só saas_admin) e "Sair" saíram do menu ⋮ do cabeçalho
+          (Header.tsx, eliminado) — mesma caixa separada que já existia lá,
+          agora dentro de Ferramentas. "Notificações push" mora agora
+          dentro de "Configurações" acima (TASK-0343). */}
       {(onLogout || onSelectTenant) && (
         <div className="relative w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
           <div className="flex items-center justify-between gap-2">
@@ -4050,18 +4094,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </div>
             </div>
           )}
-          <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800 pt-2">
-            <span className="text-[10px] text-slate-500">{isSpanish ? 'Notificaciones push' : 'Notificações push'}</span>
-            <button
-              type="button"
-              onClick={() => void togglePush()}
-              disabled={pushBusy}
-              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-bold transition-colors disabled:opacity-50 ${pushEnabled ? 'text-emerald-300' : 'text-slate-400 hover:text-white'}`}
-            >
-              {pushEnabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
-              {pushBusy ? '...' : pushEnabled ? (isSpanish ? 'Activas' : 'Ativas') : (isSpanish ? 'Activar' : 'Ativar')}
-            </button>
-          </div>
         </div>
       )}
     </>
@@ -4090,7 +4122,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // — "a caixa está muito estreita ... e a janela muito pequena".
     // Removido — a área de conversa agora estica de verdade até onde o
     // `.app-main` já permite.
-    <div className="atendimento-conversations space-y-4 animate-page-enter flex flex-col flex-1 min-h-0">
+    //
+    // TASK-0338 (achado real, 08/09/2026, 2 prints do dono do produto):
+    // a causa raiz real por trás da "faixa vazia"/nav flutuando no meio da
+    // tela ao abrir Agenda/Ferramentas no mobile — que as TASK-0328/0336/
+    // 0337 tentaram resolver só ajustando a ALTURA reservada pro nav —
+    // nunca foi a altura, e sim `animate-page-enter` (index.css) aplicado
+    // NESTE div, que é o ancestral direto da gaveta de Ferramentas e do
+    // `UpcomingEventsPanel` (Agenda), ambos `fixed inset-x-0 top-0 bottom-
+    // [...]`. `animate-page-enter` usa `animation: ... both`, e o fill-mode
+    // `both` mantém pra sempre o `transform: translateY(0)` do frame final
+    // — mesmo um transform "idêntico" (0px) faz este div virar o
+    // containing block dos seus descendentes `position: fixed` (regra do
+    // spec CSS), em vez do viewport real. Por isso os dois overlays nunca
+    // se alinhavam de verdade com a tela/nav inferior, e nenhum ajuste de
+    // `dvh`/`visualViewport`/altura medida no elemento nav resolvia — o
+    // problema nem chegava a olhar pro viewport verdadeiro. Removida a
+    // classe (a entrada suave da lista de conversas não valia o bug).
+    <div className="atendimento-conversations space-y-4 flex flex-col flex-1 min-h-0">
       {/* TASK-0225 (pedido direto, 03/09/2026): a barra de ferramentas
           exclusiva de desktop (Pendências/Agenda/Ferramentas, `hidden
           lg:block`, histórico completo nas TASK-0212/0213/0221) foi
@@ -4713,7 +4762,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </button>
             <button
               type="button"
-              onClick={googleCalendarConnected ? toggleUpcomingEventsPanel : handleConnectGoogleCalendar}
+              // TASK-0343 (pedido direto, print anotado): abrir um popup
+              // pequeno pra "Agenda" no mobile não fazia sentido quando já
+              // existe uma página cheia (AgendaWorkspace, activeTab==='agenda')
+              // com a MESMA barra inferior, igual a Pendências. Prioriza
+              // navegar pra essa página real; só cai pro popup/fluxo de
+              // conectar o Google Calendar quando `onGoToAgenda` não está
+              // disponível (ex: usuário sem permissão pra aba Agenda).
+              onClick={onGoToAgenda ?? (googleCalendarConnected ? toggleUpcomingEventsPanel : handleConnectGoogleCalendar)}
               className={`atendimento-bottom-nav__item${isUpcomingEventsPanelOpen ? ' is-active' : ''}`}
             >
               <CalendarIcon className="w-6 h-6" />
@@ -6670,7 +6726,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-3 pt-1 flex flex-col gap-3 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <div className="p-3 pt-1 flex flex-col gap-2.5 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
               {toolbarSettingsBody}
             </div>
           </div>
