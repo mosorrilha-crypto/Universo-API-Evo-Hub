@@ -221,14 +221,16 @@ interface WhatsAppLeadsSimProps {
   closeThreadSignal?: number;
   /** TASK-0326 — ação disparada de fora (App.tsx/AtendimentoSecondaryNav,
       barra de Pendências/Agenda) que este componente deve executar 1 vez
-      assim que "Conversas" ficar ativa: 'openAgenda' abre o mesmo popup
-      rápido de próximos eventos do botão "Agenda" da barra inferior local
-      (nunca navega pra página completa — decisão do dono do produto, pra
-      manter o botão consistente em qualquer tela); 'openTools' abre a
-      gaveta de Ferramentas. `onPendingConversasActionHandled` avisa
-      App.tsx que já processou, pra ele zerar o sinal (mesmo padrão de
+      assim que "Conversas" ficar ativa: 'openTools' abre a gaveta de
+      Ferramentas. (Havia também 'openAgenda', que reabria o popup rápido
+      de próximos eventos — removido na TASK-0343 quando a Agenda virou
+      página completa em todo lugar no mobile: `AtendimentoSecondaryNav`
+      agora navega direto pra `activeTab === 'agenda'`, igual ao botão
+      "Agenda" da barra inferior local, em vez de voltar pra Conversas e
+      reabrir o popup.) `onPendingConversasActionHandled` avisa App.tsx
+      que já processou, pra ele zerar o sinal (mesmo padrão de
       `openLeadRequestId`/`closeThreadSignal`). */
-  pendingConversasAction?: 'openAgenda' | 'openTools' | null;
+  pendingConversasAction?: 'openTools' | null;
   onPendingConversasActionHandled?: () => void;
   /** TASK-0292 — confirmação/erro do botão "Ressincronizar" da Ficha do
       Contato (agendamento desatualizado). Mesmo `showToast` já usado em
@@ -1288,10 +1290,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // processa, pra App.tsx zerar o sinal (mesmo padrão de openLeadRequestId).
   useEffect(() => {
     if (!pendingConversasAction) return;
-    if (pendingConversasAction === 'openAgenda') {
-      if (googleCalendarConnected) handleOpenUpcomingEvents();
-      else handleConnectGoogleCalendar();
-    } else if (pendingConversasAction === 'openTools') {
+    if (pendingConversasAction === 'openTools') {
       setIsUpcomingEventsPanelOpen(false);
       setIsToolbarSettingsOpen(true);
     }
@@ -4747,21 +4746,23 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <span className="atendimento-bottom-nav__badge">{escalationsPendingCount}</span>
               )}
             </button>
-            <button
-              type="button"
-              // TASK-0343 (pedido direto, print anotado): abrir um popup
-              // pequeno pra "Agenda" no mobile não fazia sentido quando já
-              // existe uma página cheia (AgendaWorkspace, activeTab==='agenda')
-              // com a MESMA barra inferior, igual a Pendências. Prioriza
-              // navegar pra essa página real; só cai pro popup/fluxo de
-              // conectar o Google Calendar quando `onGoToAgenda` não está
-              // disponível (ex: usuário sem permissão pra aba Agenda).
-              onClick={onGoToAgenda ?? (googleCalendarConnected ? toggleUpcomingEventsPanel : handleConnectGoogleCalendar)}
-              className={`atendimento-bottom-nav__item${isUpcomingEventsPanelOpen ? ' is-active' : ''}`}
-            >
-              <CalendarIcon className="w-6 h-6" />
-              <span>Agenda</span>
-            </button>
+            {/* TASK-0343: navega direto pra página cheia (AgendaWorkspace,
+                activeTab==='agenda'), mesma barra inferior de Pendências.
+                TASK-0345 (pedido direto): quem não tem permissão pra aba
+                Agenda (`onGoToAgenda` indisponível) não deve ver o ícone
+                aqui em lugar nenhum — antes ele continuava aparecendo e
+                caía num popup/fluxo de conectar o Google Calendar mesmo
+                sem acesso. */}
+            {onGoToAgenda && (
+              <button
+                type="button"
+                onClick={onGoToAgenda}
+                className="atendimento-bottom-nav__item"
+              >
+                <CalendarIcon className="w-6 h-6" />
+                <span>Agenda</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setIsToolbarSettingsOpen((v) => { const next = !v; if (next) setIsUpcomingEventsPanelOpen(false); return next; })}

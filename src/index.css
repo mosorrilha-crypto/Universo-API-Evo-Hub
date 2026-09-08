@@ -808,25 +808,23 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__hero .max-w-2xl { display: none; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions { width: 100%; }
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__actions button { width: 100%; min-height: 2.4rem; padding: .55rem .8rem; font-size: .72rem; box-shadow: none; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics { gap: .45rem; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article { min-height: 0; padding: .55rem .65rem; border-radius: .9rem; box-shadow: none; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:nth-child(2) { margin-top: .25rem; font-size: 1.35rem; line-height: 1; }
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics > article > p:last-child { margin-top: .25rem; font-size: .62rem; line-height: 1.2; }
+  /* TASK-0347 (pedido direto, "reformular está agenda completa... está
+     complexa" → mockup confirmado): cartões de métrica e as listas
+     "Próximos compromissos"/"Pendências da agenda" ficam escondidos em
+     TODAS as abas mobile agora (não só na antiga aba "Calendário") — viraram
+     uma lista única (`__mobile-today-list`, JSX) visível só na aba "Hoje".
+     O nav de 3 abas (Hoje/Semana/Mês, AgendaWorkspace.tsx) substitui o
+     antigo Hoje/Calendário + o seletor Semana/Mês que morava escondido
+     dentro do próprio card da Agenda. */
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics,
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__pending { display: none; }
   .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
-  .agenda-financeiro-workspace--agenda-mobile-calendar .agenda-financeiro-workspace__pending { display: none; }
-  /* Achado real (28/08/2026, pedido do dono do produto com print): os
-     cartões "Agendamentos hoje"/"Próximos atendimentos" repetiam a mesma
-     informação já coberta pela aba "Hoje" — redundante especificamente na
-     aba Calendário. */
-  .agenda-financeiro-workspace--agenda-mobile-calendar .agenda-financeiro-workspace__metrics { display: none; }
-  /* Achado real (28/08/2026, pedido do dono do produto com print): a aba
-     "Pendências" separada ficou redundante — a mesma informação (Decisão
-     necessária/Pendências da agenda) cabe direto na aba "Hoje", junto do
-     resto da rotina diária. Aba removida (AgendaWorkspace.tsx); a seção
-     de pendências agora só fica escondida na aba Calendário (redundante
-     com "Hoje", mesmo critério do bloco de métricas acima). */
+  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) > div:nth-child(2),
+  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7),
+  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__mobile-today-list,
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__mobile-today-list { display: none; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div { border-radius: 1rem; padding: .75rem; box-shadow: none; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child p { display: none; }
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child { margin-bottom: .55rem; }
@@ -836,14 +834,17 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
   .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) p { display: none; }
   /* TASK-0292 (pedido direto, print real: "o calendário pode ocupar melhor
      a página... pode ficar de ponta a ponta... preencher os espaços
-     vazios igual no desktop e no calendário do google") — só na visão
-     Calendário (não afeta Hoje): padding lateral do card reduzido mais
+     vazios igual no desktop e no calendário do google") — só nas visões
+     Semana/Mês (não afeta Hoje): padding lateral do card reduzido mais
      ainda (mais perto de borda a borda) e células da grade de mês mais
      altas, aproveitando o espaço vertical que sobrava vazio no celular
      real. */
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) > div:first-child { padding-left: .4rem; padding-right: .4rem; }
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) .grid-cols-7 > button,
-  .agenda-financeiro-workspace--agenda-mobile-calendar > section:has(.grid-cols-7) .grid-cols-7 > div[aria-hidden="true"] { min-height: 3.25rem; }
+  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) > div:first-child,
+  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) > div:first-child { padding-left: .4rem; padding-right: .4rem; }
+  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) .grid-cols-7 > div[aria-hidden="true"],
+  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) .grid-cols-7 > div[aria-hidden="true"] { min-height: 3.25rem; }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }
