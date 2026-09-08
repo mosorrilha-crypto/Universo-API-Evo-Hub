@@ -28,12 +28,21 @@ describe('AgendaWorkspace — navegação móvel', () => {
     expect(screen.getByRole('button', { name: 'Hoje' }).getAttribute('aria-current')).toBe('page');
   });
 
+  it('abre a semana apenas quando o operador solicita', () => {
+    render(<AgendaWorkspace {...props} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Semana' }));
+
+    expect(screen.getByText('Visão ativa: week')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Semana' }).getAttribute('aria-current')).toBe('page');
+  });
+
   it('abre o calendário mensal apenas quando o operador solicita', () => {
     render(<AgendaWorkspace {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Calendário' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mês' }));
 
-    expect(screen.getByText('Visão ativa: calendar')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Calendário' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByText('Visão ativa: month')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Mês' }).getAttribute('aria-current')).toBe('page');
   });
 });

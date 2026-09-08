@@ -550,7 +550,7 @@ export const App: React.FC = () => {
   // (mesmo padrão de `openLeadRequestId` — WhatsAppLeadsSim consome e avisa
   // de volta). Também cobre "Ferramentas", que também só existia dentro de
   // Conversas e não tinha equivalente em Pendências/Agenda.
-  const [pendingConversasAction, setPendingConversasAction] = useState<'openAgenda' | 'openTools' | null>(null);
+  const [pendingConversasAction, setPendingConversasAction] = useState<'openTools' | null>(null);
 
   // TASK-0290 (pedido direto, print do botão físico/gesto de voltar do
   // Android circulado): "esse botão minimiza o aplicativo e não volta as
@@ -1546,7 +1546,7 @@ export const App: React.FC = () => {
           activeTab={activeTab}
           onGoToConversas={() => handleSetActiveTab('whatsapp')}
           onGoToEscalations={() => handleSetActiveTab('escalations')}
-          onGoToAgenda={canSeeAgenda ? () => { handleSetActiveTab('whatsapp'); setPendingConversasAction('openAgenda'); } : undefined}
+          onGoToAgenda={canSeeAgenda ? () => handleSetActiveTab('agenda') : undefined}
           onGoToTools={() => { handleSetActiveTab('whatsapp'); setPendingConversasAction('openTools'); }}
           escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
         />

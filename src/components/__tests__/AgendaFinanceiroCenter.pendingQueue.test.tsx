@@ -85,7 +85,11 @@ describe('AgendaFinanceiroCenter — fila de Pendências', () => {
 
     render(<AgendaFinanceiroCenter {...baseProps()} />);
 
-    await waitFor(() => expect(screen.getByText('Manicure')).not.toBeNull());
+    // TASK-0347: além da seção desktop "Pendências da agenda", o mesmo
+    // compromisso agora também aparece na lista mesclada mobile-only
+    // (escondida via CSS na aba "Hoje") — por isso 2 cópias no DOM em vez
+    // de 1, mesmo padrão já usado no teste anterior (getAllByText).
+    await waitFor(() => expect(screen.getAllByText('Manicure').length).toBeGreaterThan(0));
     expect(screen.queryByText('Sobrancelha')).toBeNull();
   });
 
