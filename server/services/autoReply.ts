@@ -1056,6 +1056,127 @@ function containsPrematureBookingConfirmation(text: string): boolean {
   return CONFIRMATION_CLAIM_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+const STANDARD_OFFER_TIMES = ['08:30', '13:30', '16:30', '18:30'];
+
+/**
+ * Consulta REAL e determinística de disponibilidade da semana — extraída pra
+ * ser compartilhada entre o loop de function-calling do Gemini
+ * (executeCalendarTool, caso "consultar_disponibilidade_semana") e o atalho
+ * de leitura via Groq (TASK-0348, ver classifyAgendamentoConsultaViaGroq /
+ * runAgendamentoTools). Só lê a agenda real, nunca escreve nada — por isso é
+ * seguro chamar direto sem passar pelo loop de decisão do modelo.
+ */
+async function buildWeeklyAvailabilitySummary(
+  tenantId: string,
+  cfg: CalendarConfig,
+  servico: string | undefined,
+  kb: AgentKnowledgeBase | null
+): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimesHHmm?: string[] }> {
+  const durationMinutes = (servico && findProductDurationMinutes(kb, servico)) || DEFAULT_SLOT_DURATION_MINUTES;
+  const days = await findWeeklyAvailability(tenantId, cfg, durationMinutes, BUSINESS_TIMEZONE);
+  const curatedDays = days
+    .map((d) => ({ date: d.date, slots: d.slots.filter((s) => STANDARD_OFFER_TIMES.includes(s.start)) }))
+    .filter((d) => d.slots.length > 0);
+  const allTimes = curatedDays.flatMap((d) => d.slots.map((s) => s.start));
+  return {
+    response: {
+      dias_disponiveis: curatedDays,
+      aviso: 'Só oferece os 3 horários padrão do estúdio por dia: 08:30 (manhã), 13:30 ou 16:30 (tarde) — nessa ordem de preferência. NUNCA ofereça 18:30 de primeira; só mencione esse horário se o cliente pedir explicitamente algo depois das 16:30.',
+    },
+    summary: curatedDays.length
+      ? `Consultou disponibilidade da semana (duração ${durationMinutes}min, horários padrão 08:30/13:30/16:30/18:30): ${curatedDays.map((d) => `${d.date} (${d.slots.map((s) => s.start).join(', ')})`).join('; ')}.`
+      : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum dos horários padrão (08:30/13:30/16:30/18:30) está livre essa semana.`,
+    confirmedTimesHHmm: allTimes.length ? allTimes : undefined,
+  };
+}
+
+/**
+ * Verificação REAL e determinística de um intervalo específico — mesma
+ * extração de `buildWeeklyAvailabilitySummary` acima, compartilhada entre o
+ * Gemini (caso "verificar_disponibilidade") e o atalho via Groq.
+ */
+async function buildSlotAvailabilitySummary(
+  tenantId: string,
+  cfg: CalendarConfig,
+  startIso: string,
+  endIso: string
+): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimesHHmm?: string[] }> {
+  const disponivel = await checkFreeBusy(tenantId, cfg, startIso, endIso, BUSINESS_TIMEZONE);
+  return {
+    response: { disponivel },
+    summary: `Verificou disponibilidade em ${startIso}–${endIso}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
+    confirmedTimesHHmm: disponivel ? [extractHHmm(startIso)] : undefined,
+  };
+}
+
+/**
+ * TASK-0348 (pedido direto do dono do produto — extensão do caminho rápido
+ * Groq/Llama, TASK-0346, pro agendamento). Restrita DE PROPÓSITO só à
+ * classificação de consulta de disponibilidade — nunca decide criar,
+ * remarcar ou cancelar nada. Pior caso de erro de classificação: devolve uma
+ * resposta de disponibilidade errada (mesmo risco que já existe se o Gemini
+ * classificar mal), nunca escreve na agenda real. Qualquer sinal de intenção
+ * de criar/remarcar/cancelar, menção a pagamento/seña, ou qualquer
+ * ambiguidade — o próprio prompt instrui a classificar como "outro" (cai pro
+ * loop de function-calling do Gemini de sempre, sem nenhuma mudança de
+ * comportamento). Mesmo padrão Groq-primeiro já usado no roteador
+ * (classifyAgent) e na decisão de mídia (decideMidiaActionViaGroq): 1
+ * tentativa, timeout curto, qualquer falha cai pro Gemini sem propagar erro.
+ */
+interface AgendamentoConsultaClassification {
+  tipo: 'consulta_semana' | 'consulta_horario_especifico';
+  servico?: string;
+  data_hora_inicio?: string;
+  data_hora_fim?: string;
+}
+
+const AGENDAMENTO_CONSULTA_VALID_TIPOS = ['consulta_semana', 'consulta_horario_especifico', 'outro'];
+const NAIVE_ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+
+async function classifyAgendamentoConsultaViaGroq(
+  tenantId: string,
+  groqApiKey: string,
+  text: string,
+  historyText: string,
+  existing: TrackedAppointment | null,
+  durationsList: string
+): Promise<AgendamentoConsultaClassification | undefined> {
+  const prompt = `Classifique a mensagem de um cliente de um negócio de estética/micropigmentação numa destas categorias, SEM decidir nada além da classificação:
+
+- "consulta_semana": o cliente só quer saber quais horários/dias estão livres essa semana (ex: "que horários vocês têm?", "tem vaga essa semana?"), sem pedir pra criar/remarcar/cancelar nada agora.
+- "consulta_horario_especifico": o cliente pergunta se UM horário específico (dia+hora) está livre, só pra saber, sem confirmar que quer reservar agora.
+- "outro": QUALQUER outra coisa — pedido pra criar, remarcar ou cancelar um agendamento; confirmação de que quer reservar um horário; menção a pagamento/seña; qualquer ambiguidade sobre a intenção; ou mensagem que não é sobre agendamento. Na dúvida, sempre escolha "outro".
+
+${existing ? `Este contato já tem um agendamento ativo: "${existing.summary}" em ${existing.startIso}.` : 'Este contato não tem agendamento ativo.'}
+${historyText ? `Histórico recente:\n${historyText}\n` : ''}
+Mensagem do cliente: "${text}"
+
+Duração real de cada serviço (só relevante se tipo for "consulta_semana" e o cliente citar um serviço do catálogo):
+${durationsList || '(nenhuma duração cadastrada)'}
+
+Responda estritamente em JSON: { "tipo": "consulta_semana" | "consulta_horario_especifico" | "outro", "servico": "nome EXATO do catálogo se tipo for consulta_semana e um serviço foi citado, senão string vazia", "data_hora_inicio": "YYYY-MM-DDTHH:mm:ss (hora local, sem offset) se tipo for consulta_horario_especifico, senão string vazia", "data_hora_fim": "YYYY-MM-DDTHH:mm:ss se tipo for consulta_horario_especifico, senão string vazia" }`;
+
+  const { parsed, usage } = await callGroqJsonCompletion(groqApiKey, prompt);
+  const tipo = parsed?.tipo as string;
+  if (!AGENDAMENTO_CONSULTA_VALID_TIPOS.includes(tipo)) {
+    throw new Error(`Groq retornou "tipo" fora do enum esperado: ${JSON.stringify(parsed?.tipo)}`);
+  }
+  recordGeminiUsage(tenantId, 'agendamento', usage, 'groq').catch(() => {});
+  if (tipo === 'outro') return undefined;
+
+  if (tipo === 'consulta_horario_especifico') {
+    const inicio = typeof parsed?.data_hora_inicio === 'string' ? parsed.data_hora_inicio.trim() : '';
+    const fim = typeof parsed?.data_hora_fim === 'string' ? parsed.data_hora_fim.trim() : '';
+    if (!NAIVE_ISO_DATETIME_RE.test(inicio) || !NAIVE_ISO_DATETIME_RE.test(fim)) {
+      throw new Error(`Groq classificou como "consulta_horario_especifico" mas sem data_hora_inicio/data_hora_fim válidos: ${JSON.stringify(parsed)}`);
+    }
+    return { tipo: 'consulta_horario_especifico', data_hora_inicio: inicio, data_hora_fim: fim };
+  }
+
+  const servico = typeof parsed?.servico === 'string' && parsed.servico.trim() ? parsed.servico.trim() : undefined;
+  return { tipo: 'consulta_semana', servico };
+}
+
 async function executeCalendarTool(
   tenantId: string,
   name: string,
@@ -1068,12 +1189,7 @@ async function executeCalendarTool(
 ): Promise<{ response: Record<string, unknown>; summary: string; confirmedTimesHHmm?: string[] }> {
   try {
     switch (name) {
-      case 'consultar_disponibilidade_semana': {
-        // Duração real do serviço (Etapa 2) quando reconhecido no catálogo;
-        // caso contrário, duração padrão conservadora — nunca um número
-        // maior inventado, que poderia esconder slots livres de verdade.
-        const durationMinutes = (args.servico && findProductDurationMinutes(kb, args.servico)) || DEFAULT_SLOT_DURATION_MINUTES;
-        const days = await findWeeklyAvailability(tenantId, cfg, durationMinutes, BUSINESS_TIMEZONE);
+      case 'consultar_disponibilidade_semana':
         // Pedido real do dono do produto (20/08/2026) — depois de várias
         // tentativas só de PROMPT (instruir "no máximo 2-3 horários") que o
         // modelo às vezes ignorava numa resposta real, trava a ferramenta
@@ -1084,30 +1200,9 @@ async function executeCalendarTool(
         // lista — o gate anti-alucinação corrige sozinho se ele tentar. A
         // ferramenta faz a checagem real de disponibilidade só desses
         // horários padrão, e só devolve os que estiverem livres de verdade.
-        const STANDARD_OFFER_TIMES = ['08:30', '13:30', '16:30', '18:30'];
-        const curatedDays = days
-          .map((d) => ({ date: d.date, slots: d.slots.filter((s) => STANDARD_OFFER_TIMES.includes(s.start)) }))
-          .filter((d) => d.slots.length > 0);
-        const allTimes = curatedDays.flatMap((d) => d.slots.map((s) => s.start));
-        return {
-          response: {
-            dias_disponiveis: curatedDays,
-            aviso: 'Só oferece os 3 horários padrão do estúdio por dia: 08:30 (manhã), 13:30 ou 16:30 (tarde) — nessa ordem de preferência. NUNCA ofereça 18:30 de primeira; só mencione esse horário se o cliente pedir explicitamente algo depois das 16:30.',
-          },
-          summary: curatedDays.length
-            ? `Consultou disponibilidade da semana (duração ${durationMinutes}min, horários padrão 08:30/13:30/16:30/18:30): ${curatedDays.map((d) => `${d.date} (${d.slots.map((s) => s.start).join(', ')})`).join('; ')}.`
-            : `Consultou disponibilidade da semana (duração ${durationMinutes}min): nenhum dos horários padrão (08:30/13:30/16:30/18:30) está livre essa semana.`,
-          confirmedTimesHHmm: allTimes.length ? allTimes : undefined,
-        };
-      }
-      case 'verificar_disponibilidade': {
-        const disponivel = await checkFreeBusy(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim, BUSINESS_TIMEZONE);
-        return {
-          response: { disponivel },
-          summary: `Verificou disponibilidade em ${args.data_hora_inicio}–${args.data_hora_fim}: ${disponivel ? 'LIVRE' : 'OCUPADO'}.`,
-          confirmedTimesHHmm: disponivel ? [extractHHmm(args.data_hora_inicio)] : undefined,
-        };
-      }
+        return await buildWeeklyAvailabilitySummary(tenantId, cfg, args.servico, kb);
+      case 'verificar_disponibilidade':
+        return await buildSlotAvailabilitySummary(tenantId, cfg, args.data_hora_inicio, args.data_hora_fim);
       case 'criar_agendamento': {
         // Etapa 2 — achado no catálogo real: itens como "Retoque" só devem
         // ser marcados depois da Monique avaliar o resultado, nunca por
@@ -1393,7 +1488,8 @@ async function runAgendamentoTools(
   cfg: CalendarConfig,
   history?: { sender: 'lead' | 'agent'; text?: string }[],
   contactName?: string,
-  messageId?: string
+  messageId?: string,
+  groqApiKey?: string
 ): Promise<{ actionsSummary: string[]; hadError: boolean; confirmedTimes: string[]; businessHoursStatus?: string; currentAppointment?: TrackedAppointment; deferredCalendarActions: DeferredCalendarAction[] }> {
   const { naive, weekday, weekdayNum } = getNowLocalNaive(BUSINESS_TIMEZONE);
   // Best-effort: uma falha aqui é só um enriquecimento de prompt (aviso de
@@ -1462,6 +1558,32 @@ async function runAgendamentoTools(
       notifyMetaCapiEvent(tenantId, phone, 'Purchase', confirmed.summary).catch(() => {});
     }
     actionsSummary.push('Pagamento verificado por um operador agora mesmo — pode confirmar o turno pro cliente com segurança.');
+  }
+
+  // TASK-0348 — atalho de LEITURA via Groq (ver classifyAgendamentoConsultaViaGroq
+  // acima pro raciocínio de segurança). Se a mensagem for classificada como
+  // uma pergunta pura de disponibilidade, responde direto com a consulta real
+  // (mesma função usada pelo Gemini) e nunca entra no loop de function-calling
+  // — ou seja, o Gemini nunca chega a ver essa mensagem quando o Groq acerta.
+  // Qualquer falha (rede, timeout, classificação "outro", JSON inválido) cai
+  // silenciosamente pro loop do Gemini abaixo, sem nenhuma mudança de
+  // comportamento em relação a antes desta tarefa.
+  if (groqApiKey) {
+    try {
+      const consulta = await withStructuredLog({ tenantId, area: 'autoReply', op: 'agendamento:consulta:groq' }, () =>
+        classifyAgendamentoConsultaViaGroq(tenantId, groqApiKey, text, historyText, existing, durationsList)
+      );
+      if (consulta) {
+        const toolResult = consulta.tipo === 'consulta_semana'
+          ? await buildWeeklyAvailabilitySummary(tenantId, cfg, consulta.servico, kb)
+          : await buildSlotAvailabilitySummary(tenantId, cfg, consulta.data_hora_inicio!, consulta.data_hora_fim!);
+        actionsSummary.push(toolResult.summary);
+        if (toolResult.confirmedTimesHHmm) confirmedTimes.push(...toolResult.confirmedTimesHHmm);
+        return { actionsSummary, hadError: false, confirmedTimes, businessHoursStatus, currentAppointment: existing, deferredCalendarActions };
+      }
+    } catch (err) {
+      console.warn(`⚠️  [Agendamento] classificação de consulta via Groq falhou (tenant=${tenantId}), seguindo pro loop normal do Gemini:`, (err as Error)?.message || err);
+    }
   }
 
   const prompt = `Você controla a agenda real de um negócio de estética/micropigmentação através de ferramentas. O cliente quer marcar, remarcar ou cancelar um horário.
@@ -2069,7 +2191,7 @@ export async function generateAutoReplyForText(
     const contextParts: string[] = [];
 
     if (!isFirstCampaignContact && agent === 'agendamento' && phone && calendarConfig?.clientId && calendarConfig?.clientSecret) {
-      const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId);
+      const result = await runAgendamentoTools(tenantId, ai, text, phone, calendarConfig, history, contactName, messageId, groqApiKey);
       if (result.actionsSummary.length) {
         contextParts.push(result.actionsSummary.map((s) => `- ${s}`).join('\n'));
       }
