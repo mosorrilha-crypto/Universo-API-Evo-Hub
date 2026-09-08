@@ -108,6 +108,17 @@ export const Header: React.FC<HeaderProps> = ({
   }, [pushError]);
   const tabsRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  // TASK-0357 (pedido direto, print anotado): seletor de empresa volta pro
+  // cabeçalho mobile, como um ícone circular (mesmo espírito do seletor de
+  // conta do Claude Code) em vez da caixa de texto "Empresa ativa"/"Sair"
+  // que morava dentro de Ferramentas (WhatsAppLeadsSim.tsx). Ref/estado
+  // próprios porque o botão do desktop (`profileMenuRef`) fica fora da tela
+  // no mobile (`hidden md:flex`) — clicar dentro do dropdown mobile não
+  // conta como "dentro" do wrapper do desktop, então um clique-fora
+  // genérico fecharia o menu na hora errada. Mesmo padrão que já existiu
+  // aqui antes da TASK-0331 (`isMobileTenantMenuOpen`/`mobileTenantMenuRef`).
+  const mobileTenantMenuRef = useRef<HTMLDivElement>(null);
+  const [isMobileTenantMenuOpen, setIsMobileTenantMenuOpen] = useState(false);
   const configurationButtonRef = useRef<HTMLButtonElement>(null);
   const themeButtonRef = useRef<HTMLButtonElement>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
@@ -173,6 +184,18 @@ export const Header: React.FC<HeaderProps> = ({
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [isProfileMenuOpen]);
+
+  useEffect(() => {
+    if (!isMobileTenantMenuOpen) return;
+    const close = (event: MouseEvent) => { if (mobileTenantMenuRef.current && !mobileTenantMenuRef.current.contains(event.target as Node)) setIsMobileTenantMenuOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setIsMobileTenantMenuOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [isMobileTenantMenuOpen]);
 
   useEffect(() => {
     if (!openToolsMenu) return;
@@ -337,15 +360,55 @@ export const Header: React.FC<HeaderProps> = ({
             voltar pro atendimento pelo cabeçalho. */}
         <button type="button" onClick={() => selectTab('whatsapp')} className="flex min-w-0 items-center gap-2 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70" title={isSpanish ? 'Ir a Atención' : 'Ir para o Atendimento'}><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"><MessageSquare className="w-5 h-5" /></div><span className="truncate text-lg font-bold text-white">Universo</span></button>
         {/* TASK-0331 (pedido direto, prints anotados): o menu "⋮" (gaveta
-            lateral com Crescimento/Configurar/Empresas/Empresa ativa/Sair/
-            Notificações) foi eliminado — todo esse conteúdo mudou pra
-            dentro da gaveta "Ferramentas" do Atendimento
-            (WhatsAppLeadsSim.tsx, toolbarSettingsBody: seção "Crescimento"
-            no grid de Módulos, seção "Configurações" expansível com os
-            mesmos itens de configurationNavigation + Empresas, e uma seção
-            própria pra Empresa ativa/Sair/Notificações). A linha mobile do
-            cabeçalho fica só com o essencial (logo), como no app real do
-            WhatsApp — sem botão de menu nenhum aqui. */}
+            lateral com Crescimento/Configurar/Empresas/Sair/Notificações)
+            foi eliminado — esse conteúdo mudou pra dentro da gaveta
+            "Ferramentas" do Atendimento (WhatsAppLeadsSim.tsx,
+            toolbarSettingsBody: seção "Crescimento" no grid de Módulos,
+            seção "Configurações" expansível com os mesmos itens de
+            configurationNavigation + Empresas, e "Notificações" dentro
+            dela).
+            TASK-0357 (pedido direto, print anotado): Idioma/Tema — que a
+            TASK-0328 tinha tirado daqui pra morar em Ferramentas — voltam
+            pro cabeçalho, mesmo lugar de sempre no desktop. "Empresa
+            ativa"/"Sair" também saem da caixa de texto em Ferramentas e
+            viram aqui um ícone circular (mesmo espírito do seletor de conta
+            do Claude Code) + um ícone de saída, ao lado de Idioma/Tema —
+            só o ícone é reaproveitado do próprio avatar do operador, sem
+            nome ao lado (pedido explícito: "apenas o icon circular"). */}
+        <div className="flex shrink-0 items-center gap-1">
+          <div className="flex items-center gap-0.5 rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label="Idioma">
+            <button type="button" onClick={() => setLanguage('pt')} className={`rounded-md px-1.5 py-1 text-[10px] font-bold transition-colors ${language === 'pt' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>PT</button>
+            <button type="button" onClick={() => setLanguage('es')} className={`rounded-md px-1.5 py-1 text-[10px] font-bold transition-colors ${language === 'es' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>ES</button>
+          </div>
+          {renderThemeMenu()}
+          {currentUser && (
+            <div className="relative" ref={mobileTenantMenuRef}>
+              <button
+                type="button"
+                onClick={() => currentUser.role === 'saas_admin' ? setIsMobileTenantMenuOpen((value) => !value) : onOpenLoginModal()}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
+                title={currentUser.role === 'saas_admin' ? `${copy.activeCompany}: ${activeTenant?.name || ''}` : currentUser.name}
+              >
+                <img src={currentUser.avatar} alt={currentUser.name} className="h-8 w-8 rounded-full object-cover" />
+              </button>
+              {currentUser.role === 'saas_admin' && isMobileTenantMenuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
+                  <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{copy.activeCompany}</p>
+                  <div className="max-h-56 space-y-1 overflow-y-auto">
+                    {tenants.map((tenant) => (
+                      <button key={tenant.id} type="button" onClick={() => { onSelectTenant(tenant); setIsMobileTenantMenuOpen(false); }} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${tenant.id === activeTenant.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}>
+                        <span className="truncate">{tenant.name}</span>
+                        {tenant.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => { setIsMobileTenantMenuOpen(false); onOpenLoginModal(); }} className="mt-2 w-full border-t border-slate-800 px-2.5 pt-2 text-left text-xs font-medium text-slate-300 hover:text-white">{copy.changeOperator}</button>
+                </div>
+              )}
+            </div>
+          )}
+          {currentUser && <button type="button" onClick={onLogout} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300" title={copy.signOut}><LogOut className="w-4 h-4" /></button>}
+        </div>
       </div>
       {/* TASK unificação (pedido direto, 04/09/2026): as duas fileiras
           desktop (título+subtítulo+ícones numa linha, abas numa segunda

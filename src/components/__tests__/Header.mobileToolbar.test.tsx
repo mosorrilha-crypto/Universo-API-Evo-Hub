@@ -1,15 +1,21 @@
 // @vitest-environment jsdom
 /**
- * TASK-0328 (pedido direto, print anotado do cabeçalho): seletor de idioma
- * (ES/PT) e o botão de tema saíram da linha mobile do cabeçalho — mudaram
- * pra dentro da gaveta "Ferramentas" do Atendimento (WhatsAppLeadsSim.tsx).
- * TASK-0331 (pedido direto, prints anotados): o próprio menu "⋮" (gaveta
- * com Crescimento/Configurar/Empresas/Empresa ativa/Sair/Notificações) foi
- * eliminado — todo esse conteúdo também mudou pra dentro da gaveta
- * "Ferramentas". A linha mobile do cabeçalho fica só com o logo.
+ * TASK-0328 tinha tirado idioma/tema da linha mobile do cabeçalho (foram pra
+ * dentro da gaveta "Ferramentas" do Atendimento). TASK-0331 eliminou também
+ * o menu "⋮" que morava ali (Crescimento/Configurar/Empresas/Empresa
+ * ativa/Sair/Notificações), deixando a linha mobile só com o logo.
+ *
+ * TASK-0357 (pedido direto, print anotado) reverte parte disso: Idioma/Tema
+ * voltam pro cabeçalho mobile (mesmo lugar de sempre no desktop), e o
+ * seletor de empresa ("Empresa ativa"/"Sair", que tinha ido pra dentro de
+ * Ferramentas na TASK-0331) volta como um ícone circular no cabeçalho —
+ * mesmo espírito do seletor de conta do Claude Code — ao lado de um ícone
+ * de saída próprio. O menu "⋮" propriamente dito (Crescimento/Configurar/
+ * Empresas/Notificações) continua eliminado — esse conteúdo segue dentro
+ * de Ferramentas.
  */
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppPreferencesProvider } from '../../contexts/AppPreferencesContext';
 import { Header } from '../Header';
@@ -32,6 +38,8 @@ const activeTenant: Tenant = {
   webhookEndpoint: 'https://example.com/webhook',
 };
 
+const secondTenant: Tenant = { ...activeTenant, id: 'tenant-outro', name: 'Outra Empresa' };
+
 const operator: UserProfile = {
   id: 'operator-monique',
   tenantId: activeTenant.id,
@@ -41,6 +49,8 @@ const operator: UserProfile = {
   avatar: 'https://example.com/avatar.png',
   department: 'Operações',
 };
+
+const saasAdmin: UserProfile = { ...operator, id: 'saas-admin', role: 'saas_admin', name: 'Admin SaaS' };
 
 const capabilities: TenantNavigationCapabilities = {
   conversations: true,
@@ -57,8 +67,9 @@ const capabilities: TenantNavigationCapabilities = {
 
 afterEach(() => cleanup());
 
-describe('Header — linha mobile sem idioma/tema nem menu "⋮"', () => {
-  it('não mostra os antigos seletores de idioma/tema nem o menu "⋮" na linha mobile — só o logo', () => {
+describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0357)', () => {
+  it('mostra idioma (PT/ES), tema, o ícone circular de empresa e "Sair" na linha mobile', () => {
+    const onLogout = vi.fn();
     render(
       <AppPreferencesProvider>
         <Header
@@ -67,7 +78,7 @@ describe('Header — linha mobile sem idioma/tema nem menu "⋮"', () => {
           savedCount={0}
           currentUser={operator}
           onOpenLoginModal={vi.fn()}
-          onLogout={vi.fn()}
+          onLogout={onLogout}
           tenants={[activeTenant]}
           activeTenant={activeTenant}
           onSelectTenant={vi.fn()}
@@ -77,12 +88,49 @@ describe('Header — linha mobile sem idioma/tema nem menu "⋮"', () => {
       </AppPreferencesProvider>
     );
 
-    expect(screen.queryByTitle('Español')).toBeNull();
-    expect(screen.queryByTitle('Português')).toBeNull();
-    // TASK-0331 — o menu "⋮" foi eliminado; nenhum jeito de abri-lo continua a existir.
-    expect(screen.queryByTitle('Menu')).toBeNull();
-    // Logo aparece 2x no DOM (linha mobile + linha desktop, ambas
-    // renderizadas — só a responsividade via CSS decide qual aparece).
-    expect(screen.getAllByTitle('Ir para o Atendimento').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('PT').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('ES').length).toBeGreaterThan(0);
+
+    // Ícone circular do operador (não saas_admin) — abre o modal de login
+    // ao tocar, não um dropdown de troca de empresa.
+    const avatarButtons = screen.getAllByTitle(operator.name);
+    expect(avatarButtons.length).toBeGreaterThan(0);
+
+    const logoutButtons = screen.getAllByTitle('Sair');
+    expect(logoutButtons.length).toBeGreaterThan(0);
+    fireEvent.click(logoutButtons[0]);
+    expect(onLogout).toHaveBeenCalled();
+  });
+
+  it('saas_admin: tocar no ícone circular abre a lista de empresas', async () => {
+    const onSelectTenant = vi.fn();
+    render(
+      <AppPreferencesProvider>
+        <Header
+          activeTab="whatsapp"
+          setActiveTab={vi.fn()}
+          savedCount={0}
+          currentUser={saasAdmin}
+          onOpenLoginModal={vi.fn()}
+          onLogout={vi.fn()}
+          tenants={[activeTenant, secondTenant]}
+          activeTenant={activeTenant}
+          onSelectTenant={onSelectTenant}
+          capabilities={capabilities}
+          onOpenChangePasswordModal={vi.fn()}
+        />
+      </AppPreferencesProvider>
+    );
+
+    const triggers = screen.getAllByTitle(`Empresa ativa: ${activeTenant.name}`);
+    await act(async () => {
+      fireEvent.click(triggers[0]);
+    });
+
+    const tenantOptions = await screen.findAllByText(secondTenant.name);
+    await act(async () => {
+      fireEvent.click(tenantOptions[0]);
+    });
+    expect(onSelectTenant).toHaveBeenCalledWith(secondTenant);
   });
 });
