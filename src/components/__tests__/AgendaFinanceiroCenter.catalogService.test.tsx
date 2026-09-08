@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * TASK-0350 (pedido direto): "serviços poderia estar conectado ao catálogo
+ * TASK-0351 (pedido direto): "serviços poderia estar conectado ao catálogo
  * para pichar [puxar] o valor e tempo de duração e para futuramente criar
  * relatórios". "Novo agendamento" ganhou um seletor opcional do catálogo de
  * serviços (`knowledgeBase.products`, já carregado em App.tsx — nenhuma

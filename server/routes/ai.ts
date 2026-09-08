@@ -1,8 +1,8 @@
 import { Router, type RequestHandler } from 'express';
 import type { ServerConfig } from '../config';
 import { getGeminiClient, withGeminiRetry } from '../gemini';
-import { transcribeAudioWithGemini } from '../services/geminiTranscription';
-import { callGroqJsonCompletion } from '../services/groqClient';
+import { transcribeAudio } from '../services/geminiTranscription';
+import { callGroqJsonCompletion, GROQ_SPECIALIST_MODEL, GROQ_SPECIALIST_TIMEOUT_MS } from '../services/groqClient';
 import { formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { buildChronologicalConversationContext, guardContinuationReply } from '../services/conversationReplyGuard';
 import { freshnessFor, getLatestConversationAnalysis, saveConversationAnalysis } from '../services/conversationAnalysisStore';
@@ -82,6 +82,21 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
   const router = Router();
   const ai = getGeminiClient(config);
   const groqApiKey = config.groqApiKey;
+  // TASK-0350 (achado real em produção durante o incidente ativo de créditos
+  // Gemini esgotados: "Groq falhou (analyze-conversation), caindo pro
+  // Gemini: Groq respondeu 400 json_validate_failed" — e o Gemini, sem
+  // crédito, também falhou, deixando o operador sem nenhuma resposta na
+  // Ficha IA). Os 4 endpoints deste arquivo usavam o modelo default de
+  // callGroqJsonCompletion (openai/gpt-oss-20b, dimensionado pro roteador —
+  // uma classificação curta) pra gerar JSON bem mais complexo (schema de
+  // análise de CRM com objetos aninhados, texto de resposta longo) — mais
+  // sujeito a falhar a validação de JSON do próprio Groq. Reaproveita o
+  // mesmo modelo mais forte já usado pra resposta do especialista em
+  // autoReply.ts (TASK-0346, llama-3.3-70b-versatile) e seu timeout maior
+  // (12s) — reduz a chance da 1ª tentativa falhar, sem mudar a rede de
+  // segurança (Gemini de fallback, depois anti-fabricação) já existente.
+  const groqModel = GROQ_SPECIALIST_MODEL;
+  const groqTimeoutMs = GROQ_SPECIALIST_TIMEOUT_MS;
 
   // ✅ Endpoint de teste do Gemini
   router.get('/api/test-gemini', authenticateToken, rateLimiter, async (req, res) => {
@@ -175,7 +190,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 
       if (groqApiKey) {
         try {
-          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, groqTimeoutMs, groqModel);
           if (!parsed || typeof parsed.leadStage !== 'string') {
             throw new Error(`Groq retornou análise sem "leadStage" válido: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
@@ -317,7 +332,7 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 
       if (groqApiKey) {
         try {
-          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, groqTimeoutMs, groqModel);
           if (!parsed || typeof parsed.reply !== 'string' || !parsed.reply.trim()) {
             throw new Error(`Groq retornou "reply" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
@@ -385,7 +400,7 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
 
       if (groqApiKey) {
         try {
-          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt);
+          const { parsed } = await callGroqJsonCompletion(groqApiKey, prompt, groqTimeoutMs, groqModel);
           if (!parsed || typeof parsed.answer !== 'string' || !parsed.answer.trim()) {
             throw new Error(`Groq retornou "answer" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);
           }
@@ -425,7 +440,7 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
   router.post('/api/transcribe', authenticateToken, rateLimiter, async (req, res) => {
     try {
       const { audioBase64, mimeType, leadName, customInstructions } = req.body || {};
-      const outcome = await transcribeAudioWithGemini(ai, audioBase64, mimeType, { leadName, customInstructions });
+      const outcome = await transcribeAudio(ai, audioBase64, mimeType, { leadName, customInstructions, groqApiKey });
       return res.json({ success: true, source: outcome.source, result: outcome.result });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao processar áudio.' });
@@ -444,7 +459,9 @@ Leads: ${JSON.stringify(leads || [])}`;
         try {
           const { parsed } = await callGroqJsonCompletion(
             groqApiKey,
-            `${reportInstructions}\n\nResponda estritamente em formato JSON: { "report": "o relatório completo em texto" }`
+            `${reportInstructions}\n\nResponda estritamente em formato JSON: { "report": "o relatório completo em texto" }`,
+            groqTimeoutMs,
+            groqModel
           );
           if (!parsed || typeof parsed.report !== 'string' || !parsed.report.trim()) {
             throw new Error(`Groq retornou "report" ausente ou vazio: ${JSON.stringify(parsed)?.slice(0, 200)}`);

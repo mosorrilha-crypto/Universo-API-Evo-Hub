@@ -1,5 +1,5 @@
 import type { GoogleGenAI } from '@google/genai';
-import { transcribeAudioWithGemini, type TranscribeAudioOutcome } from './geminiTranscription';
+import { transcribeAudio, isRealTranscriptionSource, type TranscribeAudioOutcome } from './geminiTranscription';
 import { downloadMetaMedia, downloadEvolutionMedia } from './mediaDownload';
 import { updateMessageText, recordOutgoingMessage, getConversation, markGeoRestricted, shouldBlockForAdsOnlyMode, attachCatalogClickIfMatched } from './conversationStore';
 import { emitAiReplyStatus } from './conversationEvents';
@@ -166,9 +166,10 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
     // gravada (recordIncomingMessage em webhooks.ts).
     await saveMediaImage(deps.supabaseUrl, deps.supabaseKey, message.messageId, audioBase64!, mimeType || 'audio/ogg');
 
-    const outcome = await transcribeAudioWithGemini(deps.getAi(), audioBase64, mimeType, {
+    const outcome = await transcribeAudio(deps.getAi(), audioBase64, mimeType, {
       leadName: message.contactName,
       customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+      groqApiKey: deps.groqApiKey,
     });
 
     // Achado real de auditoria (29/08/2026): um áudio sem fala nenhuma
@@ -180,7 +181,7 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
     // exatamente como uma falha técnica — nunca dispara resposta automática,
     // sempre escala pra humano, e grava um texto legível (nunca vazio) no
     // histórico da conversa.
-    const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+    const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
     const messageTextForRecord = hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription;
 
     totalProcessed += 1;
@@ -204,7 +205,7 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
     // Reaproveita o mesmo motor de bolhas/humanização do caminho de texto
     // (generateAutoReplyForText), passando a transcrição como se fosse a
     // mensagem recebida — evita duplicar a lógica de estilo em dois lugares.
-    if (outcome.source === 'gemini' && !hasNoDetectedSpeech && !(await isAgentPaused(tenantId))) {
+    if (isRealTranscriptionSource(outcome.source) && !hasNoDetectedSpeech && !(await isAgentPaused(tenantId))) {
       runExclusive(message.from, async () => {
         const conversation = await getConversation(tenantId, message.from);
         // Mesmo bloqueio por lead individual do caminho de texto (ver

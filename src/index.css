@@ -817,7 +817,7 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
      antigo Hoje/Calendário + o seletor Semana/Mês que morava escondido
      dentro do próprio card da Agenda.
 
-     TASK-0350 (2 achados reais, print anotado):
+     TASK-0351 (2 achados reais, print anotado):
      1. "Próximos compromissos" (coluna `__upcoming-column`) ficava escondida
         só nas abas Semana/Mês — faltava escondê-la também em "Hoje", onde
         ela duplicava exatamente o que `__mobile-today-list` já mostra.

@@ -68,7 +68,7 @@ interface AgendaFinanceiroCenterProps {
       celular (TASK-0347: nav de 3 abas em vez de 2, Semana e Mês deixaram
       de ser um segundo nível escondido dentro do card da Agenda). */
   mobileAgendaView?: 'today' | 'week' | 'month';
-  /** TASK-0350 (pedido direto): catálogo de serviços (mesmo
+  /** TASK-0351 (pedido direto): catálogo de serviços (mesmo
       `knowledgeBase.products` já carregado em App.tsx, sem chamada de API
       nova) — usado só em "Novo agendamento" pra puxar preço/duração em vez
       de digitar tudo à mão. Só usado no scope="agenda"; opcional pra não
@@ -292,7 +292,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     const prefix = source === 'ads' ? '[Ads] ' : source === 'referral' ? '[Indicação] ' : source === 'organic' ? '[Orgânico] ' : '[?] ';
     const summary = `${prefix}${service}`;
     const start = new Date(`${date}T${time}:00`);
-    // TASK-0350 (pedido direto): quando o operador escolhe um serviço do
+    // TASK-0351 (pedido direto): quando o operador escolhe um serviço do
     // catálogo em vez de digitar, a duração real do serviço
     // (`durationMinutes`) substitui a hora fixa de 1h que valia pra
     // qualquer atendimento — ver o <select>/hidden input em
@@ -675,7 +675,7 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
 
       {!hasOperationalData && !loadingEvents && <section className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/45 p-6 text-center"><CircleDollarSign className="mx-auto h-7 w-7 text-emerald-400" /><h2 className="mt-3 font-bold text-white">{view === 'agenda' ? (isSpanish ? 'La agenda está lista para recibir atenciones' : 'A agenda está pronta para receber atendimentos') : (isSpanish ? 'El financiero está listo para recibir registros' : 'O financeiro está pronto para receber lançamentos')}</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-400">{view === 'agenda' ? (isSpanish ? 'Todavía no hay compromisos en este período. Creá el primer agendamiento o esperá la próxima reserva del agente.' : 'Ainda não há compromissos neste período. Crie o primeiro agendamento ou aguarde a próxima reserva do agente.') : (isSpanish ? 'Todavía no hay ingresos ni gastos registrados en este período.' : 'Ainda não há receitas ou despesas registradas neste período.')}</p></section>}
 
-      {/* TASK-0350 (achado real, print anotado: "quando clico em semana e
+      {/* TASK-0351 (achado real, print anotado: "quando clico em semana e
           volto para hoje o calendário da semana não some") — o CSS mobile
           (index.css) escondia estas 2 colunas via `section:has(.grid-cols-7)`
           + `div:first-child`/`nth-child(2)`; `:has(.grid-cols-7)` só batia
@@ -882,7 +882,7 @@ function Metric({ icon, label, value, note, tone }: { icon: React.ReactNode; lab
 function AppointmentDialog({ dialog, leads, currency, isSpanish, onClose, onSubmit, submitting, catalogProducts = [] }: { dialog: AppointmentDialogState; leads: LeadInfo[]; currency: string; isSpanish: boolean; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; submitting: boolean; catalogProducts?: AgentProduct[] }) {
   const eventDate = dialog.event ? new Date(dialog.event.startIso) : dialog.initialDate ? new Date(`${dialog.initialDate}T12:00:00`) : new Date();
   const cleanSummary = dialog.event?.summary.replace(/^\[[^\]]+\]\s*/, '') || '';
-  // TASK-0350 (pedido direto): "serviços poderia estar conectado ao
+  // TASK-0351 (pedido direto): "serviços poderia estar conectado ao
   // catálogo para puxar o valor e tempo de duração" — escolher um item do
   // catálogo aqui preenche Serviço/Valor/duração de uma vez, em vez de
   // digitar tudo à mão. `bookable === false` marca item não-agendável por
