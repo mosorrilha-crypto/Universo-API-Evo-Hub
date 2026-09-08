@@ -5,10 +5,10 @@
  * gaveta "Ferramentas" do Atendimento, discretos igual "Status do agente".
  *
  * TASK-0336 tinha colapsado idioma/tema num ícone único que precisava ser
- * tocado pra expandir as opções. TASK-0341 (pedido direto, comparando com a
- * versão ainda em produção) reverteu pra pills sempre visíveis — ambas as
- * opções (PT/ES, e os 4 temas por ícone) já aparecem prontas pra escolher,
- * sem etapa de expandir.
+ * tocado pra expandir. TASK-0341/0342 reverteram pra pills sempre visíveis.
+ * TASK-0343 (pedido direto): meio-termo — a pill do valor ATUAL (idioma e
+ * tema) fica sempre visível; tocar nela expande as outras opções como
+ * pills de texto (não um ícone isolado, como era na TASK-0336).
  */
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -61,14 +61,22 @@ describe('WhatsAppLeadsSim — idioma e tema dentro da gaveta "Ferramentas"', ()
       fireEvent.click(screen.getByText('Ferramentas'));
     });
 
-    // PT e ES já aparecem prontos lado a lado, sem etapa de expandir.
-    await waitFor(() => expect(screen.getByTitle('Español')).not.toBeNull());
+    // Idioma vira uma pill com o valor atual ("PT") — precisa tocar nela
+    // pra expandir as opções antes de poder escolher "Español".
+    await waitFor(() => expect(screen.getByText('PT')).not.toBeNull());
+    await act(async () => {
+      fireEvent.click(screen.getByText('PT'));
+    });
     await act(async () => {
       fireEvent.click(screen.getByTitle('Español'));
     });
     expect(document.documentElement.lang).toBe('es-PY');
 
-    // Mesmo padrão pro tema — os 4 ícones já aparecem prontos.
+    // Mesmo padrão pro tema (pill com o valor atual, "Escuro" por padrão).
+    await waitFor(() => expect(screen.getByText('Escuro')).not.toBeNull());
+    await act(async () => {
+      fireEvent.click(screen.getByText('Escuro'));
+    });
     await act(async () => {
       fireEvent.click(screen.getByTitle('Claro'));
     });
