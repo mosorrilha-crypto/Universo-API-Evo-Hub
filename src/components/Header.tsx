@@ -108,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [pushError]);
   const tabsRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
-  // TASK-0357 (pedido direto, print anotado): seletor de empresa volta pro
+  // TASK-0358 (pedido direto, print anotado): seletor de empresa volta pro
   // cabeçalho mobile, como um ícone circular (mesmo espírito do seletor de
   // conta do Claude Code) em vez da caixa de texto "Empresa ativa"/"Sair"
   // que morava dentro de Ferramentas (WhatsAppLeadsSim.tsx). Ref/estado
@@ -367,7 +367,7 @@ export const Header: React.FC<HeaderProps> = ({
             seção "Configurações" expansível com os mesmos itens de
             configurationNavigation + Empresas, e "Notificações" dentro
             dela).
-            TASK-0357 (pedido direto, print anotado): Idioma/Tema — que a
+            TASK-0358 (pedido direto, print anotado): Idioma/Tema — que a
             TASK-0328 tinha tirado daqui pra morar em Ferramentas — voltam
             pro cabeçalho, mesmo lugar de sempre no desktop. "Empresa
             ativa"/"Sair" também saem da caixa de texto em Ferramentas e

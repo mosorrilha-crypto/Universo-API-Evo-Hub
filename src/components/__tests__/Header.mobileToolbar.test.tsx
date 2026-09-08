@@ -5,7 +5,7 @@
  * o menu "⋮" que morava ali (Crescimento/Configurar/Empresas/Empresa
  * ativa/Sair/Notificações), deixando a linha mobile só com o logo.
  *
- * TASK-0357 (pedido direto, print anotado) reverte parte disso: Idioma/Tema
+ * TASK-0358 (pedido direto, print anotado) reverte parte disso: Idioma/Tema
  * voltam pro cabeçalho mobile (mesmo lugar de sempre no desktop), e o
  * seletor de empresa ("Empresa ativa"/"Sair", que tinha ido pra dentro de
  * Ferramentas na TASK-0331) volta como um ícone circular no cabeçalho —

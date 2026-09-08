@@ -3862,7 +3862,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </button>
       )}
 
-      {/* TASK-0357 (pedido direto, print anotado): Idioma/Tema saíram
+      {/* TASK-0358 (pedido direto, print anotado): Idioma/Tema saíram
           daqui — voltam pro cabeçalho (Header.tsx), como eram antes da
           TASK-0328. Histórico: TASK-0336 tinha colapsado num ícone único,
           TASK-0341/0343 trouxeram de volta como pills sempre visíveis
@@ -3996,7 +3996,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* TASK-0357 (pedido direto, print anotado): "Empresa ativa"/"Sair"
+      {/* TASK-0358 (pedido direto, print anotado): "Empresa ativa"/"Sair"
           saem daqui — o seletor de empresa vira um ícone circular no
           cabeçalho (Header.tsx), mesmo espírito do seletor de conta do
           Claude Code, com "Sair" ao lado como ícone próprio. */}
