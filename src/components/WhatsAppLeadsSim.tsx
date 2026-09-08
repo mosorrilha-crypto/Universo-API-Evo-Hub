@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ActiveTab, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ActiveTab, type ContactAgentContext, type ContactJourneyEvent, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
 import { apiFetch, getTenantOverride } from '../lib/apiClient';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
@@ -478,6 +478,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // esse lead (assinatura muda), a faixa volta a aparecer sozinha.
   const [dismissedContextSignature, setDismissedContextSignature] = useState<string | null>(null);
   const contactContextRequestRef = useRef(0);
+  // Jornada do contato (histórico de agendamentos + mudanças de estágio do
+  // CRM) — mesmo padrão de escopo por telefone+tenant do contactContext
+  // acima, pra alimentar a timeline na Ficha do Contato.
+  const [contactJourney, setContactJourney] = useState<ContactJourneyEvent[]>([]);
+  const [contactJourneyPhone, setContactJourneyPhone] = useState<string | null>(null);
+  const [contactJourneyTenantId, setContactJourneyTenantId] = useState<string | null>(null);
+  const [isContactJourneyLoading, setIsContactJourneyLoading] = useState(false);
+  const contactJourneyRequestRef = useRef(0);
   const [processingLeadId, setProcessingLeadId] = useState<string | null>(null);
   const [isAnalyzingConversation, setIsAnalyzingConversation] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -2088,6 +2096,40 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   }, [refreshContactContext]);
 
   const visibleContactContext = contactContextTenantId === activeTenant?.id && contactContextPhone === selectedLead?.phone ? contactContext : null;
+
+  const refreshContactJourney = React.useCallback(async () => {
+    const phone = selectedLead?.phone;
+    const tenantId = activeTenant?.id;
+    const isRealConversation = Boolean((selectedLead as any)?.isReal);
+    const requestId = ++contactJourneyRequestRef.current;
+    if (!phone || !tenantId || !isRealConversation) {
+      setContactJourney([]);
+      setContactJourneyPhone(null);
+      setContactJourneyTenantId(null);
+      setIsContactJourneyLoading(false);
+      return;
+    }
+
+    setContactJourneyPhone(phone);
+    setContactJourneyTenantId(tenantId);
+    setIsContactJourneyLoading(true);
+    try {
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/journey`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !Array.isArray(data?.events)) throw new Error(data?.error || `HTTP ${response.status}`);
+      if (requestId === contactJourneyRequestRef.current) setContactJourney(data.events as ContactJourneyEvent[]);
+    } catch {
+      if (requestId === contactJourneyRequestRef.current) setContactJourney([]);
+    } finally {
+      if (requestId === contactJourneyRequestRef.current) setIsContactJourneyLoading(false);
+    }
+  }, [activeTenant?.id, selectedLead?.phone, (selectedLead as any)?.isReal]);
+
+  useEffect(() => {
+    void refreshContactJourney();
+  }, [refreshContactJourney]);
+
+  const visibleContactJourney = contactJourneyTenantId === activeTenant?.id && contactJourneyPhone === selectedLead?.phone ? contactJourney : [];
 
   // Achado real (pedido do dono do produto, 04/09/2026): o badge "24h" e o
   // bloqueio de reengajamento congelavam no valor buscado quando a conversa
@@ -6421,6 +6463,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onToggleAgentStatus={() => selectedLead && handleUpdateConversationState(selectedLead.id, { aiBlocked: !selectedLead.aiBlockedAt })}
                 onClose={() => setShowRightPanel(false)}
                 onResyncAppointment={handleResyncAppointment}
+                journeyEvents={visibleContactJourney}
+                isJourneyLoading={isContactJourneyLoading}
               />
             ) : rightPanelTab === 'escalations' ? (
               renderEscalationHistoryPanel()
@@ -6555,6 +6599,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onToggleAgentStatus={() => handleUpdateConversationState(selectedLead.id, { aiBlocked: !(selectedLead as any).aiBlockedAt })}
                 onClose={() => setMobileAnalysisOpen(false)}
                 onResyncAppointment={handleResyncAppointment}
+                journeyEvents={visibleContactJourney}
+                isJourneyLoading={isContactJourneyLoading}
                 isMobile
               />
             ) : rightPanelTab === 'escalations' ? (
