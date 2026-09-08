@@ -5,6 +5,7 @@
  * mock/localStorage, leads reais nunca apareciam lá).
  */
 import { getDb } from './db';
+import { recordCrmStageChange } from './contactJourneyStore';
 
 export interface CrmNote {
   id: string;
@@ -88,8 +89,14 @@ export interface CrmLeadStatePatch {
  * lead de CRM pode ser cadastrado manualmente ("+ Novo Lead Real") antes de
  * qualquer conversa real acontecer nesse telefone.
  */
-export async function upsertCrmLeadState(tenantId: string, phone: string, patch: CrmLeadStatePatch): Promise<CrmLeadState> {
+export async function upsertCrmLeadState(tenantId: string, phone: string, patch: CrmLeadStatePatch, changedBy?: string): Promise<CrmLeadState> {
   const db = getDb();
+  let previousStage: string | undefined;
+  if (patch.stage !== undefined) {
+    const { data: existing } = await db.from('crm_lead_state').select('stage').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+    previousStage = (existing as { stage: string } | null)?.stage;
+  }
+
   const update: Record<string, any> = { tenant_id: tenantId, phone, updated_at: new Date().toISOString() };
   if (patch.name !== undefined) update.name = patch.name;
   if (patch.email !== undefined) update.email = patch.email;
@@ -105,6 +112,11 @@ export async function upsertCrmLeadState(tenantId: string, phone: string, patch:
     .select(CRM_LEAD_STATE_COLUMNS)
     .single();
   if (error) throw error;
+
+  if (patch.stage !== undefined && patch.stage !== previousStage) {
+    await recordCrmStageChange(tenantId, phone, previousStage, patch.stage, changedBy);
+  }
+
   return toCrmLeadState(data as CrmLeadStateRow);
 }
 

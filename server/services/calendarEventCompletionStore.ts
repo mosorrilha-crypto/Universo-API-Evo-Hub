@@ -6,6 +6,8 @@
  * ou direto no Google Calendar), não só os que passam por appointments.ts.
  */
 import { getDb } from './db';
+import { getAppointmentByEventId } from './appointmentStore';
+import { recordAppointmentJourneyEvent } from './contactJourneyStore';
 
 export async function markEventCompleted(tenantId: string, eventId: string): Promise<void> {
   const db = getDb();
@@ -13,6 +15,19 @@ export async function markEventCompleted(tenantId: string, eventId: string): Pro
     .from('calendar_event_completions')
     .upsert({ tenant_id: tenantId, event_id: eventId, completed_at: new Date().toISOString() }, { onConflict: 'tenant_id,event_id' });
   if (error) throw error;
+  // best-effort: se o evento não está espelhado em `appointments` (ex: criado
+  // direto no Google Calendar), não há telefone pra associar na jornada.
+  const appointment = await getAppointmentByEventId(tenantId, eventId);
+  if (appointment) {
+    await recordAppointmentJourneyEvent(tenantId, appointment.phone, {
+      eventType: 'completed',
+      serviceSummary: appointment.summary,
+      scheduledStart: appointment.startIso,
+      scheduledEnd: appointment.endIso,
+      eventId,
+      actor: 'operator',
+    });
+  }
 }
 
 export async function markEventNotCompleted(tenantId: string, eventId: string): Promise<void> {

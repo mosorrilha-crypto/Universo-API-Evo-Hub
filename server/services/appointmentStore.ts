@@ -6,6 +6,7 @@
  */
 import { getDb, getPlatformDb } from './db';
 import { withStructuredLog } from './structuredLog';
+import { recordAppointmentJourneyEvent } from './contactJourneyStore';
 
 export type PaymentStatus = 'awaiting_payment' | 'pending_verification' | 'verified' | 'confirmed' | 'rejected';
 
@@ -125,8 +126,18 @@ export async function setAppointmentForPhone(
     payload.payment_receipt_hint = null;
     payload.held_until = null;
   }
+  const existing = await getAppointmentForPhone(tenantId, phone);
   const { error } = await db.from('appointments').upsert(payload, { onConflict: 'tenant_id,phone' });
   if (error) throw error;
+  await recordAppointmentJourneyEvent(tenantId, phone, {
+    eventType: existing ? 'rescheduled' : 'created',
+    serviceSummary: appt.summary,
+    scheduledStart: appt.startIso,
+    scheduledEnd: appt.endIso,
+    paymentStatus: appt.paymentStatus,
+    eventId: appt.eventId,
+    actor: appt.source === 'manual' ? 'operator' : 'ai',
+  });
 }
 
 /**
@@ -148,7 +159,19 @@ export async function updateAppointmentSummaryByEventId(tenantId: string, eventI
 
 export async function clearAppointmentForPhone(tenantId: string, phone: string): Promise<void> {
   const db = getDb();
+  const existing = await getAppointmentForPhone(tenantId, phone);
   await db.from('appointments').delete().eq('tenant_id', tenantId).eq('phone', phone);
+  if (existing) {
+    await recordAppointmentJourneyEvent(tenantId, phone, {
+      eventType: 'cancelled',
+      serviceSummary: existing.summary,
+      scheduledStart: existing.startIso,
+      scheduledEnd: existing.endIso,
+      paymentStatus: existing.paymentStatus,
+      eventId: existing.eventId,
+      actor: 'system',
+    });
+  }
 }
 
 /**
@@ -360,7 +383,20 @@ export async function setPaymentVerification(tenantId: string, phone: string, st
       .select('*')
       .maybeSingle();
     if (error) throw error;
-    return data ? toTracked(data as AppointmentRow) : undefined;
+    const tracked = data ? toTracked(data as AppointmentRow) : undefined;
+    if (tracked && status === 'verified') {
+      await recordAppointmentJourneyEvent(tenantId, phone, {
+        eventType: 'payment_verified',
+        serviceSummary: tracked.summary,
+        scheduledStart: tracked.startIso,
+        scheduledEnd: tracked.endIso,
+        paymentStatus: tracked.paymentStatus,
+        eventId: tracked.eventId,
+        actor: 'operator',
+        detail: { operatorId },
+      });
+    }
+    return tracked;
   });
 }
 

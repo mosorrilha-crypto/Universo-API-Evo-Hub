@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
 import { listCrmLeadStates, upsertCrmLeadState, deleteCrmLeadState } from '../crmStore';
+import { listContactJourney } from '../contactJourneyStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const TENANT_B = '22222222-2222-2222-2222-222222222222';
@@ -65,5 +66,24 @@ describe('crmStore — estado de CRM por lead', () => {
     const state = await upsertCrmLeadState(TENANT_A, '595982222222', { name: 'Claudia', email: 'claudia@exemplo.com' });
     expect(state.name).toBe('Claudia');
     expect(state.email).toBe('claudia@exemplo.com');
+  });
+
+  it('mudança de estágio registra um evento na jornada do contato', async () => {
+    await upsertCrmLeadState(TENANT_A, '595981111111', { stage: 'novo' });
+    await upsertCrmLeadState(TENANT_A, '595981111111', { stage: 'contato' }, 'operator-1');
+
+    const events = await listContactJourney(TENANT_A, '595981111111');
+    const stageEvents = events.filter((e) => e.kind === 'stage_change');
+    expect(stageEvents).toHaveLength(2);
+    expect(stageEvents[0]).toMatchObject({ fromStage: 'novo', toStage: 'contato', changedBy: 'operator-1' });
+    expect(stageEvents[1]).toMatchObject({ fromStage: undefined, toStage: 'novo' });
+  });
+
+  it('não registra evento de jornada quando o patch não muda o estágio', async () => {
+    await upsertCrmLeadState(TENANT_A, '595981111111', { stage: 'contato' });
+    await upsertCrmLeadState(TENANT_A, '595981111111', { dealValue: 500 });
+
+    const events = await listContactJourney(TENANT_A, '595981111111');
+    expect(events.filter((e) => e.kind === 'stage_change')).toHaveLength(1);
   });
 });
