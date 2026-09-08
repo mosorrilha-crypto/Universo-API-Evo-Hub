@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { SystemLogsPanel } from '../SystemLogsPanel';
 
 const incident = {
-  id: 'incident-1', tenantId: 'tenant-a', sourceKey: 'system:knowledgeBase:loadRuntimeSource:legacy-fallback', category: 'knowledge_base' as const,
-  severity: 'high' as const, status: 'open' as const, title: 'Fonte legada usada como contingência', detail: 'source=legacy_blob',
+  id: 'incident-1', tenantId: 'tenant-a', sourceKey: 'system:knowledgeBase:loadRuntimeSource:unavailable', category: 'knowledge_base' as const,
+  severity: 'critical' as const, status: 'open' as const, title: 'Runtime da Base de Conhecimento indisponível', detail: 'source=unavailable',
   suggestedAction: 'Revise os documentos publicados.', metadata: {}, occurrenceCount: 2, firstSeenAt: new Date().toISOString(), lastSeenAt: new Date().toISOString(),
 };
 

@@ -44,10 +44,12 @@ import {
   ChevronDown,
   GripVertical,
   ExternalLink,
-  Pencil
+  Pencil,
+  Search
 } from 'lucide-react';
 import { auditKnowledgeBase, productNeedsAttention } from '../lib/knowledgeBaseAudit';
 import { KnowledgeBaseDocumentation } from './KnowledgeBaseDocumentation';
+import { PromptAuditView } from './PromptAuditView';
 import {
   type KnowledgeBaseDocumentState,
   listKnowledgeBaseDocumentStates,
@@ -64,7 +66,6 @@ import { describeKnowledgeBaseDocumentDiff } from '../lib/knowledgeBaseDocumentD
 
 interface AgentKnowledgeBaseProps {
   knowledgeBase: AgentKnowledgeBase;
-  onSaveKnowledgeBase: (kb: AgentKnowledgeBase) => Promise<boolean>;
   businessHours: BusinessHours;
   onSaveBusinessHours: (hours: BusinessHours) => Promise<boolean>;
   onGoToWhatsAppSim: () => void;
@@ -186,21 +187,24 @@ export const emptyKnowledgeBase: AgentKnowledgeBase = {
 };
 
 // Espelha o "PROMPT FINAL — MONIQUE SORRILHA BEAUTY STUDIO" (versão final
-// fechada em 07/08/2026, ver scripts/seed-monique-knowledge-base.ts pra a
-// cópia que roda de verdade no backend/Gemini). Essa cópia aqui alimenta só
-// o editor local da aba "Base de Conhecimento" — mantida em paridade com o
-// backend pra nunca voltar a divergir (achado numa auditoria: essa cópia
-// tinha só 10 dos 21 serviços e ainda mostrava a promoção de julho/2026 já
-// vencida, "[PROMO Gs 450.000]", hardcoded no preço). Usada só como PRESET
-// explícito (ver PRESET_TEMPLATES abaixo) — nunca mais como fallback
-// silencioso (ver App.tsx).
+// fechada em 07/08/2026). TASK-0327 — o script que antes gravava a cópia
+// "de verdade" no backend (scripts/seed-monique-knowledge-base.ts) foi
+// removido junto com a tabela legada `knowledge_base`: a fonte real do
+// tenant hoje é só o editor tipado (draft + publicação, painel). Esta
+// constante aqui é usada exclusivamente como PRESET explícito de onboarding
+// (ver PRESET_TEMPLATES abaixo) — nunca como fallback silencioso (ver
+// App.tsx) — então pode divergir do tenant real sem quebrar nada; revise
+// antes de aplicar num tenant novo (achado numa auditoria: chegou a ficar
+// com só 10 dos 21 serviços, uma promoção vencida hardcoded no preço, e um
+// dado bancário da conta antiga já trocada — TASK-0327 corrigiu esse
+// último).
 export const moniqueStudioKnowledgeBase: AgentKnowledgeBase = {
   companyName: 'Monique Sorrilha Beauty Studio',
   agentGoal: 'Atender clientes pelo WhatsApp e Instagram, entender o que elas desejam, recomendar serviços somente com base no catálogo oficial, consultar a agenda conectada e conduzir o atendimento até a reserva, sem confirmar horários antes da conclusão de todas as etapas obrigatórias. Quando perguntarem quem atende, responder: "Sou a Ana, assistente da Monique por aqui." Nunca dizer ou sugerir que é a própria Monique.',
   toneOfVoice: 'Espanhol paraguaio com voseo natural (vos, querés, buscás, podés, tenés, vení) e imperativos como escribime e mandame quando a cliente escreve em espanhol; português do Brasil quando ela escreve em português. Em idiomas mistos, usar o idioma predominante; em empate, perguntar a preferência. Tom caloroso, natural e direto, sem formalidade, rigidez ou pressão. Vocativos com moderação, cerca de 1 a cada 4-5 mensagens; evitar se a cliente demonstrar irritação. NUNCA use diminutivo. Escreva em frases curtas, sem parênteses nem dois-pontos explicativos. Evite usted, linguagem corporativa, excesso de emojis, falsa urgência, pressão para pagamento ou promessa de resultado. Nunca misture português em uma frase em espanhol.',
   businessModel: 'O Monique Sorrilha Beauty Studio oferece micropigmentação de sobrancelhas e lábios, procedimentos para pestañas e combos de beleza em Luque, Paraguai. O atendimento é personalizado, com foco em resultados naturais, harmônicos e adequados às preferências de cada cliente. Ana é a assistente virtual responsável pelo primeiro atendimento, esclarecimento de dúvidas, recomendação baseada no catálogo oficial, consulta de agenda e encaminhamento para aprovação humana quando necessário. A avaliação está incluída quando indicada no catálogo.',
   locationMapsUrl: 'https://www.google.com/maps?q=-25.2516845,-57.4997556&z=17&hl=pt-BR',
-  pricingAndPolicies: 'As únicas formas de recebimento são transferência bancária ou efetivo. Seña de Gs 50.000, abatida do total: só enviar os dados de transferência depois que serviço, valor e horário desejado estiverem claros e a cliente demonstrar intenção real de agendar. Alias/Cédula: 5286155. Titular: Sara Jazmin Escobar Ruiz. Efetivo só quando a cliente pedir ou demonstrar dificuldade com transferência; nesse caso, paga o total depois do atendimento e o turno não é confirmado automaticamente. Cancelamento: seña devolvida com 24h+ de antecedência, não devolvida com menos de 24h. Tolerância de atraso de 15 minutos; após isso, o agendamento poderá ser cancelado. Remarcação sem custo com 24h+ de antecedência. Ausência sem aviso não gera reembolso e exige nova seña. Retoque não está incluso, não é obrigatório, só ocorre quando Monique recomendar após avaliar a primeira aplicação feita por ela e não é feito em procedimentos de outras profissionais. Nunca desconto, parcelamento, cortesia ou alteração de política não autorizada.',
+  pricingAndPolicies: 'As únicas formas de recebimento são transferência bancária ou efetivo. Seña de Gs 50.000, abatida do total: só enviar os dados de transferência depois que serviço, valor e horário desejado estiverem claros e a cliente demonstrar intenção real de agendar. Alias/Cédula: 9518111. Titular: Monique Sorrilha. Efetivo só quando a cliente pedir ou demonstrar dificuldade com transferência; nesse caso, paga o total depois do atendimento e o turno não é confirmado automaticamente. Cancelamento: seña devolvida com 24h+ de antecedência, não devolvida com menos de 24h. Tolerância de atraso de 15 minutos; após isso, o agendamento poderá ser cancelado. Remarcação sem custo com 24h+ de antecedência. Ausência sem aviso não gera reembolso e exige nova seña. Retoque não está incluso, não é obrigatório, só ocorre quando Monique recomendar após avaliar a primeira aplicação feita por ela e não é feito em procedimentos de outras profissionais. Nunca desconto, parcelamento, cortesia ou alteração de política não autorizada.',
   products: [
     // PESTAÑAS
     { id: 'm1', name: 'Lash Lift', price: 'Gs 140.000', priceAmount: 140000, currency: 'PYG', durationMinutes: 90, bookable: false, description: 'Pestañas — curva e realça as próprias pestañas, sem extensões. Efeito natural que dura semanas.' },
@@ -541,7 +545,6 @@ const BeforeAfterEditor: React.FC<BeforeAfterEditorProps> = ({ label, pairs, onC
 
 export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   knowledgeBase,
-  onSaveKnowledgeBase,
   businessHours,
   onSaveBusinessHours,
   onGoToWhatsAppSim,
@@ -578,6 +581,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isBusinessTemplatesOpen, setIsBusinessTemplatesOpen] = useState(false);
   const [showKnowledgeBaseDocumentation, setShowKnowledgeBaseDocumentation] = useState(false);
+  const [showPromptAudit, setShowPromptAudit] = useState(false);
   const [showHoursEditor, setShowHoursEditor] = useState(false);
   const [typedDocumentStates, setTypedDocumentStates] = useState<KnowledgeBaseDocumentState[]>([]);
   const [isLoadingTypedDocuments, setIsLoadingTypedDocuments] = useState(false);
@@ -633,7 +637,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   }, [activeTenantId, usesPublishedKnowledgeBase]);
 
   // Recurso separado (tabela `tenants`, não a base de conhecimento) — save
-  // próprio, não passa pelo handleSave/onSaveKnowledgeBase de cima.
+  // próprio, não passa pelo handleSave de cima.
   //
   // Bug real (28/08/2026): o inicializador de useState só roda uma vez, na
   // primeira renderização — se este componente monta antes do GET
@@ -786,31 +790,25 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     setSaveError(null);
     setIsSavedToast(false);
     try {
-      if (usesPublishedKnowledgeBase) {
-        if (!activeTenantId) throw new Error('Empresa ativa indisponível para salvar a Base de Conhecimento.');
-        const payloads = splitVisualKnowledgeBaseIntoDocuments(updated);
-        const changedTypes = VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES.filter((documentType) => {
-          const state = typedDocumentStates.find((item) => item.documentType === documentType);
-          const current = state?.draft?.data || state?.published?.data || {};
-          return !documentPayloadsMatch(current, payloads[documentType]);
-        });
-        for (const documentType of changedTypes) {
-          await saveKnowledgeBaseDocumentDraft(documentType, payloads[documentType]);
-        }
-        const refreshedStates = await listKnowledgeBaseDocumentStates();
-        setTypedDocumentStates(refreshedStates);
-        hydrateVisualFormFromTypedDocuments(refreshedStates);
-        setFormData((previous) => ({ ...previous, lastSaved: updated.lastSaved }));
-        setIsSavedToast(true);
-        setTimeout(() => setIsSavedToast(false), 4000);
-        return;
+      // TASK-0327 — a tabela legada `knowledge_base` (e a rota que gravava
+      // nela, POST /api/knowledge-base) foi eliminada: o salvamento é sempre
+      // via documentos tipados (draft + publicação), independente do valor
+      // de `usesPublishedKnowledgeBase` (hoje sempre true no único ponto de
+      // renderização real, App.tsx).
+      if (!activeTenantId) throw new Error('Empresa ativa indisponível para salvar a Base de Conhecimento.');
+      const payloads = splitVisualKnowledgeBaseIntoDocuments(updated);
+      const changedTypes = VISUAL_KNOWLEDGE_BASE_DOCUMENT_TYPES.filter((documentType) => {
+        const state = typedDocumentStates.find((item) => item.documentType === documentType);
+        const current = state?.draft?.data || state?.published?.data || {};
+        return !documentPayloadsMatch(current, payloads[documentType]);
+      });
+      for (const documentType of changedTypes) {
+        await saveKnowledgeBaseDocumentDraft(documentType, payloads[documentType]);
       }
-      const saved = await onSaveKnowledgeBase(updated);
-      if (!saved) {
-        setSaveError('Não foi possível salvar no servidor. Revise sua conexão e tente novamente.');
-        return;
-      }
-      setFormData(updated);
+      const refreshedStates = await listKnowledgeBaseDocumentStates();
+      setTypedDocumentStates(refreshedStates);
+      hydrateVisualFormFromTypedDocuments(refreshedStates);
+      setFormData((previous) => ({ ...previous, lastSaved: updated.lastSaved }));
       setIsSavedToast(true);
       setTimeout(() => setIsSavedToast(false), 4000);
     } catch {
@@ -843,6 +841,13 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
       setDiffOpenDocumentType(null);
       setIsSavedToast(true);
       setTimeout(() => setIsSavedToast(false), 4000);
+      // TASK-0308: App.tsx só re-busca a Base de Conhecimento no mount/troca
+      // de tenant — sem isso, o estado usado por WhatsAppLeadsSim e
+      // PublicCatalogSettings ficava com o valor antigo até a página ser
+      // recarregada, mesmo minutos depois de publicar aqui.
+      if (activeTenantId) {
+        window.dispatchEvent(new CustomEvent('universo:knowledge-base-published', { detail: { tenantId: activeTenantId } }));
+      }
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Não foi possível publicar todas as alterações. Revise os rascunhos e tente novamente.');
     } finally {
@@ -1709,9 +1714,12 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
   // Upload real (Storage do backend) — até aqui era só um registro visual
   // fictício, sem arquivo nenhum de verdade guardado em lugar algum (achado
   // real: os 2 "documentos" do preset da Monique nunca existiram, ninguém
-  // conseguia abrir). Cada arquivo sobe e grava direto (não fica esperando
-  // o botão "Salvar Regras no Agente" — mesmo motivo de horário de
-  // funcionamento ter save próprio: é outro recurso, não o formData local).
+  // conseguia abrir). TASK-0327 — o binário sobe pro Storage na hora
+  // (/api/knowledge-base/document-storage, sem tocar em tabela nenhuma), mas
+  // a referência só entra de fato na Base de Conhecimento quando o rascunho
+  // de `media_assets` é salvo e publicado — mesmo padrão já usado por
+  // vídeo/foto de exemplo, que também sobem na hora mas só "contam" depois
+  // do Salvar/Publicar.
   const handleRealFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     e.target.value = '';
@@ -1729,7 +1737,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     for (const file of accepted) {
       try {
         const base64 = await fileToBase64(file);
-        const res = await apiFetch('/api/knowledge-base/documents', {
+        const res = await apiFetch('/api/knowledge-base/document-storage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
@@ -1914,6 +1922,10 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     if (firstSection) window.setTimeout(() => document.getElementById(`knowledge-base-section-${firstSection}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
 
+  if (showPromptAudit) {
+    return <PromptAuditView onBack={() => setShowPromptAudit(false)} />;
+  }
+
   if (showKnowledgeBaseDocumentation) {
     return <KnowledgeBaseDocumentation isRuntimePublished={usesPublishedKnowledgeBase} onBack={() => setShowKnowledgeBaseDocumentation(false)} />;
   }
@@ -1954,6 +1966,16 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
           >
             <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Documentação</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPromptAudit(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition-all hover:bg-fuchsia-500/20"
+            title="Ver exatamente o prompt (regras + Base de Conhecimento + conversa) que é mandado ao Gemini"
+            aria-label="Auditar prompt do agente"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Auditar Prompt</span>
           </button>
           <button
             type="button"

@@ -13,13 +13,13 @@ import { markAsReadAndShowTyping, isGeoRestrictedError } from '../services/metaS
 import { showEvolutionTyping } from '../services/evolutionSend';
 import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
-import { getRuntimeKnowledgeBase, getKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { transcribeAudioWithGemini } from '../services/geminiTranscription';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
 import { bufferIncomingText, startBufferRecoverySweeper } from '../services/messageBuffer';
-import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey } from '../services/escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment, getPendingOperatorGuidance, markOperatorGuidanceConsumed, reviewerEscalationSourceKey, bookingConfirmationEscalationSourceKey } from '../services/escalationStore';
 import { downloadMetaMedia, downloadEvolutionMedia } from '../services/mediaDownload';
 import { saveMediaImage } from '../services/mediaImageStore';
 import { consumePendingEcho } from '../services/outboundEchoTracker';
@@ -345,14 +345,14 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
         );
         if (calendarExecution.hadError) {
           const reason = calendarExecution.summaries.join(' ');
-          await logEscalation(tenantId, phone, contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, text);
+          await logEscalation(tenantId, phone, contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, text, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(phone) });
           console.warn(`⚠️ [Agenda pós-revisão] tenant=${tenantId} nenhuma resposta foi enviada porque a ação aprovada falhou: ${reason}`);
           emitAiReplyStatus(tenantId, phone, 'delivery_failed');
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
           return;
         }
         if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-          await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text);
+          await logEscalation(tenantId, phone, contactName, 'Cliente tentando fechar agendamento — precisa de confirmação/atenção humana (dados insuficientes, agenda não conectada, ou falha ao agir na agenda real)', text, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(phone) });
           emitAiReplyStatus(tenantId, phone, 'awaiting_human');
         }
         // TASK-0241: a foto/vídeo (quando runMidiaTool decidiu mandar uma)
@@ -568,7 +568,7 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
                     try {
                       const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, downloaded.base64, downloaded.mimeType, {
                         leadName: msg.contactName,
-                        customInstructions: formatKnowledgeBaseForPrompt(await getKnowledgeBase(tenantId)),
+                        customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
                       });
                       const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
                       await updateMessageText(tenantId, msg.from, msg.messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);

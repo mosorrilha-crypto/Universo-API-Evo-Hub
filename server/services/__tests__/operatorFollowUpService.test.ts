@@ -137,4 +137,45 @@ describe('sendOperatorGuidedFollowUp — retomada guiada bloqueada pelo revisor'
     expect(updated?.resolved).toBe(false);
     expect(updated?.operatorReplyConsumedAt).toBeFalsy();
   });
+
+  // TASK-0316 (pedido direto, mesmo achado da TASK-0315: "as vezes me
+  // parecem fora de contexto com o histórico do chat, principalmente o de
+  // retomada") — achado real: esta retomada é AUTOMÁTICA (vai direto pro
+  // cliente dentro da janela de 24h, sem revisão manual do texto), e o
+  // prompt que a GERA nunca recebia o histórico da conversa — só o
+  // revisor de segurança via depois. Este teste garante que o histórico
+  // chega no prompt enviado ao Gemini, formatado cronologicamente.
+  it('o prompt que gera a retomada inclui o histórico cronológico da conversa, não só a orientação do operador', async () => {
+    const seeded = await seedEscalationWithinWindow();
+    const withGuidance = await (await import('../escalationStore')).submitOperatorReply(TENANT_A, seeded.id, 'Podemos abrir uma exceção para esta cliente');
+
+    // Timestamps recentes (não fixos no passado) — a janela de 24h da Meta
+    // (getCustomerServiceWindowStatus) é calculada contra Date.now(), então
+    // uma data fixa antiga cairia fora da janela e mandaria template em vez
+    // de gerar via IA.
+    const now = Date.now();
+    const conversationStoreMock = await import('../conversationStore');
+    (conversationStoreMock.getConversation as any).mockResolvedValue({
+      messages: [
+        { sender: 'lead', text: 'Eu só posso depois das 18:00', timestamp: new Date(now - 60_000).toISOString() },
+        { sender: 'agent', text: 'Vou verificar e te aviso', timestamp: new Date(now - 30_000).toISOString() },
+      ],
+    });
+    (reviewAutoReplyBeforeSend as any).mockResolvedValue({ approved: true, source: 'gemini-reviewer', severity: 'low', reason: 'ok' });
+
+    const generateContent = vi.fn().mockResolvedValue({ text: '¡Buenísimo! Podemos hacer una excepción para vos.' });
+    const ai = { models: { generateContent } } as any;
+
+    await sendOperatorGuidedFollowUp(TENANT_A, withGuidance!, {
+      ai,
+      metaAccessToken: 'token',
+      metaPhoneNumberId: 'phone-id',
+      tenantName: 'Monique',
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    const sentPrompt = generateContent.mock.calls[0][0].contents[0].text as string;
+    expect(sentPrompt).toContain('1. CLIENTE: Eu só posso depois das 18:00');
+    expect(sentPrompt).toContain('2. ATENDIMENTO: Vou verificar e te aviso');
+  });
 });

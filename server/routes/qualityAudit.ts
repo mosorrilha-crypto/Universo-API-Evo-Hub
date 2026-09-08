@@ -410,8 +410,9 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
     const { status, reviewNote, correctedValue } = req.body || {};
     const parsedStatus = status === undefined ? undefined : parseStatus(status);
     if (status !== undefined && !parsedStatus) return res.status(400).json({ error: 'Status de revisão inválido.' });
+    const tenantId = tenantOf(req);
     const review = await updateQualityReview({
-      tenantId: tenantOf(req),
+      tenantId,
       reviewId: req.params.id,
       status: parsedStatus,
       reviewNote: reviewNote === undefined ? undefined : String(reviewNote || ''),
@@ -419,16 +420,44 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
       reviewedBy: req.user?.id || null,
     });
     if (!review) return res.status(404).json({ error: 'Revisão não encontrada.' });
+
+    // TASK-0304 — pedido direto do dono do produto: "Aprovar" não fazia
+    // nada além de gravar o status (achado durante uma auditoria da própria
+    // tela de Qualidade). Quando o achado aprovado já tem uma resposta
+    // sugerida ("Como deveria ter respondido"), aprovar agora abre um
+    // rascunho de conhecimento pra decisão humana incorporar (ou não) esse
+    // padrão na Base de Conhecimento do tenant — nunca publica sozinho,
+    // mesmo princípio não-destrutivo já usado no fluxo knowledge_draft dos
+    // padrões de memória (ver rota .../memory-pattern-reviews/:id acima).
+    let knowledgeDraftCreated = false;
+    if (parsedStatus === 'approved' && review.kind !== 'knowledge' && review.corrected_value) {
+      const existingDrafts = await listQualityReviews(tenantId, { kind: 'knowledge' });
+      const alreadyDrafted = existingDrafts.some((draft) => draft.context?.sourceReviewId === review.id);
+      if (!alreadyDrafted) {
+        await createQualityReview({
+          tenantId,
+          kind: 'knowledge',
+          title: `Incorporar resposta aprovada: ${review.title}`,
+          description: `Achado aprovado (${review.id}): "${review.title}".\n\nResposta sugerida como correta:\n${review.corrected_value}\n\nAvalie se este padrão deve virar orientação/exemplo na Base de Conhecimento do tenant — esta abertura não publica nada sozinha.`,
+          context: { source: 'approved_review', sourceReviewId: review.id },
+          originalValue: review.original_value ?? null,
+          correctedValue: review.corrected_value,
+          createdBy: req.user?.id || null,
+        });
+        knowledgeDraftCreated = true;
+      }
+    }
+
     await recordQualityAuditEvent({
-      tenantId: tenantOf(req),
+      tenantId,
       eventType: 'quality_review_updated',
       source: 'quality_admin',
       entityType: 'quality_review',
       entityId: review.id,
       actorId: req.user?.id,
-      payload: { status: review.status, reviewNote: review.review_note || null },
+      payload: { status: review.status, reviewNote: review.review_note || null, knowledgeDraftCreated },
     });
-    res.json({ review });
+    res.json({ review, knowledgeDraftCreated });
   }));
 
   router.post('/api/quality-audit/feedback', authenticateToken, requireQualityModule(), asyncHandler(async (req: AuthenticatedRequest, res) => {

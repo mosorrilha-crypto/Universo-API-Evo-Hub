@@ -43,7 +43,12 @@ const findProductMatch = vi.fn((kb: { products: { name: string }[] } | null, nam
   const product = kb?.products?.find((p) => p.name.trim().toLowerCase() === normalized);
   return product ? { product } : undefined;
 });
-vi.mock('../knowledgeBaseStore', () => ({ getKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined), findProductMatch }));
+// TASK-0327: a store real não exporta mais getKnowledgeBase (tabela legada
+// eliminada) — getRuntimeKnowledgeBase aqui só delega pro mock acima, então
+// os .mockResolvedValueOnce(...) espalhados pelo arquivo continuam valendo
+// sem precisar duplicar em cada caso.
+const getRuntimeKnowledgeBase = vi.fn(async () => ({ knowledgeBase: await getKnowledgeBase(), source: 'published_documents' as const }));
+vi.mock('../knowledgeBaseStore', () => ({ getRuntimeKnowledgeBase, resolveProductPriceAmount: vi.fn(() => 0), isNonBookableProduct: vi.fn(() => false), findProductDurationMinutes: vi.fn(() => undefined), findProductMatch }));
 vi.mock('../appointmentStore', () => ({
   getAppointmentForPhone,
   setAppointmentForPhone: vi.fn(async () => undefined),
@@ -241,6 +246,14 @@ describe('generateAutoReplyForText — camadas do prompt (Etapa 3)', () => {
     expect(systemInstruction).toContain('Nunca use parênteses nem dois-pontos explicativos dentro da mensagem');
   });
 
+  it('reforça a regra pra nunca inventar cidade/bairro ao mandar o link de localização (achado real em produção, TASK-0329: agente disse "Estamos en Asunción" sem esse dado estar no contexto, e o studio fica em Luque)', async () => {
+    const { ai, calls } = makeFakeAi();
+    await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
+    const systemInstruction: string = calls[1].config.systemInstruction;
+    expect(systemInstruction).toContain('NUNCA INVENTE CIDADE, BAIRRO OU QUALQUER DESCRIÇÃO DO LUGAR');
+    expect(systemInstruction).toContain('Coordenadas geográficas não são um dado que você consegue ler/traduzir pra nome de lugar com precisão');
+  });
+
   it('reforça a regra anti-repetição de pergunta já respondida (achado real em produção: agente perguntava "cejas, pestañas o labios?" de novo logo depois do cliente responder "Las cejas")', async () => {
     const { ai, calls } = makeFakeAi();
     await generateAutoReplyForText('tenant-a', ai, 'oi', undefined, undefined, undefined);
@@ -418,10 +431,10 @@ describe('generateAutoReplyForText — captura o nome que a cliente diz na conve
     expect(result?.capturedClientName).toBe('Camila');
   });
 
-  it('IGNORA nomeCapturado quando já existe contactName — nunca deixa a IA sobrescrever o nome real de perfil do WhatsApp', async () => {
+  it('TASK-0305: usa nomeCapturado mesmo quando o perfil do WhatsApp trouxe um valor — esse valor nunca é confiável como nome real (achado: "Pao Fretes" virando "Pao")', async () => {
     const ai = makeFakeAiWithName('Outro Nome');
     const result = await generateAutoReplyForText('tenant-a', ai, 'oi', 'Camila (perfil do WhatsApp)', undefined, []);
-    expect(result?.capturedClientName).toBeUndefined();
+    expect(result?.capturedClientName).toBe('Outro Nome');
   });
 
   it('não define capturedClientName quando o modelo não extraiu nenhum nome', async () => {

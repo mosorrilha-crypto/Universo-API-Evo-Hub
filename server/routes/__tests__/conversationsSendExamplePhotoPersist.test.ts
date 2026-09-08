@@ -21,6 +21,12 @@ const getKnowledgeBase = vi.fn(async () => ({
     { name: 'Microlips', price: 'R$ 500', exampleImageBase64: 'ZmFrZS1pbWFnZQ==', exampleImageMimeType: 'image/jpeg' },
   ],
 }));
+// TASK-0308: a rota lê via getRuntimeKnowledgeBase — este mock delega pra
+// getKnowledgeBase() acima (nome mantido só como helper local; a store real
+// não exporta mais getKnowledgeBase desde TASK-0327), então os
+// mockResolvedValueOnce por teste continuam valendo sem precisar duplicar
+// em cada caso.
+const getRuntimeKnowledgeBase = vi.fn(async (tenantId: string) => ({ knowledgeBase: await getKnowledgeBase(), source: 'published_documents' as const }));
 // TASK-0218: mesmo contrato real de resolveKnowledgeBaseImageBinary (Storage
 // se tiver imageId, senão fallback pro Base64 legado), sem fetch() de
 // verdade — sobrescrito nos testes que precisam simular Storage/ausência.
@@ -41,7 +47,7 @@ vi.mock('../../services/knowledgeBaseImageStore', async (importOriginal) => {
 });
 vi.mock('../../services/knowledgeBaseStore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/knowledgeBaseStore')>();
-  return { ...actual, getKnowledgeBase, setKnowledgeBase: vi.fn() };
+  return { ...actual, getRuntimeKnowledgeBase };
 });
 
 const { createConversationsRouter } = await import('../conversations');

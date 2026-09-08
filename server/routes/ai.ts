@@ -6,6 +6,7 @@ import { callGroqJsonCompletion } from '../services/groqClient';
 import { formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { buildChronologicalConversationContext, guardContinuationReply } from '../services/conversationReplyGuard';
 import { freshnessFor, getLatestConversationAnalysis, saveConversationAnalysis } from '../services/conversationAnalysisStore';
+import { HISTORY_WINDOW_SIZE } from '../services/autoReply';
 
 /**
  * Achado real em produção (18/08/2026): os quatro endpoints deste arquivo
@@ -46,15 +47,30 @@ import { freshnessFor, getLatestConversationAnalysis, saveConversationAnalysis }
  * json_object) — o base64 nunca era usado, só inflava o payload. Mesmo
  * princípio já aplicado à Base de Conhecimento (formatKnowledgeBaseForPrompt
  * em vez de JSON.stringify cru): manda só o que o texto precisa.
+ *
+ * TASK-0315 (05/09/2026): a correção original trocava `mediaBase64` fora de
+ * um JSON.stringify ainda cru do resto da mensagem — resolvia o 413, mas
+ * não a causa mais ampla (histórico sem formatação cronológica clara nem
+ * limite de tamanho, ver ANALYSIS_HISTORY_WINDOW_SIZE/HISTORY_WINDOW_SIZE
+ * abaixo). Os 3 endpoints agora usam buildChronologicalConversationContext
+ * (conversationReplyGuard.ts) em vez de JSON.stringify(messages) — já
+ * ignora mediaBase64 (só lê `.text`), então a função dedicada de antes
+ * (stripMediaBase64ForPrompt) não é mais necessária.
  */
-function stripMediaBase64ForPrompt(messages: any): any {
-  if (!Array.isArray(messages)) return messages;
-  return messages.map((m) => {
-    if (!m || typeof m !== 'object' || !m.mediaBase64) return m;
-    const { mediaBase64, ...rest } = m;
-    return rest;
-  });
-}
+/**
+ * Janela do histórico só pro endpoint de análise de CRM (leadStage,
+ * extractedCRMData, etc) — bem maior que HISTORY_WINDOW_SIZE (o mesmo valor
+ * usado pelo agente principal e pelos outros dois endpoints abaixo,
+ * reply-from-hint/ask, que só precisam do fim recente da conversa pra gerar
+ * a PRÓXIMA mensagem). Um dado de CRM real (orçamento, objeção, critério de
+ * decisão) pode ter sido dito bem no início de uma conversa longa — cortar
+ * pra só 24 mensagens perderia justamente esse tipo de informação que essa
+ * análise existe pra capturar. Ainda assim, limitada (não é "sem limite"
+ * como antes) — achado real via consulta direta ao Postgres de produção:
+ * conversas reais chegam a 255 mensagens, e mandar isso inteiro no prompt
+ * incha custo/tokens sem necessidade.
+ */
+const ANALYSIS_HISTORY_WINDOW_SIZE = 80;
 
 interface AiRouterDeps {
   config: ServerConfig;
@@ -115,7 +131,7 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
         }
       };
 
-      const chronologicalHistory = buildChronologicalConversationContext(messages);
+      const chronologicalHistory = buildChronologicalConversationContext(messages, ANALYSIS_HISTORY_WINDOW_SIZE);
       const prompt = `Você é um analista de Vendas e CRM inteligente para um sistema SaaS no WhatsApp.
 Analise o histórico da conversa a seguir e a base de conhecimento do agente e responda estritamente em formato JSON com a seguinte estrutura:
 {
@@ -282,9 +298,9 @@ INSTRUÇÃO DO OPERADOR: "${hint.trim()}"
 
 Use o histórico da conversa e a base de conhecimento SÓ pra manter o tom, o idioma e o contexto consistentes com o que já foi dito — nunca pra contrariar ou ignorar a instrução do operador. Mesmo quando a instrução for comercial, não ignore uma pergunta específica e ainda sem resposta da última mensagem do lead: responda-a primeiro, salvo se a instrução disser explicitamente o contrário. Não diga que enviou ou vai anexar foto, vídeo, catálogo ou outro arquivo se você não tiver uma ferramenta real de envio de mídia. Não invente disponibilidade, preço, desconto ou confirmação de agenda.
 
-Antes de escrever, releia o histórico da conversa abaixo com atenção (achado real de produção: sem este aviso, o rascunho às vezes repetia um cumprimento e uma informação que já tinham sido enviadas há poucas mensagens):
-- Se o histórico mostra que vocês já se falaram nesta conversa, NUNCA se apresente ou cumprimente de novo (nada de "¡Hola!"/"Olá!" de abertura) — continue a conversa naturalmente, como quem lembra o que já foi dito.
-- Nunca repita uma informação (preço, prazo, condição, link) que já foi enviada ao lead nas mensagens anteriores do "Atendente" — se a instrução do operador pede pra reforçar algo já dito, reformule ou avance a conversa a partir dali, não copie a mesma informação de novo como se fosse a primeira vez.
+Antes de escrever, releia o histórico da conversa abaixo com atenção (achado real de produção: sem este aviso, o rascunho às vezes repetia um cumprimento e uma informação que já tinham sido enviadas há poucas mensagens). O histórico abaixo já está em ORDEM CRONOLÓGICA, numerado, marcando CLIENTE/ATENDIMENTO — a última linha é a mais recente:
+- Se o histórico mostra que vocês já se falaram nesta conversa (qualquer linha ATENDIMENTO antes da última linha CLIENTE), NUNCA se apresente ou cumprimente de novo (nada de "¡Hola!"/"Olá!" de abertura) — continue a conversa naturalmente, como quem lembra o que já foi dito. Isso vale mesmo quando a instrução do operador for pra "retomar contato" depois de um tempo sem resposta — retomar não é a mesma coisa que recomeçar.
+- Nunca repita uma informação (preço, prazo, condição, link) que já foi enviada ao lead nas mensagens anteriores do "ATENDIMENTO" — se a instrução do operador pede pra reforçar algo já dito, reformule ou avance a conversa a partir dali, não copie a mesma informação de novo como se fosse a primeira vez.
 
 Responda estritamente em formato JSON:
 {
@@ -294,7 +310,8 @@ Responda estritamente em formato JSON:
 }
 
 Dados do Lead: ${JSON.stringify(leadInfo)}
-Histórico de Mensagens: ${JSON.stringify(stripMediaBase64ForPrompt(messages))}
+Histórico cronológico de Mensagens (as mais antigas podem ter sido omitidas; a numeração recomeça em 1, não é a posição real na conversa completa):
+${buildChronologicalConversationContext(messages, HISTORY_WINDOW_SIZE)}
 Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)}
 `;
 
@@ -359,7 +376,8 @@ Base de Conhecimento: ${formatKnowledgeBaseForPrompt(agentKnowledgeBase || null)
 O operador pode perguntar sobre a conversa com o lead abaixo (ex: "esse cliente já falou de orçamento?", "resume o que falta pra fechar") OU fazer uma pergunta geral sem relação nenhuma com essa conversa (ex: traduções, datas, cálculos, feriados) — responda da forma mais direta e útil possível, em Português, a menos que a pergunta peça outro idioma.
 
 Dados do Lead (contexto, use se for relevante pra pergunta): ${JSON.stringify(leadInfo || {})}
-Histórico da Conversa (contexto, use se for relevante pra pergunta): ${JSON.stringify(stripMediaBase64ForPrompt(messages || []))}
+Histórico cronológico da Conversa, numerado, marcando CLIENTE/ATENDIMENTO — use se for relevante pra pergunta (as mais antigas podem ter sido omitidas; a numeração recomeça em 1, não é a posição real na conversa completa):
+${buildChronologicalConversationContext(messages || [], ANALYSIS_HISTORY_WINDOW_SIZE)}
 
 Pergunta do operador: "${question.trim()}"
 

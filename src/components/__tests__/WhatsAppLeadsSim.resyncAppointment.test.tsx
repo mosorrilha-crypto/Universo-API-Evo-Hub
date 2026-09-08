@@ -55,13 +55,22 @@ vi.mock('../../lib/apiClient', () => ({
     // Qualquer outro endpoint (contexto do lead, templates de reengajamento, status do agente): resposta neutra.
     return jsonResponse({}, false);
   }),
-  getAuthToken: () => null,
   getTenantOverride: () => null,
 }));
 
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = vi.fn();
 }
+
+// TASK-0311 (TASK-0249 item 1): o SSE deixou de ser condicional a "havia
+// token" (a sessão virou cookie httpOnly, invisível pro JS) — o componente
+// sempre abre a conexão agora. jsdom 30 já implementa EventSource de
+// verdade e tentaria conectar de fato nesta suíte; um stub inofensivo evita
+// isso.
+class FakeEventSource {
+  close() {}
+}
+vi.stubGlobal('EventSource', FakeEventSource as any);
 
 // showRightPanel (WhatsAppLeadsSim) só nasce `true` quando window.innerWidth
 // >= 1200 no momento da montagem — jsdom usa 1024 por padrão, então a

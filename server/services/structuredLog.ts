@@ -44,10 +44,13 @@ function isGeminiQuotaExhaustedDetail(detail?: string): boolean {
 }
 
 export function getSystemIncidentFromStructuredLog(fields: StructuredLogFields): Omit<Parameters<typeof reportSystemIncident>[0], 'tenantId'> | null {
-  const isLegacyFallback = fields.area === 'knowledgeBase' && fields.op === 'loadRuntimeSource' && /source=legacy_blob/.test(fields.detail || '');
+  // TASK-0327 — a tabela legada `knowledge_base` foi eliminada: só resta o
+  // sinal `unavailable` (publicação incompleta ou erro na leitura), sempre
+  // crítico — não existe mais 'legacy_blob' pra tratar como contingência
+  // de severidade menor.
   const isKnowledgeUnavailable = fields.area === 'knowledgeBase' && fields.op === 'loadRuntimeSource' && /source=unavailable/.test(fields.detail || '');
   const isGeminiQuotaExhausted = fields.outcome === 'error' && isGeminiQuotaExhaustedDetail(fields.detail);
-  if (fields.outcome !== 'error' && !isLegacyFallback && !isKnowledgeUnavailable) return null;
+  if (fields.outcome !== 'error' && !isKnowledgeUnavailable) return null;
   const category: SystemIncidentCategory = isGeminiQuotaExhausted ? 'integration'
     : fields.area === 'knowledgeBase' ? 'knowledge_base'
     : /auth|session|token/i.test(`${fields.area} ${fields.op}`) ? 'authentication'
@@ -55,16 +58,13 @@ export function getSystemIncidentFromStructuredLog(fields: StructuredLogFields):
         : /media|video|upload/i.test(`${fields.area} ${fields.op}`) ? 'media'
           : /webhook|evolution|meta|calendar|integration/i.test(`${fields.area} ${fields.op}`) ? 'integration' : 'runtime';
   const severity: SystemIncidentSeverity = isGeminiQuotaExhausted || isKnowledgeUnavailable || fields.outcome === 'error' && /unavailable|5\d\d|fatal/i.test(fields.detail || '') ? 'critical'
-    : isLegacyFallback || fields.area === 'knowledgeBase' ? 'high' : 'medium';
+    : fields.area === 'knowledgeBase' ? 'high' : 'medium';
   const title = isGeminiQuotaExhausted ? 'Cota/crédito pré-pago do Gemini esgotado'
-    : isKnowledgeUnavailable ? 'Runtime da Base de Conhecimento indisponível'
-    : isLegacyFallback ? 'Fonte legada usada como contingência' : `Falha técnica: ${redactSystemIncidentDetail(fields.area)}.${redactSystemIncidentDetail(fields.op)}`;
+    : isKnowledgeUnavailable ? 'Runtime da Base de Conhecimento indisponível' : `Falha técnica: ${redactSystemIncidentDetail(fields.area)}.${redactSystemIncidentDetail(fields.op)}`;
   const suggestedAction = isGeminiQuotaExhausted
     ? 'Reabasteça o crédito pré-pago em ai.studio/projects AGORA — esta falha derruba TODAS as chamadas Gemini do projeto (resposta automática, transcrição, análises) pra TODOS os tenants ao mesmo tempo, não só este. Retentativas (withGeminiRetry) não ajudam numa exaustão sustentada.'
     : isKnowledgeUnavailable
-    ? 'Verifique o banco e o runtime da Base. Preserve o fallback técnico e suspenda publicações até a revisão humana confirmar a recuperação.'
-    : isLegacyFallback
-    ? 'Revise se os oito documentos estão publicados e confira a telemetria da Base antes de qualquer publicação nova.'
+    ? 'Verifique se os oito documentos tipados estão publicados e a telemetria do banco antes de qualquer publicação nova. Sem publicação completa, o agente fica sem contexto de negócio (nunca serve dado desatualizado silenciosamente).'
     : category === 'authentication'
       ? 'Revise papel e capability do usuário afetado. Não invalide sessões nem altere permissões sem confirmação administrativa.'
       : category === 'catalog' || category === 'media'
@@ -73,7 +73,7 @@ export function getSystemIncidentFromStructuredLog(fields: StructuredLogFields):
           ? 'Verifique a credencial e a disponibilidade da integração, sem reenviar mensagens nem modificar agenda automaticamente.'
           : 'Revise o detalhe, confirme se a falha persiste e siga a correção sugerida pelo módulo afetado. Não altere dados comerciais sem validação.';
   return {
-    sourceKey: `system:${safeSignal(fields.area)}:${safeSignal(fields.op)}:${isGeminiQuotaExhausted ? 'gemini-quota-exhausted' : isLegacyFallback ? 'legacy-fallback' : isKnowledgeUnavailable ? 'unavailable' : 'error'}`,
+    sourceKey: `system:${safeSignal(fields.area)}:${safeSignal(fields.op)}:${isGeminiQuotaExhausted ? 'gemini-quota-exhausted' : isKnowledgeUnavailable ? 'unavailable' : 'error'}`,
     category, severity, title, detail: redactSystemIncidentDetail(fields.detail), suggestedAction,
     metadata: { area: fields.area, op: fields.op, outcome: fields.outcome, latencyMs: fields.latencyMs ?? null },
   };

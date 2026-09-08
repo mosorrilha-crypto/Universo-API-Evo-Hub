@@ -157,12 +157,32 @@ RESPOSTA DO ATENDENTE A AVALIAR:
 ${input.bubbles.map((b, i) => `[BOLHA ${i + 1}] ${b}`).join('\n')}`;
 }
 
+/**
+ * Achado real de produção (05/09/2026, TASK-0302): mesmo com o parágrafo
+ * "IMPORTANTE sobre o campo issues" (buildJudgePrompt acima) já pedindo pra
+ * nunca deliberar em voz alta e decidir em silêncio antes de responder — e
+ * já reforçado uma vez em 03/09/2026 depois do mesmo tipo de falha — o
+ * avaliador voltou a deixar um parágrafo inteiro de raciocínio vazar pro
+ * array "issues", concluindo explicitamente que a resposta estava correta
+ * ("Não há motivo para reprovar pelas regras fornecidas") e mesmo assim
+ * saindo com passed=false. Reforçar o prompt pela segunda vez não bastou
+ * pra essa classe específica de falha — mesmo padrão já usado nos overrides
+ * determinísticos do revisor de segurança (replySafetyGate.ts): quando o
+ * julgamento do próprio avaliador se autocontradiz de um jeito repetível e
+ * detectável, uma correção em código é mais durável que confiar no LLM
+ * lembrar da instrução toda vez.
+ */
+const JUDGE_SELF_CONTRADICTS_NO_ISSUE = /n[ãa]o\s+h[áa]\s+motivo\s+(real\s+)?para\s+reprovar|n[ãa]o\s+h[áa]\s+(nenhum\s+)?problema\s+real/i;
+
 /** Exportado só pra teste direto do parser. */
 export function parseJudgeVerdict(raw: unknown): QualityJudgeVerdict {
   const data = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const passed = data.passed === true;
   const issues = Array.isArray(data.issues) ? data.issues.filter((i): i is string => typeof i === 'string' && i.trim().length > 0) : [];
   const suggestedFix = typeof data.suggestedFix === 'string' && data.suggestedFix.trim() ? data.suggestedFix.trim() : undefined;
+  if (!passed && issues.some((issue) => JUDGE_SELF_CONTRADICTS_NO_ISSUE.test(issue))) {
+    return { passed: true, issues: [], suggestedFix: undefined };
+  }
   return { passed: passed && issues.length === 0, issues, suggestedFix };
 }
 

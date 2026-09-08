@@ -1,0 +1,32 @@
+# TASK-0311 (TASK-0249 item 1) — exclusão pontual de UMA regra do CodeQL,
+# não uma desativação geral do scan.
+#
+# Testado nesta mesma tarefa: comentários de supressão inline
+# (`// lgtm[query-id]` / `// codeql[query-id]`) NÃO são honrados pelo
+# `github/codeql-action` de verdade (um push com esse comentário continuou
+# gerando o alerta) — são um recurso legado do extinto LGTM.com, não do
+# pipeline de Code Scanning atual. O único mecanismo que o `codeql-action`
+# realmente aplica pra silenciar uma regra é este arquivo de configuração.
+#
+# js/missing-token-validation ("Missing CSRF middleware") sinaliza qualquer
+# app Express com cookie de sessão sem uma lib de token CSRF reconhecida
+# (ex: csurf) — a query não avalia o atributo SameSite do cookie em si. A
+# defesa real desta migração (TASK-0311) é `sameSite: 'strict'` no cookie de
+# sessão (server/routes/auth.ts, sessionCookieOptions): suficiente porque o
+# app é 100% same-origin (um único processo Express serve API e SPA, sem
+# CORS, sem nenhum fluxo cross-site legítimo que precise deste cookie) — o
+# navegador nunca o anexa numa requisição disparada por outro site, o que já
+# fecha CSRF clássico. Adicionar uma lib de token CSRF por cima não fecharia
+# nenhuma lacuna real nesta arquitetura, só duplicaria a defesa em ~141 rotas
+# mutantes (mais toda a plumbing de token no frontend) sem ganho de
+# segurança. Decisão completa em docs/task-registry/TASK-0311.md.
+#
+# Reavaliar esta exclusão se o app deixar de ser same-origin no futuro (ex:
+# frontend/backend em domínios/portas diferentes) — nesse cenário SameSite
+# sozinho deixa de ser suficiente e esta regra volta a fazer sentido.
+name: "Universo API Evo Hub — CodeQL config"
+queries:
+  - uses: security-extended
+query-filters:
+  - exclude:
+      id: js/missing-token-validation

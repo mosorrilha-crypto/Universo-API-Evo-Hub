@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
+import { LeadInfo, TranscriptionResult, SavedTranscriptItem, ChatMessage, FullConversationAnalysis, AgentKnowledgeBase, Tenant, type ActiveTab, type ContactAgentContext, type EscalationInfo, type FinancialTransaction, type PaymentMethod, type PaymentStatus } from '../types';
 import { blobToBase64, createSpeechAudioBlob } from '../utils/audioUtils';
-import { apiFetch, getAuthToken, getTenantOverride } from '../lib/apiClient';
+import { apiFetch, getTenantOverride } from '../lib/apiClient';
 import { formatChatDateLabel, isNewChatDateGroup } from '../lib/chatDate';
 import { labelColorClasses, avatarColorClasses, getInitials } from '../utils/leadDisplay';
 import { ConversationAnalysisPanel, type HintReplyResult, type AskAiResult } from './ConversationAnalysisPanel';
@@ -21,6 +21,7 @@ import { ReopenConversationModal } from './owner-panel/ReopenConversationModal';
 import { ConversationContextSidebar } from './owner-panel/ConversationContextSidebar';
 import type { ContactProfileData } from './owner-panel/ownerPanelTypes';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 import {
   Play,
   Sparkles,
@@ -78,7 +79,20 @@ import {
   Copy,
   Megaphone,
   MessageCircle,
-  Receipt
+  Receipt,
+  Kanban,
+  Moon,
+  Sun,
+  Layers,
+  Target,
+  Brain,
+  Link2,
+  ShieldCheck,
+  ScrollText,
+  Radio,
+  Settings2,
+  LogOut,
+  Globe
 } from 'lucide-react';
 import { TransactionDialog } from './financial/TransactionDialog';
 
@@ -177,6 +191,15 @@ interface WhatsAppLeadsSimProps {
       só passa esta prop quando o usuário logado tem permissão pra ver a
       Agenda (`canSeeAgenda`) — se vier `undefined`, o botão nem aparece. */
   onGoToAgenda?: () => void;
+  /** TASK-0301 (pedido direto): CRM/Agenda/Financeiro saíram do menu
+      superior (Header.tsx) — Atendimento virou a tela padrão do sistema e
+      esses módulos só ficam acessíveis por dentro dele agora. Mesmo padrão
+      de onGoToAgenda/onGoToEscalations: App.tsx só passa a prop quando o
+      usuário logado tem permissão pra ver o módulo (canSeeCrm/
+      canSeeFinancial) — se vier undefined, o atalho correspondente na
+      gaveta "Ferramentas" (toolbarSettingsBody) nem aparece. */
+  onGoToCrm?: () => void;
+  onGoToFinancial?: () => void;
   /** TASK-0284: libera o item "Marcar como comprovante" no menu "⋮" das
       mensagens de imagem — App.tsx passa canSeeFinancial (mesmo flag que
       controla a aba Financeiro). Sem isso, nunca oferece a ação. */
@@ -196,11 +219,46 @@ interface WhatsAppLeadsSimProps {
       não tem nenhuma forma de fechar a conversa que este componente controla
       internamente (`mobileThreadOpen`). */
   closeThreadSignal?: number;
+  /** TASK-0326 — ação disparada de fora (App.tsx/AtendimentoSecondaryNav,
+      barra de Pendências/Agenda) que este componente deve executar 1 vez
+      assim que "Conversas" ficar ativa: 'openAgenda' abre o mesmo popup
+      rápido de próximos eventos do botão "Agenda" da barra inferior local
+      (nunca navega pra página completa — decisão do dono do produto, pra
+      manter o botão consistente em qualquer tela); 'openTools' abre a
+      gaveta de Ferramentas. `onPendingConversasActionHandled` avisa
+      App.tsx que já processou, pra ele zerar o sinal (mesmo padrão de
+      `openLeadRequestId`/`closeThreadSignal`). */
+  pendingConversasAction?: 'openAgenda' | 'openTools' | null;
+  onPendingConversasActionHandled?: () => void;
   /** TASK-0292 — confirmação/erro do botão "Ressincronizar" da Ficha do
       Contato (agendamento desatualizado). Mesmo `showToast` já usado em
       App.tsx/AgendaFinanceiroCenter; opcional pra não quebrar quem ainda não
       passa essa prop. */
   onToast?: (message: string) => void;
+  /** TASK-0331 (pedido direto, prints anotados): o menu "⋮" do cabeçalho
+      (Header.tsx) foi eliminado — Crescimento, a lista de "Configurar"
+      (Base de Conhecimento/Catálogo público/Qualidade/Logs do sistema/
+      Disparo em Massa), Empresas, o seletor de Empresa ativa, Sair e
+      Notificações push mudaram todos pra dentro da gaveta "Ferramentas"
+      (toolbarSettingsBody, abaixo). `onSelectTab` é a navegação genérica
+      (mesmo `setActiveTab` que Header.tsx já usava) — cada `canSee*` só
+      libera o item correspondente quando App.tsx manda `true` (mesmos
+      flags já usados pra gatear as próprias abas em App.tsx), replicando
+      o mesmo gate que Header.tsx sempre teve. */
+  onSelectTab?: (tab: ActiveTab) => void;
+  canSeeGrowth?: boolean;
+  canManageAgent?: boolean;
+  canSeeCatalog?: boolean;
+  canSeeQuality?: boolean;
+  canSeeSystemLogs?: boolean;
+  canSeeBroadcast?: boolean;
+  /** Libera o item "Empresas" (navega pra administração de tenants) dentro
+      de "Configurações", e a caixa de troca rápida "Empresa ativa" — mesmo
+      papel do antigo `canSeeSaasMaster` de Header.tsx. */
+  canSeeSaasMaster?: boolean;
+  tenants?: Tenant[];
+  onSelectTenant?: (tenant: Tenant) => void;
+  onLogout?: () => void;
 }
 
 // Carrega e exibe uma imagem real que o cliente mandou pelo WhatsApp (ex:
@@ -289,16 +347,49 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   escalations = [],
   onGoToEscalations,
   onGoToAgenda,
+  onGoToCrm,
+  onGoToFinancial,
   closeThreadSignal,
+  pendingConversasAction,
+  onPendingConversasActionHandled,
   openLeadPhone,
   openLeadRequestId,
   financialModuleEnabled,
   onAddTransaction,
   operatorName,
   onToast,
+  onSelectTab,
+  canSeeGrowth,
+  canManageAgent,
+  canSeeCatalog,
+  canSeeQuality,
+  canSeeSystemLogs,
+  canSeeBroadcast,
+  canSeeSaasMaster,
+  tenants = [],
+  onSelectTenant,
+  onLogout,
 }) => {
-  const { t, language } = useAppPreferences();
+  const { t, language, setLanguage, theme, setTheme } = useAppPreferences();
   const isSpanish = language === 'es';
+  // TASK-0331 — Notificações push mudaram do Header.tsx (menu ⋮, eliminado)
+  // pra dentro da gaveta Ferramentas. Mesmo hook (usePushNotifications,
+  // extraído no TASK-0284 exatamente pra ser reaproveitado em mais de um
+  // lugar sem duplicar a lógica de ativar/desativar) — cada instância só
+  // reflete o mesmo estado real do navegador, seguro chamar aqui de novo.
+  const { pushEnabled, pushBusy, pushError, togglePush } = usePushNotifications();
+  useEffect(() => {
+    if (pushError) onToast?.(pushError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushError]);
+  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
+  // TASK-0336 (pedido direto, print anotado à mão): "Status do agente"/
+  // "Idioma"/"Tema" ocupavam 3 fileiras inteiras de pills sempre visíveis na
+  // gaveta Ferramentas, mesmo sendo ajustes usados raramente — cada um vira
+  // um único ícone (valor atual já visível nele) que expande as outras
+  // opções ao tocar, igual um seletor nativo. Só um grupo expandido por vez.
+  const [expandedQuickSetting, setExpandedQuickSetting] = useState<'status' | 'language' | 'theme' | null>(null);
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
@@ -523,6 +614,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // espaço na linha de composição com o clipe de verdade (pedido direto do
   // dono do produto, comparação lado a lado com o WhatsApp Business real).
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  // TASK-0299 (pedido direto, print real): antes cada produto com foto/vídeo
+  // de exemplo cadastrado virava um ícone próprio nesta grade — com vários
+  // produtos, a lista de "fotos de exemplo" sozinha já lotava o painel.
+  // Agora é 1 ícone por tipo de mídia ("Foto de exemplo"/"Vídeo de
+  // exemplo") que expande a lista de produtos embaixo da grade principal
+  // sob demanda, em vez de inflar a grade com N ícones quase idênticos.
+  const [expandedExampleMedia, setExpandedExampleMedia] = useState<'photo' | 'video' | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [senderRole, setSenderRole] = useState<'lead' | 'agent'>('lead');
 
@@ -571,6 +669,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   } | null>(null);
   const [submittingPaymentProof, setSubmittingPaymentProof] = useState(false);
   const [isGeneratingReengagement, setIsGeneratingReengagement] = useState(false);
+  // TASK-0336 (pedido direto, print anotado): o card de aviso "mais de 24h
+  // sem responder" (canal não-Meta, sem restrição técnica, só um alerta de
+  // risco) não tinha como fechar — fica marcado por telefone, não global,
+  // pra reaparecer normalmente numa conversa diferente (ou depois de
+  // recarregar a página).
+  const [dismissedReengagementWarningPhones, setDismissedReengagementWarningPhones] = useState<Set<string>>(new Set());
   // Elemento de áudio real compartilhado (Bloco de correção "áudio não fica
   // na conversa") — antes o botão só disparava speechSynthesis lendo o
   // texto/transcrição da mensagem, nunca tocava o áudio de verdade. Cache
@@ -853,8 +957,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   const handleOpenUpcomingEvents = () => {
+    setIsToolbarSettingsOpen(false);
     setIsUpcomingEventsPanelOpen(true);
     fetchUpcomingEvents();
+  };
+
+  // TASK-0331 (pedido direto, 2 prints anotados): a Agenda e a Ferramentas
+  // são dois overlays independentes (mesmo z-index, mesma faixa reservada
+  // pra barra inferior) — abrir um sem fechar o outro fazia a Ferramentas
+  // "abrir embaixo" da Agenda quando as duas ficavam montadas ao mesmo
+  // tempo. Agora mutuamente exclusivos: abrir um sempre fecha o outro.
+  // Também vira toggle (clicar de novo no ícone "Agenda" fecha), mesmo
+  // padrão que "Ferramentas" já tinha — pedido direto pra tirar o X do
+  // cabeçalho da Agenda e fechar só pelo ícone do menu inferior.
+  const toggleUpcomingEventsPanel = () => {
+    if (isUpcomingEventsPanelOpen) { setIsUpcomingEventsPanelOpen(false); return; }
+    handleOpenUpcomingEvents();
   };
 
   const changeCalendarMonth = (delta: number) => {
@@ -1129,6 +1247,54 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // menu; só o que o operador mexe com frequência (status do agente,
   // escalonamentos, novo lead) continua sempre visível.
   const [isToolbarSettingsOpen, setIsToolbarSettingsOpen] = useState(false);
+
+  // TASK-0336 (achado real, print anotado): os overlays que reservam espaço
+  // pro `.atendimento-bottom-nav` (gaveta Ferramentas aqui embaixo e o
+  // popup da Agenda em UpcomingEventsPanel.tsx) chutavam a altura do nav
+  // num valor fixo (4.75rem) que não batia com a altura real renderizada
+  // (padding + ícone 24px + rótulo variam por escala de fonte do
+  // aparelho/tema) — sobrava um vão entre o fundo do popup e o topo do nav.
+  // Mesmo padrão já usado pra `--atendimento-header-h` em App.tsx: mede a
+  // altura REAL via ResizeObserver (`getBoundingClientRect` já inclui o
+  // `padding-bottom: env(safe-area-inset-bottom)` que o CSS do próprio nav
+  // aplica — por isso os overlays não somam esse env(...) de novo) e
+  // alimenta uma custom property CSS que os dois overlays passam a usar.
+  const bottomNavRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = bottomNavRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const applyHeight = (height: number) => {
+      if (height > 0) document.documentElement.style.setProperty('--atendimento-bottom-nav-h', `${height}px`);
+    };
+    applyHeight(el.getBoundingClientRect().height);
+    const observer = new ResizeObserver(() => {
+      // Sem usar entry.contentRect aqui de propósito: ele exclui padding e
+      // borda (a altura "de conteúdo"), mas o padding-bottom do próprio nav
+      // (env(safe-area-inset-bottom)) faz parte da altura real que precisa
+      // ser reservada — getBoundingClientRect() mede a caixa inteira.
+      applyHeight(el.getBoundingClientRect().height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // TASK-0326 — consome a ação pendente sinalizada por App.tsx quando o
+  // operador toca "Agenda"/"Ferramentas" na barra de Pendências/Agenda
+  // (AtendimentoSecondaryNav, fora desta árvore de componente). Roda só
+  // quando o sinal chega (não em todo render) e avisa de volta assim que
+  // processa, pra App.tsx zerar o sinal (mesmo padrão de openLeadRequestId).
+  useEffect(() => {
+    if (!pendingConversasAction) return;
+    if (pendingConversasAction === 'openAgenda') {
+      if (googleCalendarConnected) handleOpenUpcomingEvents();
+      else handleConnectGoogleCalendar();
+    } else if (pendingConversasAction === 'openTools') {
+      setIsUpcomingEventsPanelOpen(false);
+      setIsToolbarSettingsOpen(true);
+    }
+    onPendingConversasActionHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingConversasAction]);
 
   const handleRealFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1627,18 +1793,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
     // Aviso em tempo real (SSE) no lugar do polling de 8s — ver
     // server/services/conversationEvents.ts e a rota /api/conversations/stream.
-    // EventSource não manda header Authorization, então o token vai por
-    // query string (a mesma rota valida com jwt.verify no backend).
+    // TASK-0311 (TASK-0249 item 1): a sessão virou cookie httpOnly —
+    // EventSource manda esse cookie sozinho em toda conexão same-origem
+    // (mesma regra do fetch), então a rota autentica pelo cookie igual
+    // qualquer outra rota protegida; não precisa mais do token por
+    // querystring (nem de checar aqui se "havia" um token antes de abrir).
     let source: EventSource | null = null;
-    const token = getAuthToken();
-    if (token) {
-      // EventSource nativo não manda header customizado (nem X-Tenant-Id que
-      // apiFetch já anexa sozinho) — o tenant do seletor (saas_admin) vai por
-      // querystring aqui, mesma exceção de resolveTenantId no backend.
+    {
+      // EventSource nativo não manda header customizado (X-Tenant-Id que
+      // apiFetch já anexa sozinho) — o tenant do seletor (saas_admin) ainda
+      // vai por querystring aqui, mesma exceção de resolveTenantId no backend.
       const tenantOverride = getTenantOverride();
       const streamUrl = tenantOverride
-        ? `/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${encodeURIComponent(tenantOverride)}`
-        : `/api/conversations/stream?token=${encodeURIComponent(token)}`;
+        ? `/api/conversations/stream?tenantId=${encodeURIComponent(tenantOverride)}`
+        : '/api/conversations/stream';
       source = new EventSource(streamUrl);
       // O evento carrega o telefone que mudou — reaproveita o mesmo fetch da
       // lista em vez de montar um merge separado por telefone, então cobre
@@ -3504,6 +3672,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     active?: boolean;
     disabled?: boolean;
     badge?: number;
+    // TASK-0336 (pedido direto, print anotado): status do agente precisa de
+    // 3 cores diferentes (verde/âmbar/vermelho), não só o binário
+    // ativo/inativo que `active` já cobria — `toneClass` sobrescreve a
+    // classe de cor quando informado, sem duplicar o resto do botão.
+    toneClass?: string;
   }) => (
     <button
       key={options.key}
@@ -3514,7 +3687,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     >
       <span
         className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
-          options.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/60 text-slate-300'
+          options.toneClass ?? (options.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/60 text-slate-300')
         }`}
       >
         {options.icon}
@@ -3555,66 +3728,329 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           dentro do componente, tanto na coluna de desktop quanto na gaveta
           mobile. */}
 
-      <div className="w-full">
-        <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</p>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex items-center gap-0.5 bg-slate-950/55 p-0.5 rounded-lg flex-shrink-0">
-            {(['active', 'restricted', 'paused'] as const).map((status) => (
-              <button
-                key={status}
-                onClick={() => handleChangeAgentStatus(status)}
-                title={
-                  agentStatus === null
-                    ? 'Confirmando o status real do agente...'
-                    : status === 'active' ? 'Agente responde sempre' :
-                      status === 'restricted' ? 'Agente só responde fora do horário comercial' :
-                      'Agente pausado — silêncio total'
-                }
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
-                  agentStatus === status
-                    ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
-              </button>
-            ))}
-          </div>
-          {agentStatusLoadFailed && (
-            <button
-              type="button"
-              onClick={loadAgentStatus}
-              title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
-              className="inline-flex items-center gap-1 rounded-lg border border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
-            >
-              <AlertCircle className="h-3 w-3" />
-              <span>Erro</span>
-              <span className="sr-only">Status incerto — recarregar</span>
-            </button>
-          )}
-        </div>
+      {/* TASK-0336 (pedido direto, print anotado à mão comparando com o
+          menu de anexos do WhatsApp real): Status do agente, Idioma e Tema
+          ocupavam 3 fileiras inteiras de pills sempre visíveis — ajustes
+          usados raramente, mas sempre abertos. Cada um virou um único ícone
+          (já mostrando o valor atual — cor do status, "PT"/"ES", ícone do
+          tema escolhido); tocar nele expande as opções logo abaixo, e
+          escolher uma aplica e recolhe de volta. Só um grupo expandido por
+          vez (`expandedQuickSetting`). "Somente anúncios" entrou nessa
+          mesma fileira de 4 — já era um ícone único (é um toggle
+          liga/desliga, não tem outras opções pra expandir). */}
+      <div className="grid w-full grid-cols-4 gap-3">
+        {renderToolTile({
+          key: 'quick-status',
+          icon: <span className="h-3 w-3 rounded-full bg-current" aria-hidden="true" />,
+          label: agentStatus === null ? '...' : agentStatus === 'active' ? 'Ativo' : agentStatus === 'restricted' ? 'Restrito' : 'Pausado',
+          active: true,
+          toneClass:
+            agentStatus === 'paused' ? 'bg-red-500/20 text-red-300' :
+            agentStatus === 'restricted' ? 'bg-amber-500/20 text-amber-300' :
+            agentStatus === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
+            'bg-slate-950/60 text-slate-300',
+          onClick: () => setExpandedQuickSetting((v) => (v === 'status' ? null : 'status')),
+        })}
+        {renderToolTile({
+          key: 'quick-language',
+          icon: <Globe className="h-5 w-5" />,
+          label: language.toUpperCase(),
+          active: expandedQuickSetting === 'language',
+          onClick: () => setExpandedQuickSetting((v) => (v === 'language' ? null : 'language')),
+        })}
+        {renderToolTile({
+          key: 'quick-theme',
+          icon: {
+            dark: <Moon className="h-5 w-5" />,
+            light: <Sun className="h-5 w-5" />,
+            blue: <Layers className="h-5 w-5" />,
+            clean: <Sparkles className="h-5 w-5" />,
+          }[theme],
+          label: { dark: 'Escuro', light: 'Claro', blue: 'Azul', clean: 'Limpo' }[theme],
+          active: expandedQuickSetting === 'theme',
+          onClick: () => setExpandedQuickSetting((v) => (v === 'theme' ? null : 'theme')),
+        })}
+        {renderToolTile({
+          key: 'ads-only',
+          icon: <Filter className="h-5 w-5" />,
+          label: adsOnly ? 'Anúncios (ativo)' : 'Somente anúncios',
+          active: adsOnly,
+          onClick: handleToggleAdsOnly,
+        })}
       </div>
+
+      {agentStatusLoadFailed && (
+        <button
+          type="button"
+          onClick={loadAgentStatus}
+          title="Não foi possível confirmar o status real do agente no servidor. Clique para tentar novamente."
+          className="inline-flex items-center gap-1 self-center rounded-lg border border-amber-500/30 px-1.5 py-1 text-[10px] font-semibold text-amber-300 transition-colors hover:bg-amber-500/10"
+        >
+          <AlertCircle className="h-3 w-3" />
+          <span>Status incerto — recarregar</span>
+        </button>
+      )}
+
+      {expandedQuickSetting === 'status' && (
+        <div className="flex items-center justify-center gap-0.5 rounded-lg bg-slate-950/55 p-0.5">
+          {(['active', 'restricted', 'paused'] as const).map((status) => (
+            <button
+              key={status}
+              onClick={() => { handleChangeAgentStatus(status); setExpandedQuickSetting(null); }}
+              title={
+                status === 'active' ? 'Agente responde sempre' :
+                status === 'restricted' ? 'Agente só responde fora do horário comercial' :
+                'Agente pausado — silêncio total'
+              }
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold capitalize transition-all cursor-pointer ${
+                agentStatus === status
+                  ? status === 'paused' ? 'bg-red-500/20 text-red-300' : status === 'restricted' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {status === 'active' ? 'Ativo' : status === 'restricted' ? 'Restrito' : 'Pausado'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {expandedQuickSetting === 'language' && (
+        <div className="flex items-center justify-center gap-0.5 rounded-lg bg-slate-950/55 p-0.5">
+          {(['pt', 'es'] as const).map((lang) => (
+            <button
+              key={lang}
+              type="button"
+              onClick={() => { setLanguage(lang); setExpandedQuickSetting(null); }}
+              title={lang === 'pt' ? 'Português' : 'Español'}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                language === lang ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {lang.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {expandedQuickSetting === 'theme' && (
+        <div className="flex items-center justify-center gap-0.5 rounded-lg bg-slate-950/55 p-0.5">
+          {([
+            { id: 'dark' as const, label: 'Escuro', Icon: Moon },
+            { id: 'light' as const, label: 'Claro', Icon: Sun },
+            { id: 'blue' as const, label: 'Azul', Icon: Layers },
+            { id: 'clean' as const, label: 'Limpo', Icon: Sparkles },
+          ]).map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => { setTheme(id); setExpandedQuickSetting(null); }}
+              title={label}
+              className={`px-2.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+                theme === id ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Notificações push do PWA do atendente saíram daqui (TASK-0284,
           pedido direto): não são uma ação desta conversa/gaveta, são
           configuração de conta — agora vivem só no Header global (mesmo
           lugar em qualquer aba, não só dentro do Atendimento). */}
-      <div className="grid w-full grid-cols-4 gap-3 pt-1">
-        {renderToolTile({
-          key: 'ads-only',
-          icon: <Filter className="h-5 w-5" />,
-          label: adsOnly ? 'Somente anúncios (ativo)' : 'Somente anúncios',
-          active: adsOnly,
-          onClick: handleToggleAdsOnly,
-        })}
-        {adsOnly && renderToolTile({
-          key: 'ad-triggers',
-          icon: <Settings className="h-5 w-5" />,
-          label: 'Gatilhos',
-          onClick: openAdTriggersModal,
-          badge: adTriggerMessages.length || undefined,
-        })}
-      </div>
+      {adsOnly && (
+        <div className="grid w-full grid-cols-4 gap-3">
+          {renderToolTile({
+            key: 'ad-triggers',
+            icon: <Settings className="h-5 w-5" />,
+            label: 'Gatilhos',
+            onClick: openAdTriggersModal,
+            badge: adTriggerMessages.length || undefined,
+          })}
+        </div>
+      )}
+
+      {/* TASK-0301 (pedido direto): CRM, Agenda e Financeiro saíram do menu
+          superior (Header.tsx) — Atendimento virou a tela padrão do
+          sistema, então esses módulos precisam de um jeito de acesso daqui
+          de dentro. Cada tile só aparece se App.tsx passou a prop
+          correspondente (usuário logado tem permissão pro módulo) — mesmo
+          padrão de onGoToAgenda no ícone do cabeçalho da conversa aberta.
+          TASK-0331 (pedido direto): "Crescimento" entrou nesta mesma grade
+          — saiu do menu ⋮ (Header.tsx, eliminado), ganhou ícone próprio
+          aqui igual Vendas/Agenda completa/Financeiro. */}
+      {(onGoToCrm || onGoToAgenda || onGoToFinancial || (onSelectTab && canSeeGrowth)) && (
+        <div className="w-full border-t border-slate-800 pt-3">
+          <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Módulos</p>
+          <div className="grid w-full grid-cols-4 gap-3">
+            {onGoToCrm && renderToolTile({
+              key: 'go-to-crm',
+              icon: <Kanban className="h-5 w-5" />,
+              label: 'Vendas',
+              onClick: () => { setIsToolbarSettingsOpen(false); onGoToCrm(); },
+            })}
+            {onGoToAgenda && renderToolTile({
+              key: 'go-to-agenda',
+              icon: <CalendarPlus className="h-5 w-5" />,
+              // "Agenda completa" (não só "Agenda") pra não confundir com o
+              // tile de mesmo nome na barra inferior, que abre só o popup
+              // de próximos eventos (handleOpenUpcomingEvents) — este vai
+              // pra aba Agenda de verdade (mês/semana, financeiro da agenda).
+              label: 'Agenda completa',
+              onClick: () => { setIsToolbarSettingsOpen(false); onGoToAgenda(); },
+            })}
+            {onGoToFinancial && renderToolTile({
+              key: 'go-to-financial',
+              icon: <Wallet className="h-5 w-5" />,
+              label: 'Financeiro',
+              onClick: () => { setIsToolbarSettingsOpen(false); onGoToFinancial(); },
+            })}
+            {onSelectTab && canSeeGrowth && renderToolTile({
+              key: 'go-to-growth',
+              icon: <Target className="h-5 w-5" />,
+              label: isSpanish ? 'Crecimiento' : 'Crescimento',
+              onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('attribution'); },
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* TASK-0331 (pedido direto, prints anotados): "Configurar" (Base de
+          Conhecimento, Catálogo público, Qualidade, Logs do sistema,
+          Disparo em Massa) e "Empresas" saíram do menu ⋮ do cabeçalho
+          (Header.tsx, eliminado) — viram uma seção expansível aqui, mesmo
+          conjunto de itens/gates (`canManageAgent`/`canSeeCatalog`/
+          `canSeeQuality`/`canSeeSystemLogs`/`canSeeBroadcast`/
+          `canSeeSaasMaster`) que Header.tsx sempre usou pra decidir o que
+          aparece.
+
+          TASK-0336 (pedido direto, print anotado): "Configurações" era uma
+          fileira de texto com chevron, que abria uma LISTA de linhas de
+          texto — trocado por um ícone único (mesmo padrão de Módulos/
+          Ferramentas acima), que ao tocar abre uma grade de ícones (não
+          mais linhas de texto) com cada opção, igual pedido: "pode virar um
+          icon com outros ícones dentro". */}
+      {onSelectTab && (canManageAgent || canSeeCatalog || canSeeQuality || canSeeSystemLogs || canSeeBroadcast || canSeeSaasMaster) && (
+        <div className="w-full border-t border-slate-800 pt-3">
+          <div className="grid w-full grid-cols-4 gap-3">
+            {renderToolTile({
+              key: 'settings-toggle',
+              icon: <Settings2 className="h-5 w-5" />,
+              label: isSpanish ? 'Configuración' : 'Configurações',
+              active: isSettingsMenuOpen,
+              onClick: () => setIsSettingsMenuOpen((value) => !value),
+            })}
+          </div>
+          {isSettingsMenuOpen && (
+            <div className="mt-3 grid w-full grid-cols-4 gap-3">
+              {canManageAgent && renderToolTile({
+                key: 'settings-knowledge',
+                icon: <Brain className="h-5 w-5" />,
+                label: isSpanish ? 'Agente y catálogo' : 'Agente & catálogo',
+                onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('knowledge'); },
+              })}
+              {canSeeCatalog && renderToolTile({
+                key: 'settings-catalog',
+                icon: <Link2 className="h-5 w-5" />,
+                label: 'Catálogo público',
+                onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('catalog'); },
+              })}
+              {canSeeQuality && renderToolTile({
+                key: 'settings-quality',
+                icon: <ShieldCheck className="h-5 w-5" />,
+                label: isSpanish ? 'Calidad del agente' : 'Qualidade do agente',
+                onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('quality'); },
+              })}
+              {canSeeSystemLogs && renderToolTile({
+                key: 'settings-logs',
+                icon: <ScrollText className="h-5 w-5" />,
+                label: isSpanish ? 'Logs del sistema' : 'Logs do sistema',
+                onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('system_logs'); },
+              })}
+              {canSeeBroadcast && renderToolTile({
+                key: 'settings-broadcast',
+                icon: <Radio className="h-5 w-5" />,
+                label: isSpanish ? 'Envío Masivo' : 'Disparo em Massa',
+                onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('broadcast'); },
+              })}
+              {canSeeSaasMaster && renderToolTile({
+                key: 'settings-saas',
+                icon: <Layers className="h-5 w-5" />,
+                label: 'Empresas',
+                onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('saas'); },
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TASK-0331 (pedido direto): "Empresa ativa" (troca rápida de
+          tenant, só saas_admin), "Sair" e "Notificações push" saíram do
+          menu ⋮ do cabeçalho (Header.tsx, eliminado) — mesma caixa
+          separada que já existia lá, agora dentro de Ferramentas. */}
+      {(onLogout || onSelectTenant) && (
+        <div className="relative w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            {canSeeSaasMaster && onSelectTenant && tenants.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setIsTenantMenuOpen((value) => !value)}
+                aria-haspopup="menu"
+                aria-expanded={isTenantMenuOpen}
+                aria-label={`${isSpanish ? 'Empresa activa' : 'Empresa ativa'}: ${activeTenant?.name || ''}`}
+                className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md text-left touch-manipulation"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[10px] text-slate-500">{isSpanish ? 'Empresa activa' : 'Empresa ativa'}</span>
+                  <span className="block truncate text-xs font-semibold text-slate-200">{activeTenant?.name}</span>
+                </span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isTenantMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+              </button>
+            ) : (
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-500">{isSpanish ? 'Empresa activa' : 'Empresa ativa'}</p>
+                <p className="truncate text-xs font-semibold text-slate-200">{activeTenant?.name}</p>
+              </div>
+            )}
+            {onLogout && (
+              <button type="button" onClick={onLogout} className="inline-flex min-h-10 shrink-0 items-center gap-1 text-xs font-semibold text-rose-300">
+                <LogOut className="w-3.5 h-3.5" />{isSpanish ? 'Salir' : 'Sair'}
+              </button>
+            )}
+          </div>
+          {canSeeSaasMaster && onSelectTenant && tenants.length > 1 && isTenantMenuOpen && (
+            <div className="mt-2 space-y-1 border-t border-slate-800 pt-2" role="menu" aria-label={isSpanish ? 'Empresa activa' : 'Empresa ativa'}>
+              <div className="max-h-52 space-y-1 overflow-y-auto">
+                {tenants.map((tenant) => (
+                  <button
+                    key={tenant.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { onSelectTenant(tenant); setIsTenantMenuOpen(false); }}
+                    className={`flex min-h-10 w-full items-center justify-between rounded-md px-2 py-2 text-left text-xs font-semibold transition-colors ${tenant.id === activeTenant?.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}
+                  >
+                    <span className="truncate">{tenant.name}</span>
+                    {tenant.id === activeTenant?.id && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-800 pt-2">
+            <span className="text-[10px] text-slate-500">{isSpanish ? 'Notificaciones push' : 'Notificações push'}</span>
+            <button
+              type="button"
+              onClick={() => void togglePush()}
+              disabled={pushBusy}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-bold transition-colors disabled:opacity-50 ${pushEnabled ? 'text-emerald-300' : 'text-slate-400 hover:text-white'}`}
+            >
+              {pushEnabled ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
+              {pushBusy ? '...' : pushEnabled ? (isSpanish ? 'Activas' : 'Ativas') : (isSpanish ? 'Activar' : 'Ativar')}
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -3940,7 +4376,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               Business real): texto e altura ficavam bem menores que o
               campo de busca do app real, mesma proporção do ajuste já
               feito na caixa de digitação da conversa aberta (TASK-0164). */}
-          <div className="p-2 bg-[#111b21] border-b border-slate-800/30">
+          <div className="atendimento-search p-2 bg-[#111b21] border-b border-slate-800/30">
             <div className="relative flex items-center min-w-0">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
               <input
@@ -3970,12 +4406,12 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 lidos" não dependem de análise nenhuma, continuam confiáveis.
                 "Esperando você" removido (pedido direto, 28/08/2026: "eu não
                 sei qual a finalidade dele"). */}
-            <div className="flex items-center gap-2 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <div className="atendimento-filters flex items-center gap-2 mt-2.5 overflow-x-auto pb-1 scrollbar-none text-xs">
               <button
                 onClick={() => setActiveTabFilter('all')}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`atendimento-filter px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'all'
-                    ? 'bg-emerald-500 text-slate-950 font-bold'
+                    ? 'is-active bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
@@ -3983,9 +4419,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </button>
               <button
                 onClick={() => setActiveTabFilter('unread')}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`atendimento-filter px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'unread'
-                    ? 'bg-emerald-500 text-slate-950 font-bold'
+                    ? 'is-active bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
                 }`}
               >
@@ -4011,9 +4447,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     setIsWindowFilterMenuOpen((v) => !v);
                   }}
                   title="Filtrar por janela de atendimento de 24h"
-                  className={`atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
+                  className={`atendimento-filter atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
                     activeTabFilter === 'window_open' || activeTabFilter === 'window_closed'
-                      ? 'bg-emerald-500 text-slate-950'
+                      ? 'is-active bg-emerald-500 text-slate-950'
                       : 'bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white'
                   }`}
                 >
@@ -4107,9 +4543,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       setIsLabelFilterMenuOpen((v) => !v);
                     }}
                     title="Filtrar por etiqueta"
-                    className={`atendimento-label-filter-trigger px-2 py-1 rounded-full text-[11px] font-medium border cursor-pointer whitespace-nowrap max-w-[9.5rem] truncate ${
+                    className={`atendimento-filter atendimento-label-filter-trigger px-2 py-1 rounded-full text-[11px] font-medium border cursor-pointer whitespace-nowrap max-w-[9.5rem] truncate ${
                       labelFilter
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-semibold'
+                        ? 'is-active bg-emerald-500 text-slate-950 border-emerald-500 font-semibold'
                         : 'bg-[#202c33] text-slate-300 border-slate-700'
                     }`}
                   >
@@ -4236,11 +4672,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               22px->24px (w-6 h-6), acompanhando o bump de escala do CSS
               (`.atendimento-bottom-nav__item` no index.css) — ainda
               parecia pequena/desproporcional perto do resto da UI. */}
-          <nav className="atendimento-bottom-nav lg:!hidden" aria-label="Navegação do Atendimento">
+          <nav ref={bottomNavRef} className="atendimento-bottom-nav lg:!hidden" aria-label="Navegação do Atendimento">
+            {/* TASK-0336 (achado real, print anotado): "Conversas" tinha
+                "is-active" fixo no className — ficava destacado junto com
+                "Ferramentas"/"Agenda" sempre que um desses overlays abria,
+                em vez de só quando nenhum dos dois está aberto (mesma regra
+                que já vale pros outros 3 itens desta barra). */}
             <button
               type="button"
-              onClick={() => { setSearchQuery(''); setActiveTabFilter('all'); }}
-              className="atendimento-bottom-nav__item is-active"
+              onClick={() => { setSearchQuery(''); setActiveTabFilter('all'); setIsToolbarSettingsOpen(false); setIsUpcomingEventsPanelOpen(false); }}
+              className={`atendimento-bottom-nav__item${!isToolbarSettingsOpen && !isUpcomingEventsPanelOpen ? ' is-active' : ''}`}
             >
               <MessageCircle className="w-6 h-6" />
               <span>Conversas</span>
@@ -4259,15 +4700,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </button>
             <button
               type="button"
-              onClick={googleCalendarConnected ? handleOpenUpcomingEvents : handleConnectGoogleCalendar}
-              className="atendimento-bottom-nav__item"
+              onClick={googleCalendarConnected ? toggleUpcomingEventsPanel : handleConnectGoogleCalendar}
+              className={`atendimento-bottom-nav__item${isUpcomingEventsPanelOpen ? ' is-active' : ''}`}
             >
               <CalendarIcon className="w-6 h-6" />
               <span>Agenda</span>
             </button>
             <button
               type="button"
-              onClick={() => setIsToolbarSettingsOpen((v) => !v)}
+              onClick={() => setIsToolbarSettingsOpen((v) => { const next = !v; if (next) setIsUpcomingEventsPanelOpen(false); return next; })}
               className={`atendimento-bottom-nav__item${isToolbarSettingsOpen ? ' is-active' : ''}`}
             >
               <Settings className="w-6 h-6" />
@@ -4671,7 +5112,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               lista interna (o `rounded-xl` fica no wrapper
                               externo, que precisa de `overflow-hidden` pra
                               recortar os cantos — por isso a rolagem vive
-                              num `<div>` filho, não no mesmo elemento). */}
+                              num `<div>` filho, não no mesmo elemento).
+                              TASK-0299 (pedido direto, print real): os
+                              divisores `border-t border-slate-700` entre
+                              grupos de ações (4 no total) saíram — no tema
+                              escuro liam como linhas azuladas cortando o
+                              menu ("margens azuis"); a separação entre
+                              grupos de ações continua clara só pelo
+                              espaçamento e pela cor de cada item (âmbar/
+                              vermelho pras ações sensíveis). */}
                           <div className="mobile-header-context-menu absolute right-0 top-10 z-50 w-52 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-right animate-pop-in">
                           <div className="no-scrollbar max-h-[70vh] overflow-y-auto">
                             {(selectedLead as any)?.isReal && !paymentAppointment && (
@@ -4710,7 +5159,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 conta. Mora agora só no Header global (ver
                                 Header.tsx, usePushNotifications), visível em
                                 qualquer aba. */}
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { aiBlocked: !isAiBlocked }); setIsHeaderMenuOpen(false); }}
                               className={`w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer ${isAiBlocked ? 'text-emerald-300' : 'text-rose-300'}`}
@@ -4743,7 +5191,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 <span>{isSpanish ? 'Activar IA y preparar borrador' : 'Ativar IA e preparar rascunho'}</span>
                               </button>
                             )}
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => openOperatorFeedback('operator_idea')}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-amber-300 hover:bg-slate-700/60 transition-colors cursor-pointer"
@@ -4760,7 +5207,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               <AlertTriangle className="w-3.5 h-3.5" />
                               <span>{isSpanish ? 'Reportar bug' : 'Reportar bug'}</span>
                             </button>
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleUpdateConversationState(selectedLead.id, { pinned: !isPinned }); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
@@ -4795,7 +5241,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                               {isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                               <span>{isArchived ? (isSpanish ? 'Desarchivar conversación' : 'Desarquivar conversa') : (isSpanish ? 'Archivar conversación' : 'Arquivar conversa')}</span>
                             </button>
-                            <div className="border-t border-slate-700" />
                             <button
                               onClick={() => { handleClearChatMessages(selectedLead.id); setIsHeaderMenuOpen(false); }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
@@ -5503,24 +5948,35 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       como antes pros 3 casos que pedem decisão do operador
                       (janela fechada). */}
                   if (isWindowOpen) return null;
+                  if (!isMetaChannel && dismissedReengagementWarningPhones.has(selectedLead.phone)) return null;
 
                   return (
                     <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
                       {!isMetaChannel ? (
-                        <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center justify-between w-full gap-2">
                           <div className="flex items-center gap-1.5 text-amber-400/90 font-semibold" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                             <span>Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
                           </div>
-                          <button
-                            type="button"
-                            disabled={isGeneratingReengagement}
-                            onClick={() => void handleDraftReengagementMessage(selectedLead)}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
-                          >
-                            <Sparkles className="w-3 h-3" />
-                            {isGeneratingReengagement ? 'Gerando...' : 'Sugerir mensagem de retomada'}
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              disabled={isGeneratingReengagement}
+                              onClick={() => void handleDraftReengagementMessage(selectedLead)}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              {isGeneratingReengagement ? 'Gerando...' : 'Sugerir mensagem de retomada'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDismissedReengagementWarningPhones((prev) => new Set(prev).add(selectedLead.phone))}
+                              title="Fechar este aviso"
+                              className="p-1 text-slate-500 hover:text-white rounded-lg cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       ) : isReopenBlockedByWaba ? (
                         <div className="flex items-center gap-1.5 text-amber-400 font-semibold" title="Fale com o suporte para configurar a conta oficial do WhatsApp Business (WABA) desta empresa.">
@@ -5780,9 +6236,16 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     documento, empurra a lista de mensagens pra cima, exatamente
                     como o WhatsApp real faz), em vez de um popup `absolute`
                     ancorado no botão do clipe. Reaproveita `renderToolTile`
-                    (mesmo helper da gaveta "Ferramentas", TASK-0282). */}
+                    (mesmo helper da gaveta "Ferramentas", TASK-0282).
+                    TASK-0299 (pedido direto, print real): o cartão arredondado
+                    com borda própria (`rounded-2xl border`) flutuava com
+                    margem visível dos dois lados da tela — `-mx-2` cancela
+                    exatamente o `p-2` do wrapper pai (mesmo passo de 0.5rem
+                    do Tailwind), deixando o painel rente às laterais reais
+                    da tela ("borda a borda"), sem borda nem cantos
+                    arredondados nas laterais. */}
                 {showAttachMenu && (
-                  <div className="rounded-2xl bg-[#233138] border border-slate-700 p-3 animate-page-enter">
+                  <div className="-mx-2 bg-[#233138] p-3 animate-page-enter">
                     <div className="grid grid-cols-4 gap-3">
                       {renderToolTile({
                         key: 'attach-document',
@@ -5835,38 +6298,59 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           void handleSendTextMessage(undefined, knowledgeBase.paymentDetailsText);
                         },
                       })}
+                      {/* TASK-0299 (pedido direto, print real): antes 1 ícone
+                          POR PRODUTO com foto de exemplo cadastrada (lista
+                          crescia sem teto) — agora 1 ícone só, que expande a
+                          lista de produtos logo abaixo da grade (fora dela,
+                          não um popover ancorado: um popover de largura fixa
+                          poderia estourar a tela já que este ícone pode cair
+                          em qualquer coluna da grade, inclusive a última). */}
+                      {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && renderToolTile({
+                        key: 'attach-example-photo',
+                        icon: <ImageIcon className="h-5 w-5" />,
+                        label: isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo',
+                        active: expandedExampleMedia === 'photo',
+                        onClick: () => setExpandedExampleMedia((v) => (v === 'photo' ? null : 'photo')),
+                      })}
+                      {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && renderToolTile({
+                        key: 'attach-example-video',
+                        icon: <Video className="h-5 w-5" />,
+                        label: isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo',
+                        active: expandedExampleMedia === 'video',
+                        onClick: () => setExpandedExampleMedia((v) => (v === 'video' ? null : 'video')),
+                      })}
                     </div>
 
-                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleImageBase64) && (
-                      <>
-                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                          {isSpanish ? 'Foto de ejemplo' : 'Foto de exemplo'}
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                          {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => renderToolTile({
-                            key: p.id,
-                            icon: <ImageIcon className="h-5 w-5" />,
-                            label: p.name,
-                            onClick: () => { setShowAttachMenu(false); handleSendExamplePhoto(p.name); },
-                          }))}
-                        </div>
-                      </>
+                    {expandedExampleMedia === 'photo' && (
+                      <div className="mt-3 space-y-1">
+                        {knowledgeBase.products.filter((p) => p.exampleImageBase64).map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => { setExpandedExampleMedia(null); setShowAttachMenu(false); handleSendExamplePhoto(p.name); }}
+                            className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        ))}
+                      </div>
                     )}
 
-                    {(selectedLead as any)?.isReal && knowledgeBase.products.some((p) => p.exampleVideoId) && (
-                      <>
-                        <div className="px-0.5 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                          {isSpanish ? 'Video de ejemplo' : 'Vídeo de exemplo'}
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                          {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => renderToolTile({
-                            key: p.id,
-                            icon: <Video className="h-5 w-5" />,
-                            label: p.name,
-                            onClick: () => { setShowAttachMenu(false); handleSendExampleVideo(p.name); },
-                          }))}
-                        </div>
-                      </>
+                    {expandedExampleMedia === 'video' && (
+                      <div className="mt-3 space-y-1">
+                        {knowledgeBase.products.filter((p) => p.exampleVideoId).map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => { setExpandedExampleMedia(null); setShowAttachMenu(false); handleSendExampleVideo(p.name); }}
+                            className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
+                          >
+                            <Video className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}
@@ -6137,8 +6621,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           que pode ser puxada. Ficha IA (`atendimento-analysis-drawer`,
           acima) não mudou — o pedido foi só sobre esta gaveta. */}
       {isToolbarSettingsOpen && (
+        // TASK-0328 (pedido direto, prints comparando a barra inferior
+        // sumida): esta área clicável cobria `inset-0` (toda a viewport),
+        // inclusive a faixa de `.atendimento-bottom-nav` — `bottom-[...]`
+        // reserva a altura real da nav (mesmo valor de UpcomingEventsPanel)
+        // pra ela continuar visível/clicável com a gaveta aberta, em vez de
+        // sumir por trás.
+        //
+        // TASK-0336 (achado real, print anotado): esse "4.75rem" era um
+        // chute que não batia com a altura real renderizada do nav, deixando
+        // um vão visível entre o fundo da gaveta e o topo do nav — agora usa
+        // `--atendimento-bottom-nav-h`, medida de verdade via ResizeObserver
+        // (ver o `bottomNavRef` acima). Sem `+ env(safe-area-inset-bottom)`
+        // aqui: a altura medida (`getBoundingClientRect`) já inclui esse
+        // padding, que o CSS do próprio nav já aplica — somar de novo
+        // reservaria espaço a mais. "4.75rem" continua só como fallback
+        // pro instante antes do primeiro measure (SSR/primeiro paint).
         <div
-          className="lg:hidden fixed inset-0 z-50 flex items-end"
+          className="lg:hidden fixed inset-x-0 top-0 bottom-[var(--atendimento-bottom-nav-h,4.75rem)] z-50 flex items-end"
           onClick={() => setIsToolbarSettingsOpen(false)}
         >
           <div
@@ -6361,7 +6861,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
       <UpcomingEventsPanel
         isOpen={isUpcomingEventsPanelOpen}
-        onClose={() => setIsUpcomingEventsPanelOpen(false)}
         events={upcomingEvents}
         isLoading={isLoadingUpcomingEvents}
         error={upcomingEventsError}

@@ -14,7 +14,6 @@ import {
   isNonBookableProduct,
   findProductDurationMinutes,
   findProductMatch,
-  collectReferencedVideoIds,
   type AgentKnowledgeBase,
   type AgentProduct,
   type KnowledgeBaseDocument,
@@ -75,20 +74,6 @@ describe('formatKnowledgeBaseForPrompt', () => {
     expect(text).toContain('Modelo compacto para quintais menores.');
     expect(text).toContain('AC F500');
     expect(text).toContain('Gs 15.000.000');
-  });
-});
-
-describe('collectReferencedVideoIds', () => {
-  it('mantém o vídeo usado por uma variação para que o salvamento não o trate como órfão', () => {
-    const ids = collectReferencedVideoIds({
-      products: [{
-        name: 'Pestañas',
-        price: 'Consultar',
-        variants: [{ code: 'Efecto Foxy', price: 'Gs 200.000', exampleVideoId: 'video-foxy' }],
-      }],
-    });
-
-    expect(ids).toEqual(new Set(['video-foxy']));
   });
 });
 
@@ -357,7 +342,6 @@ describe('composeKnowledgeBaseDocuments — equivalência da KB tipada', () => {
     expect(resolveProductAmountByName(composed, 'Lash Lift')).toBe(140000);
     expect(resolveProductAmountByName(composed, 'AC F400')).toBe(12000000);
     expect(findProductDurationMinutes(composed, 'Lash Lift')).toBe(90);
-    expect(collectReferencedVideoIds(composed)).toEqual(new Set(['video-lash-lift', 'welcome-video']));
   });
 
   it('ignora rascunho e campos fora do contrato do tipo documental', () => {

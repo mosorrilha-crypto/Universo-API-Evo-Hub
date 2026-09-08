@@ -486,7 +486,9 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       setReviews((current) => current.map((review) => review.id === reviewId ? data.review : review));
       setSelectedReviewId(null);
       setReviewNote('');
-      onToast(`Item ${STATUS_LABELS[status].toLowerCase()} com sucesso.`);
+      onToast(data?.knowledgeDraftCreated
+        ? 'Aprovado — resposta sugerida virou rascunho de conhecimento para revisão.'
+        : `Item ${STATUS_LABELS[status].toLowerCase()} com sucesso.`);
       await loadData();
     } catch (error: any) {
       onToast(error?.message || 'Não foi possível atualizar a revisão.');
@@ -964,7 +966,29 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
               </details>
             )}
             <div className="mt-5"><label className="text-[10px] uppercase tracking-wider text-slate-500">Nota da revisão</label><textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} rows={3} placeholder="Explique a decisão para a próxima pessoa que consultar este item..." className="mt-1.5 w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-control text-xs text-slate-200 resize-none focus:outline-none focus:border-sky-400/50" /></div>
-            <div className="mt-5 pt-4 border-t border-slate-800"><p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Decisão administrativa</p><div className="grid grid-cols-2 gap-2"><button onClick={() => updateReview(selectedReview.id, 'approved')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 text-xs font-bold hover:bg-emerald-500/25"><Check className="w-3.5 h-3.5" /> Aprovar</button><button onClick={() => updateReview(selectedReview.id, 'testing')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-bold hover:bg-sky-500/25"><Wrench className="w-3.5 h-3.5" /> Enviar para teste</button><button onClick={() => updateReview(selectedReview.id, selectedReview.kind === 'bug' ? 'resolved' : 'rejected')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-rose-500/10 border border-rose-400/30 text-rose-200 text-xs font-bold hover:bg-rose-500/20"><ThumbsDown className="w-3.5 h-3.5" /> {selectedReview.kind === 'bug' ? 'Marcar resolvido' : 'Rejeitar'}</button><button onClick={() => updateReview(selectedReview.id, 'reopened')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-orange-500/10 border border-orange-400/30 text-orange-200 text-xs font-bold hover:bg-orange-500/20"><RotateCcw className="w-3.5 h-3.5" /> Reabrir</button></div></div>
+            {(() => {
+              const hasSuggestedFix = Boolean(selectedReview.corrected_value) && selectedReview.kind !== 'knowledge';
+              const linkedDraft = reviews.find((review) => review.kind === 'knowledge' && review.context?.sourceReviewId === selectedReview.id);
+              return (
+                <div className="mt-5 pt-4 border-t border-slate-800">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">Decisão administrativa</p>
+                    {linkedDraft && <span className="inline-flex items-center gap-1 rounded-pill border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold text-sky-200"><ArrowRight className="h-3 w-3" /> Rascunho de conhecimento criado</span>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => updateReview(selectedReview.id, 'approved')}
+                      disabled={!hasSuggestedFix}
+                      title={hasSuggestedFix ? 'Aprova a resposta sugerida e abre um rascunho de conhecimento para revisão' : 'Este achado não tem uma resposta sugerida para aprovar'}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 text-xs font-bold hover:bg-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/15"
+                    ><Check className="w-3.5 h-3.5" /> Aprovar</button>
+                    <button onClick={() => updateReview(selectedReview.id, 'testing')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-bold hover:bg-sky-500/25"><Wrench className="w-3.5 h-3.5" /> Enviar para teste</button>
+                    <button onClick={() => updateReview(selectedReview.id, selectedReview.kind === 'bug' ? 'resolved' : 'rejected')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-rose-500/10 border border-rose-400/30 text-rose-200 text-xs font-bold hover:bg-rose-500/20"><ThumbsDown className="w-3.5 h-3.5" /> {selectedReview.kind === 'bug' ? 'Marcar resolvido' : 'Rejeitar'}</button>
+                    <button onClick={() => updateReview(selectedReview.id, 'reopened')} className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-control bg-orange-500/10 border border-orange-400/30 text-orange-200 text-xs font-bold hover:bg-orange-500/20"><RotateCcw className="w-3.5 h-3.5" /> Reabrir</button>
+                  </div>
+                </div>
+              );
+            })()}
           </aside>
         </div>
       )}

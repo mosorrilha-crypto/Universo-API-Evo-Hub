@@ -52,7 +52,6 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     render(
       <AgentKnowledgeBaseView
         knowledgeBase={knowledgeBase}
-        onSaveKnowledgeBase={vi.fn(async () => true)}
         businessHours={{}}
         onSaveBusinessHours={vi.fn(async () => true)}
         onGoToWhatsAppSim={vi.fn()}
@@ -90,7 +89,6 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     render(
       <AgentKnowledgeBaseView
         knowledgeBase={knowledgeBase}
-        onSaveKnowledgeBase={vi.fn(async () => true)}
         businessHours={{}}
         onSaveBusinessHours={vi.fn(async () => true)}
         onGoToWhatsAppSim={vi.fn()}
@@ -122,7 +120,6 @@ describe('AgentKnowledgeBase — upload real de foto de produto (TASK-0218)', ()
     render(
       <AgentKnowledgeBaseView
         knowledgeBase={knowledgeBase}
-        onSaveKnowledgeBase={vi.fn(async () => true)}
         businessHours={{}}
         onSaveBusinessHours={vi.fn(async () => true)}
         onGoToWhatsAppSim={vi.fn()}
