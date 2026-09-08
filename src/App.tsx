@@ -31,9 +31,10 @@ import { TenantActivationChecklist } from './components/TenantActivationChecklis
 import { evaluateTenantActivation } from './lib/tenantActivation';
 import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
+import { AtendimentoSecondaryNav } from './components/AtendimentoSecondaryNav';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
-import { getAuthToken, setAuthToken, setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
+import { setUnauthorizedHandler, apiFetch, setTenantOverride } from './lib/apiClient';
 import { ACTIVE_TAB_STORAGE_KEY, parseStoredActiveTab } from './lib/activeTab';
 import { hasRoleAtLeast } from './lib/roles';
 import {
@@ -155,12 +156,15 @@ export const App: React.FC = () => {
   // a plataforma SaaS até que a sessão seja confirmada pelo servidor.
   const [isSaasSessionConfirmed, setIsSaasSessionConfirmed] = useState(false);
 
+  // TASK-0311 (TASK-0249 item 1): a sessão virou cookie httpOnly — o
+  // frontend não tem mais como saber, antes de perguntar, se existe uma
+  // sessão válida (o valor é invisível pro JS por desenho). Antes havia um
+  // guard aqui (`if (!getAuthToken())`) pra nem tentar `/api/auth/session`
+  // sem token; agora sempre tenta, e deixa o backend decidir (cookie
+  // ausente/inválido cai direto no `.catch`/no ramo de campos faltando
+  // abaixo, que já tratavam esse caso).
   useEffect(() => {
     let cancelled = false;
-    if (!getAuthToken()) {
-      setCurrentUser(null);
-      return () => { cancelled = true; };
-    }
 
     apiFetch('/api/auth/session')
       .then((response) => (response.ok ? response.json() : null))
@@ -168,7 +172,6 @@ export const App: React.FC = () => {
         if (cancelled) return;
         const operator = data?.operator;
         if (!operator?.id || !operator?.tenantId || !operator?.role) {
-          setAuthToken(null);
           setCurrentUser(null);
           return;
         }
@@ -534,6 +537,21 @@ export const App: React.FC = () => {
   // do WhatsApp (pedido direto, 29/08/2026). Sem efeito no desktop.
   const [isMobileWhatsAppThreadOpen, setIsMobileWhatsAppThreadOpen] = useState(false);
 
+  // TASK-0326 (pedido direto, comparando prints anotados): o botão "Agenda"
+  // da barra inferior abria coisas diferentes dependendo de onde o operador
+  // estava — dentro de Conversas abria um popup rápido de próximos eventos
+  // (handleOpenUpcomingEvents, estado local de WhatsAppLeadsSim); dentro de
+  // Pendências (AtendimentoSecondaryNav, componente irmão, fora da árvore de
+  // WhatsAppLeadsSim) navegava pra página completa da Agenda. Decisão do
+  // dono do produto: sempre o popup rápido, em qualquer tela. Como o popup
+  // é estado local de WhatsAppLeadsSim, a única forma seguro sem içar toda a
+  // lógica de Google Calendar pra cá é: navegar pra Conversas e sinalizar
+  // aqui qual ação pendente ela deve dar 1 vez ao montar/perceber o sinal
+  // (mesmo padrão de `openLeadRequestId` — WhatsAppLeadsSim consome e avisa
+  // de volta). Também cobre "Ferramentas", que também só existia dentro de
+  // Conversas e não tinha equivalente em Pendências/Agenda.
+  const [pendingConversasAction, setPendingConversasAction] = useState<'openAgenda' | 'openTools' | null>(null);
+
   // TASK-0290 (pedido direto, print do botão físico/gesto de voltar do
   // Android circulado): "esse botão minimiza o aplicativo e não volta as
   // páginas dentro do aplicativo". Achado real: o app inteiro nunca chamou
@@ -581,6 +599,41 @@ export const App: React.FC = () => {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // TASK-0337 (pedido direto, prints reais mostrando que a TASK-0333 —
+  // trocar vh por dvh — não resolveu de verdade): a "faixa vazia" embaixo
+  // da barra inferior, ao abrir a Agenda, continuou aparecendo mesmo depois
+  // da troca pra `dvh`. `dvh`/`svh`/`env(safe-area-inset-bottom)` têm
+  // suporte inconsistente entre navegadores/skins Android (ex: MIUI) — o
+  // valor que `100dvh` resolve nem sempre bate com a altura real e visível
+  // da viewport nesse aparelho. Em vez de confiar só em unidades CSS,
+  // mede a altura real via `window.visualViewport` (o padrão mais robusto
+  // pra esse problema, atualizado a cada resize/scroll do teclado/barra do
+  // navegador) e alimenta `--real-vh`, usada como valor preferido (com
+  // `dvh` só de fallback) no `body` (index.css) e no wrapper raiz abaixo.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const applyRealVh = () => {
+      const height = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--real-vh', `${height}px`);
+    };
+    applyRealVh();
+    const viewport = window.visualViewport;
+    if (viewport) {
+      viewport.addEventListener('resize', applyRealVh);
+      viewport.addEventListener('scroll', applyRealVh);
+    }
+    window.addEventListener('resize', applyRealVh);
+    window.addEventListener('orientationchange', applyRealVh);
+    return () => {
+      if (viewport) {
+        viewport.removeEventListener('resize', applyRealVh);
+        viewport.removeEventListener('scroll', applyRealVh);
+      }
+      window.removeEventListener('resize', applyRealVh);
+      window.removeEventListener('orientationchange', applyRealVh);
+    };
   }, []);
 
   // Achado real, 29/08/2026 (TASK-0159 resolveu a cadeia de flex interna do
@@ -714,7 +767,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     setUnauthorizedHandler(() => {
       setCurrentUser(null);
-      setAuthToken(null);
       setIsLoginModalOpen(true);
       clearCachedTenantScopedData();
       showToast('Sessão expirada — faça login novamente.');
@@ -859,14 +911,31 @@ export const App: React.FC = () => {
 
   // Busca o horário de funcionamento real salvo no backend (usado pelo
   // agendamento automático de verdade) e sincroniza no painel, se existir.
+  // TASK-0306 (achado real, pedido direto: "já fizemos várias tentativas mas
+  // os horários ainda não persistem"): confirmado no Supabase que o valor
+  // estava salvo corretamente no tenant (seg-sáb 09:00-18:00) — o problema
+  // nunca foi a gravação, e sim esta busca. Ela tinha `useEffect(..., [])`,
+  // sem depender de `currentUser`: dispara uma ÚNICA vez, no mount, usando o
+  // token/`X-Tenant-Id` que existir NAQUELE instante — se rodar antes da
+  // sessão terminar de resolver (ou antes do saas_admin trocar de empresa),
+  // a resposta vem vazia/errada e NUNCA tenta de novo pelo resto da sessão,
+  // mesmo depois do login terminar ou da troca de tenant. Mesma classe de
+  // bug já encontrada e corrigida 3x neste mesmo arquivo (linhas ~246, ~281,
+  // ~327) — todas guardam com `if (!currentUser) return;` e reagem a
+  // `currentUser`/`activeTenant.id` nas deps; esta busca era a única que
+  // ainda faltava esse tratamento. Também passa a resetar pra `{}` quando o
+  // backend não devolve nada (antes só atualizava se viesse algo, então uma
+  // troca de tenant sem horário configurado continuava mostrando o horário
+  // do tenant anterior).
   useEffect(() => {
+    if (!currentUser) return;
     apiFetch('/api/business-hours')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.businessHours) setBusinessHours(data.businessHours);
+        setBusinessHours(data?.businessHours || {});
       })
       .catch(() => {});
-  }, []);
+  }, [currentUser?.id, activeTenant.id]);
 
   // [CRM] Achado real em produção: OperatorCRM.tsx era 100% mock/localStorage
   // — leads reais que já chegam via WhatsApp nunca apareciam no CRM a menos
@@ -1392,6 +1461,22 @@ export const App: React.FC = () => {
     showToast(`Empresa alterada para: ${tenant.name}`);
   };
 
+  // TASK-0331 (pedido direto): extraído de dentro do JSX do <Header> pra
+  // ser reaproveitado também por <WhatsAppLeadsSim> — o botão "Sair" saiu
+  // do menu ⋮ (eliminado) e mudou pra dentro da gaveta Ferramentas.
+  const handleLogout = () => {
+    // TASK-0311 (TASK-0249 item 1): o cookie httpOnly não pode ser
+    // apagado pelo JS — precisa desse POST pro backend limpar de
+    // verdade (senão a sessão "volta" no próximo reload).
+    void apiFetch('/api/auth/logout', { method: 'POST' });
+    handleSetActiveTab('whatsapp');
+    setCurrentUser(null);
+    setIsSaasSessionConfirmed(false);
+    setIsLoginModalOpen(true);
+    clearCachedTenantScopedData();
+    showToast('Sessão encerrada');
+  };
+
   // Tab Cross-Navigation Handlers
   const handleNavigateToFinancial = (lead: LeadInfo) => {
     if (!canSeeFinancial) {
@@ -1403,8 +1488,21 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
-      
+    // TASK-0333 (pedido direto, prints comparando Escalonamentos/Conversas
+    // "normais" com uma faixa vazia embaixo da barra inferior ao abrir
+    // Agenda/Ferramentas no mobile): `min-h-screen` (100vh) não acompanha o
+    // chrome dinâmico do navegador mobile — o resto do app já mede altura
+    // via `dvh` (App.tsx mais abaixo, .atendimento-workspace etc.), que
+    // encolhe/cresce junto quando a barra de endereço reaparece/some. Como
+    // este wrapper raiz ficava preso em `100vh` (o valor "grande", medido
+    // com a barra escondida), sobrava um vão do tamanho da diferença sempre
+    // que algo (como os popups fixed em tela cheia de Agenda/Ferramentas)
+    // fazia o navegador reexibir a barra — exatamente a "faixa embaixo"
+    // relatada. Trocado por `min-h-dvh` — mas isso sozinho não resolveu de
+    // verdade em todo aparelho Android (ver TASK-0337 acima, `--real-vh`
+    // medido via `visualViewport`, mais robusto que `dvh` puro).
+    <div className="min-h-[var(--real-vh,100dvh)] bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
+
       {/* Header Navigation — escondido no mobile enquanto uma conversa está
           aberta no Atendimento (pedido direto, 29/08/2026: "esse menu e
           cabeçalho não precisa em cima"; o seletor de idioma/tema também
@@ -1419,15 +1517,7 @@ export const App: React.FC = () => {
         savedCount={savedTranscripts.length}
         currentUser={currentUser}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
-        onLogout={() => {
-          handleSetActiveTab('whatsapp');
-          setCurrentUser(null);
-          setAuthToken(null);
-          setIsSaasSessionConfirmed(false);
-          setIsLoginModalOpen(true);
-          clearCachedTenantScopedData();
-          showToast('Sessão encerrada');
-        }}
+        onLogout={handleLogout}
         tenants={tenants}
         activeTenant={activeTenant}
         onSelectTenant={handleSelectTenant}
@@ -1438,10 +1528,27 @@ export const App: React.FC = () => {
         onToast={showToast}
       />
       </div>
-      {activeTab !== 'whatsapp' && canSeeConversations && (
+      {/* TASK-0319 (pedido direto, 2 prints anotados do celular): em
+          Escalonamentos/Agenda o `AtendimentoSecondaryNav` abaixo já cobre
+          a volta pra Conversas com o mesmo "menu de baixo" que o usuário
+          pediu de volta — manter o atalho flutuante redundante ali também
+          só duplicaria/sobreporia UI no mobile (os dois são `fixed` perto
+          do rodapé). Nos demais módulos (CRM, Financeiro, Qualidade, Logs,
+          Disparo) o atalho continua sendo o único caminho de volta. */}
+      {activeTab !== 'whatsapp' && activeTab !== 'escalations' && activeTab !== 'agenda' && canSeeConversations && (
         <FloatingAttendanceButton
           storageKey={`floating_attendance_position:${currentUser?.id || 'guest'}`}
           onOpen={() => handleSetActiveTab('whatsapp')}
+        />
+      )}
+      {(activeTab === 'escalations' || activeTab === 'agenda') && canSeeConversations && (
+        <AtendimentoSecondaryNav
+          activeTab={activeTab}
+          onGoToConversas={() => handleSetActiveTab('whatsapp')}
+          onGoToEscalations={() => handleSetActiveTab('escalations')}
+          onGoToAgenda={canSeeAgenda ? () => { handleSetActiveTab('whatsapp'); setPendingConversasAction('openAgenda'); } : undefined}
+          onGoToTools={() => { handleSetActiveTab('whatsapp'); setPendingConversasAction('openTools'); }}
+          escalationsPendingCount={escalations.filter((e) => !e.resolved && e.status !== 'archived').length}
         />
       )}
 
@@ -1479,7 +1586,22 @@ export const App: React.FC = () => {
           arredondados — não depende do padding do `.app-main` pra ter
           respiro, então zerar aqui é seguro (mesma lógica já validada no
           Atendimento). */}
-      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${activeTab === 'whatsapp' ? ' app-main--atendimento' : activeTab === 'quality' ? ' app-main--quality' : ''}`}>
+      <main className={`app-main mx-auto w-full max-w-7xl space-y-5 p-3 sm:p-6 lg:p-8${
+        activeTab === 'whatsapp' ? ' app-main--atendimento'
+        : activeTab === 'quality' ? ' app-main--quality'
+        // TASK-0319 (pedido direto, "o sistema utiliza páginas de borda a
+        // borda" comparando Escalonamentos com Atendimento/Qualidade da
+        // IA): mesmo tratamento — `OperationsModuleFrame` (hideHeader) já
+        // dá o próprio respiro via card com borda/padding, então zerar o
+        // padding do `.app-main` aqui é seguro (mesma lógica das duas
+        // abas acima). `pb-*` extra (regra dedicada em index.css) evita o
+        // `AtendimentoSecondaryNav` fixo cobrir o fim da lista no mobile.
+        : activeTab === 'escalations' ? ' app-main--escalations'
+        // Agenda não pediu tratamento borda a borda — só precisa do
+        // mesmo respiro extra embaixo pro AtendimentoSecondaryNav fixo.
+        : activeTab === 'agenda' ? ' pb-24 lg:pb-8'
+        : ''
+      }`}>
         
         {/* Toast Alert */}
         {toastMsg && (
@@ -1619,7 +1741,20 @@ export const App: React.FC = () => {
             onAddTransaction={handleAddTransaction}
             operatorName={currentUser?.name}
             closeThreadSignal={closeThreadSignal}
+            pendingConversasAction={pendingConversasAction}
+            onPendingConversasActionHandled={() => setPendingConversasAction(null)}
             onToast={showToast}
+            onSelectTab={handleSetActiveTab}
+            canSeeGrowth={canSeeGrowth}
+            canManageAgent={canManageAgent}
+            canSeeCatalog={canSeeCatalog}
+            canSeeQuality={canSeeQuality}
+            canSeeSystemLogs={canSeeSystemLogs}
+            canSeeBroadcast={canSeeBroadcast}
+            canSeeSaasMaster={canSeeSaasMaster}
+            tenants={tenants}
+            onSelectTenant={handleSelectTenant}
+            onLogout={handleLogout}
           />
           </AtendimentoWorkspaceFrame>
                 </div>}
@@ -1731,23 +1866,6 @@ export const App: React.FC = () => {
                 return false;
               }
             }}
-            onSaveKnowledgeBase={async (updatedKb) => {
-              setKnowledgeBase(updatedKb);
-              try {
-                const res = await apiFetch('/api/knowledge-base', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ knowledgeBase: updatedKb }),
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                showToast('Base de conhecimento do Agente salva!');
-                return true;
-              } catch (err) {
-                console.error('Falha ao salvar base de conhecimento no backend:', err);
-                showToast('Não foi possível salvar no servidor — o agente pode continuar respondendo com a base antiga. Tente novamente.');
-                return false;
-              }
-            }}
             canUseBusinessTemplates={canSeeSaasMaster}
             publicCatalogSlug={activeTenant.slug}
             onGoToWhatsAppSim={() => handleSetActiveTab('whatsapp')}
@@ -1812,7 +1930,14 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'escalations' && (
-          <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green">
+          // TASK-0319 (pedido direto, print anotado — "tira o cabeçalho
+          // duplo, coloca a descrição de cima no de baixo"): `EscalationsPanel`
+          // já renderiza o próprio `<header>` (título + descrição + filtros),
+          // igual Agenda/Financeiro fazem com `AgendaFinanceiroCenter`/
+          // `FinancialWorkspace` — mesmo `hideHeader` usado lá. A descrição
+          // deste frame ("Resolva pendências...") migrou pro header interno
+          // do EscalationsPanel em vez de sumir.
+          <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green" compact hideHeader>
           <EscalationsPanel
             escalations={escalations}
             onResolve={handleResolveEscalation}
@@ -1847,10 +1972,12 @@ export const App: React.FC = () => {
         onClose={() => {
           if (currentUser) setIsLoginModalOpen(false);
         }}
-        onLogin={(usr, token) => {
+        onLogin={(usr) => {
+          // TASK-0311 (TASK-0249 item 1): a sessão já chega via cookie
+          // httpOnly no próprio `Set-Cookie` da resposta de login — não
+          // existe mais token pro frontend guardar/repassar.
           setCurrentUser(usr);
-          setAuthToken(token || null);
-          setIsSaasSessionConfirmed(Boolean(token) && usr.role === 'saas_admin');
+          setIsSaasSessionConfirmed(usr.role === 'saas_admin');
           setIsLoginModalOpen(false);
           showToast(`Bem-vindo, ${usr.name}!`);
         }}

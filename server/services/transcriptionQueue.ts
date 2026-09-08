@@ -11,7 +11,7 @@ import { isAgentPaused } from './agentStatus';
 import { runExclusive } from './perPhoneQueue';
 import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from './knowledgeBaseStore';
 import { getTenantSegment } from './tenantProfileStore';
-import { logEscalation, isPaymentRelated, looksLikeHarassment } from './escalationStore';
+import { logEscalation, isPaymentRelated, looksLikeHarassment, bookingConfirmationEscalationSourceKey } from './escalationStore';
 import { redactMessageForLog } from './logRedaction';
 import { reviewAutoReplyBeforeSend } from './replySafetyGate';
 import { isPlausiblePersonalName } from './contactNameGuard';
@@ -303,14 +303,14 @@ async function processJobWithTenantContext(job: TranscriptionJob, deps: Transcri
           );
           if (calendarExecution.hadError) {
             const reason = calendarExecution.summaries.join(' ');
-            await logEscalation(tenantId, message.from, message.contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, outcome.result.transcription);
+            await logEscalation(tenantId, message.from, message.contactName, `Ação de agenda aprovada pelo revisor, mas não foi concluída antes do envio: ${reason}`, outcome.result.transcription, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(message.from) });
             emitAiReplyStatus(tenantId, message.from, 'failed');
             return;
           }
           if (result.agent === 'reclamacao') {
             await logEscalation(tenantId, message.from, message.contactName, 'Cliente com reclamação — atendimento humano obrigatório, IA nunca resolve reclamação sozinha', outcome.result.transcription);
           } else if (result.agent === 'agendamento' && result.needsHumanConfirmation) {
-            await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription);
+            await logEscalation(tenantId, message.from, message.contactName, 'Cliente tentando fechar agendamento — confirmar disponibilidade real (ainda sem Google Calendar conectado)', outcome.result.transcription, 'general', { sourceKey: bookingConfirmationEscalationSourceKey(message.from) });
           }
           try {
             await sendBubbles(channel, message.from, bubblesToSend, async (bubbleText) => {

@@ -54,13 +54,18 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           da mensagem ficavam visivelmente menores que a lista de conversas
           do app real, mesma proporção do ajuste já feito na conversa aberta
           (TASK-0164). */}
+      {/* O ponto verde "online" que existia aqui foi removido (achado real,
+          comparando com o print do WhatsApp de verdade): não tinha nenhum
+          dado por trás (renderizava fixo em TODO avatar, sempre), e o
+          WhatsApp real nunca mostra indicador de presença na lista de
+          conversas — só dentro de uma conversa aberta, e mesmo esse recurso
+          já tinha sido removido daqui de propósito (TASK-0259/TASK-0185). */}
       <div className="relative flex-shrink-0">
         <div
           className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xs border border-[var(--line-subtle)] ${avatarColorClasses(lead.name || lead.phone)}`}
         >
           {getInitials(lead.name || lead.phone)}
         </div>
-        <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-[var(--action)] border-2 border-[var(--surface-deep)]" />
       </div>
 
       <div className="flex-1 min-w-0">
@@ -99,10 +104,16 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           <p className={`text-xs truncate flex items-center pr-2 ${isUnread ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
             {lastMsg ? (
               <>
+                {/* TASK-0326 (pedido direto, print anotado à mão): os ícones de
+                    confirmação/áudio usavam a cor verde da marca (--action)
+                    sempre — o WhatsApp real nunca usa verde aqui, só cinza
+                    (entregue) ou azul (lido); sem rastreio real de leitura
+                    nesta lista, cinza neutro é a leitura correta pros dois
+                    casos (evita fabricar um estado "lido" que não existe). */}
                 {lastMsg.sender === 'agent' && (
-                  <CheckCheck className="w-4 h-4 text-[var(--action)] mr-1 flex-shrink-0" />
+                  <CheckCheck className="w-4 h-4 text-[var(--text-secondary)] mr-1 flex-shrink-0" />
                 )}
-                {lastMsg.type === 'audio' && <Mic className="w-3.5 h-3.5 text-[var(--action)] mr-1 flex-shrink-0" />}
+                {lastMsg.type === 'audio' && <Mic className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 {lastMsg.type === 'image' && <ImageIcon className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 {lastMsg.type === 'file' && <FileText className="w-3.5 h-3.5 text-[var(--text-secondary)] mr-1 flex-shrink-0" />}
                 <span className="truncate">

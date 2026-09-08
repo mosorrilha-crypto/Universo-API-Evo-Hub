@@ -6,11 +6,6 @@ describe('getSystemIncidentFromStructuredLog', () => {
     expect(getSystemIncidentFromStructuredLog({ tenantId: 'tenant-a', area: 'autoReply', op: 'send', outcome: 'success' })).toBeNull();
   });
 
-  it('registra uso da fonte legada como contingência auditável, sem alerta automático', () => {
-    const incident = getSystemIncidentFromStructuredLog({ tenantId: 'tenant-a', area: 'knowledgeBase', op: 'loadRuntimeSource', outcome: 'success', detail: 'source=legacy_blob;reason=published_documents_incomplete' });
-    expect(incident).toMatchObject({ category: 'knowledge_base', severity: 'high', sourceKey: 'system:knowledgeBase:loadRuntimeSource:legacy-fallback' });
-  });
-
   it('converte falha estruturada em registro técnico com sugestão revisável', () => {
     const incident = getSystemIncidentFromStructuredLog({ tenantId: 'tenant-a', area: 'catalog', op: 'load', outcome: 'error', detail: 'erro temporário' });
     expect(incident?.category).toBe('catalog');

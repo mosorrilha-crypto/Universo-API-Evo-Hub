@@ -12,9 +12,32 @@ interface AuthRouterDeps {
   jwtSecret: string;
   supabase: SupabaseClient | null;
   authenticateToken: RequestHandler;
+  isProduction: boolean;
 }
 
-export function createAuthRouter({ jwtSecret, supabase, authenticateToken }: AuthRouterDeps): Router {
+// TASK-0311 (TASK-0249 item 1): o JWT de sessão deixou de viajar no corpo do
+// JSON de login (o frontend lia `data.token` e gravava em `localStorage` em
+// texto puro — achado de segurança real, XSS ou extensão maliciosa lendo
+// essa chave rouba a sessão inteira) — agora só existe como cookie
+// `httpOnly`, nunca legível por JavaScript do cliente. `sameSite: 'strict'`
+// é a mitigação de CSRF (o app é same-origin em dev e produção — server.ts
+// serve o front e a API pelo mesmo processo/porta —, então não existe fluxo
+// legítimo que precise desse cookie vindo de outro site; sem isso, um
+// cookie sozinho reabriria CSRF nas ~140 rotas que hoje só o header
+// `Authorization`, nunca anexado automaticamente pelo navegador, protegia).
+const SESSION_COOKIE_NAME = 'universo_session';
+const SESSION_COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // mesma janela do `expiresIn: '24h'` do JWT
+
+function sessionCookieOptions(isProduction: boolean) {
+  return {
+    httpOnly: true,
+    secure: isProduction, // cookie `Secure` não é gravado em http:// puro — precisa ser condicional pro dev local
+    sameSite: 'strict' as const,
+    path: '/',
+  };
+}
+
+export function createAuthRouter({ jwtSecret, supabase, authenticateToken, isProduction }: AuthRouterDeps): Router {
   const router = Router();
 
   /**
@@ -118,7 +141,8 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken }: Aut
       // diferente de propósito aqui (não é genericError): quem já tem senha
       // certa precisa saber que o problema é bloqueio, não credencial errada.
       const session = await issueSessionForOperator(operator);
-      res.json(session);
+      res.cookie(SESSION_COOKIE_NAME, session.token, { ...sessionCookieOptions(isProduction), maxAge: SESSION_COOKIE_MAX_AGE_MS });
+      res.json({ operator: session.operator });
     } catch (e: any) {
       res.status(401).json({ error: e.message || 'Falha na autenticação' });
     }
@@ -174,7 +198,8 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken }: Aut
       }
 
       const session = await issueSessionForOperator(operator);
-      res.json(session);
+      res.cookie(SESSION_COOKIE_NAME, session.token, { ...sessionCookieOptions(isProduction), maxAge: SESSION_COOKIE_MAX_AGE_MS });
+      res.json({ operator: session.operator });
     } catch (e: any) {
       res.status(401).json({ error: e.message || 'Falha na autenticação com Google.' });
     }
@@ -187,8 +212,7 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken }: Aut
   router.get('/api/auth/session', authSessionRateLimiter, async (req, res) => {
     try {
       if (!supabase) throw new Error('Serviço de autenticação indisponível.');
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      const token = req.cookies?.[SESSION_COOKIE_NAME];
       if (!token) return res.sendStatus(401);
 
       const payload = jwt.verify(token, jwtSecret) as { id?: string };
@@ -216,6 +240,16 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken }: Aut
     } catch {
       return res.sendStatus(403);
     }
+  });
+
+  // TASK-0311 (TASK-0249 item 1): com o token virando cookie `httpOnly`,
+  // "logout" deixou de ser só limpar estado do React no frontend — só o
+  // servidor consegue apagar um cookie `httpOnly` (`res.clearCookie`, mesmas
+  // opções do `res.cookie` original, senão o navegador não reconhece como o
+  // mesmo cookie e não apaga). Rota nova; não existia nenhuma antes.
+  router.post('/api/auth/logout', (_req, res) => {
+    res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions(isProduction));
+    res.json({ success: true });
   });
 
   // Troca de senha pelo próprio operador (TASK-0261) — até aqui só existia

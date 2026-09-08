@@ -56,6 +56,44 @@ describe('revisor pré-envio de respostas automáticas', () => {
     }));
   });
 
+  // TASK-0316 (pedido direto, mesmo achado da TASK-0315) — o revisor e a
+  // sugestão corrigida formatavam o histórico à mão, sem ordem/numeração
+  // explícita; unificado com buildChronologicalConversationContext (mesma
+  // função já usada pelo agente principal e pela Ficha IA).
+  it('o histórico enviado ao revisor é o formato cronológico numerado, marcando CLIENTE/ATENDIMENTO', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ approved: true, severity: 'low', reason: 'ok' }) });
+    await reviewAutoReplyBeforeSend({
+      customerMessage: 'Y ese cuanto año dura?',
+      draftBubbles: ['Dura aproximadamente un año.'],
+      history: [
+        { sender: 'lead', text: 'Hola, quería saber sobre las cejas', timestamp: '2026-08-21T20:47:00Z' },
+        { sender: 'agent', text: 'El Combo Full Face incluye cejas, labios y pestañas.', timestamp: '2026-08-21T20:48:00Z' },
+      ],
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('1. CLIENTE: Hola, quería saber sobre las cejas'),
+    }));
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('2. ATENDIMENTO: El Combo Full Face incluye cejas, labios y pestañas.'),
+    }));
+  });
+
+  it('o histórico enviado na sugestão corrigida é o formato cronológico numerado', async () => {
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ reply: '¡Claro! ¿Qué servicio te gustaría consultar?' }) });
+    await generateCorrectedReplySuggestion({
+      customerMessage: 'Hola, ¿cuánto dura?',
+      blockedDraft: 'Dura un año. ¿Agendamos tu turno?',
+      reviewerReason: 'A resposta conduzia para agenda após pergunta informativa.',
+      history: [{ sender: 'lead', text: 'Hola, ¿cuánto dura?', timestamp: '2026-08-21T20:47:00Z' }],
+      knowledgeContext: 'Pestañas: duración según servicio; no afirmar disponibilidad.',
+    }, { ai: { models: { generateContent } } as any });
+
+    expect(generateContent).toHaveBeenCalledWith(expect.objectContaining({
+      contents: expect.stringContaining('1. CLIENTE: Hola, ¿cuánto dura?'),
+    }));
+  });
+
   it('rejeita a sugestão quando o modelo troca o idioma da cliente (achado real 26/08/2026)', async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify({ reply: 'Qual é o teu nome, pra eu poder marcar o combo?' }) });
     const suggestion = await generateCorrectedReplySuggestion({

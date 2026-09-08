@@ -10,7 +10,7 @@ import {
 import { getAppointmentForPhone, setAppointmentForPhone, clearAppointmentForPhone, confirmPayment, createAppointmentHold, findOverlappingHold, type TrackedAppointment } from './appointmentStore';
 import { runExclusiveForTenant } from './perTenantCalendarLock';
 import { DEFAULT_SEGMENT, getTenantBusinessHours, formatBusinessHoursForPrompt, type BusinessHours } from './tenantProfileStore';
-import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
+import { resolveProductAmountByName, isNonBookableProduct, findProductDurationMinutes, findProductMatch, formatKnowledgeBaseForPrompt, type AgentKnowledgeBase, type AgentProduct } from './knowledgeBaseStore';
 import * as knowledgeBaseStore from './knowledgeBaseStore';
 import { createPreReservation, updatePreReservationStatus } from './preReservationStore';
 import { uploadWhatsAppMedia, sendWhatsAppMediaMessage } from './metaSend';
@@ -19,7 +19,7 @@ import { getKnowledgeBaseVideo } from './knowledgeBaseVideoStore';
 import { resolveKnowledgeBaseImageBinary } from './knowledgeBaseImageStore';
 import { getGlobalPromptLayerOverride, DEFAULT_GLOBAL_LAYER } from './globalPromptStore';
 import { resolveEffectiveGlobalLayer } from './tenantPromptLayerStore';
-import { recordOutgoingMessage, getConversationCtwaClid } from './conversationStore';
+import { recordOutgoingMessage, getConversationCtwaClid, getConversation } from './conversationStore';
 import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
@@ -42,20 +42,7 @@ const BUSINESS_TIMEZONE = 'America/Asuncion';
  * log informa apenas fonte e motivo de fallback, nunca conteúdo de negócio.
  */
 async function getRuntimeKnowledgeBaseForReply(tenantId: string): Promise<AgentKnowledgeBase | null> {
-  // Alguns testes unitários antigos simulam somente o carregador legado. A
-  // aplicação real sempre exporta getRuntimeKnowledgeBase; este fallback é
-  // exclusivo para mocks isolados e evita reescrever suítes não relacionadas.
-  let runtimeLoader: typeof knowledgeBaseStore.getRuntimeKnowledgeBase | undefined;
-  try {
-    runtimeLoader = knowledgeBaseStore.getRuntimeKnowledgeBase;
-  } catch {
-    // O proxy de alguns mocks do Vitest lança quando se consulta um export
-    // ausente, em vez de devolver undefined como um namespace ESM comum.
-    runtimeLoader = undefined;
-  }
-  const result = runtimeLoader
-    ? await runtimeLoader(tenantId)
-    : { knowledgeBase: await knowledgeBaseStore.getKnowledgeBase(tenantId), source: 'legacy_blob' as const, fallbackReason: 'published_documents_unavailable' as const };
+  const result = await knowledgeBaseStore.getRuntimeKnowledgeBase(tenantId);
   logStructured({
     tenantId,
     area: 'knowledgeBase',
@@ -256,7 +243,7 @@ async function withGeminiRetryAndUsage<T extends { usageMetadata?: Parameters<ty
  * depois de semanas) continuar causando isso, o próximo passo é replicar o
  * padrão de capturedClientName pro serviço identificado.
  */
-const HISTORY_WINDOW_SIZE = 24;
+export const HISTORY_WINDOW_SIZE = 24;
 
 function buildHistoryText(history?: { sender: 'lead' | 'agent'; text?: string }[]): string {
   return (history || [])
@@ -487,7 +474,9 @@ REGRAS DE ESTILO (sempre aplicar):
 	22. NÃO ENCERRE TODA APRESENTAÇÃO DE OPÇÕES COM A MESMA PERGUNTA DE ESCOLHA FORÇADA: achado real de auditoria (03/09/2026, relato direto do dono do negócio, tenant de procedimentos estéticos): a mesma pergunta de dicotomia ("¿buscás algo más natural o preferís algo más definido/marcado/con volumen?", "você prefere um estilo mais natural ou mais preenchido?") apareceu em pelo menos 11 conversas reais diferentes ao longo de duas semanas, sempre logo depois de listar opções do catálogo — e o dono do negócio relatou que a cliente frequentemente NÃO responde a essa pergunta, travando a conversa aí. Vira reflexo automático (mesmo risco das regras 12/17/18) e não ajuda a avançar quando ninguém reage a ela. Depois de apresentar as opções, prefira: deixar a cliente escolher livremente sem forçar uma dicotomia; perguntar algo mais concreto e fácil de responder (qual serviço despertou mais interesse, se quer ver disponibilidade); ou simplesmente aguardar a resposta dela sem emendar outra pergunta. Só pergunte sobre alguma variação/acabado específico do serviço (ex: "natural vs. marcante" no caso citado acima) quando a própria cliente já tiver sinalizado interesse num serviço específico e essa escolha for realmente necessária pra cotar o preço certo — nunca como fechamento padrão de toda lista de opções.
 	23. EXEMPLO CONCRETO DE REPETIÇÃO A EVITAR (reforço da regra 9): se o histórico mostra que você JÁ respondeu "O Lash Lift custa Gs 140.000, é uma curvatura suave nas suas pálpebras naturais sem extensões" e a cliente pergunta de novo "Quanto custa mesmo o Lash Lift?", NUNCA repita a explicação completa de novo como se fosse a primeira vez (ex: "O Lash Lift sai por Gs 140.000. Ele curva e realça os seus próprios cílios naturais, sem precisar de extensão" é ERRADO aqui) — responda curto, reconhecendo que já foi dito (ex: "Sai por Gs 140.000, como te falei antes" ou "Isso, Gs 140.000") e só avance pra pergunta de agenda se a cliente já tiver manifestado intenção de marcar (regra 14) e, nesse caso, siga a regra 24 abaixo sobre o nome. Achado real de auditoria (03/09/2026, avaliação automática): esse exato padrão de repetir a explicação inteira de novo apareceu em várias rodadas de teste diferentes, mesmo com a regra 9 já pedindo o contrário — o exemplo concreto aqui existe porque a instrução genérica sozinha não bastou. IMPORTANTE: reconfirmar um preço já dado com uma frase curta (regra desta mesma numeração) é o comportamento CORRETO — nesse caso específico de reconfirmação, você NÃO precisa reencaixar duração/o que está incluído/outros detalhes do catálogo de novo, mesmo que a regra 15 normalmente peça isso na PRIMEIRA vez que o preço é informado; repetir todo o detalhe de novo é exatamente o erro que esta regra pede pra evitar. Achado real de produção (05/09/2026, TASK-0302): um caso testou justamente essa reconfirmação ("che, ¿cuánto cuesta el lash lift?" depois de já ter sido respondido antes) — a resposta curta "Está Gs 140.000, como te comenté recién." é exatamente o padrão correto pedido por esta regra, mas foi reprovada como se estivesse "faltando duração/o que está incluído" — não está faltando nada, é uma reconfirmação, não a primeira resposta. Do mesmo jeito, se a cliente pedir de novo um LINK ou LOCALIZAÇÃO já enviado antes na conversa, reconheça que já foi enviado (ex: "Te paso de nuevo, por si no lo viste:") em vez de reenviar o link seco, sem nenhuma palavra reconhecendo a repetição — mesmo princípio desta regra, não só pra preço.
 	24. NOME ANTES DE AVANÇAR PRA AGENDA: sempre que sua resposta for oferecer/perguntar disponibilidade, convidar pra ver horários, criar, remarcar ou cancelar um agendamento — e a cliente ainda não tiver nome nenhum (nem em "Nome do cliente" fornecido, nem dito por ela mesma nesta conversa) — peça o nome dela NA MESMA resposta em que avança pra agenda, não deixe pra depois nem avance sem isso. Fora desse momento (dúvida informativa de preço/procedimento/localização/pagamento, triagem, reclamação) o nome NÃO é obrigatório — não pergunte à toa, mesmo que a conversa como um todo esteja classificada como fluxo de agendamento (o que importa é se ESTA resposta específica avança pra agenda, não a classificação geral da conversa). Achado real de auditoria (03/09/2026, avaliação automática): respostas que já tinham o preço certo e corretamente ofereciam ver disponibilidade (ex: "Sai por Gs 140.000, como te falei antes. Quer conferir a disponibilidade pra agendar?") foram bloqueadas repetidamente pelo revisor de segurança pela mesma regra de negócio de sempre confirmar o nome antes de agenda — a causa era só a ausência dessa instrução aqui na geração; o revisor já aplicava a regra corretamente, só faltava o atendente segui-la de saída. EXEMPLO CONCRETO EM RECLAMAÇÃO (achado real, 03/09/2026, avaliação automática): cliente reclamou de um cancelamento por atraso de 20 minutos; a resposta acolheu corretamente a reclamação e disse que ia encaminhar pra equipe humana, mas emendou "Poderia me confirmar seu nome para eu localizar seu cadastro?" — isso é ERRADO, porque acolher/encaminhar reclamação não é "avançar pra agenda"; se for preciso localizar o cadastro, a equipe humana que assumir o caso faz isso depois, não o atendente automático nesta resposta.
-	${knowledgeBaseContext || ''}
+	25. CATEGORIA COM VÁRIAS OPÇÕES: LISTE CADA UMA COM SEU PREÇO, NUNCA RESUMA EM FAIXA: quando a cliente mencionar só uma categoria genérica de serviço (ex: "cejas", "labios", sem dizer qual variante/técnica específica) e o catálogo abaixo tiver mais de uma opção distinta dentro dessa categoria (ex: diseño, tratamiento, micropigmentación, cada uma com preço próprio), responda listando cada opção da categoria com nome e preço exato — uma por linha, como já aparecem no catálogo — nunca comprima tudo numa única faixa de preço genérica (ex: "tenemos desde Gs 60.000 hasta Gs 150.000"). Uma faixa resumida esconde quais serviços existem e qual preço é de qual, obrigando a cliente a perguntar de novo; listar cada opção já dá informação completa pra ela escolher sozinha, sem fricção extra de outra pergunta seguinte. Achado real de produção (05/09/2026, TASK-0312, com prints reais comparando duas conversas do mesmo tenant): numa conversa a cliente perguntou pelos combos disponíveis e a resposta certa listou cada combo com nome e preço, um por linha; noutra, a cliente disse só "Cejas" e a resposta ERRADA resumiu "Para las cejas tenemos opciones de diseño y tratamientos desde Gs 60.000 hasta Gs 150.000, y también la micropigmentación a Gs 550.000" — o mesmo catálogo estruturado item a item foi usado pra montar uma faixa em vez de uma lista. Esta regra tem prioridade sobre pedir uma especificação (regra 15) sempre que a categoria mencionada tiver até 5 opções cadastradas — só peça a especificação em vez de listar quando a categoria reunir mais de 5 opções (listar tudo ficaria longo demais) ou quando o catálogo não tiver preço individual por opção dentro dela.
+		26. LOCALIZAÇÃO/ENDEREÇO: NUNCA INVENTE CIDADE, BAIRRO OU QUALQUER DESCRIÇÃO DO LUGAR QUE NÃO ESTEJA EXPLÍCITA NO CONTEXTO ABAIXO. Quando a cliente pedir a localização/endereço, o Link de localização (Google Maps), quando existir, já é a fonte real (regra 15) — nunca acrescente frases como "Estamos en [cidade]" ou qualquer nome de cidade/bairro/região que não apareça literalmente escrito no contexto do negócio abaixo, mesmo que pareça óbvio a partir das coordenadas do link. Coordenadas geográficas não são um dado que você consegue ler/traduzir pra nome de lugar com precisão — um nome de cidade errado é pior do que nenhum nome. Se o contexto não tiver nenhum texto explícito de endereço/cidade, mande só o link, sem nenhuma descrição do lugar. Achado real de produção (06/09/2026, tenant de procedimentos estéticos, pedido direto do dono do negócio com print real): a cliente pediu o endereço, a base de conhecimento só tinha o link do Google Maps (nenhum texto de cidade em nenhum campo), e a resposta disse "Estamos en Asunción" — cidade que não estava escrita em lugar nenhum do contexto e que está errada (o studio fica em Luque, cidade vizinha).
+${knowledgeBaseContext || ''}
 Classifique também a fase atual desta conversa em UMA destas opções:
 - "abertura": primeiro contato, saudação, cliente ainda curioso/explorando.
 - "informacao": tirando dúvida técnica, pergunta sobre preço/procedimento/disponibilidade.
@@ -674,6 +663,78 @@ async function generateSpecialistReply(
   const awaitingCustomerChoice = typeof parsed.aguardandoCliente === 'string' && parsed.aguardandoCliente.trim() ? parsed.aguardandoCliente.trim() : undefined;
   const interestedService = typeof parsed.servicoInteresse === 'string' && parsed.servicoInteresse.trim() ? parsed.servicoInteresse.trim() : undefined;
   return { phase, bubbles, needsHumanConfirmation: !!parsed.needsHumanConfirmation, capturedClientName, pendingOwnerReview, awaitingCustomerChoice, interestedService };
+}
+
+export interface PromptAuditView {
+  agent: AgentType;
+  /** Texto EXATO enviado como `systemInstruction` ao Gemini — Camada 1 (regras fixas + global) e Camada 3 (Base de Conhecimento) já combinadas, byte a byte igual ao que o especialista real usa (mesma função, buildCachedSystemInstruction). */
+  systemInstruction: string;
+  /** Só a Camada 3 (Base de Conhecimento do tenant já composta), isolada, pra conferir separado do restante. */
+  knowledgeBaseContext: string;
+  /** Horário de funcionamento formatado — entra dentro de knowledgeBaseContext no prompt real (fullKnowledgeBaseContext), mostrado à parte aqui só pra clareza. */
+  businessHoursForPrompt: string;
+  /** Fonte real da Base de Conhecimento nesta consulta — 'unavailable' explica por que knowledgeBaseContext pode vir vazio. */
+  knowledgeBaseSource: string;
+  /** Preenchido só quando `phone` foi informado e a conversa existe — o texto de histórico exatamente como `buildHistoryText` monta pra Camada 4. */
+  conversationPreview?: {
+    contactName?: string;
+    historyText: string;
+    /** Preâmbulo de contents.text, sem o campo "Ações reais já executadas"/anúncio/orientação do operador (só existem durante uma mensagem real, ver dynamicNotShown). */
+    contentsPreamble: string;
+  };
+  /** Pedaços da Camada 4 que só existem durante uma mensagem real (resultado de ferramentas, contexto de anúncio, orientação do operador, exemplos aprovados) — não têm como ser reconstruídos aqui sem simular uma mensagem de verdade. */
+  dynamicNotShown: string[];
+}
+
+/**
+ * Auditoria SOMENTE LEITURA do prompt real enviado ao Gemini pro
+ * especialista — pedido direto (06/09/2026): depois de eliminar a rota de
+ * salvar a KB inteira (TASK-0327), o dono do produto precisava de outro
+ * jeito de conferir "quais informações estão chegando e como estão
+ * chegando no agente", sem reabrir escrita direta na Base de Conhecimento.
+ *
+ * Reaproveita as MESMAS funções que o turno real usa (buildCachedSystemInstruction,
+ * buildHistoryText, formatKnowledgeBaseForPrompt) — nunca reimplementa a
+ * montagem do prompt em paralelo, pra não arriscar a auditoria mostrar algo
+ * diferente do que de fato é mandado. `phone` é opcional: sem ele, mostra só
+ * as camadas estáveis (1 e 3); com ele, também mostra o histórico real da
+ * conversa (Camada 4, parte reconstruível sem side effect).
+ */
+export async function getPromptAuditView(tenantId: string, agent: AgentType, phone?: string): Promise<PromptAuditView> {
+  const runtimeKnowledgeBase = await knowledgeBaseStore.getRuntimeKnowledgeBase(tenantId);
+  const knowledgeBaseContext = formatKnowledgeBaseForPrompt(runtimeKnowledgeBase.knowledgeBase);
+  const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
+  const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
+  const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, fullKnowledgeBaseContext);
+
+  let conversationPreview: PromptAuditView['conversationPreview'];
+  if (phone) {
+    const conversation = await getConversation(tenantId, phone);
+    if (conversation) {
+      const historyText = buildHistoryText(conversation.messages);
+      const contactName = conversation.name;
+      conversationPreview = {
+        contactName,
+        historyText,
+        contentsPreamble: `${contactName ? `Nome do cliente: ${contactName}.\n` : ''}${historyText ? `Histórico recente da conversa (mais antiga primeiro):\n${historyText}\n` : ''}`,
+      };
+    }
+  }
+
+  return {
+    agent,
+    systemInstruction,
+    knowledgeBaseContext,
+    businessHoursForPrompt,
+    knowledgeBaseSource: runtimeKnowledgeBase.source,
+    conversationPreview,
+    dynamicNotShown: [
+      'A "Nova mensagem do cliente" em si — o texto literal que dispara o turno.',
+      'Ações reais já executadas nesta mensagem (disponibilidade consultada, evento de agenda criado/remarcado/cancelado, foto/vídeo enviado) — só existem durante uma mensagem real, geradas pelas ferramentas de agenda/mídia.',
+      'Contexto de anúncio (Clique para WhatsApp) — só aparece no primeiro contato de uma lead vinda de campanha.',
+      'Orientação do operador e exemplos de resposta aprovados — variam por escalonamento resolvido.',
+    ],
+  };
 }
 
 /**

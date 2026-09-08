@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch, getAuthToken, getTenantOverride, setAuthToken, setTenantOverride, setUnauthorizedHandler } from './apiClient';
+import { apiFetch, getTenantOverride, setTenantOverride, setUnauthorizedHandler } from './apiClient';
 
 describe('apiClient tenant override', () => {
   afterEach(() => {
     setTenantOverride(null);
-    setAuthToken(null);
     setUnauthorizedHandler(null);
     vi.unstubAllGlobals();
   });
@@ -31,27 +30,28 @@ describe('apiClient tenant override', () => {
 });
 
 describe('apiClient sessão e autorização', () => {
+  // TASK-0311: a sessão deixou de ser um token manipulado pelo cliente
+  // (localStorage/`currentToken`) — agora é só um cookie `httpOnly`, que o
+  // frontend nunca lê nem grava diretamente. Os testes verificam só o
+  // efeito observável que ainda existe do lado do cliente: quando
+  // `onUnauthorized` dispara ou não, a partir da resposta do servidor.
   it('não encerra uma sessão válida quando a rota recusa apenas o papel do usuário', async () => {
     const onUnauthorized = vi.fn();
-    setAuthToken('token-válido');
     setUnauthorizedHandler(onUnauthorized);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'Permissão insuficiente pra essa ação.' }), { status: 403, headers: { 'Content-Type': 'application/json' } })));
 
     await apiFetch('/api/knowledge-base/documents');
 
-    expect(getAuthToken()).toBe('token-válido');
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
   it('encerra a sessão somente quando o servidor a identifica explicitamente como inválida', async () => {
     const onUnauthorized = vi.fn();
-    setAuthToken('token-expirado');
     setUnauthorizedHandler(onUnauthorized);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 403, headers: { 'X-Auth-Session-Invalid': 'true' } })));
 
     await apiFetch('/api/knowledge-base/documents');
 
-    expect(getAuthToken()).toBeNull();
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });

@@ -18,8 +18,12 @@ export type AuthenticatedRequest = Request<StringParamsDictionary> & { user?: an
 
 export function createAuthenticateToken(jwtSecret: string) {
   return function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    // TASK-0311 (TASK-0249 item 1): token deixou de vir por header
+    // `Authorization` (legível por qualquer JS do cliente, inclusive um XSS)
+    // e passou a vir só pelo cookie httpOnly `universo_session` (setado em
+    // auth.ts) — o navegador anexa sozinho, o JavaScript do frontend nunca
+    // tem acesso ao valor cru.
+    const token = req.cookies?.universo_session;
     if (!token) return res.sendStatus(401);
 
     jwt.verify(token, jwtSecret, (err: any, user: any) => {

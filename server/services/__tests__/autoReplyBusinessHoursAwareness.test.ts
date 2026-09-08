@@ -32,6 +32,7 @@ vi.mock('../conversationStore', () => ({
 }));
 vi.mock('../knowledgeBaseStore', () => ({
   getKnowledgeBase: vi.fn(async () => null),
+  getRuntimeKnowledgeBase: vi.fn(async () => ({ knowledgeBase: null, source: 'published_documents' as const })),
   resolveProductPrice: vi.fn(),
   parsePriceToNumber: vi.fn(() => 0),
   resolveProductPriceAmount: vi.fn(() => 0),

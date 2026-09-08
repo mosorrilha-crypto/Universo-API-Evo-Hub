@@ -53,12 +53,21 @@ afterAll(() => {
   server.close();
 });
 
+// TASK-0327 — o blob legado `knowledge_base` foi eliminado; a leitura do
+// catálogo (pra resolver o preço pelo nome do serviço) exige os 8 documentos
+// tipados publicados.
+const OTHER_DOCUMENT_TYPES = ['business_profile', 'brand_voice', 'opening_hours', 'faq', 'human_handoff_rules', 'media_assets'] as const;
+
 function seed(products: any[]) {
   supabase = createFakeSupabase({
     appointments: [
       { tenant_id: TENANT_ID, phone: PHONE, event_id: 'evt-1', summary: 'Microlips', start_iso: '2026-08-10T10:00:00', end_iso: '2026-08-10T11:30:00', created_at: new Date().toISOString(), payment_status: 'pending_verification', payment_proof_message_id: 'msg-1', payment_verified_by: null, payment_verified_at: null },
     ],
-    knowledge_base: [{ tenant_id: TENANT_ID, data: { products } }],
+    knowledge_base_documents: [
+      { id: `${TENANT_ID}-service_catalog`, tenant_id: TENANT_ID, document_type: 'service_catalog', version: 1, status: 'published', data: { products } },
+      { id: `${TENANT_ID}-pricing_policies`, tenant_id: TENANT_ID, document_type: 'pricing_policies', version: 1, status: 'published', data: {} },
+      ...OTHER_DOCUMENT_TYPES.map((documentType) => ({ id: `${TENANT_ID}-${documentType}`, tenant_id: TENANT_ID, document_type: documentType, version: 1, status: 'published', data: {} })),
+    ],
   });
   initDb(supabase);
 }

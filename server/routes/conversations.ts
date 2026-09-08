@@ -1,5 +1,4 @@
 import { Router, type RequestHandler, type Response } from 'express';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import {
   listConversations,
@@ -25,11 +24,7 @@ import { sendBubbles, type OutboundChannel } from '../services/sendBubbles';
 import { resolveCredentialsForTenant, resolveCredentialsForConversation, resolveMetaTemplateCredentialsForTenant } from '../services/tenantResolver';
 import { getAgentStatus, setAgentStatus, isAdsOnlyMode, setAdsOnlyMode, getAdTriggerMessages, setAdTriggerMessages, type AgentStatus } from '../services/agentStatus';
 import {
-  getKnowledgeBase,
   getRuntimeKnowledgeBase,
-  setKnowledgeBase,
-  collectReferencedVideoIds,
-  collectReferencedImageIds,
   formatKnowledgeBaseForPrompt,
   findProductMatch,
   resolveProductAmountByName,
@@ -47,8 +42,8 @@ import { isAgendaModuleEnabledForCurrentTenant } from '../services/agendaModuleA
 import { isSystemLogsModuleEnabledForCurrentTenant } from '../services/systemLogsModuleAccess';
 import { getTenantBusinessHours, setTenantBusinessHours, validateBusinessHours } from '../services/tenantProfileStore';
 import { uploadKnowledgeBaseDocument, getKnowledgeBaseDocument, deleteKnowledgeBaseDocument, extractTextFromDocument } from '../services/knowledgeBaseDocumentStore';
-import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, deleteKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
-import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, deleteKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
+import { uploadKnowledgeBaseVideo, getKnowledgeBaseVideo, ALLOWED_VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_VIDEO_INPUT_BYTES } from '../services/knowledgeBaseVideoStore';
+import { uploadKnowledgeBaseImage, getKnowledgeBaseImage, resolveKnowledgeBaseImageBinary, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../services/knowledgeBaseImageStore';
 import { transcodeToWhatsAppVideo } from '../services/videoTranscode';
 import { assignEscalation, listEscalations, getEscalation, resolveEscalation, deleteEscalation, permanentlyDeleteEscalation, restoreEscalation, submitOperatorReply, saveReplySuggestion, type ReplySuggestionStatus } from '../services/escalationStore';
 import { saveApprovedReplyExample } from '../services/approvedReplyExampleStore';
@@ -70,7 +65,7 @@ import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
 import { queueLeadSheetSync } from '../services/googleSheetsSync';
 import { checkFreeBusy, createCalendarEvent, cancelCalendarEvent, listUpcomingEvents, type CalendarConfig } from '../services/googleCalendar';
-import { getNowLocalNaive } from '../services/autoReply';
+import { getNowLocalNaive, getPromptAuditView, type AgentType } from '../services/autoReply';
 import { getCatalogClickAnalytics } from '../services/publicCatalogClickStore';
 import { TENANT_SLUG_PATTERN, TENANT_SLUG_FORMAT_ERROR, friendlyTenantSlugError } from '../services/tenantSlug';
 import { subscribeTenant } from '../services/conversationEvents';
@@ -214,20 +209,20 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
    * o mesmo segredo/algoritmo de authenticateToken (não dá pra reaproveitar
    * o middleware direto, que só lê do header).
    */
-  router.get('/api/conversations/stream', conversationsStreamRateLimiter, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const token = typeof req.query.token === 'string' ? req.query.token : undefined;
-    if (!token) return res.status(401).end();
-    let user: any;
-    try {
-      user = jwt.verify(token, jwtSecret);
-    } catch {
-      return res.status(403).end();
-    }
-    if (!user?.tenantId) return res.status(403).end();
+  // TASK-0311 (TASK-0249 item 1): até aqui esta rota tinha sua PRÓPRIA
+  // verificação de JWT (não passava pelo `authenticateToken` compartilhado)
+  // porque `EventSource` nativo não manda header `Authorization` — o token
+  // vinha por querystring como contorno. Isso deixou de ser necessário: a
+  // sessão agora é um cookie `httpOnly` (`universo_session`), que o
+  // `EventSource` manda sozinho em toda conexão same-origem (mesma regra do
+  // `fetch`, não precisa de `withCredentials` pra same-origin) — a rota
+  // passa a usar o middleware padrão como qualquer outra rota autenticada.
+  router.get('/api/conversations/stream', conversationsStreamRateLimiter, authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const user = req.user!;
     // Mesma exceção de resolveTenantId (middleware/rbac.ts): só saas_admin
     // pode apontar pra outro tenant, aqui via querystring (EventSource
-    // nativo não manda header customizado) — o painel manda isso a partir
-    // do tenant selecionado no seletor.
+    // nativo não manda header customizado como X-Tenant-Id) — o painel
+    // manda isso a partir do tenant selecionado no seletor.
     const requestedTenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId.trim() : undefined;
     const tenantId = user.role === 'saas_admin' && requestedTenantId ? requestedTenantId : user.tenantId;
 
@@ -1695,13 +1690,12 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   }));
 
   // Base de conhecimento real do agente (objetivo, regras, preços, FAQ) —
-  // usada como contexto nos prompts de resposta automática. TASK-0308: lê
-  // via getRuntimeKnowledgeBase (fonte tipada/publicada, com fallback pro
-  // blob legado quando a publicação estiver incompleta) — antes fazia um
-  // select cru na tabela legada `knowledge_base`, o que fazia esta rota (e
-  // os botões "Dados da conta"/"Localização" da conversa, que consomem o
-  // estado alimentado por ela) devolver texto desatualizado minutos depois
-  // de o usuário editar e publicar uma correção no editor tipado.
+  // usada como contexto nos prompts de resposta automática. TASK-0327: fonte
+  // única é getRuntimeKnowledgeBase (composição dos 8 documentos tipados
+  // publicados) — a tabela legada `knowledge_base` (blob jsonb por tenant)
+  // foi eliminada; escrever/editar a Base de Conhecimento agora passa sempre
+  // pelo editor tipado (draft + publicação, ver as rotas
+  // /api/knowledge-base/documents/:type/* abaixo).
   //
   // Cache condicional por ETag (pedido direto de chat, 25/08/2026 —
   // incidente real de cota do Supabase: a Base de Conhecimento da Monique
@@ -1712,11 +1706,9 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // estourar a cota gratuita de saída (egress) do projeto.
   //
   // O ETag não pode mais vir de `updated_at` (não existe mais uma única
-  // linha/timestamp — a fonte pode ser a composição de 8 documentos
-  // tipados ou o blob legado) — agora é um hash do CONTEÚDO devolvido, o
-  // que mantém a mesma finalidade (evitar reenviar o corpo de ~12MB quando
-  // nada mudou) de forma agnóstica à fonte, e continua correto mesmo no
-  // fallback pro legado.
+  // linha/timestamp — a fonte é a composição de 8 documentos tipados) —
+  // é um hash do CONTEÚDO devolvido, o que mantém a mesma finalidade
+  // (evitar reenviar o corpo de ~12MB quando nada mudou).
   router.get('/api/knowledge-base', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
     const { knowledgeBase } = await getRuntimeKnowledgeBase(tenantOf(req));
 
@@ -1736,35 +1728,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.json({ knowledgeBase: knowledgeBase || null });
   }));
 
-  router.post('/api/knowledge-base', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { knowledgeBase } = req.body || {};
-    if (!knowledgeBase || typeof knowledgeBase !== 'object') {
-      return res.status(400).json({ error: 'Campo "knowledgeBase" é obrigatório.' });
-    }
-    const tenantId = tenantOf(req);
-    // Issue #261 — só agora (save real, bem-sucedido) é seguro apagar vídeo
-    // do Storage: qualquer videoId que estava referenciado na KB anterior e
-    // deixou de aparecer na nova é, de fato, lixo (produto/bloco removido ou
-    // vídeo trocado por outro) — nunca uma troca que ainda não foi salva.
-    // TASK-0218 — mesma lógica pra imagem (collectReferencedImageIds).
-    const previousKb = await getKnowledgeBase(tenantId);
-    const previousVideoIds = collectReferencedVideoIds(previousKb);
-    const previousImageIds = collectReferencedImageIds(previousKb);
-    await setKnowledgeBase(tenantId, knowledgeBase);
-    const currentVideoIds = collectReferencedVideoIds(knowledgeBase);
-    const currentImageIds = collectReferencedImageIds(knowledgeBase);
-    const orphanedVideoIds = [...previousVideoIds].filter((id) => !currentVideoIds.has(id));
-    const orphanedImageIds = [...previousImageIds].filter((id) => !currentImageIds.has(id));
-    await Promise.all([
-      ...orphanedVideoIds.map((videoId) => deleteKnowledgeBaseVideo(supabaseUrl, supabaseKey, tenantId, videoId)),
-      ...orphanedImageIds.map((imageId) => deleteKnowledgeBaseImage(supabaseUrl, supabaseKey, tenantId, imageId)),
-    ]);
-    res.json({ success: true });
-  }));
-
-  // ISSUE-0096 / PR2 — API administrativa de documentos tipados. Não substitui
-  // GET/POST /api/knowledge-base: o agente e o painel legado seguem no blob
-  // até o corte de runtime aprovado em PR4. Por conter rascunhos internos,
+  // ISSUE-0096 / PR2 — API administrativa de documentos tipados. Por conter
+  // rascunhos internos,
   // toda a superfície é exclusiva de admin/saas_admin.
   router.get('/api/knowledge-base/documents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     try {
@@ -1847,6 +1812,24 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   router.delete('/api/tenant-prompt-layer', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     await clearTenantPromptLayer(tenantOf(req));
     res.json(await getTenantPromptLayerRow(tenantOf(req)));
+  }));
+
+  // TASK-0330 — auditoria SOMENTE LEITURA do prompt real mandado ao Gemini
+  // (Camada 1 fixa + Camada 3 Base de Conhecimento, já combinadas
+  // idênticas ao que o especialista de verdade usa; Camada 4 real da
+  // conversa quando `phone` é informado). Pedido direto: depois de eliminar
+  // a rota de salvar a KB inteira (TASK-0327), o dono do produto precisava
+  // de outro jeito de conferir "quais informações estão chegando e como
+  // estão chegando no agente" — nunca escreve nada, só lê e reaproveita a
+  // mesma montagem de prompt do turno real (getPromptAuditView).
+  const VALID_AUDIT_AGENTS: AgentType[] = ['triagem', 'faq', 'agendamento', 'reclamacao'];
+  router.get('/api/tenant-prompt-audit', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const agent = req.query.agent as string;
+    if (!VALID_AUDIT_AGENTS.includes(agent as AgentType)) {
+      return res.status(400).json({ error: `Campo "agent" precisa ser um destes: ${VALID_AUDIT_AGENTS.join(', ')}.` });
+    }
+    const phone = typeof req.query.phone === 'string' && req.query.phone.trim() ? req.query.phone.trim() : undefined;
+    res.json(await getPromptAuditView(tenantOf(req), agent as AgentType, phone));
   }));
 
   // Horário de funcionamento real do tenant (tabela `tenants`, não a base de
@@ -2067,54 +2050,6 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     });
   }));
 
-  // Upload real de documento anexado à base de conhecimento — até aqui a
-  // aba "Documentos Anexados" era só um registro visual fictício (achado
-  // real: 2 "documentos" hardcoded no preset da Monique que nunca
-  // existiram de verdade, ninguém conseguia abrir). Extrai texto quando dá
-  // (PDF/TXT/CSV/JSON/MD, ver knowledgeBaseDocumentStore.ts) pra o agente
-  // usar como contexto real (formatKnowledgeBaseForPrompt), com teto de
-  // tamanho pra nunca inflar o prompt sem limite.
-  router.post('/api/knowledge-base/documents', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const tenantId = tenantOf(req);
-    const { fileName, mimeType, base64 } = req.body || {};
-    if (!fileName?.trim() || !base64) {
-      return res.status(400).json({ error: 'Campos "fileName" e "base64" são obrigatórios.' });
-    }
-    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buffer.length > MAX_DOCUMENT_BYTES) {
-      return res.status(400).json({ error: `Arquivo maior que ${MAX_DOCUMENT_BYTES / (1024 * 1024)}MB.` });
-    }
-
-    const kb = (await getKnowledgeBase(tenantId)) || {};
-    const existingDocs = kb.documents || [];
-    if (existingDocs.length >= MAX_DOCUMENTS_PER_TENANT) {
-      return res.status(400).json({ error: `Limite de ${MAX_DOCUMENTS_PER_TENANT} documentos atingido. Apague algum documento antigo antes de enviar um novo.` });
-    }
-    const existingTotalBytes = existingDocs.reduce((sum, d) => sum + (d.sizeBytes || 0), 0);
-    if (existingTotalBytes + buffer.length > MAX_TOTAL_BYTES_PER_TENANT) {
-      const remainingMb = Math.max(0, (MAX_TOTAL_BYTES_PER_TENANT - existingTotalBytes) / (1024 * 1024)).toFixed(1);
-      return res.status(400).json({ error: `Limite de ${MAX_TOTAL_BYTES_PER_TENANT / (1024 * 1024)}MB no total atingido (restam ${remainingMb}MB). Apague algum documento antigo antes de enviar um novo.` });
-    }
-
-    const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const resolvedMimeType = mimeType || 'application/octet-stream';
-    await uploadKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId, buffer, resolvedMimeType);
-    const extractedText = await extractTextFromDocument(buffer, resolvedMimeType, fileName);
-
-    const newDoc = {
-      id: docId,
-      fileName: String(fileName).trim(),
-      fileSize: `${(buffer.length / (1024 * 1024)).toFixed(1)} MB`,
-      sizeBytes: buffer.length,
-      mimeType: resolvedMimeType,
-      uploadDate: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      status: 'Processado' as const,
-      extractedText,
-    };
-    await setKnowledgeBase(tenantId, { ...kb, documents: [...existingDocs, newDoc] });
-    res.json({ document: newDoc });
-  }));
-
   // Baixa/visualiza o arquivo real — nunca público (pode conter dado
   // sensível do negócio), mesmo padrão autenticado de GET /api/media/:messageId.
   router.get('/api/knowledge-base/documents/:docId', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
@@ -2130,12 +2065,13 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     res.send(doc.buffer);
   }));
 
+  // TASK-0327 — apaga só o binário do Storage. A remoção da referência em
+  // `media_assets.documents` é responsabilidade do editor tipado (o cliente
+  // já tira o item de formData.documents e persiste via rascunho/publicação,
+  // mesmo padrão já usado por vídeo/imagem — nenhum dos dois tem rota de
+  // DELETE dedicada, só esta, mantida por já apagar o Storage de fato).
   router.delete('/api/knowledge-base/documents/:docId', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const tenantId = tenantOf(req);
-    const docId = req.params.docId;
-    await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantId, docId);
-    const kb = (await getKnowledgeBase(tenantId)) || {};
-    await setKnowledgeBase(tenantId, { ...kb, documents: (kb.documents || []).filter((d) => d.id !== docId) });
+    await deleteKnowledgeBaseDocument(supabaseUrl, supabaseKey, tenantOf(req), req.params.docId);
     res.json({ success: true });
   }));
 
@@ -2146,7 +2082,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
   // pra um produto ainda não salvo no servidor (ver knowledgeBaseVideoStore.ts).
   // Quem associa a referência a um produto é o cliente (AgentKnowledgeBase.tsx),
   // no mesmo formData local que já guarda exampleImageBase64 — só persiste
-  // de verdade quando a base inteira é salva (POST /api/knowledge-base acima).
+  // de verdade quando o rascunho do documento tipado é salvo/publicado.
   router.post('/api/knowledge-base/videos', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = tenantOf(req);
     const { fileName, mimeType, base64 } = req.body || {};

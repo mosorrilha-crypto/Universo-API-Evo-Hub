@@ -1,15 +1,22 @@
 /**
  * GET /api/conversations/stream (SSE) — avisa o painel em tempo real no
  * lugar do polling de 8s (ver server/services/conversationEvents.ts).
- * EventSource não manda header Authorization, então essa rota autentica
- * via query string (?token=) com o mesmo segredo/algoritmo de
- * authenticateToken, nunca confiando em tenantId vindo de fora do JWT.
+ *
+ * TASK-0311 (TASK-0249 item 1): até aqui esta rota tinha sua PRÓPRIA
+ * verificação de JWT via querystring (?token=), porque EventSource nativo
+ * não manda header Authorization. Isso deixou de ser necessário: a sessão
+ * virou um cookie httpOnly (`universo_session`), que o EventSource manda
+ * sozinho em toda conexão same-origem — a rota passou a usar o middleware
+ * `authenticateToken` padrão, igual a qualquer outra rota autenticada. Este
+ * teste simula isso mandando o JWT via header `Cookie` em vez de `?token=`.
  */
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import type { Server } from 'http';
 import jwt from 'jsonwebtoken';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createConversationsRouter } from '../conversations';
+import { createAuthenticateToken } from '../../middleware/auth';
 import { initDb } from '../../services/db';
 import { createFakeSupabase } from '../../services/__tests__/fakeSupabase';
 import { emitConversationUpdated } from '../../services/conversationEvents';
@@ -20,17 +27,20 @@ const JWT_SECRET = 'test-secret';
 let server: Server;
 let baseUrl: string;
 
-function fakeAuthenticateToken(req: any, _res: any, next: any) {
-  req.user = { id: 'op-1', tenantId: TENANT_A, role: 'admin' };
-  next();
+function cookieFor(token: string) {
+  return `universo_session=${token}`;
 }
 
 beforeAll(async () => {
   const app = express();
   app.use(express.json());
+  // Servidor de teste efêmero, sem tráfego real — CodeQL não distingue isso
+  // de um app em produção (ver rationale completa em server.ts). Regra
+  // js/missing-token-validation excluída via .github/codeql/codeql-config.yml.
+  app.use(cookieParser());
   app.use(
     createConversationsRouter({
-      authenticateToken: fakeAuthenticateToken as any,
+      authenticateToken: createAuthenticateToken(JWT_SECRET),
       jwtSecret: JWT_SECRET,
       metaAccessToken: 'tok',
       metaPhoneNumberId: 'pn',
@@ -53,20 +63,23 @@ beforeEach(() => {
 });
 
 describe('GET /api/conversations/stream', () => {
-  it('sem token — recusa (401), nunca abre o stream', async () => {
+  it('sem cookie de sessão — recusa (401), nunca abre o stream', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/stream`);
     expect(res.status).toBe(401);
   });
 
-  it('token inválido/expirado — recusa (403), nunca abre o stream', async () => {
-    const res = await fetch(`${baseUrl}/api/conversations/stream?token=lixo-nao-e-jwt`);
+  it('cookie inválido/expirado — recusa (403), nunca abre o stream', async () => {
+    const res = await fetch(`${baseUrl}/api/conversations/stream`, {
+      headers: { Cookie: cookieFor('lixo-nao-e-jwt') },
+    });
     expect(res.status).toBe(403);
   });
 
-  it('token válido — abre o stream e entrega evento do próprio tenant', async () => {
+  it('cookie válido — abre o stream e entrega evento do próprio tenant', async () => {
     const token = jwt.sign({ id: 'op-1', tenantId: TENANT_A, role: 'admin' }, JWT_SECRET);
     const controller = new AbortController();
-    const res = await fetch(`${baseUrl}/api/conversations/stream?token=${encodeURIComponent(token)}`, {
+    const res = await fetch(`${baseUrl}/api/conversations/stream`, {
+      headers: { Cookie: cookieFor(token) },
       signal: controller.signal,
     });
     expect(res.status).toBe(200);
@@ -94,7 +107,8 @@ describe('GET /api/conversations/stream', () => {
     const TENANT_B = 'tenant-b';
     const token = jwt.sign({ id: 'op-1', tenantId: TENANT_A, role: 'saas_admin' }, JWT_SECRET);
     const controller = new AbortController();
-    const res = await fetch(`${baseUrl}/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${TENANT_B}`, {
+    const res = await fetch(`${baseUrl}/api/conversations/stream?tenantId=${TENANT_B}`, {
+      headers: { Cookie: cookieFor(token) },
       signal: controller.signal,
     });
     expect(res.status).toBe(200);
@@ -119,7 +133,8 @@ describe('GET /api/conversations/stream', () => {
     const TENANT_B = 'tenant-b';
     const token = jwt.sign({ id: 'op-1', tenantId: TENANT_A, role: 'admin' }, JWT_SECRET);
     const controller = new AbortController();
-    const res = await fetch(`${baseUrl}/api/conversations/stream?token=${encodeURIComponent(token)}&tenantId=${TENANT_B}`, {
+    const res = await fetch(`${baseUrl}/api/conversations/stream?tenantId=${TENANT_B}`, {
+      headers: { Cookie: cookieFor(token) },
       signal: controller.signal,
     });
     expect(res.status).toBe(200);

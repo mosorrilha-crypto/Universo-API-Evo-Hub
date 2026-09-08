@@ -6,7 +6,10 @@ import { apiFetch } from '../lib/apiClient';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 
 interface LoginModalProps {
-  onLogin: (user: UserProfile, token?: string) => void;
+  // TASK-0311 (TASK-0249 item 1): a sessão chega via cookie httpOnly no
+  // próprio Set-Cookie da resposta de login — não existe mais token pra
+  // repassar pro chamador.
+  onLogin: (user: UserProfile) => void;
   isOpen: boolean;
   onClose?: () => void;
   isForcedLogin?: boolean;
@@ -64,7 +67,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         department: 'Operador',
       };
-      onLogin(authenticatedUser, data.token);
+      onLogin(authenticatedUser);
     } catch (err: any) {
       setErrorMsg(err.message || t('loginError'));
     } finally {
@@ -192,7 +195,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     avatar: googleUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
                     department: 'Operador',
                   };
-                  onLogin(authenticatedUser, data.token);
+                  onLogin(authenticatedUser);
                 } catch (err: any) {
                   setErrorMsg(err.message || 'Erro ao autenticar via Google.');
                 } finally {

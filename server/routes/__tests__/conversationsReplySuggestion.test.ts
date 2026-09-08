@@ -122,19 +122,18 @@ function seed(kind: 'general' | 'payment_proof' = 'general') {
         kind: 'general',
       },
     ],
-    knowledge_base: [
-      {
-        tenant_id: TENANT_ID,
-        data: {
-          companyName: 'Studio Seguro',
-          toneOfVoice: 'amável',
-          pricingAndPolicies: 'SEGREDO_INTERNO_DE_PAGAMENTO',
-          businessRules: ['REGRA_INTERNA_NAO_EXIBIR'],
-          documents: [{ fileName: 'interno.txt', extractedText: 'DADO_INTERNO_DOCUMENTO' }],
-          products: [{ name: 'Lifting de pestañas', active: true, category: 'Pestañas', price: 100, description: 'Serviço comercial público', aliases: ['lifting'], variants: [] }],
-          faqs: [{ question: 'Quanto dura?', answer: 'A duração depende do serviço.' }],
-        },
-      },
+    // TASK-0327 — o blob legado `knowledge_base` foi eliminado; a rota lê
+    // via getRuntimeKnowledgeBase, que exige os 8 documentos tipados
+    // publicados.
+    knowledge_base_documents: [
+      { id: `${TENANT_ID}-business_profile`, tenant_id: TENANT_ID, document_type: 'business_profile', version: 1, status: 'published', data: { companyName: 'Studio Seguro' } },
+      { id: `${TENANT_ID}-brand_voice`, tenant_id: TENANT_ID, document_type: 'brand_voice', version: 1, status: 'published', data: { toneOfVoice: 'amável' } },
+      { id: `${TENANT_ID}-service_catalog`, tenant_id: TENANT_ID, document_type: 'service_catalog', version: 1, status: 'published', data: { products: [{ name: 'Lifting de pestañas', active: true, category: 'Pestañas', price: 100, description: 'Serviço comercial público', aliases: ['lifting'], variants: [] }] } },
+      { id: `${TENANT_ID}-pricing_policies`, tenant_id: TENANT_ID, document_type: 'pricing_policies', version: 1, status: 'published', data: { pricingAndPolicies: 'SEGREDO_INTERNO_DE_PAGAMENTO', businessRules: ['REGRA_INTERNA_NAO_EXIBIR'] } },
+      { id: `${TENANT_ID}-opening_hours`, tenant_id: TENANT_ID, document_type: 'opening_hours', version: 1, status: 'published', data: {} },
+      { id: `${TENANT_ID}-faq`, tenant_id: TENANT_ID, document_type: 'faq', version: 1, status: 'published', data: { faqs: [{ question: 'Quanto dura?', answer: 'A duração depende do serviço.' }] } },
+      { id: `${TENANT_ID}-human_handoff_rules`, tenant_id: TENANT_ID, document_type: 'human_handoff_rules', version: 1, status: 'published', data: {} },
+      { id: `${TENANT_ID}-media_assets`, tenant_id: TENANT_ID, document_type: 'media_assets', version: 1, status: 'published', data: { documents: [{ fileName: 'interno.txt', extractedText: 'DADO_INTERNO_DOCUMENTO' }] } },
     ],
   });
   initDb(supabase);

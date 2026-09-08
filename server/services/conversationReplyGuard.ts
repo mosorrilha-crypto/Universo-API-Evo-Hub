@@ -41,10 +41,29 @@ function isGenericIntroduction(text: string): boolean {
   return /^[^a-z]*(hola|ola|hello)[!,.\s]*(soy|me llamo|aqui es|aqui e|te habla|mi nombre es)\b/.test(value);
 }
 
-export function buildChronologicalConversationContext(messages: unknown): string {
+/**
+ * `windowSize` (TASK-0315, pedido direto: "verifica se as análises estão com
+ * o prompt atualizado igual o agente pois as vezes me parecem fora de
+ * contexto com o histórico do chat, principalmente o de retomada") — mantém
+ * só as N mensagens mais recentes, na mesma ordem cronológica, antes de
+ * numerar. Sem isso, os 3 endpoints auxiliares da Ficha IA
+ * (analyze-conversation, reply-from-hint, ask — ver ai.ts) sempre mandavam a
+ * conversa INTEIRA pro modelo, sem limite — achado real via consulta direta
+ * ao Postgres de produção: conversas reais do tenant chegam a 255 mensagens.
+ * Sem uma janela, a mensagem mais recente (o que realmente importa pra uma
+ * mensagem de retomada, por exemplo) fica perdida em meio a dezenas de
+ * trocas antigas e menos relevantes — mesmo risco de "lost in the middle"
+ * que HISTORY_WINDOW_SIZE em autoReply.ts já existe pra evitar no agente
+ * principal, só que os endpoints auxiliares nunca tinham essa mesma
+ * proteção. Omitir windowSize mantém o comportamento anterior (histórico
+ * completo) — usado pela análise de CRM, que se beneficia de contexto mais
+ * profundo (orçamento/objeção podem ter sido ditos bem antes na conversa).
+ */
+export function buildChronologicalConversationContext(messages: unknown, windowSize?: number): string {
   const ordered = orderedMessages(messages);
-  if (!ordered.length) return 'Sem mensagens disponíveis.';
-  return ordered
+  const windowed = windowSize && windowSize > 0 ? ordered.slice(-windowSize) : ordered;
+  if (!windowed.length) return 'Sem mensagens disponíveis.';
+  return windowed
     .map((message, index) => {
       const actor = message.sender === 'lead' ? 'CLIENTE' : message.sender === 'agent' ? 'ATENDIMENTO' : 'SISTEMA';
       const body = String(message.text || '[mensagem sem texto]').trim();
