@@ -4077,7 +4077,24 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // — "a caixa está muito estreita ... e a janela muito pequena".
     // Removido — a área de conversa agora estica de verdade até onde o
     // `.app-main` já permite.
-    <div className="atendimento-conversations space-y-4 animate-page-enter flex flex-col flex-1 min-h-0">
+    //
+    // TASK-0338 (achado real, 08/09/2026, 2 prints do dono do produto):
+    // a causa raiz real por trás da "faixa vazia"/nav flutuando no meio da
+    // tela ao abrir Agenda/Ferramentas no mobile — que as TASK-0328/0336/
+    // 0337 tentaram resolver só ajustando a ALTURA reservada pro nav —
+    // nunca foi a altura, e sim `animate-page-enter` (index.css) aplicado
+    // NESTE div, que é o ancestral direto da gaveta de Ferramentas e do
+    // `UpcomingEventsPanel` (Agenda), ambos `fixed inset-x-0 top-0 bottom-
+    // [...]`. `animate-page-enter` usa `animation: ... both`, e o fill-mode
+    // `both` mantém pra sempre o `transform: translateY(0)` do frame final
+    // — mesmo um transform "idêntico" (0px) faz este div virar o
+    // containing block dos seus descendentes `position: fixed` (regra do
+    // spec CSS), em vez do viewport real. Por isso os dois overlays nunca
+    // se alinhavam de verdade com a tela/nav inferior, e nenhum ajuste de
+    // `dvh`/`visualViewport`/altura medida no elemento nav resolvia — o
+    // problema nem chegava a olhar pro viewport verdadeiro. Removida a
+    // classe (a entrada suave da lista de conversas não valia o bug).
+    <div className="atendimento-conversations space-y-4 flex flex-col flex-1 min-h-0">
       {/* TASK-0225 (pedido direto, 03/09/2026): a barra de ferramentas
           exclusiva de desktop (Pendências/Agenda/Ferramentas, `hidden
           lg:block`, histórico completo nas TASK-0212/0213/0221) foi
