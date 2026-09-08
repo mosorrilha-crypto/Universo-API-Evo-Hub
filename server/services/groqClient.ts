@@ -16,6 +16,20 @@ const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 // Groq na doc de depreciação (console.groq.com/docs/deprecations):
 // openai/gpt-oss-20b.
 const GROQ_MODEL = 'openai/gpt-oss-20b';
+// TASK-0346 (pedido direto, 08/09/2026, incidente ativo — Gemini sem
+// crédito em produção): modelo Meta Llama usado quando o Groq passa a ser
+// PRIMEIRO provedor pra gerar a resposta do especialista (não só a
+// classificação do roteador) — confirmado ativo/produção na doc oficial da
+// Groq em 08/09/2026 (não usar o 8B aqui: a 70B tem raciocínio/instrução
+// bem melhor pra seguir as ~26 regras de negócio do prompt).
+export const GROQ_SPECIALIST_MODEL = 'llama-3.3-70b-versatile';
+/**
+ * Timeout maior que o do roteador (GROQ_TIMEOUT_MS, 6s) — a resposta do
+ * especialista é texto de atendimento de verdade (1-2 bolhas + campos de
+ * acompanhamento de funil), não só um enum curto como a classificação do
+ * roteador, e o modelo 70B tem mais raciocínio pra fazer antes de responder.
+ */
+export const GROQ_SPECIALIST_TIMEOUT_MS = 12000;
 
 /**
  * Timeout curto e sem retry — decisão explícita do plano aprovado: Groq
@@ -42,8 +56,19 @@ export interface GroqJsonCompletionResult {
  * mesmo padrão do responseMimeType 'application/json' já usado com o
  * Gemini). Lança em qualquer falha — rede, timeout, HTTP não-2xx, corpo sem
  * "choices[0].message.content", ou content que não é um JSON válido.
+ *
+ * `model`/`temperature` opcionais (TASK-0346) — o roteador continua usando
+ * o default (`GROQ_MODEL`, temperatura 0, determinístico: só classifica um
+ * enum). A geração da resposta do especialista passa `GROQ_SPECIALIST_MODEL`
+ * e uma temperatura > 0 (texto criativo de atendimento, não classificação).
  */
-export async function callGroqJsonCompletion(apiKey: string, prompt: string, timeoutMs: number = GROQ_TIMEOUT_MS): Promise<GroqJsonCompletionResult> {
+export async function callGroqJsonCompletion(
+  apiKey: string,
+  prompt: string,
+  timeoutMs: number = GROQ_TIMEOUT_MS,
+  model: string = GROQ_MODEL,
+  temperature: number = 0
+): Promise<GroqJsonCompletionResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -54,10 +79,10 @@ export async function callGroqJsonCompletion(apiKey: string, prompt: string, tim
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: GROQ_MODEL,
+        model,
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
-        temperature: 0,
+        temperature,
       }),
       signal: controller.signal,
     });
