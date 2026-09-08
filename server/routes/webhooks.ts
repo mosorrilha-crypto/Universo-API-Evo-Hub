@@ -14,7 +14,7 @@ import { showEvolutionTyping } from '../services/evolutionSend';
 import { showInstagramTyping } from '../services/instagramSend';
 import { isAgentPaused } from '../services/agentStatus';
 import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
-import { transcribeAudioWithGemini } from '../services/geminiTranscription';
+import { transcribeAudio, isRealTranscriptionSource } from '../services/geminiTranscription';
 import { hasFirstContactMessage, sendFirstContactMessage } from '../services/firstContactMessage';
 import { getTenantSegment, getTenantBusinessHours } from '../services/tenantProfileStore';
 import { runExclusive } from '../services/perPhoneQueue';
@@ -566,11 +566,12 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
                     // dois casos, aplicado aqui.
                     if (!isAudio) return;
                     try {
-                      const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, downloaded.base64, downloaded.mimeType, {
+                      const outcome = await transcribeAudio(getAi ? getAi() : null, downloaded.base64, downloaded.mimeType, {
                         leadName: msg.contactName,
                         customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+                        groqApiKey,
                       });
-                      const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+                      const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
                       await updateMessageText(tenantId, msg.from, msg.messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
                     } catch (transcriptionError: any) {
                       console.warn(`⚠️  [Eco de envio] Falha ao transcrever áudio mandado direto do celular (${msg.from}):`, transcriptionError?.message || transcriptionError);
