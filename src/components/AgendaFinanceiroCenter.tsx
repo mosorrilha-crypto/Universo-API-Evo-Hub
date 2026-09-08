@@ -64,8 +64,10 @@ interface AgendaFinanceiroCenterProps {
   onDeleteRecurringExpense?: (id: string) => void;
   /** No celular, fluxo e recorrências abrem como detalhe em vez de alongar a página inicial. */
   mobileDetail?: 'flow' | 'recurring' | null;
-  /** A Agenda abre em compromissos de hoje; calendário e pendências entram sob demanda no celular. */
-  mobileAgendaView?: 'today' | 'calendar';
+  /** A Agenda abre em compromissos de hoje; Semana/Mês entram sob demanda no
+      celular (TASK-0347: nav de 3 abas em vez de 2, Semana e Mês deixaram
+      de ser um segundo nível escondido dentro do card da Agenda). */
+  mobileAgendaView?: 'today' | 'week' | 'month';
 }
 
 const statusStyle: Record<PaymentStatus, string> = {
@@ -160,6 +162,15 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     refreshEvents();
   }, [view, calendarDate.getFullYear(), calendarDate.getMonth()]);
 
+  // TASK-0347 — o seletor Semana/Mês interno (abaixo, escondido no mobile)
+  // e a nova aba Semana/Mês do nav mobile (AgendaWorkspace.tsx) controlam a
+  // MESMA visão; esta é a ponte entre os dois no mobile, sem duplicar o
+  // estado (`calendarViewMode` continua sendo a única fonte de verdade,
+  // usada tanto pela grade quanto pelo desktop).
+  useEffect(() => {
+    if (mobileAgendaView === 'week' || mobileAgendaView === 'month') setCalendarViewMode(mobileAgendaView);
+  }, [mobileAgendaView]);
+
   const financial = useMemo(() => summarizeFinancialTransactions(transactions, period), [transactions, period]);
   const visibleTransactions = useMemo(() => financial.scoped.filter((transaction) => {
     const entryType = transaction.entryType || 'income';
@@ -185,6 +196,23 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
     return aPendingPayment - bPendingPayment || Date.parse(a.startIso) - Date.parse(b.startIso);
   }).slice(0, 12);
   const hasOperationalData = view === 'agenda' ? events.length > 0 : transactions.length > 0;
+
+  // TASK-0347 (pedido direto, "reformular está agenda completa não estou
+  // entendendo ela está complexa" → mockup confirmado): no mobile, "Próximos
+  // compromissos" e "Pendências da agenda" eram duas listas separadas que na
+  // prática mostravam muitas vezes o MESMO compromisso duas vezes. Fundidas
+  // numa lista só (mobile-only, ver JSX/CSS), com o item pendente/atrasado
+  // subindo pro topo em vez de precisar de uma segunda seção pra ele.
+  const mobileTodayList = useMemo(() => {
+    const byId = new Map<string, CalendarEvent>();
+    pendingAppointments.forEach((event) => byId.set(event.id, event));
+    nextAppointments.forEach((event) => byId.set(event.id, event));
+    return Array.from(byId.values()).sort((a, b) => {
+      const aPending = a.payment?.status === 'atrasado' ? 0 : a.payment?.status === 'pendente' ? 1 : 2;
+      const bPending = b.payment?.status === 'atrasado' ? 0 : b.payment?.status === 'pendente' ? 1 : 2;
+      return aPending - bPending || Date.parse(a.startIso) - Date.parse(b.startIso);
+    });
+  }, [pendingAppointments, nextAppointments]);
 
   const changeMonth = (offset: number) => {
     setCalendarDate((date) => {
@@ -649,8 +677,10 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
               <p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Eventos reales del calendario, cobro y atención en el mismo flujo.' : 'Eventos reais do calendário, cobrança e atendimento no mesmo fluxo.'}</p>
             </div>
             {/* Pedido direto do dono do produto (28/08/2026): seletor Semana/Mês,
-                encaixado ao lado do título pra não abrir mais uma linha na tela. */}
-            <div className="inline-flex shrink-0 rounded-lg border border-slate-800 bg-slate-950 p-0.5">
+                encaixado ao lado do título pra não abrir mais uma linha na tela.
+                TASK-0347: escondido no mobile — virou a aba Semana/Mês do nav
+                de cima (AgendaWorkspace.tsx), redundante com este aqui. */}
+            <div className="hidden shrink-0 rounded-lg border border-slate-800 bg-slate-950 p-0.5 sm:inline-flex">
               <button type="button" onClick={() => setCalendarViewMode('week')} className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${calendarViewMode === 'week' ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-400 hover:text-white'}`}>{isSpanish ? 'Semana' : 'Semana'}</button>
               <button type="button" onClick={() => setCalendarViewMode('month')} className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${calendarViewMode === 'month' ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-400 hover:text-white'}`}>{isSpanish ? 'Mes' : 'Mês'}</button>
             </div>
@@ -736,6 +766,15 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
       {view === 'agenda' && <section className="agenda-financeiro-workspace__pending rounded-2xl border border-slate-800 bg-slate-900/75 p-4 shadow-lg sm:p-5">
         <div className="mb-4 flex items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-300">{isSpanish ? 'Decisión requerida' : 'Decisão necessária'}</p><h2 className="mt-1 font-bold text-white">{isSpanish ? 'Pendientes de la agenda' : 'Pendências da agenda'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Confirmación y cobro antes de seguir con la atención.' : 'Confirmação e cobrança antes de seguir com o atendimento.'}</p></div><span className="rounded-full bg-amber-400/10 px-2 py-1 text-[10px] font-bold text-amber-200">{pendingAppointments.length}</span></div>
         {pendingAppointments.length ? <div className="space-y-2">{pendingAppointments.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>)}</div> : <div className="rounded-xl border border-dashed border-slate-700 px-3 py-8 text-center text-xs text-slate-400">{isSpanish ? 'No hay pendientes para revisar.' : 'Nenhuma pendência para revisar.'}</div>}
+      </section>}
+
+      {/* TASK-0347 — versão mobile de "Próximos compromissos" + "Pendências da
+          agenda" fundidos numa lista só (`mobileTodayList`), visível só na
+          aba "Hoje" do nav mobile (CSS esconde nas abas Semana/Mês, ver
+          index.css). As duas seções desktop acima continuam intactas — essa
+          é adicional, não substitui nada no desktop. */}
+      {view === 'agenda' && <section className="agenda-financeiro-workspace__mobile-today-list space-y-2 sm:hidden">
+        {mobileTodayList.length ? mobileTodayList.map((event) => <div key={event.id}><EventCard calendarEvent={event} compact /></div>) : <div className="rounded-xl border border-dashed border-slate-700 px-3 py-8 text-center text-xs text-slate-400">{isSpanish ? 'No hay compromisos próximos.' : 'Nenhum compromisso próximo.'}</div>}
       </section>}
 
       {view === 'financial' &&<section className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg"><div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="font-bold text-white">{isSpanish ? 'Flujo financiero' : 'Fluxo financeiro'}</h2><p className="mt-1 text-xs text-slate-400">{isSpanish ? 'Ingresos vinculados a la agenda, registros manuales y gastos operativos.' : 'Receitas vinculadas à agenda, lançamentos manuais e despesas operacionais.'}</p></div><div className="flex flex-wrap gap-2"><select value={period} onChange={(event) => setPeriod(event.target.value as 'month' | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="month">{isSpanish ? 'Mes actual' : 'Mês atual'}</option><option value="all">{isSpanish ? 'Todo el historial' : 'Todo histórico'}</option></select><select value={transactionType} onChange={(event) => setTransactionType(event.target.value as 'all' | 'income' | 'expense')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los tipos' : 'Todos os tipos'}</option><option value="income">{isSpanish ? 'Ingresos' : 'Receitas'}</option><option value="expense">{isSpanish ? 'Gastos' : 'Despesas'}</option></select><select value={transactionStatus} onChange={(event) => setTransactionStatus(event.target.value as PaymentStatus | 'all')} className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200"><option value="all">{isSpanish ? 'Todos los estados' : 'Todos os status'}</option>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select><button type="button" onClick={() => setTransactionDialog('income')} className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/15"><Plus className="mr-1 inline h-3.5 w-3.5" />{isSpanish ? 'Ingreso adicional' : 'Receita avulsa'}</button></div></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Previsto' : 'Previsto'}</p><p className="mt-1 text-sm font-black text-slate-200">{formatMoney(financial.projectedIncome)}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Ingresos' : 'Receitas'}</p><p className="mt-1 text-sm font-black text-emerald-300">{financial.incomeCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Por cobrar' : 'A receber'}</p><p className="mt-1 text-sm font-black text-amber-200">{financial.pendingCount}</p></div><div className="rounded-xl bg-slate-950/45 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-slate-500">{isSpanish ? 'Cobrado' : 'Recebido'}</p><p className="mt-1 text-sm font-black text-sky-200">{financial.collectionRate === null ? '—' : new Intl.NumberFormat(displayLocale, { style: 'percent', maximumFractionDigits: 0 }).format(financial.collectionRate)}</p></div></div><div className="responsive-table-scroll hidden overflow-x-auto sm:block"><table className="w-full min-w-[720px] text-left text-xs"><thead className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="pb-3 font-bold">{isSpanish ? 'Fecha' : 'Data'}</th><th className="pb-3 font-bold">{isSpanish ? 'Cliente / descripción' : 'Cliente / descrição'}</th><th className="pb-3 font-bold">{isSpanish ? 'Tipo' : 'Tipo'}</th><th className="pb-3 font-bold">{isSpanish ? 'Estado' : 'Status'}</th><th className="pb-3 text-right font-bold">{isSpanish ? 'Valor' : 'Valor'}</th><th className="pb-3" /></tr></thead><tbody className="divide-y divide-slate-800/80">{visibleTransactions.length ? visibleTransactions.map((transaction) => <tr key={transaction.id} className="transition-colors hover:bg-slate-800/30"><td className="py-3.5 text-slate-400">{new Date(transaction.date).toLocaleDateString(displayLocale)}</td><td className="py-3.5"><p className="font-bold text-slate-200">{transaction.productName}</p><p className="mt-0.5 text-[10px] text-slate-500">{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto operativo' : 'Despesa operacional') : transaction.leadName}</p></td><td className="py-3.5"><span className={`inline-flex items-center gap-1 font-bold ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? <ArrowDownRight className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}{transaction.entryType === 'expense' ? (isSpanish ? 'Gasto' : 'Despesa') : (isSpanish ? 'Ingreso' : 'Receita')}</span></td><td className="py-3.5"><select value={transaction.status} onChange={(event) => onUpdateTransactionStatus(transaction.id, event.target.value as PaymentStatus)} aria-label={`${isSpanish ? 'Estado de' : 'Status de'} ${transaction.productName}`} className={`rounded-full border px-2 py-1 text-[10px] font-bold outline-none ${statusStyle[transaction.status]}`}>{(['pago', 'pendente', 'atrasado', 'cancelado'] as PaymentStatus[]).map((status) => <option key={status} value={status}>{transactionStatusLabel(status, isSpanish)}</option>)}</select></td><td className={`py-3.5 text-right font-black ${transaction.entryType === 'expense' ? 'text-rose-300' : 'text-emerald-300'}`}>{transaction.entryType === 'expense' ? '-' : '+'}{formatMoney(transaction.amount)}</td><td className="py-3.5 text-right"><button type="button" onClick={() => confirmDeleteTransaction(transaction)} className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Eliminar registro' : 'Excluir lançamento'}><Trash2 className="h-3.5 w-3.5" /></button></td></tr>) : <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</td></tr>}</tbody></table></div><div className="space-y-2 sm:hidden">{visibleTransactions.length ? visibleTransactions.map((transaction) => <div key={transaction.id}><FinancialTransactionCard transaction={transaction} currency={currency} displayLocale={displayLocale} isSpanish={isSpanish} onUpdateStatus={onUpdateTransactionStatus} onDelete={() => confirmDeleteTransaction(transaction)} /></div>) : <p className="rounded-xl bg-slate-950/55 p-4 text-center text-xs text-slate-500">{isSpanish ? 'Todavía no hay registros reales para este filtro.' : 'Ainda não há lançamentos reais para este filtro.'}</p>}</div></section>}
