@@ -4424,6 +4424,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             </div>
           </div>
 
+          {/* TASK-0354 (pedido direto, "eu pedi pra recriar a página de
+              ferramentas, não mandar ela como janela"): a versão anterior
+              (TASK-0349) já tinha altura cheia, mas continuava sendo um
+              `<div>` `fixed`/`z-50`/animado por CIMA da fila de conversas —
+              ainda uma "janela" flutuante, só que maior, não uma página de
+              verdade. Busca/filtros/lista agora ficam num wrapper próprio,
+              escondido (`hidden`, sem desmontar — preserva o texto já
+              digitado na busca) quando Ferramentas está aberta no mobile;
+              o conteúdo de Ferramentas (mais abaixo, antes da barra
+              inferior) ocupa o MESMO espaço dentro da MESMA `.atendimento-queue`,
+              em vez de um overlay à parte — a barra inferior nunca muda de
+              lugar/comportamento, porque nunca deixa de ser a mesma árvore
+              de componente. */}
+          <div className={`flex-1 min-h-0 flex-col ${isToolbarSettingsOpen ? 'hidden lg:flex' : 'flex'}`}>
           {/* WhatsApp Web Search Bar — escala aumentada (pedido real,
               01/09/2026, print comparando lado a lado com o WhatsApp
               Business real): texto e altura ficavam bem menores que o
@@ -4687,6 +4701,26 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </div>
             )}
           </div>
+          </div>
+
+          {/* TASK-0354 — conteúdo de Ferramentas no mobile, ocupando o
+              mesmo espaço de busca/lista acima (escondida enquanto isto
+              está aberto) dentro da MESMA `.atendimento-queue` — não é
+              mais um overlay/"janela" à parte (ver TASK-0349, comentário
+              acima). Sem X pra fechar: fechar é tocar noutro item da barra
+              inferior (Conversas/Pendências/Agenda), que já limpa o estado
+              — mesmo padrão da Agenda (`activeTab==='agenda'`), que também
+              não tem botão de fechar próprio. */}
+          {isToolbarSettingsOpen && (
+            <div className="flex flex-1 min-h-0 flex-col lg:hidden">
+              <div className="flex-shrink-0 px-3 py-2.5 border-b border-slate-800">
+                <h3 className="text-sm font-bold text-white">Ferramentas</h3>
+              </div>
+              <div className="flex-1 min-h-0 p-3 flex flex-col gap-2.5 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+                {toolbarSettingsBody}
+              </div>
+            </div>
+          )}
 
           {/* Barra inferior estilo WhatsApp (pedido direto, 28/08/2026, com
               print comparando lado a lado com o app real): Conversas,
@@ -6662,64 +6696,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               />
             </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Ferramentas no mobile — página cheia (aberta pela aba inferior
-          "Ferramentas", ícone de engrenagem), não mais gaveta. Conteúdo
-          reaproveita `toolbarSettingsBody`, definido antes do "return"
-          deste componente, sem duplicar JSX.
-          Redesenho (pedido direto, 04/09/2026, com print comparando com o
-          menu de anexos real do WhatsApp): antes o fundo inteiro escurecia
-          (`bg-slate-950/80 backdrop-blur-sm`) — removido, mesmo padrão do
-          menu de anexos real do WhatsApp.
-
-          TASK-0348 (pedido direto, print anotado com X na área de cima:
-          "não está funcional abrir como gaveta a parte de cima não fica
-          útil... vamos transformar essa aba em uma página igual a
-          agenda") — a versão em gaveta (`max-h-[70vh]`, ancorada embaixo)
-          deixava ~30% da tela em cima mostrando a busca/lista de conversas
-          por trás, mas sem dar pra interagir (um toque ali só fechava a
-          gaveta) — exatamente a mesma classe de bug de "área morta" que a
-          Agenda teve (TASK-0343/0344). Virou página cheia de verdade
-          (`h-full`, sem `items-end`/alcinha de arraste/cantos
-          arredondados), preenchendo TODO o espaço entre o topo e a barra
-          inferior — mesmo princípio da Agenda, só que sem precisar virar
-          uma aba própria em App.tsx (o conteúdo já depende de estado local
-          deste componente: status do agente, idioma/tema, etc.), então a
-          troca aqui é só de altura/estilo, mantendo a mesma barra inferior
-          já usada (dentro de `.atendimento-queue`, ver mais abaixo) e o
-          mesmo mecanismo de fechar tocando fora/no X/trocando de aba. */}
-      {isToolbarSettingsOpen && (
-        // TASK-0328 (pedido direto, prints comparando a barra inferior
-        // sumida): esta área clicável cobria `inset-0` (toda a viewport),
-        // inclusive a faixa de `.atendimento-bottom-nav` — `bottom-[...]`
-        // reserva a altura real da nav (mesmo valor de UpcomingEventsPanel)
-        // pra ela continuar visível/clicável com a página aberta, em vez de
-        // sumir por trás.
-        //
-        // TASK-0336 (achado real, print anotado): esse "4.75rem" era um
-        // chute que não batia com a altura real renderizada do nav, deixando
-        // um vão visível entre o fundo da página e o topo do nav — agora usa
-        // `--atendimento-bottom-nav-h`, medida de verdade via ResizeObserver
-        // (ver o `bottomNavRef` acima). Sem `+ env(safe-area-inset-bottom)`
-        // aqui: a altura medida (`getBoundingClientRect`) já inclui esse
-        // padding, que o CSS do próprio nav já aplica — somar de novo
-        // reservaria espaço a mais. "4.75rem" continua só como fallback
-        // pro instante antes do primeiro measure (SSR/primeiro paint).
-        <div className="lg:hidden fixed inset-x-0 top-0 bottom-[var(--atendimento-bottom-nav-h,4.75rem)] z-50 flex flex-col bg-[#111b21] animate-page-enter">
-          <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2.5 flex-shrink-0">
-            <h3 className="text-sm font-bold text-white">Ferramentas</h3>
-            <button
-              onClick={() => setIsToolbarSettingsOpen(false)}
-              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="flex-1 min-h-0 p-3 flex flex-col gap-2.5 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-            {toolbarSettingsBody}
           </div>
         </div>
       )}
