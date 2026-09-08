@@ -3664,6 +3664,14 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // anúncios, Gatilhos, Notificações) viraram uma grade de ícones em
   // círculo + rótulo embaixo, no mesmo estilo do menu de anexos do
   // WhatsApp real, em vez da fileira de botões retangulares de texto.
+  //
+  // TASK-0340 (pedido direto, print anotado): os círculos de 56px (h-14
+  // w-14) com ícone de 20px deixavam a gaveta grande demais no mobile —
+  // muito espaço vazio entre botões e a gaveta ocupando altura maior do
+  // que o necessário. Reduzido pra 48px (h-12 w-12) com ícone de 16px,
+  // gap menor entre ícone/rótulo e entre colunas, e menos respiro vertical
+  // entre as seções (Status/Idioma/Tema/Anúncios, Módulos, Configurações)
+  // — mesma quantidade de opções, ocupando bem menos tela.
   const renderToolTile = (options: {
     key: string;
     icon: React.ReactNode;
@@ -3683,10 +3691,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
       type="button"
       onClick={options.onClick}
       disabled={options.disabled}
-      className="relative flex flex-col items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+      className="relative flex flex-col items-center gap-1 disabled:opacity-50 cursor-pointer"
     >
       <span
-        className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
+        className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
           options.toneClass ?? (options.active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/60 text-slate-300')
         }`}
       >
@@ -3738,7 +3746,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           vez (`expandedQuickSetting`). "Somente anúncios" entrou nessa
           mesma fileira de 4 — já era um ícone único (é um toggle
           liga/desliga, não tem outras opções pra expandir). */}
-      <div className="grid w-full grid-cols-4 gap-3">
+      <div className="grid w-full grid-cols-4 gap-2">
         {renderToolTile({
           key: 'quick-status',
           icon: <span className="h-3 w-3 rounded-full bg-current" aria-hidden="true" />,
@@ -3753,7 +3761,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         })}
         {renderToolTile({
           key: 'quick-language',
-          icon: <Globe className="h-5 w-5" />,
+          icon: <Globe className="h-4 w-4" />,
           label: language.toUpperCase(),
           active: expandedQuickSetting === 'language',
           onClick: () => setExpandedQuickSetting((v) => (v === 'language' ? null : 'language')),
@@ -3761,10 +3769,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         {renderToolTile({
           key: 'quick-theme',
           icon: {
-            dark: <Moon className="h-5 w-5" />,
-            light: <Sun className="h-5 w-5" />,
-            blue: <Layers className="h-5 w-5" />,
-            clean: <Sparkles className="h-5 w-5" />,
+            dark: <Moon className="h-4 w-4" />,
+            light: <Sun className="h-4 w-4" />,
+            blue: <Layers className="h-4 w-4" />,
+            clean: <Sparkles className="h-4 w-4" />,
           }[theme],
           label: { dark: 'Escuro', light: 'Claro', blue: 'Azul', clean: 'Limpo' }[theme],
           active: expandedQuickSetting === 'theme',
@@ -3772,7 +3780,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         })}
         {renderToolTile({
           key: 'ads-only',
-          icon: <Filter className="h-5 w-5" />,
+          icon: <Filter className="h-4 w-4" />,
           label: adsOnly ? 'Anúncios (ativo)' : 'Somente anúncios',
           active: adsOnly,
           onClick: handleToggleAdsOnly,
@@ -3860,10 +3868,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           configuração de conta — agora vivem só no Header global (mesmo
           lugar em qualquer aba, não só dentro do Atendimento). */}
       {adsOnly && (
-        <div className="grid w-full grid-cols-4 gap-3">
+        <div className="grid w-full grid-cols-4 gap-2">
           {renderToolTile({
             key: 'ad-triggers',
-            icon: <Settings className="h-5 w-5" />,
+            icon: <Settings className="h-4 w-4" />,
             label: 'Gatilhos',
             onClick: openAdTriggersModal,
             badge: adTriggerMessages.length || undefined,
@@ -3881,18 +3889,18 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           — saiu do menu ⋮ (Header.tsx, eliminado), ganhou ícone próprio
           aqui igual Vendas/Agenda completa/Financeiro. */}
       {(onGoToCrm || onGoToAgenda || onGoToFinancial || (onSelectTab && canSeeGrowth)) && (
-        <div className="w-full border-t border-slate-800 pt-3">
+        <div className="w-full border-t border-slate-800 pt-2.5">
           <p className="mb-2 pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">Módulos</p>
-          <div className="grid w-full grid-cols-4 gap-3">
+          <div className="grid w-full grid-cols-4 gap-2">
             {onGoToCrm && renderToolTile({
               key: 'go-to-crm',
-              icon: <Kanban className="h-5 w-5" />,
+              icon: <Kanban className="h-4 w-4" />,
               label: 'Vendas',
               onClick: () => { setIsToolbarSettingsOpen(false); onGoToCrm(); },
             })}
             {onGoToAgenda && renderToolTile({
               key: 'go-to-agenda',
-              icon: <CalendarPlus className="h-5 w-5" />,
+              icon: <CalendarPlus className="h-4 w-4" />,
               // "Agenda completa" (não só "Agenda") pra não confundir com o
               // tile de mesmo nome na barra inferior, que abre só o popup
               // de próximos eventos (handleOpenUpcomingEvents) — este vai
@@ -3902,13 +3910,13 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
             })}
             {onGoToFinancial && renderToolTile({
               key: 'go-to-financial',
-              icon: <Wallet className="h-5 w-5" />,
+              icon: <Wallet className="h-4 w-4" />,
               label: 'Financeiro',
               onClick: () => { setIsToolbarSettingsOpen(false); onGoToFinancial(); },
             })}
             {onSelectTab && canSeeGrowth && renderToolTile({
               key: 'go-to-growth',
-              icon: <Target className="h-5 w-5" />,
+              icon: <Target className="h-4 w-4" />,
               label: isSpanish ? 'Crecimiento' : 'Crescimento',
               onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('attribution'); },
             })}
@@ -3932,51 +3940,51 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           mais linhas de texto) com cada opção, igual pedido: "pode virar um
           icon com outros ícones dentro". */}
       {onSelectTab && (canManageAgent || canSeeCatalog || canSeeQuality || canSeeSystemLogs || canSeeBroadcast || canSeeSaasMaster) && (
-        <div className="w-full border-t border-slate-800 pt-3">
-          <div className="grid w-full grid-cols-4 gap-3">
+        <div className="w-full border-t border-slate-800 pt-2.5">
+          <div className="grid w-full grid-cols-4 gap-2">
             {renderToolTile({
               key: 'settings-toggle',
-              icon: <Settings2 className="h-5 w-5" />,
+              icon: <Settings2 className="h-4 w-4" />,
               label: isSpanish ? 'Configuración' : 'Configurações',
               active: isSettingsMenuOpen,
               onClick: () => setIsSettingsMenuOpen((value) => !value),
             })}
           </div>
           {isSettingsMenuOpen && (
-            <div className="mt-3 grid w-full grid-cols-4 gap-3">
+            <div className="mt-2 grid w-full grid-cols-4 gap-2">
               {canManageAgent && renderToolTile({
                 key: 'settings-knowledge',
-                icon: <Brain className="h-5 w-5" />,
+                icon: <Brain className="h-4 w-4" />,
                 label: isSpanish ? 'Agente y catálogo' : 'Agente & catálogo',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('knowledge'); },
               })}
               {canSeeCatalog && renderToolTile({
                 key: 'settings-catalog',
-                icon: <Link2 className="h-5 w-5" />,
+                icon: <Link2 className="h-4 w-4" />,
                 label: 'Catálogo público',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('catalog'); },
               })}
               {canSeeQuality && renderToolTile({
                 key: 'settings-quality',
-                icon: <ShieldCheck className="h-5 w-5" />,
+                icon: <ShieldCheck className="h-4 w-4" />,
                 label: isSpanish ? 'Calidad del agente' : 'Qualidade do agente',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('quality'); },
               })}
               {canSeeSystemLogs && renderToolTile({
                 key: 'settings-logs',
-                icon: <ScrollText className="h-5 w-5" />,
+                icon: <ScrollText className="h-4 w-4" />,
                 label: isSpanish ? 'Logs del sistema' : 'Logs do sistema',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('system_logs'); },
               })}
               {canSeeBroadcast && renderToolTile({
                 key: 'settings-broadcast',
-                icon: <Radio className="h-5 w-5" />,
+                icon: <Radio className="h-4 w-4" />,
                 label: isSpanish ? 'Envío Masivo' : 'Disparo em Massa',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('broadcast'); },
               })}
               {canSeeSaasMaster && renderToolTile({
                 key: 'settings-saas',
-                icon: <Layers className="h-5 w-5" />,
+                icon: <Layers className="h-4 w-4" />,
                 label: 'Empresas',
                 onClick: () => { setIsToolbarSettingsOpen(false); onSelectTab('saas'); },
               })}
@@ -6674,7 +6682,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-3 pt-1 flex flex-col gap-3 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <div className="p-3 pt-1 flex flex-col gap-2.5 overflow-y-auto" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
               {toolbarSettingsBody}
             </div>
           </div>
