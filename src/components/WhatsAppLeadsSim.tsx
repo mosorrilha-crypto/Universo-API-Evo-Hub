@@ -385,16 +385,6 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pushError]);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
-  const [isTenantMenuOpen, setIsTenantMenuOpen] = useState(false);
-  // TASK-0336 tinha colapsado "Status do agente"/"Idioma"/"Tema" num ícone
-  // único por ajuste (expandia opções ao tocar) pra ocupar menos espaço —
-  // TASK-0341/0342 (pedido direto) reverteram pra pills sempre visíveis.
-  // TASK-0343 (pedido direto): meio-termo pra Idioma/Tema especificamente —
-  // "não quero ícones, quero botões, só recolhe os inativos, aparecem só
-  // quando solicitado" — a pill do valor ATUAL fica sempre visível, tocar
-  // nela expande as outras opções (mesma pill de texto, não ícone isolado).
-  // "Status do agente" continua sem recolher — sem reclamação sobre ele.
-  const [expandedLangOrTheme, setExpandedLangOrTheme] = useState<'language' | 'theme' | null>(null);
   // Bug real em produção (12/08/2026): sem cache local (navegador novo, aba
   // anônima, ou depois de limpar dados do site), essa lista caía pro
   // conjunto inteiro de leads fictícios de demonstração — e como os leads
@@ -3872,79 +3862,11 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </button>
       )}
 
-      {/* TASK-0343 (pedido direto): idioma/tema voltam a ficar recolhidos —
-          só o valor ATUAL aparece (uma pill de idioma + uma pill de tema),
-          e tocar numa delas expande as outras opções logo abaixo, igual
-          era antes de TASK-0342 — mas mantendo o visual de "pill" com
-          texto (pedido explícito: "não quero ícones, quero botões"), não o
-          ícone redondo isolado que existia na TASK-0336. */}
-      <div className="flex flex-col gap-1">
-        <p className="pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-          {isSpanish ? 'Idioma y tema' : 'Idioma e tema'}
-        </p>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setExpandedLangOrTheme((v) => (v === 'language' ? null : 'language'))}
-            className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold transition-all cursor-pointer ${
-              expandedLangOrTheme === 'language' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-300 hover:text-white'
-            }`}
-          >
-            {language.toUpperCase()}
-            <ChevronDown className={`h-3 w-3 transition-transform ${expandedLangOrTheme === 'language' ? 'rotate-180' : ''}`} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpandedLangOrTheme((v) => (v === 'theme' ? null : 'theme'))}
-            className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
-              expandedLangOrTheme === 'theme' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-300 hover:text-white'
-            }`}
-          >
-            {{ dark: 'Escuro', light: 'Claro', blue: 'Azul', clean: 'Limpo' }[theme]}
-            <ChevronDown className={`h-3 w-3 transition-transform ${expandedLangOrTheme === 'theme' ? 'rotate-180' : ''}`} aria-hidden="true" />
-          </button>
-        </div>
-        {expandedLangOrTheme === 'language' && (
-          <div className="flex items-center gap-1">
-            {(['pt', 'es'] as const).map((lang) => (
-              <button
-                key={lang}
-                type="button"
-                onClick={() => { setLanguage(lang); setExpandedLangOrTheme(null); }}
-                title={lang === 'pt' ? 'Português' : 'Español'}
-                className={`rounded-lg px-2 py-1.5 text-[11px] font-bold transition-all cursor-pointer ${
-                  language === lang ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
-                }`}
-              >
-                {lang.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        )}
-        {expandedLangOrTheme === 'theme' && (
-          <div className="flex items-center gap-1">
-            {([
-              { id: 'dark' as const, label: 'Escuro', Icon: Moon },
-              { id: 'light' as const, label: 'Claro', Icon: Sun },
-              { id: 'blue' as const, label: 'Azul', Icon: Layers },
-              { id: 'clean' as const, label: 'Limpo', Icon: Sparkles },
-            ]).map(({ id, label, Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => { setTheme(id); setExpandedLangOrTheme(null); }}
-                title={label}
-                className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
-                  theme === id ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-950/50 text-slate-400 hover:text-white'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* TASK-0358 (pedido direto, print anotado): Idioma/Tema saíram
+          daqui — voltam pro cabeçalho (Header.tsx), como eram antes da
+          TASK-0328. Histórico: TASK-0336 tinha colapsado num ícone único,
+          TASK-0341/0343 trouxeram de volta como pills sempre visíveis
+          dentro de Ferramentas; agora saem de Ferramentas por completo. */}
 
       {/* TASK-0301 (pedido direto): CRM e Financeiro saíram do menu superior
           (Header.tsx) — Atendimento virou a tela padrão do sistema, então
@@ -4074,61 +3996,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         </div>
       )}
 
-      {/* TASK-0331 (pedido direto): "Empresa ativa" (troca rápida de
-          tenant, só saas_admin) e "Sair" saíram do menu ⋮ do cabeçalho
-          (Header.tsx, eliminado) — mesma caixa separada que já existia lá,
-          agora dentro de Ferramentas. "Notificações push" mora agora
-          dentro de "Configurações" acima (TASK-0343). */}
-      {(onLogout || onSelectTenant) && (
-        <div className="relative w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-          <div className="flex items-center justify-between gap-2">
-            {canSeeSaasMaster && onSelectTenant && tenants.length > 1 ? (
-              <button
-                type="button"
-                onClick={() => setIsTenantMenuOpen((value) => !value)}
-                aria-haspopup="menu"
-                aria-expanded={isTenantMenuOpen}
-                aria-label={`${isSpanish ? 'Empresa activa' : 'Empresa ativa'}: ${activeTenant?.name || ''}`}
-                className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md text-left touch-manipulation"
-              >
-                <span className="min-w-0">
-                  <span className="block text-[10px] text-slate-500">{isSpanish ? 'Empresa activa' : 'Empresa ativa'}</span>
-                  <span className="block truncate text-xs font-semibold text-slate-200">{activeTenant?.name}</span>
-                </span>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isTenantMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-              </button>
-            ) : (
-              <div className="min-w-0">
-                <p className="text-[10px] text-slate-500">{isSpanish ? 'Empresa activa' : 'Empresa ativa'}</p>
-                <p className="truncate text-xs font-semibold text-slate-200">{activeTenant?.name}</p>
-              </div>
-            )}
-            {onLogout && (
-              <button type="button" onClick={onLogout} className="inline-flex min-h-10 shrink-0 items-center gap-1 text-xs font-semibold text-rose-300">
-                <LogOut className="w-3.5 h-3.5" />{isSpanish ? 'Salir' : 'Sair'}
-              </button>
-            )}
-          </div>
-          {canSeeSaasMaster && onSelectTenant && tenants.length > 1 && isTenantMenuOpen && (
-            <div className="mt-2 space-y-1 border-t border-slate-800 pt-2" role="menu" aria-label={isSpanish ? 'Empresa activa' : 'Empresa ativa'}>
-              <div className="max-h-52 space-y-1 overflow-y-auto">
-                {tenants.map((tenant) => (
-                  <button
-                    key={tenant.id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => { onSelectTenant(tenant); setIsTenantMenuOpen(false); }}
-                    className={`flex min-h-10 w-full items-center justify-between rounded-md px-2 py-2 text-left text-xs font-semibold transition-colors ${tenant.id === activeTenant?.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}
-                  >
-                    <span className="truncate">{tenant.name}</span>
-                    {tenant.id === activeTenant?.id && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* TASK-0358 (pedido direto, print anotado): "Empresa ativa"/"Sair"
+          saem daqui — o seletor de empresa vira um ícone circular no
+          cabeçalho (Header.tsx), mesmo espírito do seletor de conta do
+          Claude Code, com "Sair" ao lado como ícone próprio. */}
     </>
   );
 
@@ -4945,7 +4816,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                         um badge poluindo o cabeçalho sem ação nenhuma
                         associada, e o usuário confirmou que não precisa. */}
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-[#e9edef] truncate">{selectedLead.name}</h3>
+                      <h3 className="text-base font-semibold text-[#e9edef] truncate">{selectedLead.name}</h3>
                     </div>
                     <p className="text-[11px] font-normal text-slate-400 flex items-center gap-1.5 min-w-0">
                       {/* TASK-0259 (pedido direto): telefone saiu daqui de
@@ -5614,7 +5485,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     // inteira só pra isso.
                     const timeFooter = (
                       <span
-                        className={`float-right ml-2 mt-0.5 inline-flex items-center gap-1 text-[9px] whitespace-nowrap select-none ${
+                        className={`float-right ml-2 mt-0.5 inline-flex items-center gap-1 text-[11px] whitespace-nowrap select-none ${
                           isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-200'
                         }`}
                       >
