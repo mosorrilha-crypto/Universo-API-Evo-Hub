@@ -4493,7 +4493,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 placeholder={t('searchConversation')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="atendimento-search-input w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-lg focus:outline-none"
+                className="atendimento-search-input w-full pl-9 pr-7 py-2.5 bg-[#202c33] text-sm text-[#e9edef] placeholder-slate-400 rounded-full focus:outline-none"
               />
               {searchQuery && (
                 <button
@@ -4526,9 +4526,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               >
                 {t('all')} ({leads.length - archivedLeads.length})
               </button>
+              {/* TASK-0356 (clone visual do WhatsApp, pedido direto): no
+                  mobile este chip some daqui e vira uma opção dentro do
+                  ícone de filtro (Filter) logo abaixo, junto com "Dentro/
+                  Fora das 24h" — o print de referência só mostra "Todas"
+                  como pill fixa na lista, o resto fica atrás de um ícone.
+                  Desktop mantém o chip direto, sem mudança. */}
               <button
                 onClick={() => setActiveTabFilter('unread')}
-                className={`atendimento-filter px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                className={`hidden lg:inline-block atendimento-filter px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
                   activeTabFilter === 'unread'
                     ? 'is-active bg-emerald-500 text-slate-950 font-bold'
                     : 'bg-[#202c33] text-slate-300 hover:bg-slate-700'
@@ -4555,9 +4561,9 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                     }
                     setIsWindowFilterMenuOpen((v) => !v);
                   }}
-                  title="Filtrar por janela de atendimento de 24h"
+                  title="Filtrar conversas"
                   className={`atendimento-filter atendimento-label-filter-trigger flex-shrink-0 p-1.5 rounded-full transition-all cursor-pointer ${
-                    activeTabFilter === 'window_open' || activeTabFilter === 'window_closed'
+                    activeTabFilter === 'window_open' || activeTabFilter === 'window_closed' || activeTabFilter === 'unread'
                       ? 'is-active bg-emerald-500 text-slate-950'
                       : 'bg-[#202c33] text-slate-300 hover:bg-slate-700 hover:text-white'
                   }`}
@@ -4579,6 +4585,25 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                       style={{ top: windowFilterMenuPos.top, left: windowFilterMenuPos.left }}
                       className="fixed z-50 w-60 bg-[#233138] border border-slate-700 rounded-xl shadow-2xl overflow-hidden text-xs origin-top-left animate-pop-in"
                     >
+                      {/* TASK-0356: opção "Não lidas" só precisa existir aqui
+                          no mobile (o chip dedicado continua no desktop,
+                          `hidden lg:inline-block` acima) — deixada visível
+                          nos dois breakpoints porque é um caminho extra, não
+                          exclusivo, sem custo de manter em ambos. */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTabFilter((prev) => (prev === 'unread' ? 'all' : 'unread'));
+                          setIsWindowFilterMenuOpen(false);
+                        }}
+                        title="Contatos com mensagens não lidas"
+                        className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 hover:bg-slate-700/60 transition-colors cursor-pointer border-b border-slate-700/60 ${
+                          activeTabFilter === 'unread' ? 'text-emerald-400 font-semibold' : 'text-slate-200'
+                        }`}
+                      >
+                        <span>{t('unread')}</span>
+                        <span>{unreadLeadsCount}</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => {

@@ -118,7 +118,7 @@ describe('WhatsAppLeadsSim — filtro de janela de 24h (ícone + lista)', () => 
     await waitFor(() => expect(screen.getAllByText('Dentro da Janela').length).toBeGreaterThan(0));
     expect(screen.getAllByText('Fora da Janela').length).toBeGreaterThan(0);
 
-    const filterButton = screen.getByTitle('Filtrar por janela de atendimento de 24h');
+    const filterButton = screen.getByTitle('Filtrar conversas');
     await act(async () => {
       fireEvent.click(filterButton);
     });
@@ -156,7 +156,7 @@ describe('WhatsAppLeadsSim — filtro de janela de 24h (ícone + lista)', () => 
 
     await waitFor(() => expect(screen.getAllByText('Dentro da Janela').length).toBeGreaterThan(0));
 
-    const filterButton = screen.getByTitle('Filtrar por janela de atendimento de 24h');
+    const filterButton = screen.getByTitle('Filtrar conversas');
     await act(async () => {
       fireEvent.click(filterButton);
     });
