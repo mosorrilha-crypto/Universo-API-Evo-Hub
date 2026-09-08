@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { CalendarDays, ListChecks, Rows3 } from 'lucide-react';
 import { AgendaFinanceiroCenter } from './AgendaFinanceiroCenter';
 import { GoogleCalendarConnectionControl } from './calendar/GoogleCalendarConnectionControl';
-import type { FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, RecurringExpense, UserProfile } from '../types';
+import type { AgentProduct, FinancialTransaction, LeadInfo, PaymentMethod, PaymentStatus, RecurringExpense, UserProfile } from '../types';
 
 type AgendaMobileView = 'today' | 'week' | 'month';
 
@@ -25,6 +25,11 @@ interface AgendaWorkspaceProps {
   onAddRecurringExpense?: (input: { description: string; amount: number; paymentMethod: PaymentMethod; dayOfMonth: number }) => Promise<boolean>;
   onToggleRecurringExpense?: (id: string, active: boolean) => void;
   onDeleteRecurringExpense?: (id: string) => void;
+  /** TASK-0350 (pedido direto): catálogo de serviços (Base de Conhecimento)
+      pra "Novo agendamento" puxar preço/duração em vez de digitar tudo à
+      mão — mesmo dado que já existe em App.tsx (`knowledgeBase.products`),
+      sem nenhuma chamada de API nova. */
+  catalogProducts?: AgentProduct[];
 }
 
 export function AgendaWorkspace(props: AgendaWorkspaceProps) {
@@ -63,7 +68,7 @@ export function AgendaWorkspace(props: AgendaWorkspaceProps) {
           <button type="button" onClick={() => setMobileView('month')} aria-current={mobileView === 'month' ? 'page' : undefined} className={`flex min-w-max flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${mobileView === 'month' ? 'bg-sky-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><CalendarDays className="h-4 w-4" /> Mês</button>
         </nav>
       </div>
-      <AgendaFinanceiroCenter scope="agenda" transactions={props.transactions} onAddTransaction={props.onAddTransaction} onUpdateTransactionStatus={props.onUpdateTransactionStatus} onDeleteTransaction={props.onDeleteTransaction} leads={props.leads} currentUser={props.currentUser} currency={props.currency} locale={props.locale} financialModuleEnabled={props.financialModuleEnabled} onToast={props.onToast} recurringExpenses={props.recurringExpenses} onAddRecurringExpense={props.onAddRecurringExpense} onToggleRecurringExpense={props.onToggleRecurringExpense} onDeleteRecurringExpense={props.onDeleteRecurringExpense} mobileAgendaView={mobileView} />
+      <AgendaFinanceiroCenter scope="agenda" transactions={props.transactions} onAddTransaction={props.onAddTransaction} onUpdateTransactionStatus={props.onUpdateTransactionStatus} onDeleteTransaction={props.onDeleteTransaction} leads={props.leads} currentUser={props.currentUser} currency={props.currency} locale={props.locale} financialModuleEnabled={props.financialModuleEnabled} onToast={props.onToast} recurringExpenses={props.recurringExpenses} onAddRecurringExpense={props.onAddRecurringExpense} onToggleRecurringExpense={props.onToggleRecurringExpense} onDeleteRecurringExpense={props.onDeleteRecurringExpense} mobileAgendaView={mobileView} catalogProducts={props.catalogProducts} />
     </div>
   );
 }

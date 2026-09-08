@@ -815,23 +815,32 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
      uma lista única (`__mobile-today-list`, JSX) visível só na aba "Hoje".
      O nav de 3 abas (Hoje/Semana/Mês, AgendaWorkspace.tsx) substitui o
      antigo Hoje/Calendário + o seletor Semana/Mês que morava escondido
-     dentro do próprio card da Agenda. */
+     dentro do próprio card da Agenda.
+
+     TASK-0350 (2 achados reais, print anotado):
+     1. "Próximos compromissos" (coluna `__upcoming-column`) ficava escondida
+        só nas abas Semana/Mês — faltava escondê-la também em "Hoje", onde
+        ela duplicava exatamente o que `__mobile-today-list` já mostra.
+        Agora sempre escondida no mobile (as 3 abas têm equivalente próprio:
+        Hoje usa a lista mesclada, Semana/Mês mostram só o calendário).
+     2. Os seletores usavam `section:has(.grid-cols-7)` — só bate quando a
+        grade de MÊS está renderizada (é a única visão com um elemento com
+        essa classe; a grade de Semana usa `flex`). Resultado: trocar pra
+        Semana e voltar pra "Hoje" nunca escondia a grade de semana (o
+        seletor não reconhecia a seção). Trocado por classes próprias
+        (`__calendar-section`/`__calendar-column`), que existem sempre,
+        em Semana ou Mês. */
   .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__metrics,
-  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__pending { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-today > section:has(.grid-cols-7) > div:first-child { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) > div:nth-child(2),
-  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) > div:nth-child(2) { display: none; }
-  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7),
-  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) { grid-template-columns: minmax(0, 1fr); }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__pending,
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__upcoming-column { display: none; }
+  .agenda-financeiro-workspace--agenda-mobile-today .agenda-financeiro-workspace__calendar-column { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-section { grid-template-columns: minmax(0, 1fr); }
   .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__mobile-today-list,
   .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__mobile-today-list { display: none; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div { border-radius: 1rem; padding: .75rem; box-shadow: none; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child p { display: none; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:first-child { margin-bottom: .55rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div > div:nth-child(2) { margin-bottom: .5rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) { padding: .75rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) h2 { font-size: .9rem; }
-  .agenda-financeiro-workspace--agenda > section:has(.grid-cols-7) > div:nth-child(2) p { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column { border-radius: 1rem; padding: .75rem; box-shadow: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column > div:first-child p { display: none; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column > div:first-child { margin-bottom: .55rem; }
+  .agenda-financeiro-workspace--agenda .agenda-financeiro-workspace__calendar-column > div:nth-child(2) { margin-bottom: .5rem; }
   /* TASK-0292 (pedido direto, print real: "o calendário pode ocupar melhor
      a página... pode ficar de ponta a ponta... preencher os espaços
      vazios igual no desktop e no calendário do google") — só nas visões
@@ -839,12 +848,12 @@ html[data-theme='clean'] .operations-module-frame__badge { color:#0369A1; backgr
      ainda (mais perto de borda a borda) e células da grade de mês mais
      altas, aproveitando o espaço vertical que sobrava vazio no celular
      real. */
-  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) > div:first-child,
-  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) > div:first-child { padding-left: .4rem; padding-right: .4rem; }
-  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) .grid-cols-7 > button,
-  .agenda-financeiro-workspace--agenda-mobile-week > section:has(.grid-cols-7) .grid-cols-7 > div[aria-hidden="true"],
-  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) .grid-cols-7 > button,
-  .agenda-financeiro-workspace--agenda-mobile-month > section:has(.grid-cols-7) .grid-cols-7 > div[aria-hidden="true"] { min-height: 3.25rem; }
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__calendar-column,
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__calendar-column { padding-left: .4rem; padding-right: .4rem; }
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__calendar-column .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-week .agenda-financeiro-workspace__calendar-column .grid-cols-7 > div[aria-hidden="true"],
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__calendar-column .grid-cols-7 > button,
+  .agenda-financeiro-workspace--agenda-mobile-month .agenda-financeiro-workspace__calendar-column .grid-cols-7 > div[aria-hidden="true"] { min-height: 3.25rem; }
 
   .crm-mobile-workspace > nav { position: static; }
   .crm-workspace { gap: .65rem; }
