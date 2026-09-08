@@ -375,11 +375,18 @@ export const Header: React.FC<HeaderProps> = ({
             do Claude Code) + um ícone de saída, ao lado de Idioma/Tema —
             só o ícone é reaproveitado do próprio avatar do operador, sem
             nome ao lado (pedido explícito: "apenas o icon circular"). */}
-        <div className="flex shrink-0 items-center gap-1">
-          <div className="flex items-center gap-0.5 rounded-lg border border-slate-700 bg-slate-950 p-1" aria-label="Idioma">
-            <button type="button" onClick={() => setLanguage('pt')} className={`rounded-md px-1.5 py-1 text-[10px] font-bold transition-colors ${language === 'pt' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>PT</button>
-            <button type="button" onClick={() => setLanguage('es')} className={`rounded-md px-1.5 py-1 text-[10px] font-bold transition-colors ${language === 'es' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>ES</button>
-          </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* Botão único (mostra o idioma PRA TROCAR, não os dois lado a
+              lado) — pedido direto com print do próprio menu antigo da
+              TASK-0328, mesmo estilo/posição de então. */}
+          <button
+            type="button"
+            onClick={() => setLanguage(language === 'pt' ? 'es' : 'pt')}
+            className="rounded-md border border-slate-700 px-2.5 py-1 text-xs font-bold text-slate-200"
+            title={isSpanish ? 'Português' : 'Español'}
+          >
+            {isSpanish ? 'PT' : 'ES'}
+          </button>
           {renderThemeMenu()}
           {currentUser && (
             <div className="relative" ref={mobileTenantMenuRef}>

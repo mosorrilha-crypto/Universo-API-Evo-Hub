@@ -65,9 +65,18 @@ const capabilities: TenantNavigationCapabilities = {
   broadcast: true,
 };
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // Sem isso, o clique no toggle de idioma do primeiro teste persiste
+  // 'es' em localStorage (AppPreferencesContext) e vaza pro próximo teste.
+  try {
+    localStorage.clear();
+  } catch {
+    // sem storage disponível no ambiente de teste — segue sem estado persistido.
+  }
+});
 
-describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0357)', () => {
+describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0358)', () => {
   it('mostra idioma (PT/ES), tema, o ícone circular de empresa e "Sair" na linha mobile', () => {
     const onLogout = vi.fn();
     render(
@@ -88,9 +97,6 @@ describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0357)', 
       </AppPreferencesProvider>
     );
 
-    expect(screen.getAllByText('PT').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('ES').length).toBeGreaterThan(0);
-
     // Ícone circular do operador (não saas_admin) — abre o modal de login
     // ao tocar, não um dropdown de troca de empresa.
     const avatarButtons = screen.getAllByTitle(operator.name);
@@ -98,7 +104,17 @@ describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0357)', 
 
     const logoutButtons = screen.getAllByTitle('Sair');
     expect(logoutButtons.length).toBeGreaterThan(0);
-    fireEvent.click(logoutButtons[0]);
+
+    // Botão único de idioma (mostra o idioma PRA TROCAR — "ES" enquanto PT
+    // está ativo por padrão), não os dois PT/ES lado a lado do desktop.
+    // Verificado por último porque troca o idioma real via contexto,
+    // mudando a tradução do resto do cabeçalho (inclusive "Sair"→"Salir").
+    const langToggle = screen.getByTitle('Español');
+    fireEvent.click(langToggle);
+    expect(document.documentElement.lang).toBe('es-PY');
+    expect(screen.getByTitle('Português')).not.toBeNull();
+
+    fireEvent.click(screen.getAllByTitle('Salir')[0]);
     expect(onLogout).toHaveBeenCalled();
   });
 
