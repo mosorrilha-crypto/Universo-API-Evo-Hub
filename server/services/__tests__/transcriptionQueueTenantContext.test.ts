@@ -37,7 +37,8 @@ vi.mock('../conversationStore', async (importOriginal) => {
 vi.mock('../conversationEvents', () => ({ emitAiReplyStatus: vi.fn() }));
 vi.mock('../mediaImageStore', () => ({ saveMediaImage: vi.fn(async () => {}) }));
 vi.mock('../geminiTranscription', () => ({
-  transcribeAudioWithGemini: vi.fn(async () => ({ source: 'gemini', result: { transcription: 'todo bien' } })),
+  transcribeAudio: vi.fn(async () => ({ source: 'gemini', result: { transcription: 'todo bien' } })),
+  isRealTranscriptionSource: (s: string) => s === 'groq' || s === 'gemini',
 }));
 vi.mock('../mediaDownload', () => ({
   downloadMetaMedia: vi.fn(async () => ({ base64: 'ZmFrZS1hdWRpbw==', mimeType: 'audio/ogg' })),

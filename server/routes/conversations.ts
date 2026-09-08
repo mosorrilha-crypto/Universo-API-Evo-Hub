@@ -59,7 +59,7 @@ import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer }
 import bcrypt from 'bcrypt';
 import { getQuickReplies, setQuickReplies } from '../services/quickRepliesStore';
 import { getMediaImage, saveMediaImage } from '../services/mediaImageStore';
-import { transcribeAudioWithGemini } from '../services/geminiTranscription';
+import { transcribeAudio, isRealTranscriptionSource } from '../services/geminiTranscription';
 import { extractPaymentProofDataWithGemini } from '../services/paymentReceiptAnalysis';
 import { transcodeToWhatsAppVoiceNote } from '../services/audioTranscode';
 import { getAppointmentForPhone, setAppointmentForPhone, setPaymentVerification, clearAppointmentForPhone, attachCalendarEventToHold, type TrackedAppointment } from '../services/appointmentStore';
@@ -293,17 +293,18 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       return res.status(404).json({ error: 'Áudio original não está mais disponível pra reprocessar (não foi salvo ou expirou).' });
     }
 
-    const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType, {
+    const outcome = await transcribeAudio(getAi ? getAi() : null, media.buffer.toString('base64'), media.contentType, {
       leadName: conv?.name,
       customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+      groqApiKey,
     });
 
     // Mesmo critério de /send-media acima e de transcriptionQueue.ts: sem
     // fala real detectada, grava um texto legível em vez da string vazia.
-    const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+    const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
     await updateMessageText(tenantId, phone, messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
 
-    res.json({ success: outcome.source === 'gemini', source: outcome.source, transcription: outcome.result.transcription });
+    res.json({ success: isRealTranscriptionSource(outcome.source), source: outcome.source, transcription: outcome.result.transcription });
   }));
 
   // Análise sob demanda de uma imagem do chat marcada pelo operador como
@@ -878,9 +879,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       // ponto.
       if (msgType === 'audio') {
         try {
-          const outcome = await transcribeAudioWithGemini(getAi ? getAi() : null, uploadBase64, uploadMimeType, {
+          const outcome = await transcribeAudio(getAi ? getAi() : null, uploadBase64, uploadMimeType, {
             leadName: conv?.name,
             customInstructions: formatKnowledgeBaseForPrompt((await getRuntimeKnowledgeBase(tenantId)).knowledgeBase),
+            groqApiKey,
           });
           // Achado real (29/08/2026): sem fala real detectada, transcription
           // vem vazia ("") — gravar isso direto como texto da mensagem
@@ -888,7 +890,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           // branco, tão confuso quanto a transcrição alucinada que esse
           // mecanismo existe pra evitar. Mesmo texto/critério já usado em
           // transcriptionQueue.ts (áudio recebido do cliente).
-          const hasNoDetectedSpeech = outcome.source === 'gemini' && !outcome.result.transcription?.trim();
+          const hasNoDetectedSpeech = isRealTranscriptionSource(outcome.source) && !outcome.result.transcription?.trim();
           await updateMessageText(tenantId, req.params.phone, messageId, hasNoDetectedSpeech ? '[Áudio sem fala detectável]' : outcome.result.transcription);
         } catch (transcriptionError) {
           console.warn(`⚠️  [Conversas] Falha ao transcrever áudio enviado (messageId=${messageId}):`, (transcriptionError as Error).message);

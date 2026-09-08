@@ -1,7 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import type { ServerConfig } from '../config';
 import { getGeminiClient, withGeminiRetry } from '../gemini';
-import { transcribeAudioWithGemini } from '../services/geminiTranscription';
+import { transcribeAudio } from '../services/geminiTranscription';
 import { callGroqJsonCompletion, GROQ_SPECIALIST_MODEL, GROQ_SPECIALIST_TIMEOUT_MS } from '../services/groqClient';
 import { formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
 import { buildChronologicalConversationContext, guardContinuationReply } from '../services/conversationReplyGuard';
@@ -440,7 +440,7 @@ Responda estritamente em formato JSON: { "answer": "sua resposta direta" }`;
   router.post('/api/transcribe', authenticateToken, rateLimiter, async (req, res) => {
     try {
       const { audioBase64, mimeType, leadName, customInstructions } = req.body || {};
-      const outcome = await transcribeAudioWithGemini(ai, audioBase64, mimeType, { leadName, customInstructions });
+      const outcome = await transcribeAudio(ai, audioBase64, mimeType, { leadName, customInstructions, groqApiKey });
       return res.json({ success: true, source: outcome.source, result: outcome.result });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message || 'Erro ao processar áudio.' });
