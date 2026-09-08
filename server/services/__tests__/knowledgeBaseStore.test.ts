@@ -231,6 +231,29 @@ describe('findProductMatch (produto de topo ou variante dentro de uma família)'
     expect(findProductMatch(familyKb, 'Serviço Inexistente')).toBeUndefined();
   });
 
+  it('TASK-0339: bate ignorando diferença de acento e caixa (ex: IA citando "pestanas" sem til)', () => {
+    const match = findProductMatch(familyKb, 'pestanas');
+    expect(match?.product.name).toBe('Pestañas');
+  });
+
+  it('TASK-0339: bate variante ignorando acento/caixa/espaçamento nas pontas', () => {
+    const match = findProductMatch(familyKb, '  LASH LIFT  ');
+    expect(match?.variant?.code).toBe('Lash Lift');
+  });
+
+  it('TASK-0339: bate por um alias comercial cadastrado no produto (ex: "Full Face" pro nome oficial do combo)', () => {
+    const kb: AgentKnowledgeBase = {
+      products: [{ name: 'Combo Triple: Micro Cejas + Labios + Pestañas', aliases: ['Combo Full Face', 'Full Face'], price: 'Gs 1.200.000' }],
+    };
+    const match = findProductMatch(kb, 'full face');
+    expect(match?.product.name).toBe('Combo Triple: Micro Cejas + Labios + Pestañas');
+  });
+
+  it('TASK-0339: não faz matching aproximado por digitação errada (nunca "quase igual")', () => {
+    expect(findProductMatch(familyKb, 'Lash Lif')).toBeUndefined();
+    expect(findProductMatch(familyKb, 'Pestana')).toBeUndefined();
+  });
+
   it('findProductDurationMinutes usa a duração da variante, não a do produto pai (que nem tem)', () => {
     expect(findProductDurationMinutes(familyKb, 'Lash Lift')).toBe(90);
     expect(findProductDurationMinutes(familyKb, 'Efecto Delineado')).toBe(120);

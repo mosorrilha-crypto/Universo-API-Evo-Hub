@@ -14,6 +14,7 @@
  * ninguém mais escreve.
  */
 import { getDb, getPlatformDb } from './db';
+import { normalizeText } from './textNormalize';
 
 /**
  * Comparação visual real de um procedimento. TASK-0218 — a foto passou a
@@ -252,9 +253,10 @@ export interface ProductNameMatch {
 
 /**
  * Acha um produto do catálogo pelo nome exato (comparação normalizada:
- * trim + minúsculas) — procura primeiro no nível do produto, depois dentro
- * de `variants` de cada família. Fonte única usada por toda checagem de
- * duração/bookable/preço/mídia por nome de serviço (ver
+ * acento/caixa/espaçamento via normalizeText, ver textNormalize.ts) —
+ * procura primeiro no nível do produto (nome oficial e `aliases`), depois
+ * dentro de `variants` de cada família. Fonte única usada por toda checagem
+ * de duração/bookable/preço/mídia por nome de serviço (ver
  * isNonBookableProduct/findProductDurationMinutes/resolveProductAmountByName
  * abaixo, e os pontos em conversations.ts/autoReply.ts que mandam foto,
  * vídeo, registram a transação financeira e disparam o Meta CAPI).
@@ -265,12 +267,25 @@ export interface ProductNameMatch {
  * cobrindo "Lash Lift", "Efecto Delineado" etc.) quebraria silenciosamente
  * duração de agendamento, valor do registro financeiro e envio de foto/vídeo
  * assim que um serviço deixasse de ser um produto de topo.
+ *
+ * TASK-0339: até aqui a comparação só tolerava trim+minúsculas — um nome com
+ * acento diferente do cadastro (ex: "pestanas" vs "Pestañas") ou um sinônimo
+ * comercial já cadastrado em `aliases` (usado noutros pontos do agente, ver
+ * agentContextPack.ts/inferServiceInterest) nunca batia aqui, mesmo a IA
+ * citando o produto certo com uma grafia levemente diferente. Adicionada
+ * tolerância a acento/espaçamento e checagem de `aliases` — deliberadamente
+ * SEM matching aproximado por distância de edição: esta função alimenta
+ * preço/duração/agendamento (dinheiro e Google Calendar reais), então um
+ * "quase igual" errado é pior que não achar nada e cair no fallback textual
+ * de "esse nome não bate com nenhum produto do catálogo" já tratado pelos
+ * chamadores.
  */
 export function findProductMatch(kb: AgentKnowledgeBase | null, productName: string): ProductNameMatch | undefined {
-  const normalized = productName.trim().toLowerCase();
+  const normalized = normalizeText(productName);
   for (const product of kb?.products || []) {
-    if (product.name.trim().toLowerCase() === normalized) return { product };
-    const variant = product.variants?.find((v) => v.code.trim().toLowerCase() === normalized);
+    if (normalizeText(product.name) === normalized) return { product };
+    if (product.aliases?.some((alias) => normalizeText(alias) === normalized)) return { product };
+    const variant = product.variants?.find((v) => normalizeText(v.code) === normalized);
     if (variant) return { product, variant };
   }
   return undefined;
