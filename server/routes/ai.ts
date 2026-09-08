@@ -92,8 +92,9 @@ export function createAiRouter({ config, authenticateToken, rateLimiter }: AiRou
   // análise de CRM com objetos aninhados, texto de resposta longo) — mais
   // sujeito a falhar a validação de JSON do próprio Groq. Reaproveita o
   // mesmo modelo mais forte já usado pra resposta do especialista em
-  // autoReply.ts (TASK-0346, llama-3.3-70b-versatile) e seu timeout maior
-  // (12s) — reduz a chance da 1ª tentativa falhar, sem mudar a rede de
+  // autoReply.ts (TASK-0346, GROQ_SPECIALIST_MODEL — ver groqClient.ts pro
+  // valor atual) e seu timeout maior (12s) — reduz a chance da 1ª tentativa
+  // falhar, sem mudar a rede de
   // segurança (Gemini de fallback, depois anti-fabricação) já existente.
   const groqModel = GROQ_SPECIALIST_MODEL;
   const groqTimeoutMs = GROQ_SPECIALIST_TIMEOUT_MS;
