@@ -9,10 +9,14 @@
  * voltam pro cabeçalho mobile (mesmo lugar de sempre no desktop), e o
  * seletor de empresa ("Empresa ativa"/"Sair", que tinha ido pra dentro de
  * Ferramentas na TASK-0331) volta como um ícone circular no cabeçalho —
- * mesmo espírito do seletor de conta do Claude Code — ao lado de um ícone
- * de saída próprio. O menu "⋮" propriamente dito (Crescimento/Configurar/
- * Empresas/Notificações) continua eliminado — esse conteúdo segue dentro
- * de Ferramentas.
+ * mesmo espírito do seletor de conta do Claude Code. Achado real no meio
+ * da mesma tarefa (print anotado, "o que é isso, coloca dentro do icon de
+ * empresa"): a primeira versão tinha deixado "Sair" como um ícone SOLTO ao
+ * lado do avatar — corrigido pra "Sair" viver dentro do menu que o próprio
+ * avatar abre (junto da lista de empresas, quando há uma pra mostrar), sem
+ * botão próprio na barra. O menu "⋮" propriamente dito (Crescimento/
+ * Configurar/Empresas/Notificações) continua eliminado — esse conteúdo
+ * segue dentro de Ferramentas.
  */
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -77,7 +81,7 @@ afterEach(() => {
 });
 
 describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0358)', () => {
-  it('mostra idioma (PT/ES), tema, o ícone circular de empresa e "Sair" na linha mobile', () => {
+  it('operador (não saas_admin): avatar abre um menu só com "Sair", sem lista de empresas', async () => {
     const onLogout = vi.fn();
     render(
       <AppPreferencesProvider>
@@ -97,29 +101,34 @@ describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0358)', 
       </AppPreferencesProvider>
     );
 
-    // Ícone circular do operador (não saas_admin) — abre o modal de login
-    // ao tocar, não um dropdown de troca de empresa.
-    const avatarButtons = screen.getAllByTitle(operator.name);
-    expect(avatarButtons.length).toBeGreaterThan(0);
+    // Sem o menu aberto, "Sair" não deve existir solto na barra (achado
+    // real corrigido nesta mesma tarefa — era um ícone à parte antes).
+    expect(screen.queryByText('Sair')).toBeNull();
 
-    const logoutButtons = screen.getAllByTitle('Sair');
+    const avatarButtons = screen.getAllByTitle(operator.name);
+    await act(async () => {
+      fireEvent.click(avatarButtons[0]);
+    });
+
+    // Sem tenants pra trocar (só 1 na lista) e sem ser saas_admin, o menu
+    // não mostra "Empresa ativa" nem "Trocar operador" — só "Sair".
+    expect(screen.queryByText('Empresa ativa')).toBeNull();
+    const logoutButtons = screen.getAllByText('Sair');
     expect(logoutButtons.length).toBeGreaterThan(0);
+    fireEvent.click(logoutButtons[0]);
+    expect(onLogout).toHaveBeenCalled();
 
     // Botão único de idioma (mostra o idioma PRA TROCAR — "ES" enquanto PT
     // está ativo por padrão), não os dois PT/ES lado a lado do desktop.
-    // Verificado por último porque troca o idioma real via contexto,
-    // mudando a tradução do resto do cabeçalho (inclusive "Sair"→"Salir").
     const langToggle = screen.getByTitle('Español');
     fireEvent.click(langToggle);
     expect(document.documentElement.lang).toBe('es-PY');
     expect(screen.getByTitle('Português')).not.toBeNull();
-
-    fireEvent.click(screen.getAllByTitle('Salir')[0]);
-    expect(onLogout).toHaveBeenCalled();
   });
 
-  it('saas_admin: tocar no ícone circular abre a lista de empresas', async () => {
+  it('saas_admin: avatar abre a lista de empresas e "Sair" junto, no mesmo menu', async () => {
     const onSelectTenant = vi.fn();
+    const onLogout = vi.fn();
     render(
       <AppPreferencesProvider>
         <Header
@@ -128,7 +137,7 @@ describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0358)', 
           savedCount={0}
           currentUser={saasAdmin}
           onOpenLoginModal={vi.fn()}
-          onLogout={vi.fn()}
+          onLogout={onLogout}
           tenants={[activeTenant, secondTenant]}
           activeTenant={activeTenant}
           onSelectTenant={onSelectTenant}
@@ -148,5 +157,14 @@ describe('Header — Idioma/Tema/Empresa de volta na linha mobile (TASK-0358)', 
       fireEvent.click(tenantOptions[0]);
     });
     expect(onSelectTenant).toHaveBeenCalledWith(secondTenant);
+
+    // Menu fecha ao escolher — reabre pra confirmar que "Sair" mora no
+    // mesmo lugar (achado real corrigido nesta tarefa).
+    await act(async () => {
+      fireEvent.click(triggers[0]);
+    });
+    const logoutButtons = await screen.findAllByText('Sair');
+    fireEvent.click(logoutButtons[0]);
+    expect(onLogout).toHaveBeenCalled();
   });
 });

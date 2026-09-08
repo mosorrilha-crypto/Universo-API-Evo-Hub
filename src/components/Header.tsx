@@ -390,31 +390,44 @@ export const Header: React.FC<HeaderProps> = ({
           {renderThemeMenu()}
           {currentUser && (
             <div className="relative" ref={mobileTenantMenuRef}>
+              {/* TASK-0358 (pedido direto, print anotado): "isso" (o ícone
+                  de saída separado, do lado do avatar) não devia estar
+                  solto — "Sair" mora AQUI dentro, junto do resto de conta,
+                  não como um botão próprio na barra. Agora o avatar sempre
+                  abre este menu (antes só abria pra saas_admin; quem não é
+                  saas_admin não tinha onde ver o próprio "Sair" no mobile,
+                  já que o botão solto foi removido). */}
               <button
                 type="button"
-                onClick={() => currentUser.role === 'saas_admin' ? setIsMobileTenantMenuOpen((value) => !value) : onOpenLoginModal()}
+                onClick={() => setIsMobileTenantMenuOpen((value) => !value)}
                 className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
                 title={currentUser.role === 'saas_admin' ? `${copy.activeCompany}: ${activeTenant?.name || ''}` : currentUser.name}
               >
                 <img src={currentUser.avatar} alt={currentUser.name} className="h-8 w-8 rounded-full object-cover" />
               </button>
-              {currentUser.role === 'saas_admin' && isMobileTenantMenuOpen && (
+              {isMobileTenantMenuOpen && (
                 <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
-                  <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{copy.activeCompany}</p>
-                  <div className="max-h-56 space-y-1 overflow-y-auto">
-                    {tenants.map((tenant) => (
-                      <button key={tenant.id} type="button" onClick={() => { onSelectTenant(tenant); setIsMobileTenantMenuOpen(false); }} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${tenant.id === activeTenant.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}>
-                        <span className="truncate">{tenant.name}</span>
-                        {tenant.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />}
-                      </button>
-                    ))}
-                  </div>
-                  <button type="button" onClick={() => { setIsMobileTenantMenuOpen(false); onOpenLoginModal(); }} className="mt-2 w-full border-t border-slate-800 px-2.5 pt-2 text-left text-xs font-medium text-slate-300 hover:text-white">{copy.changeOperator}</button>
+                  {currentUser.role === 'saas_admin' && (
+                    <>
+                      <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{copy.activeCompany}</p>
+                      <div className="max-h-56 space-y-1 overflow-y-auto">
+                        {tenants.map((tenant) => (
+                          <button key={tenant.id} type="button" onClick={() => { onSelectTenant(tenant); setIsMobileTenantMenuOpen(false); }} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${tenant.id === activeTenant.id ? 'bg-emerald-500/15 text-emerald-200' : 'text-slate-300 hover:bg-slate-800'}`}>
+                            <span className="truncate">{tenant.name}</span>
+                            {tenant.id === activeTenant.id && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400" />}
+                          </button>
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => { setIsMobileTenantMenuOpen(false); onOpenLoginModal(); }} className="mt-2 w-full rounded-lg px-2.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white">{copy.changeOperator}</button>
+                    </>
+                  )}
+                  <button type="button" onClick={() => { setIsMobileTenantMenuOpen(false); onLogout?.(); }} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-rose-300 hover:bg-rose-500/10 ${currentUser.role === 'saas_admin' ? 'mt-1 border-t border-slate-800 pt-2' : ''}`}>
+                    <LogOut className="h-3.5 w-3.5" />{copy.signOut}
+                  </button>
                 </div>
               )}
             </div>
           )}
-          {currentUser && <button type="button" onClick={onLogout} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300" title={copy.signOut}><LogOut className="w-4 h-4" /></button>}
         </div>
       </div>
       {/* TASK unificação (pedido direto, 04/09/2026): as duas fileiras
