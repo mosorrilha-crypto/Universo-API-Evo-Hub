@@ -4,10 +4,11 @@
  * tema saíram do cabeçalho global (Header.tsx) e vieram pra dentro da
  * gaveta "Ferramentas" do Atendimento, discretos igual "Status do agente".
  *
- * TASK-0336 (pedido direto, print anotado): idioma/tema deixaram de ser 2
- * fileiras de pills sempre abertas — cada um virou um ícone único (rótulo =
- * valor atual, ex: "PT"/"Escuro") que precisa ser tocado pra expandir as
- * opções antes de poder escolher outra.
+ * TASK-0336 tinha colapsado idioma/tema num ícone único que precisava ser
+ * tocado pra expandir as opções. TASK-0341 (pedido direto, comparando com a
+ * versão ainda em produção) reverteu pra pills sempre visíveis — ambas as
+ * opções (PT/ES, e os 4 temas por ícone) já aparecem prontas pra escolher,
+ * sem etapa de expandir.
  */
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -60,22 +61,14 @@ describe('WhatsAppLeadsSim — idioma e tema dentro da gaveta "Ferramentas"', ()
       fireEvent.click(screen.getByText('Ferramentas'));
     });
 
-    // Idioma vira um ícone único (rótulo = idioma atual, "PT") — precisa
-    // tocar nele pra expandir as opções antes de poder escolher "Español".
-    await waitFor(() => expect(screen.getByText('PT')).not.toBeNull());
-    await act(async () => {
-      fireEvent.click(screen.getByText('PT'));
-    });
+    // PT e ES já aparecem prontos lado a lado, sem etapa de expandir.
+    await waitFor(() => expect(screen.getByTitle('Español')).not.toBeNull());
     await act(async () => {
       fireEvent.click(screen.getByTitle('Español'));
     });
     expect(document.documentElement.lang).toBe('es-PY');
 
-    // Mesmo padrão pro tema (rótulo = tema atual, "Escuro" por padrão).
-    await waitFor(() => expect(screen.getByText('Escuro')).not.toBeNull());
-    await act(async () => {
-      fireEvent.click(screen.getByText('Escuro'));
-    });
+    // Mesmo padrão pro tema — os 4 ícones já aparecem prontos.
     await act(async () => {
       fireEvent.click(screen.getByTitle('Claro'));
     });
