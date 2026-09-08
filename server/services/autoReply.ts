@@ -24,7 +24,7 @@ import { saveMediaImage } from './mediaImageStore';
 import { fireMetaCapiEventForTenant } from './metaCapiService';
 import { getCachedSystemInstruction, invalidateAllSystemInstructionCaches } from './geminiSystemInstructionCache';
 import { recordGeminiUsage, type GeminiCallSite } from './tokenUsageStore';
-import { callGroqJsonCompletion } from './groqClient';
+import { callGroqJsonCompletion, GROQ_SPECIALIST_MODEL, GROQ_SPECIALIST_TIMEOUT_MS } from './groqClient';
 import { logStructured, withStructuredLog } from './structuredLog';
 import { buildAgentContextPack, deriveContactMemoryPatch, loadAgentContextPack, type AgentContextPack } from './agentContextPack';
 import { upsertContactAgentMemory } from './contactAgentMemoryStore';
@@ -548,7 +548,8 @@ async function generateSpecialistReply(
   extraContext?: string,
   contextPack?: AgentContextPack,
   adContext?: string,
-  isBurst?: boolean
+  isBurst?: boolean,
+  groqApiKey?: string
 ): Promise<{ phase: ConversationPhase; bubbles: string[]; needsHumanConfirmation: boolean; capturedClientName?: string; pendingOwnerReview?: string; awaitingCustomerChoice?: string; interestedService?: string } | null> {
   const historyText = buildHistoryText(history);
   const systemInstruction = await buildCachedSystemInstruction(tenantId, agent, knowledgeBaseContext);
@@ -617,23 +618,7 @@ async function generateSpecialistReply(
       GEMINI_TIMEOUT_MS
     );
 
-  const response = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}` }, async () => {
-    try {
-      return await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
-    } catch (err) {
-      // Rede de segurança extra: se a chamada com cachedContent falhar mesmo
-      // depois do retry padrão (ex: cache expirou entre criar e usar, corrida
-      // rara já que o TTL é de 55min), tenta UMA vez a mais sem cache antes de
-      // desistir — a resposta ao cliente nunca pode depender do cache de
-      // contexto dar certo.
-      if (!cachedContentName) throw err;
-      console.warn('⚠️  [Gemini Cache] chamada com cachedContent falhou mesmo após retry — tentando de novo sem cache:', (err as Error)?.message || err);
-      invalidateAllSystemInstructionCaches();
-      return await callSpecialist({ systemInstruction });
-    }
-  });
-
-  const parsed = JSON.parse(response.text || '{}') as {
+  type SpecialistParsed = {
     phase?: string;
     bubbles?: string[];
     needsHumanConfirmation?: boolean;
@@ -642,6 +627,63 @@ async function generateSpecialistReply(
     aguardandoCliente?: string | null;
     servicoInteresse?: string | null;
   };
+
+  // TASK-0346 (pedido direto, incidente ativo de produção — Gemini sem
+  // crédito): mesmo padrão Groq-primeiro-Gemini-de-fallback já usado no
+  // roteador (classifyAgent, acima) e na decisão de mídia
+  // (decideMidiaActionViaGroq) — mas aqui pra gerar a resposta de verdade do
+  // especialista (FAQ/triagem/agendamento/reclamação), não só uma
+  // classificação curta. Achatado num único prompt de texto (Camada 1+3 já
+  // combinadas em `systemInstruction`, mais o conteúdo dinâmico que viraria
+  // `contents` no Gemini) porque `callGroqJsonCompletion` já existe pronta
+  // pra esse formato — reaproveita a função em vez de criar um cliente de
+  // chat multi-turno novo, risco menor numa correção de incidente ativo.
+  // Qualquer falha (rede, timeout, JSON malformado) cai pro Gemini de
+  // sempre, sem propagar erro — a resposta ao cliente nunca deve depender
+  // do Groq dar certo.
+  let parsed: SpecialistParsed | undefined;
+  if (groqApiKey) {
+    const flattenedUserContent =
+      burstMessages.length === 1
+        ? `${contextPreamble}Nova mensagem do cliente: "${burstMessages[0]}"`
+        : burstMessages
+            .map((line, i) => (i === 0 ? `${contextPreamble}Nova mensagem do cliente: "${line}"` : `Mensagem seguinte do cliente (mais recente): "${line}"`))
+            .join('\n\n');
+    try {
+      const { parsed: groqParsed, usage } = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}:groq` }, () =>
+        callGroqJsonCompletion(groqApiKey, `${systemInstruction}\n\n${flattenedUserContent}`, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.7)
+      );
+      const groqBubbles = Array.isArray(groqParsed?.bubbles)
+        ? groqParsed.bubbles.filter((b: unknown) => typeof b === 'string' && b.trim())
+        : [];
+      if (!groqBubbles.length) {
+        throw new Error(`Groq retornou resposta do especialista sem "bubbles" válidas: ${JSON.stringify(groqParsed)}`);
+      }
+      parsed = groqParsed as SpecialistParsed;
+      recordGeminiUsage(tenantId, 'especialista', usage, 'groq').catch(() => {});
+    } catch (err) {
+      console.warn(`⚠️  [Especialista] Groq falhou (tenant=${tenantId}, agent=${agent}), caindo pro Gemini:`, (err as Error)?.message || err);
+    }
+  }
+
+  if (!parsed) {
+    const response = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}` }, async () => {
+      try {
+        return await callSpecialist(cachedContentName ? { cachedContent: cachedContentName } : { systemInstruction });
+      } catch (err) {
+        // Rede de segurança extra: se a chamada com cachedContent falhar mesmo
+        // depois do retry padrão (ex: cache expirou entre criar e usar, corrida
+        // rara já que o TTL é de 55min), tenta UMA vez a mais sem cache antes de
+        // desistir — a resposta ao cliente nunca pode depender do cache de
+        // contexto dar certo.
+        if (!cachedContentName) throw err;
+        console.warn('⚠️  [Gemini Cache] chamada com cachedContent falhou mesmo após retry — tentando de novo sem cache:', (err as Error)?.message || err);
+        invalidateAllSystemInstructionCaches();
+        return await callSpecialist({ systemInstruction });
+      }
+    });
+    parsed = JSON.parse(response.text || '{}') as SpecialistParsed;
+  }
   // O modelo pode desobedecer o limite mesmo com a instrução explícita. Duas
   // bolhas preservam uma resposta humana e evitam que o cliente receba uma
   // sequência de preço, oferta e agenda antes de conseguir responder.
@@ -2128,7 +2170,7 @@ export async function generateAutoReplyForText(
     // divergir do valor real sem aviso nenhum.
     const businessHoursForPrompt = formatBusinessHoursForPrompt(await getTenantBusinessHours(tenantId).catch(() => null));
     const fullKnowledgeBaseContext = [knowledgeBaseContext, businessHoursForPrompt].filter(Boolean).join('\n\n');
-    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, contextPack, adContext, isBurst);
+    const specialist = await generateSpecialistReply(tenantId, ai, agent, text, segment, contactName, fullKnowledgeBaseContext, history, combinedExtraContext || undefined, contextPack, adContext, isBurst, groqApiKey);
     if (!specialist) {
       console.warn('⚠️  Gemini Auto-Reply: resposta vazia, nada enviado.');
       return null;
