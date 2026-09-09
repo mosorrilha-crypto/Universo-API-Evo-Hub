@@ -19,6 +19,7 @@ import { BroadcastDocumentation } from './BroadcastDocumentation';
 interface BroadcastNumber {
   id: string;
   label: string;
+  provider: 'meta' | 'evolution';
   phoneNumberId: string;
   wabaId: string | null;
   status: 'active' | 'paused' | 'banned' | 'warming';
@@ -121,10 +122,17 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
   const [numbersLoaded, setNumbersLoaded] = useState(false);
   const [isNumberModalOpen, setIsNumberModalOpen] = useState(false);
   const [editingNumber, setEditingNumber] = useState<BroadcastNumber | null>(null);
-  const [numberForm, setNumberForm] = useState({ label: '', phoneNumberId: '', wabaId: '', accessToken: '', qualityRating: 'unknown' as BroadcastNumber['qualityRating'] });
+  const [numberForm, setNumberForm] = useState({ label: '', provider: 'meta' as BroadcastNumber['provider'], phoneNumberId: '', wabaId: '', accessToken: '', qualityRating: 'unknown' as BroadcastNumber['qualityRating'] });
   const [numberAdvanced, setNumberAdvanced] = useState({ perMinuteCap: '5', dailyCap: '1000', minGapSeconds: '8' });
   const [numberError, setNumberError] = useState<string | null>(null);
   const [isSavingNumber, setIsSavingNumber] = useState(false);
+
+  // TASK-0367 — mesmos defaults conservadores do backend (EVOLUTION_DEFAULT_*
+  // em broadcastStore.ts), só pra pré-preencher o formulário quando o
+  // operador troca pra Evolution — o backend aplica o mesmo piso/teto
+  // mesmo que o campo venha vazio ou o operador edite o valor.
+  const EVOLUTION_ADVANCED_DEFAULTS = { perMinuteCap: '1', dailyCap: '20', minGapSeconds: '60' };
+  const META_ADVANCED_DEFAULTS = { perMinuteCap: '5', dailyCap: '1000', minGapSeconds: '8' };
 
   const loadNumbers = async () => {
     const res = await apiFetch('/api/admin/broadcast-numbers');
@@ -139,14 +147,14 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
 
   const resetNumberForm = () => {
     setEditingNumber(null);
-    setNumberForm({ label: '', phoneNumberId: '', wabaId: '', accessToken: '', qualityRating: 'unknown' });
-    setNumberAdvanced({ perMinuteCap: '5', dailyCap: '1000', minGapSeconds: '8' });
+    setNumberForm({ label: '', provider: 'meta', phoneNumberId: '', wabaId: '', accessToken: '', qualityRating: 'unknown' });
+    setNumberAdvanced(META_ADVANCED_DEFAULTS);
     setNumberError(null);
   };
 
   const openEditNumber = (n: BroadcastNumber) => {
     setEditingNumber(n);
-    setNumberForm({ label: n.label, phoneNumberId: n.phoneNumberId, wabaId: n.wabaId || '', accessToken: '', qualityRating: n.qualityRating });
+    setNumberForm({ label: n.label, provider: n.provider, phoneNumberId: n.phoneNumberId, wabaId: n.wabaId || '', accessToken: '', qualityRating: n.qualityRating });
     setNumberAdvanced({ perMinuteCap: String(n.perMinuteCap), dailyCap: String(n.dailyCap), minGapSeconds: String(n.minGapSeconds) });
     setNumberError(null);
     setIsNumberModalOpen(true);
@@ -159,6 +167,7 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
     try {
       const payload = {
         label: numberForm.label,
+        provider: numberForm.provider,
         phoneNumberId: numberForm.phoneNumberId,
         wabaId: numberForm.wabaId || null,
         accessToken: numberForm.accessToken || undefined,
@@ -634,12 +643,17 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="text-slate-500 border-b border-slate-800">
-                  <tr><th className="py-2 pr-3">Rótulo</th><th className="py-2 pr-3">Phone Number ID</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Qualidade</th><th className="py-2 pr-3">Teto/dia</th><th></th></tr>
+                  <tr><th className="py-2 pr-3">Rótulo</th><th className="py-2 pr-3">Provedor</th><th className="py-2 pr-3">Phone Number ID</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Qualidade</th><th className="py-2 pr-3">Teto/dia</th><th></th></tr>
                 </thead>
                 <tbody>
                   {numbers.map((n) => (
                     <tr key={n.id} className="border-b border-slate-800/60">
                       <td className="py-2 pr-3 text-slate-200 font-semibold">{n.label}</td>
+                      <td className="py-2 pr-3">
+                        <span className={`px-2 py-0.5 rounded-md border font-semibold ${n.provider === 'evolution' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' : 'bg-slate-700 text-slate-300 border-slate-600'}`}>
+                          {n.provider === 'evolution' ? 'Evolution' : 'Meta'}
+                        </span>
+                      </td>
                       <td className="py-2 pr-3 text-slate-400">{n.phoneNumberId}</td>
                       <td className="py-2 pr-3"><span className={`px-2 py-0.5 rounded-md border font-semibold ${STATUS_COLORS[n.status]}`}>{STATUS_LABELS[n.status]}{n.status === 'warming' ? ` (dia ${n.warmupProgressDays})` : ''}</span></td>
                       <td className="py-2 pr-3 text-slate-400">{QUALITY_LABELS[n.qualityRating]}</td>
@@ -667,24 +681,56 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
               <input value={numberForm.label} onChange={(e) => setNumberForm({ ...numberForm, label: e.target.value })} required className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" placeholder="Ex.: Corrida ELAS 2026" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Phone Number ID (Meta)</label>
-              <input value={numberForm.phoneNumberId} onChange={(e) => setNumberForm({ ...numberForm, phoneNumberId: e.target.value })} required disabled={!!editingNumber} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white disabled:opacity-50" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">WABA ID (opcional)</label>
-              <input value={numberForm.wabaId} onChange={(e) => setNumberForm({ ...numberForm, wabaId: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Token de acesso {editingNumber ? '(deixe em branco pra manter o atual)' : ''}</label>
-              <input type="password" value={numberForm.accessToken} onChange={(e) => setNumberForm({ ...numberForm, accessToken: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Qualidade (confira em Meta Business Manager &gt; Qualidade da conta)</label>
-              <select value={numberForm.qualityRating} onChange={(e) => setNumberForm({ ...numberForm, qualityRating: e.target.value as any })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
-                <option value="unknown">Não sei</option><option value="high">Alta</option><option value="medium">Média</option><option value="low">Baixa</option>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Provedor</label>
+              <select
+                value={numberForm.provider}
+                disabled={!!editingNumber}
+                onChange={(e) => {
+                  const provider = e.target.value as BroadcastNumber['provider'];
+                  setNumberForm({ ...numberForm, provider });
+                  setNumberAdvanced(provider === 'evolution' ? EVOLUTION_ADVANCED_DEFAULTS : META_ADVANCED_DEFAULTS);
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white disabled:opacity-50"
+              >
+                <option value="meta">Meta Cloud API (template aprovado)</option>
+                <option value="evolution">Evolution API (texto livre, número operacional do tenant)</option>
               </select>
-              {numberForm.qualityRating === 'low' && <p className="text-[11px] text-rose-400 mt-1">Marcar como Baixa pausa os envios deste número imediatamente.</p>}
+              {numberForm.provider === 'evolution' && (
+                <p className="text-[11px] text-amber-400 mt-1">
+                  Manda texto livre direto pelo número operacional Evolution do tenant (não um número separado — a Evolution não tem esse conceito). Sem template/aprovação da Meta, mas com risco real de bloqueio se usado de forma agressiva — por isso os limites abaixo vêm bem mais conservadores por padrão e têm um teto de segurança que não pode ser ultrapassado.
+                </p>
+              )}
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">{numberForm.provider === 'evolution' ? 'Identificador (só precisa ser único — não é usado pro envio de verdade)' : 'Phone Number ID (Meta)'}</label>
+              <input value={numberForm.phoneNumberId} onChange={(e) => setNumberForm({ ...numberForm, phoneNumberId: e.target.value })} required disabled={!!editingNumber} placeholder={numberForm.provider === 'evolution' ? 'Ex.: evolution-reaquecimento-monique' : undefined} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white disabled:opacity-50" />
+            </div>
+            {numberForm.provider === 'meta' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">WABA ID (opcional)</label>
+                  <input value={numberForm.wabaId} onChange={(e) => setNumberForm({ ...numberForm, wabaId: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Token de acesso {editingNumber ? '(deixe em branco pra manter o atual)' : ''}</label>
+                  <input type="password" value={numberForm.accessToken} onChange={(e) => setNumberForm({ ...numberForm, accessToken: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Qualidade</label>
+                  <select value={numberForm.qualityRating} onChange={(e) => setNumberForm({ ...numberForm, qualityRating: e.target.value as any })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                    <option value="unknown">Não sei</option><option value="high">Alta</option><option value="medium">Média</option><option value="low">Baixa</option>
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Confira o valor real em{' '}
+                    <a href="https://business.facebook.com/wa/manage/phone-numbers/" target="_blank" rel="noreferrer" className="underline decoration-slate-500/70 underline-offset-4 hover:text-slate-300">
+                      business.facebook.com/wa/manage/phone-numbers
+                    </a>{' '}
+                    (WhatsApp Manager → Números de telefone → coluna Qualidade). Só existe pra número registrado na Meta Cloud API — não se aplica a um número Evolution/Baileys, que nunca é registrado lá.
+                  </p>
+                  {numberForm.qualityRating === 'low' && <p className="text-[11px] text-rose-400 mt-1">Marcar como Baixa pausa os envios deste número imediatamente.</p>}
+                </div>
+              </>
+            )}
             <details className="text-xs">
               <summary className="cursor-pointer text-slate-400 font-semibold">Avançado (cadência)</summary>
               <div className="grid grid-cols-3 gap-2 mt-2">
@@ -692,7 +738,11 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
                 <div><label className="block text-[10px] text-slate-500 mb-1">Teto final/dia</label><input type="number" value={numberAdvanced.dailyCap} onChange={(e) => setNumberAdvanced({ ...numberAdvanced, dailyCap: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white" /></div>
                 <div><label className="block text-[10px] text-slate-500 mb-1">Intervalo (s)</label><input type="number" value={numberAdvanced.minGapSeconds} onChange={(e) => setNumberAdvanced({ ...numberAdvanced, minGapSeconds: e.target.value })} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white" /></div>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1">Um número novo já começa em aquecimento automático (20 a 1.000 msgs/dia ao longo de ~2 semanas) — o "teto final" só vale depois do aquecimento.</p>
+              {numberForm.provider === 'evolution' ? (
+                <p className="text-[10px] text-amber-400 mt-1">Número Evolution tem teto de segurança fixo no servidor (no máximo 3 msgs/minuto, 100/dia, nunca menos de 45s de intervalo) — mesmo que você configure algo mais agressivo aqui, esse teto sempre prevalece.</p>
+              ) : (
+                <p className="text-[10px] text-slate-500 mt-1">Um número novo já começa em aquecimento automático (20 a 1.000 msgs/dia ao longo de ~2 semanas) — o "teto final" só vale depois do aquecimento.</p>
+              )}
             </details>
             {numberError && <p className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{numberError}</p>}
             <button type="submit" disabled={isSavingNumber} className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer">

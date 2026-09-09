@@ -301,7 +301,12 @@ export async function getOrCreateConversationForBroadcast(
   tenantId: string,
   phone: string,
   name: string | null,
-  broadcastPhoneNumberId: string
+  // TASK-0367: `null` pra campanhas via Evolution API — não existe "número
+  // de disparo" separado do operacional pra Evolution (Baileys só tem UM
+  // número por instância), então a conversa fica sem phone_number_id
+  // próprio e sai pelo operacional de sempre via resolveCredentialsForConversation
+  // (mesmo comportamento de uma conversa comum, nunca criada por disparo).
+  broadcastPhoneNumberId: string | null
 ): Promise<{ id: string; phoneNumberId: string | null }> {
   const db = getDb();
   const { data: existing } = await db

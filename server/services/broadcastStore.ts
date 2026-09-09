@@ -22,11 +22,21 @@ function stripDataUriPrefix(base64: string): string {
 
 export type BroadcastNumberStatus = 'active' | 'paused' | 'banned' | 'warming';
 export type BroadcastQualityRating = 'unknown' | 'high' | 'medium' | 'low';
+/**
+ * TASK-0367 — `meta` (default, comportamento de sempre) manda por template
+ * aprovado via Meta Cloud API. `evolution` manda texto livre (sem template,
+ * Baileys não tem esse conceito) direto pro número operacional Evolution do
+ * próprio tenant — não existe "pool de números dedicados" pra Evolution
+ * como existe pra Meta, só o único número já conectado à instância.
+ */
+export type BroadcastNumberProvider = 'meta' | 'evolution';
 
 export interface BroadcastNumber {
   id: string;
   tenantId: string;
   label: string;
+  provider: BroadcastNumberProvider;
+  /** Pra `provider: 'meta'`, o phone_number_id real da Meta. Pra `provider: 'evolution'`, só um identificador único e informativo — a rota de envio de verdade é sempre o número operacional Evolution do tenant, resolvido em tempo de envio (ver broadcastSenderJob.ts). */
   phoneNumberId: string;
   wabaId: string | null;
   accessToken: string | null;
@@ -46,6 +56,7 @@ function mapNumberRow(row: any): BroadcastNumber {
     id: row.id,
     tenantId: row.tenant_id,
     label: row.label,
+    provider: row.provider === 'evolution' ? 'evolution' : 'meta',
     phoneNumberId: row.phone_number_id,
     wabaId: row.waba_id ?? null,
     accessToken: row.access_token ? decryptSecret(row.access_token) : null,
@@ -78,6 +89,7 @@ export async function getBroadcastNumber(tenantId: string, id: string): Promise<
 export interface CreateBroadcastNumberInput {
   label: string;
   phoneNumberId: string;
+  provider?: BroadcastNumberProvider;
   wabaId?: string | null;
   accessToken?: string | null;
   perMinuteCap?: number;
@@ -85,23 +97,37 @@ export interface CreateBroadcastNumberInput {
   minGapSeconds?: number;
 }
 
+// TASK-0367 — a Evolution/Baileys não tem conceito de "qualidade de
+// número"/quota oficial da Meta pra calibrar contra; o único jeito de
+// reduzir risco de bloqueio é ser bem mais conservador por padrão do que os
+// defaults da Meta (per_minute_cap 5, daily_cap 1000, min_gap 8s) — pedido
+// direto pelo dono do produto: "o menor lote possível primeiro e
+// espaçamento maior". Esses defaults só valem quando o campo não é
+// informado explicitamente — um operador pode sobrescrever se souber o que
+// está fazendo, mas o padrão nunca deve ser o mesmo tão permissivo da Meta.
+const EVOLUTION_DEFAULT_PER_MINUTE_CAP = 1;
+const EVOLUTION_DEFAULT_DAILY_CAP = 20;
+const EVOLUTION_DEFAULT_MIN_GAP_SECONDS = 60;
+
 export async function createBroadcastNumber(tenantId: string, input: CreateBroadcastNumberInput): Promise<BroadcastNumber> {
   const db = getDb();
+  const provider: BroadcastNumberProvider = input.provider === 'evolution' ? 'evolution' : 'meta';
   const { data, error } = await db
     .from('broadcast_numbers')
     .insert({
       tenant_id: tenantId,
       label: input.label,
+      provider,
       phone_number_id: input.phoneNumberId,
-      waba_id: input.wabaId || null,
-      access_token: input.accessToken ? encryptSecret(input.accessToken) : null,
+      waba_id: provider === 'evolution' ? null : input.wabaId || null,
+      access_token: provider === 'evolution' ? null : input.accessToken ? encryptSecret(input.accessToken) : null,
       status: 'warming',
       warmup_progress_days: 0,
       warmup_last_advanced_on: null,
       quality_rating: 'unknown',
-      per_minute_cap: input.perMinuteCap ?? 5,
-      daily_cap: input.dailyCap ?? 1000,
-      min_gap_seconds: input.minGapSeconds ?? 8,
+      per_minute_cap: input.perMinuteCap ?? (provider === 'evolution' ? EVOLUTION_DEFAULT_PER_MINUTE_CAP : 5),
+      daily_cap: input.dailyCap ?? (provider === 'evolution' ? EVOLUTION_DEFAULT_DAILY_CAP : 1000),
+      min_gap_seconds: input.minGapSeconds ?? (provider === 'evolution' ? EVOLUTION_DEFAULT_MIN_GAP_SECONDS : 8),
     })
     .select('*')
     .single();

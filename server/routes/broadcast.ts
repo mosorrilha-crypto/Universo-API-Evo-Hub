@@ -22,6 +22,7 @@ import {
   deleteBroadcastNumber,
   getBroadcastNumber,
   type BroadcastNumberStatus,
+  type BroadcastNumberProvider,
   type BroadcastQualityRating,
   listBroadcastTemplates,
   createBroadcastTemplate,
@@ -67,6 +68,14 @@ interface BroadcastRouterDeps {
 }
 
 const NUMBER_STATUSES: BroadcastNumberStatus[] = ['active', 'paused', 'banned', 'warming'];
+const NUMBER_PROVIDERS: BroadcastNumberProvider[] = ['meta', 'evolution'];
+// TASK-0367 — piso de segurança pra número Evolution: mesmo que o operador
+// tente configurar algo mais agressivo, nunca aceita menos que isso — a
+// Evolution/Baileys não tem quota oficial nem curva de qualidade calibrada
+// como a Meta, e é o número operacional real do tenant que está em jogo.
+const EVOLUTION_MIN_GAP_SECONDS_FLOOR = 45;
+const EVOLUTION_MAX_PER_MINUTE_CAP_CEILING = 3;
+const EVOLUTION_MAX_DAILY_CAP_CEILING = 100;
 const QUALITY_RATINGS: BroadcastQualityRating[] = ['unknown', 'high', 'medium', 'low'];
 const TEMPLATE_CATEGORIES: BroadcastTemplateCategory[] = ['marketing', 'utility'];
 const TEMPLATE_HEADER_TYPES: BroadcastTemplateHeaderType[] = ['none', 'image'];
@@ -102,12 +111,27 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   }));
 
   router.post('/api/admin/broadcast-numbers', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { label, phoneNumberId, wabaId, accessToken, perMinuteCap, dailyCap, minGapSeconds } = req.body || {};
+    const { label, phoneNumberId, provider, wabaId, accessToken, perMinuteCap, dailyCap, minGapSeconds } = req.body || {};
     if (typeof label !== 'string' || !label.trim()) return res.status(400).json({ error: 'Campo "label" é obrigatório.' });
     if (typeof phoneNumberId !== 'string' || !phoneNumberId.trim()) return res.status(400).json({ error: 'Campo "phoneNumberId" é obrigatório.' });
+    if (provider !== undefined && !NUMBER_PROVIDERS.includes(provider)) {
+      return res.status(400).json({ error: `Campo "provider" precisa ser um de: ${NUMBER_PROVIDERS.join(', ')}.` });
+    }
+    if (provider === 'evolution') {
+      if (minGapSeconds !== undefined && Number(minGapSeconds) < EVOLUTION_MIN_GAP_SECONDS_FLOOR) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita menos de ${EVOLUTION_MIN_GAP_SECONDS_FLOOR}s de espaçamento entre mensagens (risco de bloqueio no número operacional real).` });
+      }
+      if (perMinuteCap !== undefined && Number(perMinuteCap) > EVOLUTION_MAX_PER_MINUTE_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_PER_MINUTE_CAP_CEILING} mensagens por minuto.` });
+      }
+      if (dailyCap !== undefined && Number(dailyCap) > EVOLUTION_MAX_DAILY_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_DAILY_CAP_CEILING} mensagens por dia.` });
+      }
+    }
     const number = await createBroadcastNumber(tenantOf(req), {
       label: label.trim(),
       phoneNumberId: phoneNumberId.trim(),
+      provider,
       wabaId: wabaId || null,
       accessToken: accessToken || null,
       perMinuteCap,
@@ -124,6 +148,20 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     }
     if (qualityRating !== undefined && !QUALITY_RATINGS.includes(qualityRating)) {
       return res.status(400).json({ error: `Campo "qualityRating" precisa ser um de: ${QUALITY_RATINGS.join(', ')}.` });
+    }
+    // TASK-0367 — provider é fixo desde a criação (não está em UpdateBroadcastNumberPatch),
+    // então reconfere o piso/teto de segurança contra o valor real já salvo.
+    const existingNumber = await getBroadcastNumber(tenantOf(req), req.params.id);
+    if (existingNumber?.provider === 'evolution') {
+      if (minGapSeconds !== undefined && Number(minGapSeconds) < EVOLUTION_MIN_GAP_SECONDS_FLOOR) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita menos de ${EVOLUTION_MIN_GAP_SECONDS_FLOOR}s de espaçamento entre mensagens (risco de bloqueio no número operacional real).` });
+      }
+      if (perMinuteCap !== undefined && Number(perMinuteCap) > EVOLUTION_MAX_PER_MINUTE_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_PER_MINUTE_CAP_CEILING} mensagens por minuto.` });
+      }
+      if (dailyCap !== undefined && Number(dailyCap) > EVOLUTION_MAX_DAILY_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_DAILY_CAP_CEILING} mensagens por dia.` });
+      }
     }
     const number = await updateBroadcastNumber(tenantOf(req), req.params.id, {
       label, wabaId, accessToken, status, qualityRating, perMinuteCap, dailyCap, minGapSeconds,
