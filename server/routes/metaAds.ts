@@ -3,6 +3,7 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { requireRole, resolveTenantId } from '../middleware/rbac';
 import {
+  findAdsByWelcomeMessage,
   getMetaAdsConnectionStatus,
   getMetaTrafficOverview,
   isTrafficDatePreset,
@@ -145,6 +146,26 @@ export function createMetaAdsRouter({ authenticateToken }: MetaAdsRouterDeps): R
     try {
       const overview = await getMetaTrafficOverview(tenantOf(req), datePreset);
       res.json({ overview });
+    } catch (error: any) {
+      if (error instanceof MetaAdsConfigurationError) return res.status(409).json({ error: error.message, code: 'META_ADS_NOT_CONFIGURED' });
+      if (error instanceof MetaAdsTokenExpiredError) return res.status(401).json({ error: error.message, code: 'META_ADS_TOKEN_EXPIRED' });
+      if (error instanceof MetaAdsRequestError) return res.status(502).json({ error: error.message, code: 'META_ADS_REQUEST_FAILED' });
+      throw error;
+    }
+  }));
+
+  // TASK-0365: pra descobrir de qual anúncio veio um lead cuja atribuição
+  // automática não foi capturada (ver TASK-0364) — procura entre os
+  // anúncios da conta conectada qual tem uma mensagem inicial de "Clique
+  // para WhatsApp" batendo com o texto informado.
+  router.get('/api/meta-ads/find-by-welcome-message', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const query = req.query.q;
+    if (typeof query !== 'string' || !query.trim()) {
+      return res.status(400).json({ error: 'Informe o texto da mensagem inicial pra buscar (parâmetro q).' });
+    }
+    try {
+      const matches = await findAdsByWelcomeMessage(tenantOf(req), query);
+      res.json({ matches });
     } catch (error: any) {
       if (error instanceof MetaAdsConfigurationError) return res.status(409).json({ error: error.message, code: 'META_ADS_NOT_CONFIGURED' });
       if (error instanceof MetaAdsTokenExpiredError) return res.status(401).json({ error: error.message, code: 'META_ADS_TOKEN_EXPIRED' });
