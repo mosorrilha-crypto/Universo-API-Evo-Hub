@@ -54,6 +54,7 @@ import { getDb, getPlatformDb } from '../services/db';
 import { recordQualityAuditEvent } from '../services/qualityAuditStore';
 import { generateCorrectedReplySuggestion } from '../services/replySafetyGate';
 import { getContactAgentMemory, OperatorContactMemoryValidationError, updateContactAgentMemoryByOperator } from '../services/contactAgentMemoryStore';
+import { listContactJourney } from '../services/contactJourneyStore';
 import { listAgentTurnTraces } from '../services/agentTurnTraceStore';
 import { getTenantPromptLayerRow, setTenantPromptLayer, clearTenantPromptLayer } from '../services/tenantPromptLayerStore';
 import bcrypt from 'bcrypt';
@@ -552,6 +553,21 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
       }
       throw error;
     }
+  }));
+
+  /**
+   * Jornada do contato: histórico cronológico append-only de agendamentos
+   * (criado/remarcado/cancelado/concluído/pagamento verificado) + mudanças de
+   * estágio do CRM, pra alimentar a timeline da Ficha do Contato. Sem
+   * backfill — só eventos gravados a partir do deploy desta rota em diante.
+   */
+  router.get('/api/conversations/:phone/journey', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = tenantOf(req);
+    const phone = req.params.phone;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const beforeTimestamp = typeof req.query.before === 'string' ? req.query.before : undefined;
+    const events = await listContactJourney(tenantId, phone, { limit, beforeTimestamp });
+    res.json({ events });
   }));
 
   router.get('/api/conversations/:phone', authenticateToken, asyncHandler(async (req: AuthenticatedRequest, res) => {

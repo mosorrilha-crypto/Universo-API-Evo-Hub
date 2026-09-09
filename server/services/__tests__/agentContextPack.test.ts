@@ -161,4 +161,63 @@ describe('Agent Context Pack', () => {
 
     expect(patch.serviceInterest).toBe('pestañas/extensiones');
   });
+
+  // TASK-0355: o especialista já extrai servicoInteresse (lê a conversa
+  // inteira, mais preciso que o regex de inferServiceInterest, que só olha
+  // a mensagem atual) — sem chamada extra de LLM, já vem de graça na mesma
+  // resposta usada pra gerar o texto pro cliente.
+  it('prefere o interestedService já extraído pelo especialista ao regex de inferServiceInterest', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: null,
+      agent: 'faq',
+      text: 'Y cuánto sale eso?',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      interestedService: 'Diseño con Henna',
+    });
+
+    expect(patch.serviceInterest).toBe('Diseño con Henna');
+  });
+
+  it('não sobrescreve o service_interest já registrado na memória, mesmo com um interestedService novo', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: memory,
+      agent: 'faq',
+      text: 'Y el combo también incluye retoque?',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      interestedService: 'Combo Full Face',
+    });
+
+    expect(patch.serviceInterest).toBe('pestañas/extensiones');
+  });
+
+  // TASK-0355: a fase "objecao" (já classificada pelo especialista na mesma
+  // resposta, sem chamada extra) passa a alimentar o campo "objections" —
+  // hoje só um operador conseguia preencher esse campo manualmente.
+  it('registra uma objeção quando a fase da conversa é "objecao"', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: null,
+      agent: 'faq',
+      text: 'Uy, me parece muy caro para lo que ofrecen.',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      phase: 'objecao',
+    });
+
+    expect(patch.objections).toEqual(['Uy, me parece muy caro para lo que ofrecen.']);
+  });
+
+  it('não registra objeção quando a fase não é "objecao"', () => {
+    const patch = deriveContactMemoryPatch({
+      existingMemory: null,
+      agent: 'faq',
+      text: 'Perfecto, entonces reservo el jueves.',
+      needsHumanConfirmation: false,
+      liveState: { appointment: null, appointmentAvailable: true, escalation: null, escalationAvailable: true },
+      phase: 'fechamento',
+    });
+
+    expect(patch.objections).toBeUndefined();
+  });
 });

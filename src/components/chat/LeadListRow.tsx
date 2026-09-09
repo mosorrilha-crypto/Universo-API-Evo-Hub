@@ -70,7 +70,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
-          <h4 className="text-sm font-bold text-[var(--text-primary)] truncate flex items-center gap-1">
+          <h4 className="text-base font-semibold text-[var(--text-primary)] truncate flex items-center gap-1">
             <span className="truncate">{lead.name}</span>
           </h4>
           <div className="flex items-center space-x-1">
@@ -86,7 +86,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
                 <span>Silenciada</span>
               </span>
             )}
-            <span className={`text-xs ${isSelected || isUnread ? 'text-[var(--action)] font-bold' : 'text-[var(--text-secondary)]'}`}>
+            <span className={`text-xs ${isSelected || isUnread ? 'text-[var(--action)]' : 'text-[var(--text-secondary)]'}`}>
               {lead.timestamp}
             </span>
             <button
@@ -101,7 +101,7 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
 
         {/* Message Preview */}
           <div className="flex items-center justify-between mt-1">
-          <p className={`text-xs truncate flex items-center pr-2 ${isUnread ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
+          <p className={`text-sm truncate flex items-center pr-2 ${isUnread ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
             {lastMsg ? (
               <>
                 {/* TASK-0326 (pedido direto, print anotado à mão): os ícones de
@@ -138,7 +138,10 @@ export const LeadListRow: React.FC<LeadListRowProps> = ({
           <div className="flex items-center gap-1 flex-shrink-0">
             {isPinned && <Pin className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />}
             {unreadCount > 0 ? (
-              <span className="min-w-[1.35rem] h-[1.35rem] px-1 rounded-full bg-[var(--action)] text-[var(--action-contrast)] font-extrabold text-[11px] flex items-center justify-center flex-shrink-0">
+              // Verde vívido fixo (não `--action` do tema, que no padrão
+              // atual é um tom pastel): o WhatsApp real usa sempre o mesmo
+              // verde saturado aqui, com texto branco, independente de tema.
+              <span className="min-w-[1.35rem] h-[1.35rem] px-1 rounded-full bg-[#25D366] text-white font-extrabold text-[11px] flex items-center justify-center flex-shrink-0">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             ) : lead.fullAnalysis ? (

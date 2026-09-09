@@ -468,6 +468,34 @@ export interface ContactAgentContext {
   } | null;
 }
 
+/**
+ * Item da jornada do contato (GET /api/conversations/:phone/journey) — log
+ * append-only mesclando agendamentos e mudanças de estágio do CRM, mais
+ * recente primeiro. Sem backfill: só eventos gravados a partir do deploy da
+ * TASK que criou essa rota em diante (ver server/services/contactJourneyStore.ts).
+ */
+export type ContactJourneyEvent =
+  | {
+      kind: 'appointment';
+      id: string;
+      eventType: 'created' | 'rescheduled' | 'cancelled' | 'completed' | 'no_show' | 'payment_verified';
+      serviceSummary?: string;
+      scheduledStart?: string;
+      scheduledEnd?: string;
+      paymentStatus?: string;
+      eventId?: string;
+      actor: 'ai' | 'operator' | 'system';
+      createdAt: string;
+    }
+  | {
+      kind: 'stage_change';
+      id: string;
+      fromStage?: string;
+      toStage: string;
+      changedBy?: string;
+      createdAt: string;
+    };
+
 export interface LeadInfo {
   id: string;
   tenantId?: string;

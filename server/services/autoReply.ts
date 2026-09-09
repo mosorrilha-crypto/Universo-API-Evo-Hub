@@ -2521,6 +2521,8 @@ export async function generateAutoReplyForText(
         needsHumanConfirmation,
         liveState: finalContextPack.liveState,
         knowledgeBase: kbForMemory,
+        interestedService: specialist.interestedService,
+        phase: specialist.phase,
       });
       const traceOutcome = stopAutoReply
         ? 'auto_reply_blocked'

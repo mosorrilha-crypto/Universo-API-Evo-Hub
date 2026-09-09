@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import type { ContactProfileData } from './ownerPanelTypes';
 import { getInitials } from '../../utils/leadDisplay';
+import { ContactJourneyTimeline } from './ContactJourneyTimeline';
+import type { ContactJourneyEvent } from '../../types';
 
 interface ConversationContextSidebarProps {
   contact: ContactProfileData | null;
@@ -23,6 +25,9 @@ interface ConversationContextSidebarProps {
   isMobile?: boolean;
   /** TASK-0292 (pedido direto, print: "este campo não está conectado a agenda, e eu não consigo editar pois a cliente remarcou") — o card AGENDAMENTOS é só leitura, sem jeito de corrigir um horário desatualizado quando o reagendamento aconteceu fora dos fluxos que escrevem em `appointments` (ex.: editar o evento direto no Google Calendar). Ressincroniza com o estado atual do mesmo evento (POST /api/conversations/:phone/appointment/resync). */
   onResyncAppointment?: () => Promise<void> | void;
+  /** Histórico cronológico do contato (agendamentos + mudanças de estágio do CRM) — GET /api/conversations/:phone/journey, sem backfill. */
+  journeyEvents?: ContactJourneyEvent[];
+  isJourneyLoading?: boolean;
 }
 
 export const ConversationContextSidebar: React.FC<ConversationContextSidebarProps> = ({
@@ -32,6 +37,8 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
   onClose,
   isMobile,
   onResyncAppointment,
+  journeyEvents,
+  isJourneyLoading,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
@@ -238,6 +245,8 @@ export const ConversationContextSidebar: React.FC<ConversationContextSidebarProp
           </div>
         )}
       </div>
+
+      <ContactJourneyTimeline events={journeyEvents || []} isLoading={Boolean(isJourneyLoading)} />
 
       {/* Bloco: STATUS DO AGENTE & INTERVENÇÃO */}
       <div className="border-t border-slate-800/80 pt-4">
