@@ -3788,7 +3788,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           em pills menores (padding e fonte reduzidos) — sem o estado
           `expandedQuickSetting`/toque-pra-expandir. "Somente anúncios"
           continua como ícone em círculo (mesmo estilo de Módulos), já que
-          é só um toggle liga/desliga, não tem opções pra escolher. */}
+          é só um toggle liga/desliga, não tem opções pra escolher.
+
+          Achado real (bug reportado, 09/09/2026): esta seção (Status do
+          agente, dentro da gaveta Ferramentas) renderizava incondicionalmente
+          pra QUALQUER role — mesmo gate `canManageAgent` (admin/saas_admin)
+          já usado na faixa fixa de desktop e no tile "Agente & catálogo"
+          logo abaixo, aplicado aqui também. */}
+      {canManageAgent && (
+      <>
       <div className="flex flex-col gap-1">
         <p className="pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
           {isSpanish ? 'Estado del agente' : 'Status do agente'}
@@ -3860,6 +3868,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           <AlertCircle className="h-3 w-3" />
           <span>Status incerto — recarregar</span>
         </button>
+      )}
+      </>
       )}
 
       {/* TASK-0358 (pedido direto, print anotado): Idioma/Tema saíram
@@ -4259,7 +4269,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               gaveta de Ferramentas (ver `toolbarSettingsBody`), que só
               aparece quando o operador realmente precisa mexer no status.
               Desktop não tem gaveta de Ferramentas (removida na TASK-0225),
-              então mantém a faixa fixa aqui, sem mudança. */}
+              então mantém a faixa fixa aqui, sem mudança.
+
+              Achado real (bug reportado, 09/09/2026): esta faixa renderizava
+              incondicionalmente pra QUALQUER role, mesmo `operator`/`manager`
+              — o backend já bloqueia `POST /api/agent-status` com
+              `requireRole('admin')` (`server/routes/conversations.ts`), mas o
+              frontend fazia uma atualização OTIMISTA (mudava o pill na hora)
+              e só revertia depois que o servidor rejeitava — dava a
+              impressão enganosa de que um operador conseguiu mudar o status.
+              Corrigido gatando a faixa inteira por `canManageAgent` (mesmo
+              gate — admin/saas_admin — já usado pro tile "Agente & catálogo"
+              logo abaixo), tanto aqui (desktop) quanto na gaveta mobile
+              (`toolbarSettingsBody`). */}
+          {canManageAgent && (
           <div className="hidden lg:flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
             <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
             <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -4336,6 +4359,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* TASK-0354 (pedido direto, "eu pedi pra recriar a página de
               ferramentas, não mandar ela como janela"): a versão anterior
