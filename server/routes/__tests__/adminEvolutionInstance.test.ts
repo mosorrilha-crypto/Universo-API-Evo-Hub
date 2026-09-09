@@ -36,7 +36,7 @@ function startServer(
   app.use(
     createAdminRouter({
       authenticateToken,
-      supabase: supabase as any,
+      supabase: supabase as any, jwtSecret: 'test-secret', isProduction: false,
       publicBaseUrl: PUBLIC_BASE_URL,
       ...deps,
     })
