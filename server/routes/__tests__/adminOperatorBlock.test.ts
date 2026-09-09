@@ -27,7 +27,7 @@ function startServer(supabase: ReturnType<typeof createFakeSupabase>, user: { id
   app.use(
     createAdminRouter({
       authenticateToken: makeAuth(user) as any,
-      supabase: supabase as any,
+      supabase: supabase as any, jwtSecret: 'test-secret', isProduction: false,
       publicBaseUrl: 'https://universo.example.com',
     })
   );

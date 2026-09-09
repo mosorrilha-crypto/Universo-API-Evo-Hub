@@ -1,9 +1,12 @@
 import { Router, type RequestHandler } from 'express';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireRole, isSaasAdmin } from '../middleware/rbac';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { SESSION_COOKIE_NAME, sessionCookieOptions } from './auth';
+import { recordOperatorImpersonationEvent } from '../services/operatorImpersonationStore';
 import { setEvolutionWebhook } from '../services/evolutionSend';
 import { getGlobalPromptLayerRow, setGlobalPromptLayer } from '../services/globalPromptStore';
 import { getRuntimeKnowledgeBaseForPlatform } from '../services/knowledgeBaseStore';
@@ -22,6 +25,9 @@ import { decryptSecret, encryptSecret } from '../services/tokenCrypto';
 interface AdminRouterDeps {
   authenticateToken: RequestHandler;
   supabase: SupabaseClient | null;
+  /** Usados só pela rota de impersonação (POST /api/admin/operators/:id/impersonate) — assina/grava o mesmo cookie de sessão do login normal. */
+  jwtSecret: string;
+  isProduction: boolean;
   /** Credencial "admin" da Evolution API (servidor self-hosted) usada só pra provisionar instância nova — depois de criada, cada instância tem sua própria linha em tenant_evolution_credentials (Epic 4.6). */
   evolutionApiUrl?: string;
   evolutionApiKey?: string;
@@ -42,13 +48,21 @@ interface AdminRouterDeps {
  * vai precisar chamar pra deixar de ser decorativo — essa reconexão do
  * frontend ainda não foi feita, fica pro próximo passo.
  */
-export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl, evolutionApiKey, publicBaseUrl, sharedMetaPhoneNumberId }: AdminRouterDeps): Router {
+export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isProduction, evolutionApiUrl, evolutionApiKey, publicBaseUrl, sharedMetaPhoneNumberId }: AdminRouterDeps): Router {
   const router = Router();
 
   function db() {
     if (!supabase) throw new Error('Supabase não configurado.');
     return supabase;
   }
+
+  // Sessão de impersonação (TASK-0363) expira bem mais rápido que um login
+  // normal (24h) — reduz a janela de risco de uma sessão "acessando como
+  // outro operador" ficar esquecida aberta. Quem esquecer de clicar "Voltar
+  // para admin" simplesmente perde a sessão e precisa logar de novo como
+  // saas_admin depois desse tempo.
+  const IMPERSONATION_SESSION_TTL = '2h';
+  const IMPERSONATION_SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
   // ── Tenants ──────────────────────────────────────────────────────────
   // Só saas_admin cria/lista tenants — são os clientes do SaaS, não algo
@@ -496,6 +510,62 @@ export function createAdminRouter({ authenticateToken, supabase, evolutionApiUrl
     if (error) return res.status(500).json({ error: error.message });
     if (!data?.length) return res.status(404).json({ error: 'Operador não encontrado.' });
     res.json({ success: true });
+  }));
+
+  /**
+   * Impersonação (TASK-0363, pedido real: "como saas_admin eu consigo trocar
+   * de empresa, mas se um tenant tem vários operadores não tenho como agir
+   * como um específico") — troca a sessão do saas_admin pela do operador
+   * alvo (mesmo cookie único `universo_session`, sem tabela de sessão nova),
+   * pra ver/usar o painel exatamente como aquele operador. Restaurado via
+   * POST /api/auth/end-impersonation (server/routes/auth.ts). `requireRole
+   * ('saas_admin')` — mais restrito que as outras rotas de operador acima
+   * (`admin`) — só o topo da hierarquia pode assumir a identidade de outra
+   * conta.
+   */
+  router.post('/api/admin/operators/:id/impersonate', authenticateToken, requireRole('saas_admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const targetId = req.params.id;
+    if (targetId === req.user?.id) {
+      return res.status(400).json({ error: 'Você já está logado como você mesmo.' });
+    }
+
+    const { data: target, error } = await db()
+      .from('operators')
+      .select('id, tenant_id, email, name, role, is_active')
+      .eq('id', targetId)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!target) return res.status(404).json({ error: 'Operador não encontrado.' });
+    // Nunca outro saas_admin — evita um saas_admin se escondendo atrás de
+    // outro (decisão explícita do dono do produto).
+    if (target.role === 'saas_admin') {
+      return res.status(403).json({ error: 'Não é possível impersonar outro saas_admin.' });
+    }
+    if (target.is_active === false) {
+      return res.status(400).json({ error: 'Este operador está bloqueado — não é possível acessar como ele.' });
+    }
+
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) || undefined : undefined;
+
+    // Auditoria ANTES de trocar o cookie — uma falha aqui bloqueia a troca
+    // de sessão (diferente da jornada do contato, best-effort); impersonação
+    // nunca pode acontecer sem deixar rastro auditável.
+    await recordOperatorImpersonationEvent(db(), {
+      tenantId: target.tenant_id,
+      targetOperatorId: target.id,
+      actorId: req.user!.id,
+      eventType: 'started',
+      reason,
+    });
+
+    const token = jwt.sign(
+      { id: target.id, tenantId: target.tenant_id, role: target.role, impersonatedBy: req.user!.id },
+      jwtSecret,
+      { expiresIn: IMPERSONATION_SESSION_TTL }
+    );
+    res.cookie(SESSION_COOKIE_NAME, token, { ...sessionCookieOptions(isProduction), maxAge: IMPERSONATION_SESSION_MAX_AGE_MS });
+
+    res.json({ operator: { id: target.id, tenantId: target.tenant_id, email: target.email, name: target.name, role: target.role } });
   }));
 
   /**

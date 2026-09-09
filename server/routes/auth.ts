@@ -7,6 +7,7 @@ import type { AuthenticatedRequest } from '../middleware/auth';
 import { authChangePasswordRateLimiter, authLoginRateLimiter, authSessionRateLimiter } from '../middleware/rateLimit';
 import { clearFailedLogins, isLoginLocked, recordFailedLogin } from '../services/authLoginAttempts';
 import { FirebaseAdminNotConfiguredError, verifyGoogleIdToken } from '../services/firebaseAdmin';
+import { recordOperatorImpersonationEvent } from '../services/operatorImpersonationStore';
 
 interface AuthRouterDeps {
   jwtSecret: string;
@@ -25,10 +26,10 @@ interface AuthRouterDeps {
 // legítimo que precise desse cookie vindo de outro site; sem isso, um
 // cookie sozinho reabriria CSRF nas ~140 rotas que hoje só o header
 // `Authorization`, nunca anexado automaticamente pelo navegador, protegia).
-const SESSION_COOKIE_NAME = 'universo_session';
-const SESSION_COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // mesma janela do `expiresIn: '24h'` do JWT
+export const SESSION_COOKIE_NAME = 'universo_session';
+export const SESSION_COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // mesma janela do `expiresIn: '24h'` do JWT
 
-function sessionCookieOptions(isProduction: boolean) {
+export function sessionCookieOptions(isProduction: boolean) {
   return {
     httpOnly: true,
     secure: isProduction, // cookie `Secure` não é gravado em http:// puro — precisa ser condicional pro dev local
@@ -215,7 +216,7 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken, isPro
       const token = req.cookies?.[SESSION_COOKIE_NAME];
       if (!token) return res.sendStatus(401);
 
-      const payload = jwt.verify(token, jwtSecret) as { id?: string };
+      const payload = jwt.verify(token, jwtSecret) as { id?: string; impersonatedBy?: string };
       if (!payload.id) return res.sendStatus(403);
 
       const { data, error } = await supabase
@@ -228,6 +229,20 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken, isPro
       // sessão já no próximo carregamento do app, não só em um login novo.
       if (data.is_active === false) return res.sendStatus(403);
 
+      // Sessão de impersonação (TASK-0363, "acessar como um operador"): o
+      // JWT carrega `impersonatedBy` (id do saas_admin real por trás desta
+      // sessão) — busca o nome dele só pra exibição na faixa de aviso do
+      // painel; melhor esforço, nunca derruba a sessão se essa busca falhar.
+      let impersonation: { active: boolean; byOperatorId?: string; byOperatorName?: string } = { active: false };
+      if (payload.impersonatedBy) {
+        const { data: byOperator } = await supabase
+          .from('operators')
+          .select('id, name')
+          .eq('id', payload.impersonatedBy)
+          .maybeSingle();
+        impersonation = { active: true, byOperatorId: payload.impersonatedBy, byOperatorName: byOperator?.name };
+      }
+
       res.json({
         operator: {
           id: data.id,
@@ -236,6 +251,7 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken, isPro
           name: data.name,
           role: data.role,
         },
+        impersonation,
       });
     } catch {
       return res.sendStatus(403);
@@ -250,6 +266,61 @@ export function createAuthRouter({ jwtSecret, supabase, authenticateToken, isPro
   router.post('/api/auth/logout', (_req, res) => {
     res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions(isProduction));
     res.json({ success: true });
+  });
+
+  // Encerra uma sessão de impersonação (TASK-0363, saas_admin "acessando
+  // como" um operador — ver POST /api/admin/operators/:id/impersonate) e
+  // restaura a sessão original do saas_admin. Só `authenticateToken` (não
+  // `requireRole`) porque quem chama já É o operador impersonado — pode ter
+  // qualquer role, inclusive `operator`. Revalida o saas_admin original
+  // contra o Postgres (não confia cegamente no claim antigo do JWT): se ele
+  // sumiu, perdeu o role saas_admin ou foi bloqueado nesse meio-tempo, a
+  // restauração é recusada.
+  router.post('/api/auth/end-impersonation', authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      if (!supabase) throw new Error('Supabase não está configurado.');
+      const impersonatedBy = req.user?.impersonatedBy as string | undefined;
+      if (!impersonatedBy) {
+        return res.status(400).json({ error: 'Esta sessão não está impersonando ninguém.' });
+      }
+
+      const { data: originalOperator, error } = await supabase
+        .from('operators')
+        .select('id, tenant_id, email, name, role, is_active')
+        .eq('id', impersonatedBy)
+        .maybeSingle();
+      if (error || !originalOperator) throw new Error('Sessão original não encontrada.');
+      if (originalOperator.role !== 'saas_admin' || originalOperator.is_active === false) {
+        throw new Error('Sessão original não pode mais ser restaurada.');
+      }
+
+      // Auditoria ANTES de trocar o cookie — se isto falhar, a sessão
+      // impersonada continua ativa em vez de voltar sem deixar rastro.
+      await recordOperatorImpersonationEvent(supabase, {
+        tenantId: req.user!.tenantId,
+        targetOperatorId: req.user!.id,
+        actorId: originalOperator.id,
+        eventType: 'ended',
+      });
+
+      const token = jwt.sign(
+        { id: originalOperator.id, tenantId: originalOperator.tenant_id, role: originalOperator.role },
+        jwtSecret,
+        { expiresIn: '24h' }
+      );
+      res.cookie(SESSION_COOKIE_NAME, token, { ...sessionCookieOptions(isProduction), maxAge: SESSION_COOKIE_MAX_AGE_MS });
+      res.json({
+        operator: {
+          id: originalOperator.id,
+          tenantId: originalOperator.tenant_id,
+          email: originalOperator.email,
+          name: originalOperator.name,
+          role: originalOperator.role,
+        },
+      });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || 'Falha ao encerrar a impersonação.' });
+    }
   });
 
   // Troca de senha pelo próprio operador (TASK-0261) — até aqui só existia

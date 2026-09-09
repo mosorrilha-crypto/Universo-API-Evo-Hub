@@ -202,7 +202,7 @@ async function startServer() {
     googleRedirectUri: config.googleRedirectUri,
     jwtSecret: config.jwtSecret,
   }));
-  app.use(createAdminRouter({ authenticateToken, supabase, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
+  app.use(createAdminRouter({ authenticateToken, supabase, jwtSecret: config.jwtSecret, isProduction: config.isProduction, evolutionApiUrl: config.evolutionApiUrl, evolutionApiKey: config.evolutionApiKey, publicBaseUrl: config.publicBaseUrl, sharedMetaPhoneNumberId: config.metaPhoneNumberId }));
   app.use(createRoadmapRouter({ authenticateToken }));
   // TASK-0206 — deps compartilhadas com startBroadcastSenderJob logo abaixo,
   // pra que criar/ativar uma campanha (broadcast.ts) dispare um tick
