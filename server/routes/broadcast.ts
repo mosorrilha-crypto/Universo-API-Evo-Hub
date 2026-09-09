@@ -22,6 +22,7 @@ import {
   deleteBroadcastNumber,
   getBroadcastNumber,
   type BroadcastNumberStatus,
+  type BroadcastNumberProvider,
   type BroadcastQualityRating,
   listBroadcastTemplates,
   createBroadcastTemplate,
@@ -67,6 +68,14 @@ interface BroadcastRouterDeps {
 }
 
 const NUMBER_STATUSES: BroadcastNumberStatus[] = ['active', 'paused', 'banned', 'warming'];
+const NUMBER_PROVIDERS: BroadcastNumberProvider[] = ['meta', 'evolution'];
+// TASK-0367 — piso de segurança pra número Evolution: mesmo que o operador
+// tente configurar algo mais agressivo, nunca aceita menos que isso — a
+// Evolution/Baileys não tem quota oficial nem curva de qualidade calibrada
+// como a Meta, e é o número operacional real do tenant que está em jogo.
+const EVOLUTION_MIN_GAP_SECONDS_FLOOR = 45;
+const EVOLUTION_MAX_PER_MINUTE_CAP_CEILING = 3;
+const EVOLUTION_MAX_DAILY_CAP_CEILING = 100;
 const QUALITY_RATINGS: BroadcastQualityRating[] = ['unknown', 'high', 'medium', 'low'];
 const TEMPLATE_CATEGORIES: BroadcastTemplateCategory[] = ['marketing', 'utility'];
 const TEMPLATE_HEADER_TYPES: BroadcastTemplateHeaderType[] = ['none', 'image'];
@@ -102,12 +111,27 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   }));
 
   router.post('/api/admin/broadcast-numbers', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { label, phoneNumberId, wabaId, accessToken, perMinuteCap, dailyCap, minGapSeconds } = req.body || {};
+    const { label, phoneNumberId, provider, wabaId, accessToken, perMinuteCap, dailyCap, minGapSeconds } = req.body || {};
     if (typeof label !== 'string' || !label.trim()) return res.status(400).json({ error: 'Campo "label" é obrigatório.' });
     if (typeof phoneNumberId !== 'string' || !phoneNumberId.trim()) return res.status(400).json({ error: 'Campo "phoneNumberId" é obrigatório.' });
+    if (provider !== undefined && !NUMBER_PROVIDERS.includes(provider)) {
+      return res.status(400).json({ error: `Campo "provider" precisa ser um de: ${NUMBER_PROVIDERS.join(', ')}.` });
+    }
+    if (provider === 'evolution') {
+      if (minGapSeconds !== undefined && Number(minGapSeconds) < EVOLUTION_MIN_GAP_SECONDS_FLOOR) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita menos de ${EVOLUTION_MIN_GAP_SECONDS_FLOOR}s de espaçamento entre mensagens (risco de bloqueio no número operacional real).` });
+      }
+      if (perMinuteCap !== undefined && Number(perMinuteCap) > EVOLUTION_MAX_PER_MINUTE_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_PER_MINUTE_CAP_CEILING} mensagens por minuto.` });
+      }
+      if (dailyCap !== undefined && Number(dailyCap) > EVOLUTION_MAX_DAILY_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_DAILY_CAP_CEILING} mensagens por dia.` });
+      }
+    }
     const number = await createBroadcastNumber(tenantOf(req), {
       label: label.trim(),
       phoneNumberId: phoneNumberId.trim(),
+      provider,
       wabaId: wabaId || null,
       accessToken: accessToken || null,
       perMinuteCap,
@@ -124,6 +148,20 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
     }
     if (qualityRating !== undefined && !QUALITY_RATINGS.includes(qualityRating)) {
       return res.status(400).json({ error: `Campo "qualityRating" precisa ser um de: ${QUALITY_RATINGS.join(', ')}.` });
+    }
+    // TASK-0367 — provider é fixo desde a criação (não está em UpdateBroadcastNumberPatch),
+    // então reconfere o piso/teto de segurança contra o valor real já salvo.
+    const existingNumber = await getBroadcastNumber(tenantOf(req), req.params.id);
+    if (existingNumber?.provider === 'evolution') {
+      if (minGapSeconds !== undefined && Number(minGapSeconds) < EVOLUTION_MIN_GAP_SECONDS_FLOOR) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita menos de ${EVOLUTION_MIN_GAP_SECONDS_FLOOR}s de espaçamento entre mensagens (risco de bloqueio no número operacional real).` });
+      }
+      if (perMinuteCap !== undefined && Number(perMinuteCap) > EVOLUTION_MAX_PER_MINUTE_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_PER_MINUTE_CAP_CEILING} mensagens por minuto.` });
+      }
+      if (dailyCap !== undefined && Number(dailyCap) > EVOLUTION_MAX_DAILY_CAP_CEILING) {
+        return res.status(400).json({ error: `Número Evolution nunca aceita mais de ${EVOLUTION_MAX_DAILY_CAP_CEILING} mensagens por dia.` });
+      }
     }
     const number = await updateBroadcastNumber(tenantOf(req), req.params.id, {
       label, wabaId, accessToken, status, qualityRating, perMinuteCap, dailyCap, minGapSeconds,
@@ -231,19 +269,26 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   }));
 
   // Monta a lista a partir de dado real já existente no sistema (não CSV)
-  // — "já é lead" (conversations) ou "já tem agendamento confirmado"
-  // (appointments com eventId real). Não existe segmento de "inscrito em
-  // evento": o sistema não tem essa entidade, e inventar uma fabricaria
-  // dado de negócio que não existe (mesma regra do agente de IA).
-  const CONTACT_LIST_SEGMENTS: ContactListSegment[] = ['known_leads', 'has_appointment'];
+  // — "já é lead" (conversations), "já tem agendamento confirmado"
+  // (appointments com eventId real), ou "demonstrou interesse em algo
+  // específico mas não agendou" (TASK-0366 — campanha de reaquecimento;
+  // filtra conversations.interest por um termo livre em interestKeyword e
+  // exclui quem já tem qualquer linha em appointments). Não existe
+  // segmento de "inscrito em evento": o sistema não tem essa entidade, e
+  // inventar uma fabricaria dado de negócio que não existe (mesma regra
+  // do agente de IA).
+  const CONTACT_LIST_SEGMENTS: ContactListSegment[] = ['known_leads', 'has_appointment', 'interested_no_appointment'];
   router.post('/api/admin/broadcast-contact-lists/from-segment', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { name, segment } = req.body || {};
+    const { name, segment, interestKeyword } = req.body || {};
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
     if (!CONTACT_LIST_SEGMENTS.includes(segment)) {
       return res.status(400).json({ error: `Campo "segment" precisa ser um de: ${CONTACT_LIST_SEGMENTS.join(', ')}.` });
     }
+    if (segment === 'interested_no_appointment' && (typeof interestKeyword !== 'string' || !interestKeyword.trim())) {
+      return res.status(400).json({ error: 'Informe "interestKeyword" (ex.: "micro" pra micropigmentação) pra esse segmento.' });
+    }
     try {
-      const result = await createContactListFromSegment(tenantOf(req), name.trim(), segment, req.user?.id || null);
+      const result = await createContactListFromSegment(tenantOf(req), name.trim(), segment, req.user?.id || null, { interestKeyword });
       res.status(201).json({ list: result.list, imported: result.imported });
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });

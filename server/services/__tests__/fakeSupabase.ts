@@ -10,6 +10,18 @@ import { randomUUID } from 'crypto';
 type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
 
+/**
+ * `ilike` real do Postgres: `%` é curinga (qualquer sequência, inclusive
+ * vazia), case-insensitive, sem `%` vira match exato — mesmo comportamento
+ * usado pelos 2 casos reais já existentes (login por e-mail, match exato) e
+ * o novo caso de busca parcial (createContactListFromSegment,
+ * TASK-0366 — filtro de interesse por termo livre, ex.: `%micro%`).
+ */
+function matchesIlikePattern(value: string, pattern: string): boolean {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
+  return new RegExp(`^${escaped}$`, 'i').test(value);
+}
+
 class FakeQueryBuilder {
   private filters: Array<['eq' | 'ilike' | 'gte' | 'lt' | 'lte' | 'in', string, any]> = [];
   private wantSelect = false;
@@ -72,7 +84,7 @@ class FakeQueryBuilder {
 
   private matches(row: Row): boolean {
     return this.filters.every(([kind, column, value]) => {
-      if (kind === 'ilike') return String(row[column] ?? '').toLowerCase() === String(value ?? '').toLowerCase();
+      if (kind === 'ilike') return matchesIlikePattern(String(row[column] ?? ''), String(value ?? ''));
       if (kind === 'gte') return row[column] >= value;
       if (kind === 'lt') return row[column] < value;
       if (kind === 'lte') return row[column] <= value;

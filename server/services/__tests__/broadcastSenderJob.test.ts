@@ -17,6 +17,11 @@ vi.mock('../metaSend', () => ({
 }));
 import { sendWhatsAppTemplateMessage, uploadWhatsAppMedia } from '../metaSend';
 
+vi.mock('../evolutionSend', () => ({
+  sendEvolutionTextMessage: vi.fn().mockResolvedValue('evo-msg-id-test'),
+}));
+import { sendEvolutionTextMessage } from '../evolutionSend';
+
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const NOW = new Date('2026-08-30T12:00:00Z');
 
@@ -75,6 +80,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   vi.mocked(sendWhatsAppTemplateMessage).mockClear();
   vi.mocked(uploadWhatsAppMedia).mockClear();
+  vi.mocked(sendEvolutionTextMessage).mockClear();
 });
 
 describe('broadcastSenderJob — cotas de segurança', () => {
@@ -358,5 +364,80 @@ describe('broadcastSenderJob — variação de template', () => {
 
     expect(sendWhatsAppTemplateMessage).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendWhatsAppTemplateMessage).mock.calls[0][3]).toBe('template_a');
+  });
+});
+
+describe('broadcastSenderJob — provider "evolution" (TASK-0367)', () => {
+  async function seedEvolutionCredentials() {
+    await getDb().from('tenant_evolution_credentials').insert({
+      tenant_id: TENANT_A, instance_name: 'monique-instance', api_url: 'https://evo.example.com', api_key: 'evo-key-plaintext',
+    });
+  }
+
+  it('manda texto livre via Evolution (não template Meta), renderizando as variáveis do contato', async () => {
+    await seedEvolutionCredentials();
+    await seedTemplate('tpl-1', { body_text: 'Oi {{nome}}, temos uma promo pra você!', body_variable_labels: ['nome'] });
+    await seedNumber('num-1', { provider: 'evolution', per_minute_cap: 5, daily_cap: 100, min_gap_seconds: 0 });
+    await seedCampaign('camp-1', 'tpl-1');
+    await seedCampaignNumber('camp-1', 'num-1');
+    await getDb().from('broadcast_contacts').insert({ id: 'contact-1', tenant_id: TENANT_A, list_id: 'list-1', phone: '595981111111', name: 'Ana', variables: { nome: 'Ana' } });
+    await getDb().from('broadcast_campaign_recipients').insert({
+      id: 'recipient-1', campaign_id: 'camp-1', tenant_id: TENANT_A, contact_id: 'contact-1', broadcast_number_id: 'num-1', phone: '595981111111', status: 'pending',
+    });
+
+    await runBroadcastSenderTick();
+
+    expect(sendWhatsAppTemplateMessage).not.toHaveBeenCalled();
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(1);
+    expect(sendEvolutionTextMessage).toHaveBeenCalledWith('monique-instance', 'https://evo.example.com', 'evo-key-plaintext', '595981111111', 'Oi Ana, temos uma promo pra você!');
+
+    const { data: recipient } = await getDb().from('broadcast_campaign_recipients').select('*').eq('id', 'recipient-1').maybeSingle();
+    expect(recipient?.status).toBe('sent');
+    expect(recipient?.wamid).toBe('evo-msg-id-test');
+  });
+
+  it('conversa nova sai sem phone_number_id próprio (rota pelo operacional real do tenant, sem "número de disparo" dedicado)', async () => {
+    await seedEvolutionCredentials();
+    await seedTemplate('tpl-1');
+    await seedNumber('num-1', { provider: 'evolution' });
+    await seedCampaign('camp-1', 'tpl-1');
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 1, '595982222222');
+
+    await runBroadcastSenderTick();
+
+    const { data: conv } = await getDb().from('conversations').select('*').eq('tenant_id', TENANT_A).eq('phone', '5959822222220').maybeSingle();
+    expect(conv?.phone_number_id).toBeNull();
+  });
+
+  it('teto de segurança da Evolution (2 por tick) prevalece mesmo com per_minute_cap/daily_cap configurados bem mais altos', async () => {
+    await seedEvolutionCredentials();
+    await seedTemplate('tpl-1');
+    await seedNumber('num-1', { provider: 'evolution', per_minute_cap: 1000, daily_cap: 100000, min_gap_seconds: 0 });
+    await seedCampaign('camp-1', 'tpl-1');
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 5);
+
+    await runBroadcastSenderTick();
+
+    expect(sendEvolutionTextMessage).toHaveBeenCalledTimes(2);
+    const { data: pending } = await getDb().from('broadcast_campaign_recipients').select('id').eq('campaign_id', 'camp-1').eq('status', 'pending');
+    expect(pending).toHaveLength(3);
+  });
+
+  it('sem credencial Evolution configurada pro tenant, marca o recipient como failed em vez de derrubar o tick inteiro', async () => {
+    // Sem seedEvolutionCredentials() — tenant não tem tenant_evolution_credentials.
+    await seedTemplate('tpl-1');
+    await seedNumber('num-1', { provider: 'evolution' });
+    await seedCampaign('camp-1', 'tpl-1');
+    await seedCampaignNumber('camp-1', 'num-1');
+    await seedPendingRecipients('camp-1', 'num-1', 1);
+
+    await runBroadcastSenderTick();
+
+    expect(sendEvolutionTextMessage).not.toHaveBeenCalled();
+    const { data: recipient } = await getDb().from('broadcast_campaign_recipients').select('*').eq('campaign_id', 'camp-1').maybeSingle();
+    expect(recipient?.status).toBe('failed');
+    expect(recipient?.error_message).toMatch(/credencial Evolution/i);
   });
 });

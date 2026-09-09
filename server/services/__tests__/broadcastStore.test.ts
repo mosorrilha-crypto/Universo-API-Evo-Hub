@@ -369,6 +369,33 @@ describe('createContactListFromSegment', () => {
   it('lança erro claro quando o segmento não encontra nenhum contato', async () => {
     await expect(createContactListFromSegment(TENANT_A, 'Vazia', 'known_leads', null)).rejects.toThrow(/nenhum contato/i);
   });
+
+  describe('segmento "interested_no_appointment" (TASK-0366 — campanha de reaquecimento)', () => {
+    it('filtra por termo parcial case-insensitive no interest e exclui quem já tem qualquer linha em appointments', async () => {
+      await getDb().from('conversations').insert([
+        { tenant_id: TENANT_A, phone: '595981111111', name: 'Interessada sem agendar', interest: 'Cejas Microshading o Microblading' },
+        { tenant_id: TENANT_A, phone: '595982222222', name: 'Interessada MAIÚSCULO', interest: 'COMBO MICRO CEJAS + LABIOS' },
+        { tenant_id: TENANT_A, phone: '595983333333', name: 'Interesse diferente', interest: 'Lash Lift' },
+        { tenant_id: TENANT_A, phone: '595984444444', name: 'Já tem reserva provisória', interest: 'Microlips Labios' },
+        { tenant_id: TENANT_A, phone: '595985555555', name: 'Já tem agendamento confirmado', interest: 'Microlips Labios' },
+      ]);
+      await getDb().from('appointments').insert([
+        { tenant_id: TENANT_A, phone: '595984444444', event_id: null, held_until: '2026-09-10T10:00:00', summary: 'Reserva sem evento', start_iso: '2026-09-10T10:00:00', end_iso: '2026-09-10T10:30:00', created_at: new Date().toISOString() },
+        { tenant_id: TENANT_A, phone: '595985555555', event_id: 'evt-real-2', summary: 'Microlips', start_iso: '2026-09-11T10:00:00', end_iso: '2026-09-11T10:30:00', created_at: new Date().toISOString() },
+      ]);
+
+      const result = await createContactListFromSegment(TENANT_A, 'Reaquecimento micropigmentação', 'interested_no_appointment', null, { interestKeyword: 'micro' });
+
+      expect(result.imported).toBe(2);
+      expect(result.list.source).toBe('segment_interested_no_appointment');
+      const contacts = await getDb().from('broadcast_contacts').select('*').eq('list_id', result.list.id);
+      expect((contacts.data || []).map((c: any) => c.phone).sort()).toEqual(['595981111111', '595982222222']);
+    });
+
+    it('lança erro claro quando interestKeyword não é informado', async () => {
+      await expect(createContactListFromSegment(TENANT_A, 'Sem termo', 'interested_no_appointment', null)).rejects.toThrow(/interestKeyword/);
+    });
+  });
 });
 
 describe('variação de template numa campanha', () => {
