@@ -23,7 +23,7 @@ function makeAuth(role: string) {
 function startServer(role: string) {
   const app = express();
   app.use(express.json());
-  app.use(createAdminRouter({ authenticateToken: makeAuth(role) as any, supabase: supabase as any, publicBaseUrl: 'https://universo.example.com' }));
+  app.use(createAdminRouter({ authenticateToken: makeAuth(role) as any, supabase: supabase as any, jwtSecret: 'test-secret', isProduction: false, publicBaseUrl: 'https://universo.example.com' }));
   return new Promise<{ server: Server; baseUrl: string }>((resolve) => {
     const s = app.listen(0, () => {
       const address = s.address();

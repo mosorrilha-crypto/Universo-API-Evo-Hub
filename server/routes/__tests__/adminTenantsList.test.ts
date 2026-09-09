@@ -30,7 +30,7 @@ function startServer(role: string, sharedMetaPhoneNumberId?: string) {
   app.use(
     createAdminRouter({
       authenticateToken: makeAuth(role) as any,
-      supabase: supabase as any,
+      supabase: supabase as any, jwtSecret: 'test-secret', isProduction: false,
       publicBaseUrl: 'https://universo.example.com',
       sharedMetaPhoneNumberId,
     })
