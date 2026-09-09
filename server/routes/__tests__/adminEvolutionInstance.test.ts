@@ -578,3 +578,72 @@ describe('escopo por tenant pra admin comum (não saas_admin)', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// TASK-0371 (pedido direto, print real do painel SaaS Admin: tenant "Dr.
+// Daniel" com "Sem conexão" — só saas_admin conseguia iniciar a primeira
+// conexão via QR, apesar de POST .../evolution-instance já aceitar admin
+// comum). Esse endpoint decide se o botão self-service aparece pro admin.
+describe('GET /api/admin/tenants/:id/evolution-instance/available', () => {
+  function fakeAuthenticateTokenAsAdmin(req: any, _res: any, next: any) {
+    req.user = { id: 'op-admin-comum', tenantId: TENANT_ID, role: 'admin' };
+    next();
+  }
+
+  it('true (já conectado) quando o tenant já tem credencial Evolution', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'minha-instancia', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: true, alreadyConnected: true });
+  });
+
+  it('true (primeira conexão) quando o tenant não tem NENHUMA credencial própria e o servidor tem EVOLUTION_API_URL/KEY', async () => {
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: true, alreadyConnected: false });
+  });
+
+  it('false quando o tenant já tem credencial Meta própria configurada (canal escolhido deliberadamente)', async () => {
+    supabase.__tables.tenant_meta_credentials = [{ tenant_id: TENANT_ID, phone_number_id: 'pn-real-123' }];
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: false, alreadyConnected: false });
+  });
+
+  it('false quando o servidor não tem EVOLUTION_API_URL/KEY configurados, mesmo sem credencial Meta', async () => {
+    ({ server, baseUrl } = await startServer({}, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: false, alreadyConnected: false });
+  });
+
+  it('ignora o :id da URL pra admin comum — sempre resolve pelo tenantId do JWT', async () => {
+    const OTHER_TENANT_ID = 'tenant-de-outra-empresa';
+    supabase.__tables.tenant_meta_credentials = [{ tenant_id: OTHER_TENANT_ID, phone_number_id: 'pn-de-outra-empresa' }];
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${OTHER_TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    // Não bate na credencial Meta de OTHER_TENANT_ID — resolve pro tenant do JWT (TENANT_ID), sem credencial nenhuma.
+    expect(await res.json()).toEqual({ available: true, alreadyConnected: false });
+  });
+
+  it('403 pra operator/manager', async () => {
+    function fakeAuthenticateTokenAsOperator(req: any, _res: any, next: any) {
+      req.user = { id: 'op-comum', tenantId: TENANT_ID, role: 'operator' };
+      next();
+    }
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsOperator));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(403);
+  });
+});

@@ -15,8 +15,16 @@ import { apiFetch } from '../lib/apiClient';
  * (resolveEvolutionTenantId) ignora qualquer id que não venha de saas_admin
  * e resolve pelo tenantId do JWT, então isso nunca abre a conexão de outro
  * tenant mesmo que o `tenantId` passado aqui esteja errado/desatualizado.
+ *
+ * `alreadyConnected` (TASK-0371) só ajusta o texto do botão/título — o
+ * mesmo `handleGenerateQr` já cria a instância do zero quando o tenant ainda
+ * não tem nenhuma (POST .../evolution-instance é idempotente), então esse
+ * componente sempre serviu tanto pra primeira conexão quanto pra reconectar;
+ * antes disso só ficava visível pra quem já tinha instância, o que escondia
+ * a opção de primeira conexão pra admin comum.
  */
-export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) => {
+export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string; alreadyConnected?: boolean }> = ({ tenantId, alreadyConnected = false }) => {
+  const buttonLabel = alreadyConnected ? 'Reconectar WhatsApp' : 'Conectar WhatsApp';
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
   const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
@@ -119,12 +127,12 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
       <button
         type="button"
         onClick={openModal}
-        title="Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)"
+        title={alreadyConnected ? 'Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)' : 'Conectar o WhatsApp deste tenant via QR Code (Evolution API)'}
         className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-sky-800/60 bg-sky-950/60 px-3 py-2 text-xs font-semibold text-sky-300 transition-all hover:bg-sky-900/80"
       >
         <QrCode className="w-3.5 h-3.5" />
-        <span className="hidden sm:inline">Reconectar WhatsApp (QR Code)</span>
-        <span className="sm:hidden">Reconectar WhatsApp</span>
+        <span className="hidden sm:inline">{buttonLabel} (QR Code)</span>
+        <span className="sm:hidden">{buttonLabel}</span>
       </button>
 
       {isModalOpen && (
@@ -135,7 +143,7 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
           >
             <div className="flex items-center justify-between">
               <h3 className="text-white font-bold text-sm flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-sky-400" /> Reconectar WhatsApp (Evolution API)
+                <QrCode className="w-4 h-4 text-sky-400" /> {buttonLabel} (Evolution API)
               </h3>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
                 <X className="w-4 h-4" />
