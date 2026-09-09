@@ -38,7 +38,7 @@ export interface StoredMessage {
   reactions?: MessageReaction[];
   /** Só presente quando sender='agent' — distingue resposta automática da IA, mensagem digitada manualmente por um operador no painel (ver issue #126), ou envio automático de campanha de disparo em massa (TASK-0171). */
   sentBy?: 'ai' | 'operator' | 'campaign';
-  /** TASK-0368 — nome do operador que digitou (snapshot no momento do envio, não um join ao vivo com `operators` — mostra o nome de quem mandou mesmo que o operador seja renomeado/removido depois). Só presente quando `sentBy === 'operator'`; `undefined` em mensagens antigas de antes desta coluna existir (painel cai no rótulo genérico "Você (equipe)"). */
+  /** TASK-0370 — nome do operador que digitou (snapshot no momento do envio, não um join ao vivo com `operators` — mostra o nome de quem mandou mesmo que o operador seja renomeado/removido depois). Só presente quando `sentBy === 'operator'`; `undefined` em mensagens antigas de antes desta coluna existir (painel cai no rótulo genérico "Você (equipe)"). */
   operatorName?: string;
 }
 
@@ -529,7 +529,7 @@ export async function recordOutgoingMessage(
   forwardedFromMessageId?: string,
   /** ID pré-gerado pra essa mensagem — usado quando quem chama precisa saber o id ANTES de gravar (ex: pra salvar a mídia real sob o mesmo id em mediaImageStore, ver /send-media em conversations.ts). Sem isso, o id só existia dentro desta função e ninguém conseguia associar o áudio/imagem enviado à mensagem gravada. */
   customId?: string,
-  /** TASK-0368 (pedido direto — identificar qual operador específico escreveu) — só faz sentido quando `sentBy === 'operator'`; nome já resolvido pelo chamador (ver /send em conversations.ts), gravado como snapshot (não muda se o operador for renomeado depois). */
+  /** TASK-0370 (pedido direto — identificar qual operador específico escreveu) — só faz sentido quando `sentBy === 'operator'`; nome já resolvido pelo chamador (ver /send em conversations.ts), gravado como snapshot (não muda se o operador for renomeado depois). */
   operatorName?: string
 ): Promise<StoredConversation> {
   const db = getDb();

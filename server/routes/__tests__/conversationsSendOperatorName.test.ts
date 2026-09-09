@@ -1,5 +1,5 @@
 /**
- * TASK-0368 (pedido direto, print real de conversa duplicada no painel):
+ * TASK-0370 (pedido direto, print real de conversa duplicada no painel):
  * POST /api/conversations/:phone/send precisa identificar QUAL operador
  * específico está mandando a mensagem (antes o painel só sabia dizer
  * "algum operador do tenant"), gravando o nome como snapshot na própria
@@ -63,7 +63,7 @@ beforeEach(() => {
   initDb(supabase);
 });
 
-describe('POST /api/conversations/:phone/send — identifica o operador (TASK-0368)', () => {
+describe('POST /api/conversations/:phone/send — identifica o operador (TASK-0370)', () => {
   it('grava o nome do operador autenticado na mensagem enviada', async () => {
     const res = await fetch(`${baseUrl}/api/conversations/595981111111/send`, {
       method: 'POST',

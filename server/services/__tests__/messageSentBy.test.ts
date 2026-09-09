@@ -53,7 +53,7 @@ describe('messages.sent_by', () => {
   });
 });
 
-describe('messages.operator_name (TASK-0368 — identificar qual operador específico escreveu)', () => {
+describe('messages.operator_name (TASK-0370 — identificar qual operador específico escreveu)', () => {
   it('grava operator_name quando sentBy=operator e o nome foi informado', async () => {
     await recordOutgoingMessage(TENANT_A, '595981111111', { type: 'text', text: 'oi', timestamp: '10:00' }, 'operator', undefined, undefined, undefined, 'Monique');
     const rows = supabase.__tables.messages;

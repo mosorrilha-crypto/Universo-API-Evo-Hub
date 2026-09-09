@@ -1,4 +1,4 @@
--- TASK-0368 (pedido direto, exemplo real com print da conversa da Pamela):
+-- TASK-0370 (pedido direto, exemplo real com print da conversa da Pamela):
 -- o painel rotulava toda mensagem digitada por um operador só como "Você
 -- (equipe)"/"Escrita por você", sem dizer QUAL operador — em tenant com mais
 -- de um atendente isso não ajuda a saber quem escreveu o quê. Snapshot do

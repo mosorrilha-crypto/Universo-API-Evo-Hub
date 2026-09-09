@@ -3137,7 +3137,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
 
   // Envia de verdade via Meta Cloud API (só quando o lead é uma conversa real, não simulada)
   //
-  // TASK-0368 (achado real, print de conversa duplicada): a bolha otimista
+  // TASK-0370 (achado real, print de conversa duplicada): a bolha otimista
   // criada em handleSendTextMessage usa um id local (`msg-<timestamp>`) só
   // pra aparecer na hora, sem esperar a rede. Antes desta correção, a
   // mensagem REAL (id de verdade do WhatsApp, sentBy/operatorName
@@ -5542,7 +5542,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-200'
                         }`}
                       >
-                        {/* TASK-0368: "ESCRITA POR VOCÊ" aqui era redundante com o
+                        {/* TASK-0370: "ESCRITA POR VOCÊ" aqui era redundante com o
                             cabeçalho da bolha (hasSenderLabel acima, mesmo mensagem
                             derivada de msg.sentBy === 'operator') — removido, o
                             cabeçalho agora já identifica o operador específico. */}
@@ -5700,7 +5700,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide">
                                   {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5 text-emerald-400" /> : <UserCheck className="w-2.5 h-2.5 text-slate-300" />}
                                   <span className={msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-400'}>
-                                    {/* TASK-0368 (pedido direto): identifica QUEM especificamente
+                                    {/* TASK-0370 (pedido direto): identifica QUEM especificamente
                                         escreveu, não só "algum operador da equipe" — cai no rótulo
                                         genérico só pra mensagens antigas sem operatorName gravado. */}
                                     {msg.sentBy === 'ai' ? 'Atendente' : msg.operatorName || 'Você (equipe)'}

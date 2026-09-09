@@ -650,7 +650,7 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     try {
-      // TASK-0368 — nome do operador que está digitando, pra identificar
+      // TASK-0370 — nome do operador que está digitando, pra identificar
       // QUEM especificamente mandou (antes o painel só mostrava um rótulo
       // genérico "Você (equipe)" pra qualquer operador do tenant). Busca
       // avulsa (não um join na query de mensagens) porque só interessa no
