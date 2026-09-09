@@ -350,16 +350,26 @@ export interface AdReferral {
  * Conversions API (Epic 4.5.6) pra amarrar eventos de conversão ao anúncio
  * real; sem isso gravado, o CAPI nunca dispara pra essa conversa (nunca
  * manda atribuição incompleta/inventada).
+ *
+ * TASK-0364: `ctwaClid` sozinho deixou de ser exigido — a Evolution API
+ * (self-hosted, sem o conceito de ctwa_clid da Meta Cloud API) só entrega
+ * `adHeadline`/`adSourceId` na maioria dos casos (ver
+ * extractEvolutionAdReferral em webhookParsers.ts). Exigir ctwaClid faria
+ * TODA atribuição de anúncio via Evolution nunca ser gravada, mesmo tendo
+ * título real disponível pro operador ver de qual anúncio o lead veio. O
+ * CAPI continua seguro: `fireMetaConversionEvent` (metaCapiService.ts) já
+ * checa `ctwaClid` antes de disparar e não faz nada sem ele — gravar
+ * headline/sourceId sem ctwaClid não muda esse comportamento.
  */
 export async function attachAdReferralIfMissing(tenantId: string, phone: string, referral: AdReferral | undefined): Promise<void> {
-  if (!referral?.ctwaClid) return;
+  if (!referral?.ctwaClid && !referral?.adSourceId && !referral?.adHeadline) return;
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
-  const { data: existing } = await db.from('conversations').select('ctwa_clid').eq('id', conv.id).maybeSingle();
-  if (existing?.ctwa_clid) return;
+  const { data: existing } = await db.from('conversations').select('ctwa_clid, ad_headline').eq('id', conv.id).maybeSingle();
+  if (existing?.ctwa_clid || existing?.ad_headline) return;
   await db
     .from('conversations')
-    .update({ ctwa_clid: referral.ctwaClid, ad_source_id: referral.adSourceId || null, ad_headline: referral.adHeadline || null })
+    .update({ ctwa_clid: referral.ctwaClid || null, ad_source_id: referral.adSourceId || null, ad_headline: referral.adHeadline || null })
     .eq('id', conv.id);
 }
 

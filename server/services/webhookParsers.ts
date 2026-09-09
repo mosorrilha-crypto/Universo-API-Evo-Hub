@@ -187,6 +187,45 @@ export function parseInstagramWebhookPayload(body: any): ParsedIncomingMessage[]
 }
 
 /**
+ * TASK-0364 (achado real, 09/09/2026): das 371 conversas do tenant Monique
+ * (Evolution API, não Meta Cloud API), NENHUMA tinha `ad_headline`/`ctwa_clid`
+ * gravado — o operador não tinha como saber de qual anúncio um lead veio,
+ * mesmo suspeitando que vários vinham de anúncio. Causa: `referral` (o campo
+ * que carrega essa atribuição na Meta Cloud API, ver parseMetaWebhookPayload
+ * acima) só existe nesse formato de payload — não existe na Evolution API.
+ * O protocolo do WhatsApp (Baileys, base da Evolution API) carrega a mesma
+ * informação num campo diferente: `contextInfo.externalAdReply` (presente na
+ * mensagem quando ela se origina de um clique em anúncio "Clique para
+ * WhatsApp", igual à Meta Cloud API — é o mesmo mecanismo do WhatsApp, só
+ * exposto em outro formato de payload). `contextInfo` pode aparecer em
+ * qualquer tipo de mensagem que carregue contexto (extendedTextMessage é o
+ * mais comum pra a saudação automática de anúncio, mas imageMessage/
+ * videoMessage também podem carregar quando o cliente responde com mídia
+ * antes de mandar texto) — por isso a checagem é genérica, não presa a um
+ * tipo específico. Sem confirmação ainda contra um payload real de produção
+ * (precisa de um lead de anúncio de verdade batendo no webhook) — todo
+ * acesso é opcional-chain, então um formato ligeiramente diferente do
+ * esperado nunca quebra o processamento da mensagem, só deixa de capturar a
+ * atribuição (mesmo comportamento de hoje, sem regressão).
+ */
+function extractEvolutionAdReferral(message: any): { headline?: string; sourceId?: string; ctwaClid?: string } | undefined {
+  const contextInfo =
+    message?.extendedTextMessage?.contextInfo ||
+    message?.imageMessage?.contextInfo ||
+    message?.videoMessage?.contextInfo ||
+    message?.audioMessage?.contextInfo;
+  const externalAdReply = contextInfo?.externalAdReply;
+  if (!externalAdReply) return undefined;
+
+  const headline = typeof externalAdReply.title === 'string' ? externalAdReply.title.trim() : undefined;
+  const sourceId = typeof externalAdReply.sourceId === 'string' ? externalAdReply.sourceId.trim() : undefined;
+  const ctwaClid = typeof externalAdReply.ctwaClid === 'string' ? externalAdReply.ctwaClid.trim() : undefined;
+  if (!headline && !sourceId && !ctwaClid) return undefined;
+
+  return { headline: headline || undefined, sourceId: sourceId || undefined, ctwaClid: ctwaClid || undefined };
+}
+
+/**
  * Evolution API v2 manda o evento MESSAGES_UPSERT (ou "messages.upsert",
  * dependendo da versão/config) com a mensagem em data.message. O áudio real
  * (criptografado ponta-a-ponta pelo protocolo do WhatsApp) não vem inline —
@@ -232,6 +271,7 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
   const from = normalizeConversationPhone(rawFrom);
   const contactName: string | undefined = data.pushName;
   const message = data.message || {};
+  const adReferral = extractEvolutionAdReferral(message);
 
   const base: Omit<ParsedIncomingMessage, 'type'> = {
     provider: 'evolution',
@@ -240,6 +280,7 @@ export function parseEvolutionWebhookPayload(body: any): ParsedIncomingMessage[]
     contactName,
     instanceName: body.instance,
     ...(data.key.fromMe ? { fromMe: true as const } : {}),
+    ...(adReferral ? { referral: { headline: adReferral.headline, sourceId: adReferral.sourceId, ctwaClid: adReferral.ctwaClid } } : {}),
   };
 
   if (message.audioMessage) {
