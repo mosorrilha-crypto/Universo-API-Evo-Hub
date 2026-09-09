@@ -34,6 +34,20 @@ import { isPlausiblePersonalName } from './contactNameGuard';
 
 import { GEMINI_TIMEOUT_MS, withGeminiRetry } from '../gemini';
 
+// TASK-0362 — teto de caracteres do prompt combinado (systemInstruction +
+// contexto dinâmico) enviado ao Groq no path do especialista, pra ficar com
+// folga segura sob o limite real de 8.000 TPM (tokens por minuto) da conta
+// Groq pro modelo `openai/gpt-oss-120b` (achado real em produção: requests
+// de 10.081-11.840 tokens sendo rejeitados com 413 "Request too large" em
+// TODA mensagem de um tenant com Base de Conhecimento maior — o Groq não tem
+// nenhum mecanismo de cache, ao contrário do Gemini, então a única correção
+// possível é não mandar um request fadado a estourar o limite). Heurística
+// conservadora de ~3,3 caracteres por token (textos em português/espanhol
+// com acentuação tokenizam pior que inglês puro) aplicada a um alvo de
+// ~6.500 tokens — abaixo dos 8.000 reais, com margem pro contexto dinâmico
+// (histórico, mensagem atual) que só é conhecido depois de montar o prompt.
+const GROQ_SPECIALIST_MAX_PROMPT_CHARS = 21_500;
+
 const BUSINESS_TIMEZONE = 'America/Asuncion';
 
 /**
@@ -705,20 +719,47 @@ async function generateSpecialistReply(
         : burstMessages
             .map((line, i) => (i === 0 ? `${contextPreamble}Nova mensagem do cliente: "${line}"` : `Mensagem seguinte do cliente (mais recente): "${line}"`))
             .join('\n\n');
-    try {
-      const { parsed: groqParsed, usage } = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}:groq` }, () =>
-        callGroqJsonCompletion(groqApiKey, `${systemInstruction}\n\n${flattenedUserContent}`, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.7)
+    const groqPrompt = `${systemInstruction}\n\n${flattenedUserContent}`;
+    // TASK-0362 (achado real em produção, incidente ativo — zero leads
+    // respondidos por 14h+): diferente do Gemini (cache de contexto real via
+    // `cachedContentName`, ver getCachedSystemInstruction acima), o Groq NÃO
+    // TEM NENHUM mecanismo de cache — `callGroqJsonCompletion` manda
+    // `systemInstruction` inteiro (Camada 1 + Base de Conhecimento) mais o
+    // contexto dinâmico, achatado num único prompt, em TODA mensagem. O
+    // limite de 8.000 TPM (tokens por minuto) desta conta Groq pra
+    // `openai/gpt-oss-120b` é AVALIADO SOBRE O TAMANHO CRU DO REQUEST, não
+    // sobre uso agregado — não existe cache que ajudaria aqui mesmo que o
+    // Groq oferecesse um, porque a rejeição (413 "Request too large") já
+    // acontece na entrada, antes de qualquer inferência. Pra tenants com
+    // Base de Conhecimento maior (ex: catálogo extenso), o prompt combinado
+    // passa de 10-12 mil tokens reais — acima do limite em TODA mensagem,
+    // não só num pico ocasional. Sem essa checagem, cada mensagem paga o
+    // timeout/latência de uma chamada ao Groq fadada a falhar (413) antes de
+    // cair pro Gemini, sem nenhum ganho. `GROQ_SPECIALIST_MAX_PROMPT_CHARS`
+    // estima o teto de caracteres que ainda cabe com folga sob 8.000 tokens
+    // (heurística conservadora de ~3,3 caracteres por token — textos em
+    // português/espanhol com acentuação tendem a tokenizar pior que inglês
+    // puro — deixando margem antes do limite real da conta).
+    if (groqPrompt.length > GROQ_SPECIALIST_MAX_PROMPT_CHARS) {
+      console.warn(
+        `⚠️  [Especialista] Prompt do Groq (${groqPrompt.length} caracteres) excede o teto seguro de ${GROQ_SPECIALIST_MAX_PROMPT_CHARS} pro limite de 8.000 TPM da conta — pulando Groq e indo direto pro Gemini (tenant=${tenantId}, agent=${agent}).`
       );
-      const groqBubbles = Array.isArray(groqParsed?.bubbles)
-        ? groqParsed.bubbles.filter((b: unknown) => typeof b === 'string' && b.trim())
-        : [];
-      if (!groqBubbles.length) {
-        throw new Error(`Groq retornou resposta do especialista sem "bubbles" válidas: ${JSON.stringify(groqParsed)}`);
+    } else {
+      try {
+        const { parsed: groqParsed, usage } = await withStructuredLog({ tenantId, area: 'autoReply', op: `especialista:${agent}:groq` }, () =>
+          callGroqJsonCompletion(groqApiKey, groqPrompt, GROQ_SPECIALIST_TIMEOUT_MS, GROQ_SPECIALIST_MODEL, 0.7)
+        );
+        const groqBubbles = Array.isArray(groqParsed?.bubbles)
+          ? groqParsed.bubbles.filter((b: unknown) => typeof b === 'string' && b.trim())
+          : [];
+        if (!groqBubbles.length) {
+          throw new Error(`Groq retornou resposta do especialista sem "bubbles" válidas: ${JSON.stringify(groqParsed)}`);
+        }
+        parsed = groqParsed as SpecialistParsed;
+        recordGeminiUsage(tenantId, 'especialista', usage, 'groq').catch(() => {});
+      } catch (err) {
+        console.warn(`⚠️  [Especialista] Groq falhou (tenant=${tenantId}, agent=${agent}), caindo pro Gemini:`, (err as Error)?.message || err);
       }
-      parsed = groqParsed as SpecialistParsed;
-      recordGeminiUsage(tenantId, 'especialista', usage, 'groq').catch(() => {});
-    } catch (err) {
-      console.warn(`⚠️  [Especialista] Groq falhou (tenant=${tenantId}, agent=${agent}), caindo pro Gemini:`, (err as Error)?.message || err);
     }
   }
 
