@@ -45,7 +45,7 @@ interface BroadcastContactList {
   id: string;
   name: string;
   sourceFilename: string | null;
-  source: 'csv' | 'segment_known_leads' | 'segment_has_appointment';
+  source: 'csv' | 'segment_known_leads' | 'segment_has_appointment' | 'segment_interested_no_appointment';
   contactCount: number;
   createdAt: string;
 }
@@ -54,6 +54,7 @@ const LIST_SOURCE_LABELS: Record<BroadcastContactList['source'], string> = {
   csv: 'CSV',
   segment_known_leads: 'Segmento: já são leads',
   segment_has_appointment: 'Segmento: já têm agendamento',
+  segment_interested_no_appointment: 'Segmento: interessados sem agendar',
 };
 
 interface BroadcastCampaign {
@@ -319,12 +320,17 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
   // — "já é lead" ou "já tem agendamento confirmado". Não existe segmento
   // de "inscrito em evento": o sistema não tem essa entidade.
   const [segmentListName, setSegmentListName] = useState('');
-  const [segmentChoice, setSegmentChoice] = useState<'known_leads' | 'has_appointment'>('known_leads');
+  const [segmentChoice, setSegmentChoice] = useState<'known_leads' | 'has_appointment' | 'interested_no_appointment'>('known_leads');
+  const [segmentInterestKeyword, setSegmentInterestKeyword] = useState('');
   const [isCreatingSegmentList, setIsCreatingSegmentList] = useState(false);
 
   const handleCreateSegmentList = async () => {
     if (!segmentListName.trim()) {
       setListError('Dê um nome pra lista antes de criar a partir do segmento.');
+      return;
+    }
+    if (segmentChoice === 'interested_no_appointment' && !segmentInterestKeyword.trim()) {
+      setListError('Informe um termo de interesse (ex.: "micro" pra micropigmentação) antes de criar a lista.');
       return;
     }
     setIsCreatingSegmentList(true);
@@ -334,12 +340,17 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
       const res = await apiFetch('/api/admin/broadcast-contact-lists/from-segment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: segmentListName.trim(), segment: segmentChoice }),
+        body: JSON.stringify({
+          name: segmentListName.trim(),
+          segment: segmentChoice,
+          ...(segmentChoice === 'interested_no_appointment' ? { interestKeyword: segmentInterestKeyword.trim() } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setListImportMessage(`Lista criada com ${data.imported} contatos a partir do segmento.`);
       setSegmentListName('');
+      setSegmentInterestKeyword('');
       await loadLists();
     } catch (err: any) {
       setListError(err.message || 'Falha ao criar lista a partir do segmento.');
@@ -788,13 +799,25 @@ export const BroadcastAdminPanel: React.FC<{ tenantName?: string }> = ({ tenantN
                 <select value={segmentChoice} onChange={(e) => setSegmentChoice(e.target.value as any)} className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
                   <option value="known_leads">Já são leads (já conversaram)</option>
                   <option value="has_appointment">Já têm agendamento confirmado</option>
+                  <option value="interested_no_appointment">Interessados em algo específico, sem agendar</option>
                 </select>
               </div>
+              {segmentChoice === 'interested_no_appointment' && (
+                <div className="flex-1 min-w-[180px]">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Termo de interesse</label>
+                  <input
+                    value={segmentInterestKeyword}
+                    onChange={(e) => setSegmentInterestKeyword(e.target.value)}
+                    placeholder='Ex.: "micro" pra micropigmentação'
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                  />
+                </div>
+              )}
               <button onClick={handleCreateSegmentList} disabled={isCreatingSegmentList} className="py-2 px-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-2 cursor-pointer">
                 {isCreatingSegmentList ? <Loader2 className="w-4 h-4 animate-spin" /> : null}<span>Criar lista</span>
               </button>
             </div>
-            <p className="text-[10px] text-slate-500">Não existe segmento de "inscrito em evento" — o sistema não tem essa entidade. Esses 2 segmentos usam dados reais já existentes (Atendimento e Agenda).</p>
+            <p className="text-[10px] text-slate-500">Não existe segmento de "inscrito em evento" — o sistema não tem essa entidade. "Interessados sem agendar" busca o serviço mais recente que o lead demonstrou interesse (campo usado pelo agente) por um termo parcial, sem diferenciar maiúsculas/minúsculas (mas SEM ignorar acentos — "micro" não bate com "mícro"), e exclui quem já tem qualquer agendamento (mesmo uma reserva provisória).</p>
           </div>
           {listImportMessage && <p className="text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-800/60 rounded-lg px-3 py-2">{listImportMessage}</p>}
           {listError && <p className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">{listError}</p>}

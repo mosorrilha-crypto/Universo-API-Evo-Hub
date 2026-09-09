@@ -231,19 +231,26 @@ export function createBroadcastRouter({ authenticateToken, triggerImmediateBroad
   }));
 
   // Monta a lista a partir de dado real já existente no sistema (não CSV)
-  // — "já é lead" (conversations) ou "já tem agendamento confirmado"
-  // (appointments com eventId real). Não existe segmento de "inscrito em
-  // evento": o sistema não tem essa entidade, e inventar uma fabricaria
-  // dado de negócio que não existe (mesma regra do agente de IA).
-  const CONTACT_LIST_SEGMENTS: ContactListSegment[] = ['known_leads', 'has_appointment'];
+  // — "já é lead" (conversations), "já tem agendamento confirmado"
+  // (appointments com eventId real), ou "demonstrou interesse em algo
+  // específico mas não agendou" (TASK-0366 — campanha de reaquecimento;
+  // filtra conversations.interest por um termo livre em interestKeyword e
+  // exclui quem já tem qualquer linha em appointments). Não existe
+  // segmento de "inscrito em evento": o sistema não tem essa entidade, e
+  // inventar uma fabricaria dado de negócio que não existe (mesma regra
+  // do agente de IA).
+  const CONTACT_LIST_SEGMENTS: ContactListSegment[] = ['known_leads', 'has_appointment', 'interested_no_appointment'];
   router.post('/api/admin/broadcast-contact-lists/from-segment', authenticateToken, requireBroadcastAdmin, asyncHandler(async (req: AuthenticatedRequest, res) => {
-    const { name, segment } = req.body || {};
+    const { name, segment, interestKeyword } = req.body || {};
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'Campo "name" é obrigatório.' });
     if (!CONTACT_LIST_SEGMENTS.includes(segment)) {
       return res.status(400).json({ error: `Campo "segment" precisa ser um de: ${CONTACT_LIST_SEGMENTS.join(', ')}.` });
     }
+    if (segment === 'interested_no_appointment' && (typeof interestKeyword !== 'string' || !interestKeyword.trim())) {
+      return res.status(400).json({ error: 'Informe "interestKeyword" (ex.: "micro" pra micropigmentação) pra esse segmento.' });
+    }
     try {
-      const result = await createContactListFromSegment(tenantOf(req), name.trim(), segment, req.user?.id || null);
+      const result = await createContactListFromSegment(tenantOf(req), name.trim(), segment, req.user?.id || null, { interestKeyword });
       res.status(201).json({ list: result.list, imported: result.imported });
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });

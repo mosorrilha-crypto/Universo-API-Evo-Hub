@@ -286,7 +286,7 @@ export async function deleteBroadcastTemplate(tenantId: string, id: string): Pro
 
 // ─── Listas de contatos ─────────────────────────────────────────────────
 
-export type ContactListSource = 'csv' | 'segment_known_leads' | 'segment_has_appointment';
+export type ContactListSource = 'csv' | 'segment_known_leads' | 'segment_has_appointment' | 'segment_interested_no_appointment';
 
 export interface BroadcastContactList {
   id: string;
@@ -374,7 +374,7 @@ export async function importContactList(
   return { list: mapContactListRow(listRow), imported: contacts.length, duplicatesIgnored };
 }
 
-export type ContactListSegment = 'known_leads' | 'has_appointment';
+export type ContactListSegment = 'known_leads' | 'has_appointment' | 'interested_no_appointment';
 
 /**
  * Monta uma lista de contatos a partir de dados reais já existentes no
@@ -384,17 +384,29 @@ export type ContactListSegment = 'known_leads' | 'has_appointment';
  * - `has_appointment`: telefones com um `eventId` real no Google Calendar
  *   em `appointments` (agendamento confirmado, não uma reserva provisória
  *   ainda sem evento — ver appointmentStore.ts).
- * "Já se inscreveu em um evento" (a pergunta original que motivou esse
- * item do backlog) não vira um 3º segmento aqui: o sistema não tem
- * nenhuma entidade de "inscrição em evento" — inventar uma sem um caso de
- * uso real por trás violaria a mesma regra de "nunca fabricar dado de
- * negócio" que já vale pro conteúdo do agente.
+ * - `interested_no_appointment` (TASK-0366, pedido direto — campanha de
+ *   reaquecimento de leads de micropigmentação que não agendaram): filtra
+ *   `conversations.interest` (o serviço/produto do catálogo mais recente
+ *   que o lead demonstrou interesse, capturado a cada turno pelo
+ *   especialista — TASK-0185) por um termo livre (`interestKeyword`,
+ *   busca parcial case-insensitive, ex.: "micro" pega Microblading,
+ *   Microshading, Microlips e combos com "Micro"), e exclui qualquer
+ *   telefone que já tenha QUALQUER linha em `appointments` — mesmo uma
+ *   reserva provisória sem evento ainda (`heldUntil` sem `eventId`) conta
+ *   como "já em processo de agendar", pra não campanhar de novo quem já
+ *   está no meio do fluxo.
+ * "Já se inscreveu em um evento" (a pergunta original que motivou o
+ * backlog dos 2 primeiros segmentos) não vira um segmento aqui: o sistema
+ * não tem nenhuma entidade de "inscrição em evento" — inventar uma sem um
+ * caso de uso real por trás violaria a mesma regra de "nunca fabricar
+ * dado de negócio" que já vale pro conteúdo do agente.
  */
 export async function createContactListFromSegment(
   tenantId: string,
   name: string,
   segment: ContactListSegment,
-  createdBy: string | null
+  createdBy: string | null,
+  options?: { interestKeyword?: string }
 ): Promise<ImportContactListResult> {
   const db = getDb();
   let pairs: Array<{ phone: string; name: string | null }>;
@@ -403,9 +415,23 @@ export async function createContactListFromSegment(
     const { data, error } = await db.from('conversations').select('phone, name').eq('tenant_id', tenantId);
     if (error) throw error;
     pairs = (data || []).map((row: any) => ({ phone: row.phone, name: row.name ?? null }));
-  } else {
+  } else if (segment === 'has_appointment') {
     const appointments = await listAllAppointments(tenantId);
     pairs = appointments.filter((a) => !!a.eventId).map((a) => ({ phone: a.phone, name: null }));
+  } else {
+    const keyword = options?.interestKeyword?.trim();
+    if (!keyword) throw new Error('Informe um termo em "interestKeyword" pra filtrar o interesse (ex.: "micro" pra micropigmentação).');
+    const { data, error } = await db
+      .from('conversations')
+      .select('phone, name, interest')
+      .eq('tenant_id', tenantId)
+      .ilike('interest', `%${keyword}%`);
+    if (error) throw error;
+    const appointments = await listAllAppointments(tenantId);
+    const phonesAlreadyInBookingFlow = new Set(appointments.map((a) => a.phone));
+    pairs = (data || [])
+      .filter((row: any) => !phonesAlreadyInBookingFlow.has(row.phone))
+      .map((row: any) => ({ phone: row.phone, name: row.name ?? null }));
   }
 
   const seen = new Set<string>();
@@ -418,7 +444,8 @@ export async function createContactListFromSegment(
     throw new Error('Nenhum contato encontrado nesse segmento — a lista ficaria vazia.');
   }
 
-  const source: ContactListSource = segment === 'known_leads' ? 'segment_known_leads' : 'segment_has_appointment';
+  const source: ContactListSource =
+    segment === 'known_leads' ? 'segment_known_leads' : segment === 'has_appointment' ? 'segment_has_appointment' : 'segment_interested_no_appointment';
   const { data: listRow, error: listError } = await db
     .from('broadcast_contact_lists')
     .insert({ tenant_id: tenantId, name, source_filename: null, source, contact_count: uniquePairs.length, created_by: createdBy })
