@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
-import { recordIncomingMessage, recordOutgoingMessage, forwardMessage } from '../conversationStore';
+import { recordIncomingMessage, recordOutgoingMessage, forwardMessage, getConversationMessagesPage } from '../conversationStore';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 
@@ -50,5 +50,32 @@ describe('messages.sent_by', () => {
 
     const forwarded = supabase.__tables.messages.find((m: any) => m.forwarded_from_message_id === originalId);
     expect(forwarded?.sent_by).toBe('operator');
+  });
+});
+
+describe('messages.operator_name (TASK-0368 — identificar qual operador específico escreveu)', () => {
+  it('grava operator_name quando sentBy=operator e o nome foi informado', async () => {
+    await recordOutgoingMessage(TENANT_A, '595981111111', { type: 'text', text: 'oi', timestamp: '10:00' }, 'operator', undefined, undefined, undefined, 'Monique');
+    const rows = supabase.__tables.messages;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].operator_name).toBe('Monique');
+  });
+
+  it('nunca grava operator_name em mensagem da IA, mesmo se um nome for passado por engano', async () => {
+    await recordOutgoingMessage(TENANT_A, '595981111111', { type: 'text', text: 'oi', timestamp: '10:00' }, 'ai', undefined, undefined, undefined, 'Monique');
+    const rows = supabase.__tables.messages;
+    expect(rows[0].operator_name).toBeNull();
+  });
+
+  it('sem nome informado, operator_name fica null (mensagens antigas/sem identificação seguem funcionando, painel cai no rótulo genérico)', async () => {
+    await recordOutgoingMessage(TENANT_A, '595981111111', { type: 'text', text: 'oi', timestamp: '10:00' }, 'operator');
+    const rows = supabase.__tables.messages;
+    expect(rows[0].operator_name).toBeNull();
+  });
+
+  it('a página de mensagens (usada pelo painel pra buscar mensagens novas) devolve operatorName pro painel identificar quem escreveu', async () => {
+    await recordOutgoingMessage(TENANT_A, '595981111111', { type: 'text', text: 'Qual é o teu nome?', timestamp: '10:00' }, 'operator', undefined, undefined, undefined, 'Lucas');
+    const page = await getConversationMessagesPage(TENANT_A, '595981111111');
+    expect(page.messages[0].operatorName).toBe('Lucas');
   });
 });

@@ -386,6 +386,8 @@ export interface ChatMessage {
   reactions?: MessageReaction[];
   /** Só presente quando sender='agent' — distingue resposta automática da IA, mensagem digitada manualmente por um operador no painel, ou envio automático de campanha de disparo em massa. */
   sentBy?: 'ai' | 'operator' | 'campaign';
+  /** TASK-0368 — nome do operador que digitou (snapshot no momento do envio). Só presente quando `sentBy === 'operator'`; `undefined` em mensagens antigas ou quando o painel ainda não sabe identificar quem escreveu. */
+  operatorName?: string;
 }
 
 export interface ExtractedCRMData {

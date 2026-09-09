@@ -3136,6 +3136,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Envia de verdade via Meta Cloud API (só quando o lead é uma conversa real, não simulada)
+  //
+  // TASK-0368 (achado real, print de conversa duplicada): a bolha otimista
+  // criada em handleSendTextMessage usa um id local (`msg-<timestamp>`) só
+  // pra aparecer na hora, sem esperar a rede. Antes desta correção, a
+  // mensagem REAL (id de verdade do WhatsApp, sentBy/operatorName
+  // preenchidos) que chega depois — seja na resposta deste POST, seja via
+  // loadNewerMessages disparado pelo próximo evento SSE — tinha um id
+  // DIFERENTE do local, e o dedup por id em loadNewerMessages (`existingIds`)
+  // nunca reconhecia as duas como a mesma mensagem: ambas ficavam na lista,
+  // uma "crua" (sem rótulo de operador) e outra com o rótulo completo.
+  // Corrigido substituindo a entrada otimista pela mensagem real assim que a
+  // resposta deste POST chega, em vez de deixar as duas coexistirem — usa o
+  // id local (já conhecido no fechamento desta função) pra achar e trocar a
+  // entrada certa.
   const sendRealWhatsAppMessage = async (leadId: string, phone: string, messageId: string, text: string, replyToMessageId?: string) => {
     try {
       const res = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
@@ -3144,6 +3158,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         body: JSON.stringify({ text, ...(replyToMessageId ? { replyToMessageId } : {}) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => null);
+      const realMessages: ChatMessage[] = data?.conversation?.messages || [];
+      // A mensagem que acabamos de mandar é sempre a última com
+      // sentBy === 'operator' na lista fresca devolvida pelo servidor —
+      // recordOutgoingMessage já gravou e releu a conversa antes de responder.
+      const realMessage = [...realMessages].reverse().find((m) => m.sentBy === 'operator');
+      if (realMessage) {
+        setLeads((prev) => prev.map((l) => {
+          if (l.id !== leadId) return l;
+          return {
+            ...l,
+            messages: (l.messages || []).map((m) => (m.id === messageId ? { ...m, ...realMessage, timestamp: m.timestamp, rawTimestamp: realMessage.timestamp } : m)),
+          };
+        }));
+      }
     } catch (err) {
       console.error('Falha ao enviar mensagem real via WhatsApp:', err);
       markMessageFailed(leadId, messageId, 'Falha ao enviar a mensagem pro cliente — ele NÃO recebeu. Tente reenviar.');
@@ -5513,11 +5542,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-200'
                         }`}
                       >
-                        {msg.sentBy === 'operator' && (
-                          <span className="font-extrabold tracking-wider text-slate-300 mr-1 uppercase">
-                            ESCRITA POR VOCÊ
-                          </span>
-                        )}
+                        {/* TASK-0368: "ESCRITA POR VOCÊ" aqui era redundante com o
+                            cabeçalho da bolha (hasSenderLabel acima, mesmo mensagem
+                            derivada de msg.sentBy === 'operator') — removido, o
+                            cabeçalho agora já identifica o operador específico. */}
                         {msg.timestamp}
                         {!isLead && (msg.sendFailed ? (
                           <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
@@ -5672,7 +5700,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide">
                                   {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5 text-emerald-400" /> : <UserCheck className="w-2.5 h-2.5 text-slate-300" />}
                                   <span className={msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-400'}>
-                                    {msg.sentBy === 'ai' ? 'Atendente' : 'Você (equipe)'}
+                                    {/* TASK-0368 (pedido direto): identifica QUEM especificamente
+                                        escreveu, não só "algum operador da equipe" — cai no rótulo
+                                        genérico só pra mensagens antigas sem operatorName gravado. */}
+                                    {msg.sentBy === 'ai' ? 'Atendente' : msg.operatorName || 'Você (equipe)'}
                                   </span>
                                 </div>
                               )}

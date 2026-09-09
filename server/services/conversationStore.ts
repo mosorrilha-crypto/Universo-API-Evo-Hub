@@ -38,6 +38,8 @@ export interface StoredMessage {
   reactions?: MessageReaction[];
   /** Só presente quando sender='agent' — distingue resposta automática da IA, mensagem digitada manualmente por um operador no painel (ver issue #126), ou envio automático de campanha de disparo em massa (TASK-0171). */
   sentBy?: 'ai' | 'operator' | 'campaign';
+  /** TASK-0368 — nome do operador que digitou (snapshot no momento do envio, não um join ao vivo com `operators` — mostra o nome de quem mandou mesmo que o operador seja renomeado/removido depois). Só presente quando `sentBy === 'operator'`; `undefined` em mensagens antigas de antes desta coluna existir (painel cai no rótulo genérico "Você (equipe)"). */
+  operatorName?: string;
 }
 
 export interface GeoRestriction {
@@ -133,6 +135,7 @@ type MessageRow = {
   forwarded_from_message_id: string | null;
   reactions: MessageReaction[] | null;
   sent_by: 'ai' | 'operator' | 'campaign' | null;
+  operator_name: string | null;
 };
 
 /** Conta mensagens do lead chegadas depois de lastReadAt — extraída à parte pra ser testável sem depender do formato de embed relacional do Supabase. */
@@ -170,11 +173,12 @@ function toStoredConversation(row: ConversationRow): StoredConversation {
         forwardedFromMessageId: m.forwarded_from_message_id || undefined,
         reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
         sentBy: m.sent_by || undefined,
+        operatorName: m.operator_name || undefined,
       })),
   };
 }
 
-const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by)';
+const CONVERSATION_WITH_MESSAGES = '*, messages(id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by, operator_name)';
 
 // A lista é atualizada por SSE + polling de segurança. Não deve transportar o
 // histórico inteiro de todas as conversas a cada rodada: a view 0041 devolve
@@ -208,6 +212,10 @@ function toStoredConversationSummary(row: ConversationSummaryRow): StoredConvers
     forwarded_from_message_id: message.forwardedFromMessageId || null,
     reactions: message.reactions || null,
     sent_by: message.sentBy || null,
+    // A view de lista (conversation_list_summaries) não expõe operator_name —
+    // só a mensagem completa (getConversation/paginação) carrega isso; o
+    // preview da lista nunca precisou do nome específico do operador.
+    operator_name: null,
   })) });
   conversation.unreadCount = row.unread_count || 0;
   conversation.lastMessageId = row.last_message_id || undefined;
@@ -520,7 +528,9 @@ export async function recordOutgoingMessage(
   replyToMessageId?: string,
   forwardedFromMessageId?: string,
   /** ID pré-gerado pra essa mensagem — usado quando quem chama precisa saber o id ANTES de gravar (ex: pra salvar a mídia real sob o mesmo id em mediaImageStore, ver /send-media em conversations.ts). Sem isso, o id só existia dentro desta função e ninguém conseguia associar o áudio/imagem enviado à mensagem gravada. */
-  customId?: string
+  customId?: string,
+  /** TASK-0368 (pedido direto — identificar qual operador específico escreveu) — só faz sentido quando `sentBy === 'operator'`; nome já resolvido pelo chamador (ver /send em conversations.ts), gravado como snapshot (não muda se o operador for renomeado depois). */
+  operatorName?: string
 ): Promise<StoredConversation> {
   const db = getDb();
   const conv = await getOrCreateConversationRow(tenantId, phone);
@@ -537,6 +547,7 @@ export async function recordOutgoingMessage(
       reply_to_message_id: replyToMessageId || null,
       forwarded_from_message_id: forwardedFromMessageId || null,
       sent_by: sentBy,
+      operator_name: sentBy === 'operator' ? operatorName || null : null,
     });
   if (error) {
     // Mesmo bug do recordIncomingMessage (ver comentário lá): engolir o erro
@@ -717,7 +728,7 @@ export async function getConversation(tenantId: string, phone: string): Promise<
   return conv;
 }
 
-const MESSAGE_PAGE_COLUMNS = 'id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by';
+const MESSAGE_PAGE_COLUMNS = 'id, sender, type, text, created_at, reply_to_message_id, forwarded_from_message_id, reactions, sent_by, operator_name';
 
 function toStoredMessages(rows: MessageRow[]): StoredMessage[] {
   return rows.map((m) => ({
@@ -730,6 +741,7 @@ function toStoredMessages(rows: MessageRow[]): StoredMessage[] {
     forwardedFromMessageId: m.forwarded_from_message_id || undefined,
     reactions: m.reactions && m.reactions.length ? m.reactions : undefined,
     sentBy: m.sent_by || undefined,
+    operatorName: m.operator_name || undefined,
   }));
 }
 
