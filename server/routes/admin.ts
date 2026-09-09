@@ -838,6 +838,52 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
     }
   }));
 
+  /**
+   * TASK-0371 (pedido direto, print real do painel SaaS Admin — tenant "Dr.
+   * Daniel" com "Sem conexão" e o botão "WhatsApp QR" só visível pra
+   * saas_admin): antes disso, o botão self-service "Reconectar WhatsApp
+   * (QR Code)" (`ReconectarWhatsAppQrCode.tsx`, dentro da Base de
+   * Conhecimento) já era liberado pra `admin` comum de tenant no backend —
+   * mas só *aparecia* quando `GET /api/status/available` respondia `true`,
+   * e esse endpoint só responde `true` quando o tenant JÁ tem uma linha em
+   * `tenant_evolution_credentials` (ver tenantResolver.ts,
+   * resolveCredentialsForTenant). Resultado: um tenant que nunca teve
+   * NENHUMA credencial própria (nem Meta nem Evolution — como um recém-
+   * cadastrado) nunca via o botão, então só saas_admin conseguia fazer a
+   * PRIMEIRA conexão — mesmo o endpoint que o botão chama
+   * (POST .../evolution-instance, abaixo) já sendo idempotente e já
+   * suportando provisionar do zero pra esse mesmo tenant.
+   *
+   * Endpoint separado de `/api/status/available` de propósito — aquele
+   * outro alimenta a feature de Status/Stories (só faz sentido `true` pra
+   * quem JÁ está conectado de verdade), não o gate de "posso tentar
+   * conectar". Aqui: `true` se (a) o tenant já usa Evolution (reconectar) ou
+   * (b) o tenant não tem credencial Meta própria configurada E o servidor
+   * tem EVOLUTION_API_URL/EVOLUTION_API_KEY (senão o POST abaixo simplesmente
+   * falharia com 503) — nunca oferece Evolution pra um tenant que a equipe
+   * deliberadamente configurou com Meta Cloud API própria.
+   */
+  router.get('/api/admin/tenants/:id/evolution-instance/available', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const tenantId = resolveEvolutionTenantId(req);
+    const { data: evoCred, error: evoError } = await db()
+      .from('tenant_evolution_credentials')
+      .select('tenant_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (evoError) return res.status(500).json({ error: evoError.message });
+    if (evoCred) return res.json({ available: true, alreadyConnected: true });
+
+    if (!evolutionApiUrl || !evolutionApiKey) return res.json({ available: false, alreadyConnected: false });
+
+    const { data: metaCred, error: metaError } = await db()
+      .from('tenant_meta_credentials')
+      .select('phone_number_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (metaError) return res.status(500).json({ error: metaError.message });
+    res.json({ available: !metaCred?.phone_number_id, alreadyConnected: false });
+  }));
+
   // Estado da conexão (aberta/fechada/conectando) — pro painel saber quando
   // parar de mostrar o QR Code e exibir "conectado" sem precisar o operador
   // ficar recarregando a tela manualmente pra descobrir.
