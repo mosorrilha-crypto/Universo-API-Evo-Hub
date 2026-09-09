@@ -6011,12 +6011,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   return (
                     <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
                       {!isMetaChannel ? (
-                        <div className="flex items-center justify-between w-full gap-2">
-                          <div className="flex items-center gap-1.5 text-amber-400/90 font-semibold" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span>Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
+                        // Achado real (bug reportado, print anotado): o layout
+                        // era uma única linha (`flex items-center
+                        // justify-between`) sem `flex-wrap`/`min-w-0` — no
+                        // mobile, o texto e os botões brigavam pelo mesmo
+                        // espaço horizontal e o texto acabava quebrando
+                        // palavra por palavra. Agora empilha (texto em cima,
+                        // botões embaixo) até `sm`, e só vira uma linha só em
+                        // telas largas o bastante pra caber os dois.
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between w-full">
+                          <div className="flex items-start gap-1.5 text-amber-400/90 font-semibold min-w-0" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span className="min-w-0">Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
+                          <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">
                             <button
                               type="button"
                               disabled={isGeneratingReengagement}
