@@ -57,12 +57,19 @@ export interface OperatorContactMemoryPatch {
   serviceInterest?: string | null;
   objections?: string[];
   nextBestAction?: string | null;
+  /**
+   * TASK-0375 (pedido direto): liberado pra edição humana — é só um resumo
+   * textual solto, não um dos estados vivos (`liveState`) que o prompt do
+   * agente instrui a nunca substituir por memória (agenda/pagamento/
+   * escalonamento continuam sempre vindos dos stores próprios, nunca daqui).
+   */
+  conversationSummary?: string | null;
 }
 
 const MAX_TEXT_LENGTH = 240;
 const MAX_SUMMARY_LENGTH = 900;
 const MAX_LIST_ITEMS = 8;
-const OPERATOR_EDITABLE_MEMORY_FIELDS = new Set(['preferredLanguage', 'preferredName', 'currentIntent', 'serviceInterest', 'objections', 'nextBestAction']);
+const OPERATOR_EDITABLE_MEMORY_FIELDS = new Set(['preferredLanguage', 'preferredName', 'currentIntent', 'serviceInterest', 'objections', 'nextBestAction', 'conversationSummary']);
 // Estados vivos são sempre resolvidos dos stores próprios a cada turno; memória
 // jamais pode virar uma cópia autorizativa de pagamento, agenda ou escalonamento.
 const DISALLOWED_FACT_KEY = /(?:token|secret|password|base64|media|receipt|comprovante|document|prompt|history|message|phone|email|payment|pagamento|appointment|agenda|booking|calendar|escalation|escalonamento)/i;
@@ -124,6 +131,7 @@ export function normalizeOperatorContactMemoryPatch(value: unknown): OperatorCon
     serviceInterest: readNullableText('serviceInterest', 160),
     objections,
     nextBestAction: readNullableText('nextBestAction', MAX_TEXT_LENGTH),
+    conversationSummary: readNullableText('conversationSummary', MAX_SUMMARY_LENGTH),
   };
 }
 
