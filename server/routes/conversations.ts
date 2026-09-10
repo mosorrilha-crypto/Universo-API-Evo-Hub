@@ -650,6 +650,15 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
     const tenantId = tenantOf(req);
 
     try {
+      // TASK-0370 — nome do operador que está digitando, pra identificar
+      // QUEM especificamente mandou (antes o painel só mostrava um rótulo
+      // genérico "Você (equipe)" pra qualquer operador do tenant). Busca
+      // avulsa (não um join na query de mensagens) porque só interessa no
+      // momento do envio — fica gravado como snapshot na própria mensagem.
+      const operatorName = req.user?.id
+        ? (await getDb().from('operators').select('name').eq('id', req.user.id).maybeSingle()).data?.name || undefined
+        : undefined;
+
       // TASK-0171 (disparo em massa): a conversa pode estar num número de
       // disparo, não no operacional do tenant — resolve pelo phone_number_id
       // da CONVERSA, não do tenant como um todo, senão a resposta sairia
@@ -712,7 +721,10 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
             req.params.phone,
             { type: 'text', text: bubbleText, timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) },
             'operator',
-            isFirstBubble && typeof replyToMessageId === 'string' ? replyToMessageId : undefined
+            isFirstBubble && typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
+            undefined,
+            undefined,
+            operatorName
           );
           isFirstBubble = false;
         });
@@ -749,7 +761,8 @@ export function createConversationsRouter({ authenticateToken, jwtSecret, metaAc
           'operator',
           typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
           undefined,
-          realMessageId
+          realMessageId,
+          operatorName
         );
       }
       await resolveOpenEscalationsAfterManualReply(

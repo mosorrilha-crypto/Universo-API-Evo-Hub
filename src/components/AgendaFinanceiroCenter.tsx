@@ -565,11 +565,24 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
           </div>
           <div className={`flex flex-wrap items-center gap-2 ${compact ? 'mt-1.5' : 'mt-3'}`}>
             {financialModuleEnabled && (calendarEvent.payment ? <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusStyle[calendarEvent.payment.status]}`}>{calendarEvent.payment.status === 'pago' ? (isSpanish ? 'Cobrado' : 'Recebido') : calendarEvent.payment.status === 'atrasado' ? (isSpanish ? 'Atrasado' : 'Em atraso') : (isSpanish ? 'Por cobrar' : 'A receber')} · {formatMoney(calendarEvent.payment.amount)}</button> : <button type="button" onClick={() => setPaymentDialog(calendarEvent)} className="rounded-full border border-dashed border-amber-500/35 px-2 py-1 text-[10px] font-bold text-amber-200 hover:bg-amber-500/10">{isSpanish ? 'Vincular cobro' : 'Vincular cobrança'}</button>)}
-            {!compact && <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-              <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar agendamiento' : 'Editar agendamento'}><MoreHorizontal className="h-4 w-4" /></button>
-              <button type="button" onClick={() => quickComplete(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-300" title={isSpanish ? 'Finalizar atención' : 'Concluir atendimento'}><CheckCircle2 className="h-4 w-4" /></button>
-              <button type="button" onClick={() => cancelAppointment(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Cancelar agendamiento' : 'Cancelar agendamento'}><Trash2 className="h-4 w-4" /></button>
-            </div>}
+            {/* Achado real (pedido direto, print da Agenda "Hoje" no mobile):
+                o botão de editar/remarcar já existia (abre o mesmo
+                AppointmentDialog em modo 'edit'), mas só aparecia no card
+                COMPLETO (`!compact`), escondido atrás de hover — que nem
+                existe em touch. A lista "Hoje"/Pendências usa sempre
+                `compact`, então não tinha nenhum jeito de reagendar
+                diretamente dali. Card compacto ganha só o botão de editar
+                (sempre visível, sem hover), sem concluir/cancelar — mantém
+                o compacto enxuto, só resolve o gap de reagendamento. */}
+            {compact ? (
+              <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar/reagendar' : 'Editar/reagendar'}><MoreHorizontal className="h-4 w-4" /></button>
+            ) : (
+              <div className="ml-auto flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                <button type="button" onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title={isSpanish ? 'Editar agendamiento' : 'Editar agendamento'}><MoreHorizontal className="h-4 w-4" /></button>
+                <button type="button" onClick={() => quickComplete(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-300" title={isSpanish ? 'Finalizar atención' : 'Concluir atendimento'}><CheckCircle2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => cancelAppointment(calendarEvent)} className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300" title={isSpanish ? 'Cancelar agendamiento' : 'Cancelar agendamento'}><Trash2 className="h-4 w-4" /></button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -778,9 +791,23 @@ export const AgendaFinanceiroCenter: React.FC<AgendaFinanceiroCenterProps> = ({
                 {selectedDayAppointments.length} {isSpanish ? 'citas el' : 'compromissos em'} {new Date(`${selectedDate}T12:00:00`).toLocaleDateString(displayLocale, { day: '2-digit', month: 'short' })}
               </p>
               {selectedDayAppointments.map((calendarEvent) => (
-                <button type="button" key={calendarEvent.id} onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })} className="block w-full text-left">
+                // Achado real (TASK atual): o card compacto passou a ter seu
+                // próprio botão de editar/reagendar (ver EventCard acima) —
+                // envolver o card inteiro num <button> aqui aninhava um
+                // <button> dentro de outro <button> (HTML inválido, clique
+                // ambíguo). Vira <div role="button"> com o mesmo onClick;
+                // o botão interno chama exatamente a mesma ação, então não
+                // precisa de stopPropagation.
+                <div
+                  key={calendarEvent.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setAppointmentDialog({ mode: 'edit', event: calendarEvent })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setAppointmentDialog({ mode: 'edit', event: calendarEvent }); }}
+                  className="block w-full cursor-pointer text-left"
+                >
                   <EventCard calendarEvent={calendarEvent} compact />
-                </button>
+                </div>
               ))}
             </div>
           )}

@@ -585,9 +585,15 @@ export function createWebhooksRouter({ metaWebhookVerifyToken, metaAppSecret, ge
           return;
         }
 
-        if (msg.referral?.ctwaClid) {
+        // TASK-0364: Evolution API não tem `ctwa_clid` (campo específico da
+        // Meta Cloud API) — a atribuição de anúncio que ela carrega vem de
+        // `contextInfo.externalAdReply` (ver extractEvolutionAdReferral em
+        // webhookParsers.ts), quase sempre com título/sourceId mas sem
+        // ctwaClid. Exigir só ctwaClid deixaria TODA atribuição de anúncio
+        // via Evolution sem ser gravada — checa qualquer um dos três campos.
+        if (msg.referral?.ctwaClid || msg.referral?.sourceId || msg.referral?.headline) {
           attachAdReferralIfMissing(tenantId, msg.from, { ctwaClid: msg.referral.ctwaClid, adSourceId: msg.referral.sourceId, adHeadline: msg.referral.headline }).catch((err) =>
-            console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar ctwa_clid de ${msg.from}:`, err.message)
+            console.warn(`⚠️  [Webhook ${msg.provider}] Falha ao gravar atribuição de anúncio de ${msg.from}:`, err.message)
           );
         }
 

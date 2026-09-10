@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { QrCode, X, CheckCircle2, RefreshCw } from 'lucide-react';
+import { QrCode, X, CheckCircle2, RefreshCw, KeyRound } from 'lucide-react';
 import { apiFetch } from '../lib/apiClient';
 
 /**
@@ -15,14 +15,29 @@ import { apiFetch } from '../lib/apiClient';
  * (resolveEvolutionTenantId) ignora qualquer id que não venha de saas_admin
  * e resolve pelo tenantId do JWT, então isso nunca abre a conexão de outro
  * tenant mesmo que o `tenantId` passado aqui esteja errado/desatualizado.
+ *
+ * `alreadyConnected` (TASK-0371) só ajusta o texto do botão/título — o
+ * mesmo `handleGenerateQr` já cria a instância do zero quando o tenant ainda
+ * não tem nenhuma (POST .../evolution-instance é idempotente), então esse
+ * componente sempre serviu tanto pra primeira conexão quanto pra reconectar;
+ * antes disso só ficava visível pra quem já tinha instância, o que escondia
+ * a opção de primeira conexão pra admin comum.
  */
-export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenantId }) => {
+export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string; alreadyConnected?: boolean }> = ({ tenantId, alreadyConnected = false }) => {
+  const buttonLabel = alreadyConnected ? 'Reconectar WhatsApp' : 'Conectar WhatsApp';
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
   const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<'idle' | 'waiting' | 'connected'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isRecreating, setIsRecreating] = useState(false);
+  // Alternativa ao QR — conectar digitando o número no celular (WhatsApp >
+  // Aparelhos conectados > Conectar com número de telefone), sem precisar
+  // escanear nada. `phoneInput` é o que o operador digita nesta tela;
+  // `useCode` decide se a próxima geração pede pairing code em vez de QR.
+  const [phoneInput, setPhoneInput] = useState('');
+  const [useCode, setUseCode] = useState(false);
 
   useEffect(() => {
     if (connectionState !== 'waiting') return;
@@ -43,11 +58,13 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
     setIsGeneratingQr(true);
     setErrorMsg(null);
     try {
-      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/qrcode`);
+      const query = useCode && phoneInput.trim() ? `?number=${encodeURIComponent(phoneInput.trim())}` : '';
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/qrcode${query}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.warning) setErrorMsg(data.warning);
       setQrCodeBase64(data.qrCodeBase64 || null);
+      setPairingCode(data.pairingCode || null);
       setConnectionState('waiting');
     } catch (err: any) {
       setErrorMsg(err.message || 'Falha ao buscar o QR Code.');
@@ -60,13 +77,19 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
     setIsGeneratingQr(true);
     setErrorMsg(null);
     setQrCodeBase64(null);
+    setPairingCode(null);
     try {
-      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance`, { method: 'POST' });
+      const number = useCode && phoneInput.trim() ? phoneInput.trim() : undefined;
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance`, {
+        method: 'POST',
+        ...(number ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number }) } : {}),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.warning) setErrorMsg(data.warning);
-      if (data.qrCodeBase64) {
-        setQrCodeBase64(data.qrCodeBase64);
+      if (data.qrCodeBase64 || data.pairingCode) {
+        setQrCodeBase64(data.qrCodeBase64 || null);
+        setPairingCode(data.pairingCode || null);
         setConnectionState('waiting');
       } else {
         await handleRefreshQr();
@@ -82,7 +105,10 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
     setIsModalOpen(true);
     setErrorMsg(null);
     setQrCodeBase64(null);
+    setPairingCode(null);
     setConnectionState('idle');
+    setUseCode(false);
+    setPhoneInput('');
   };
 
   // Recria a instância do zero na Evolution API (delete + create) — achado
@@ -96,13 +122,19 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
     setIsRecreating(true);
     setErrorMsg(null);
     setQrCodeBase64(null);
+    setPairingCode(null);
     try {
-      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/recreate`, { method: 'POST' });
+      const number = useCode && phoneInput.trim() ? phoneInput.trim() : undefined;
+      const res = await apiFetch(`/api/admin/tenants/${tenantId}/evolution-instance/recreate`, {
+        method: 'POST',
+        ...(number ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number }) } : {}),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.warning) setErrorMsg(data.warning);
-      if (data.qrCodeBase64) {
-        setQrCodeBase64(data.qrCodeBase64);
+      if (data.qrCodeBase64 || data.pairingCode) {
+        setQrCodeBase64(data.qrCodeBase64 || null);
+        setPairingCode(data.pairingCode || null);
         setConnectionState('waiting');
       } else {
         await handleRefreshQr();
@@ -119,12 +151,12 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
       <button
         type="button"
         onClick={openModal}
-        title="Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)"
+        title={alreadyConnected ? 'Gerar/renovar o QR Code de conexão do WhatsApp deste tenant (Evolution API)' : 'Conectar o WhatsApp deste tenant via QR Code (Evolution API)'}
         className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-sky-800/60 bg-sky-950/60 px-3 py-2 text-xs font-semibold text-sky-300 transition-all hover:bg-sky-900/80"
       >
         <QrCode className="w-3.5 h-3.5" />
-        <span className="hidden sm:inline">Reconectar WhatsApp (QR Code)</span>
-        <span className="sm:hidden">Reconectar WhatsApp</span>
+        <span className="hidden sm:inline">{buttonLabel} (QR Code)</span>
+        <span className="sm:hidden">{buttonLabel}</span>
       </button>
 
       {isModalOpen && (
@@ -135,7 +167,7 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
           >
             <div className="flex items-center justify-between">
               <h3 className="text-white font-bold text-sm flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-sky-400" /> Reconectar WhatsApp (Evolution API)
+                <QrCode className="w-4 h-4 text-sky-400" /> {buttonLabel} (Evolution API)
               </h3>
               <button type="button" onClick={() => setIsModalOpen(false)} className="text-slate-500 hover:text-white">
                 <X className="w-4 h-4" />
@@ -160,6 +192,19 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
                   <RefreshCw className={`w-3 h-3 ${isRecreating ? 'animate-spin' : ''}`} /> {isRecreating ? 'Recriando...' : 'Mensagens não chegam mesmo conectado? Recriar instância do zero'}
                 </button>
               </div>
+            ) : pairingCode ? (
+              <div className="text-center space-y-3">
+                <p className="text-2xl font-mono font-bold tracking-widest text-white bg-slate-800 rounded-lg py-3">{pairingCode}</p>
+                <p className="text-xs text-slate-400">No celular deste número: WhatsApp → Aparelhos conectados → Conectar com número de telefone → digite este código.</p>
+                <button
+                  type="button"
+                  onClick={handleRefreshQr}
+                  disabled={isGeneratingQr}
+                  className="text-xs text-sky-300 hover:text-sky-200 flex items-center gap-1.5 mx-auto disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isGeneratingQr ? 'animate-spin' : ''}`} /> Código expirou? Gerar novo
+                </button>
+              </div>
             ) : qrCodeBase64 ? (
               <div className="text-center space-y-3">
                 <img src={qrCodeBase64} alt="QR Code de conexão" className="mx-auto rounded-lg border border-slate-700 w-56 h-56 object-contain bg-white" />
@@ -174,15 +219,34 @@ export const ReconectarWhatsAppQrCode: React.FC<{ tenantId: string }> = ({ tenan
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={handleGenerateQr}
-                disabled={isGeneratingQr}
-                className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-              >
-                {isGeneratingQr ? <span className="animate-spin">⏳</span> : <QrCode className="w-3.5 h-3.5" />}
-                {isGeneratingQr ? 'Gerando...' : 'Gerar QR Code'}
-              </button>
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setUseCode((v) => !v)}
+                  className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5"
+                >
+                  <KeyRound className="w-3 h-3" />
+                  {useCode ? 'Prefiro escanear o QR Code' : 'Sem câmera à mão? Conectar digitando o número'}
+                </button>
+                {useCode && (
+                  <input
+                    type="tel"
+                    value={phoneInput}
+                    onChange={(e) => setPhoneInput(e.target.value)}
+                    placeholder="Ex: 5567999249351 (DDI+DDD+número, só dígitos)"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={handleGenerateQr}
+                  disabled={isGeneratingQr || (useCode && !phoneInput.trim())}
+                  className="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  {isGeneratingQr ? <span className="animate-spin">⏳</span> : useCode ? <KeyRound className="w-3.5 h-3.5" /> : <QrCode className="w-3.5 h-3.5" />}
+                  {isGeneratingQr ? 'Gerando...' : useCode ? 'Gerar código' : 'Gerar QR Code'}
+                </button>
+              </div>
             )}
           </div>
         </div>

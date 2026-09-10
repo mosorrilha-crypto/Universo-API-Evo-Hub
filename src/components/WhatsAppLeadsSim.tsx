@@ -3136,6 +3136,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   };
 
   // Envia de verdade via Meta Cloud API (só quando o lead é uma conversa real, não simulada)
+  //
+  // TASK-0370 (achado real, print de conversa duplicada): a bolha otimista
+  // criada em handleSendTextMessage usa um id local (`msg-<timestamp>`) só
+  // pra aparecer na hora, sem esperar a rede. Antes desta correção, a
+  // mensagem REAL (id de verdade do WhatsApp, sentBy/operatorName
+  // preenchidos) que chega depois — seja na resposta deste POST, seja via
+  // loadNewerMessages disparado pelo próximo evento SSE — tinha um id
+  // DIFERENTE do local, e o dedup por id em loadNewerMessages (`existingIds`)
+  // nunca reconhecia as duas como a mesma mensagem: ambas ficavam na lista,
+  // uma "crua" (sem rótulo de operador) e outra com o rótulo completo.
+  // Corrigido substituindo a entrada otimista pela mensagem real assim que a
+  // resposta deste POST chega, em vez de deixar as duas coexistirem — usa o
+  // id local (já conhecido no fechamento desta função) pra achar e trocar a
+  // entrada certa.
   const sendRealWhatsAppMessage = async (leadId: string, phone: string, messageId: string, text: string, replyToMessageId?: string) => {
     try {
       const res = await apiFetch(`/api/conversations/${encodeURIComponent(phone)}/send`, {
@@ -3144,6 +3158,21 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
         body: JSON.stringify({ text, ...(replyToMessageId ? { replyToMessageId } : {}) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => null);
+      const realMessages: ChatMessage[] = data?.conversation?.messages || [];
+      // A mensagem que acabamos de mandar é sempre a última com
+      // sentBy === 'operator' na lista fresca devolvida pelo servidor —
+      // recordOutgoingMessage já gravou e releu a conversa antes de responder.
+      const realMessage = [...realMessages].reverse().find((m) => m.sentBy === 'operator');
+      if (realMessage) {
+        setLeads((prev) => prev.map((l) => {
+          if (l.id !== leadId) return l;
+          return {
+            ...l,
+            messages: (l.messages || []).map((m) => (m.id === messageId ? { ...m, ...realMessage, timestamp: m.timestamp, rawTimestamp: realMessage.timestamp } : m)),
+          };
+        }));
+      }
     } catch (err) {
       console.error('Falha ao enviar mensagem real via WhatsApp:', err);
       markMessageFailed(leadId, messageId, 'Falha ao enviar a mensagem pro cliente — ele NÃO recebeu. Tente reenviar.');
@@ -3788,7 +3817,15 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           em pills menores (padding e fonte reduzidos) — sem o estado
           `expandedQuickSetting`/toque-pra-expandir. "Somente anúncios"
           continua como ícone em círculo (mesmo estilo de Módulos), já que
-          é só um toggle liga/desliga, não tem opções pra escolher. */}
+          é só um toggle liga/desliga, não tem opções pra escolher.
+
+          Achado real (bug reportado, 09/09/2026): esta seção (Status do
+          agente, dentro da gaveta Ferramentas) renderizava incondicionalmente
+          pra QUALQUER role — mesmo gate `canManageAgent` (admin/saas_admin)
+          já usado na faixa fixa de desktop e no tile "Agente & catálogo"
+          logo abaixo, aplicado aqui também. */}
+      {canManageAgent && (
+      <>
       <div className="flex flex-col gap-1">
         <p className="pl-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
           {isSpanish ? 'Estado del agente' : 'Status do agente'}
@@ -3860,6 +3897,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
           <AlertCircle className="h-3 w-3" />
           <span>Status incerto — recarregar</span>
         </button>
+      )}
+      </>
       )}
 
       {/* TASK-0358 (pedido direto, print anotado): Idioma/Tema saíram
@@ -4259,7 +4298,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               gaveta de Ferramentas (ver `toolbarSettingsBody`), que só
               aparece quando o operador realmente precisa mexer no status.
               Desktop não tem gaveta de Ferramentas (removida na TASK-0225),
-              então mantém a faixa fixa aqui, sem mudança. */}
+              então mantém a faixa fixa aqui, sem mudança.
+
+              Achado real (bug reportado, 09/09/2026): esta faixa renderizava
+              incondicionalmente pra QUALQUER role, mesmo `operator`/`manager`
+              — o backend já bloqueia `POST /api/agent-status` com
+              `requireRole('admin')` (`server/routes/conversations.ts`), mas o
+              frontend fazia uma atualização OTIMISTA (mudava o pill na hora)
+              e só revertia depois que o servidor rejeitava — dava a
+              impressão enganosa de que um operador conseguiu mudar o status.
+              Corrigido gatando a faixa inteira por `canManageAgent` (mesmo
+              gate — admin/saas_admin — já usado pro tile "Agente & catálogo"
+              logo abaixo), tanto aqui (desktop) quanto na gaveta mobile
+              (`toolbarSettingsBody`). */}
+          {canManageAgent && (
           <div className="hidden lg:flex items-center justify-between gap-2 p-2 bg-[#111b21] border-b border-slate-800/30">
             <span className="pl-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">Status do agente</span>
             <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -4336,6 +4388,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* TASK-0354 (pedido direto, "eu pedi pra recriar a página de
               ferramentas, não mandar ela como janela"): a versão anterior
@@ -4825,6 +4878,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           Contador de mensagens continua, é útil no
                           cabeçalho e não é dado sensível. */}
                       <span className="truncate min-w-0">{selectedLead.messages?.length || 0} mensagens</span>
+                      {/* TASK-0373 (pedido direto): indicador visual de que
+                          a IA está no atendimento deste lead — antes só
+                          existia dentro da Ficha do Contato (painel lateral,
+                          precisa abrir), e a única forma de saber "a IA vai
+                          responder a próxima mensagem?" direto no cabeçalho
+                          era clicar no menu ⋮ e ver se o item era "Bloquear"
+                          ou "Reativar". Mesmo dado já usado no sidebar
+                          (`aiBlockedAt`), só que visível sem clique extra. */}
+                      <span
+                        className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                          (selectedLead as any).aiBlockedAt
+                            ? 'text-amber-400 bg-amber-950/60 border-amber-700/50'
+                            : 'text-emerald-400 bg-emerald-950/60 border-emerald-700/50'
+                        }`}
+                        title={
+                          (selectedLead as any).aiBlockedAt
+                            ? (isSpanish ? 'La IA está bloqueada para este contacto — solo un operador responde hasta reactivarla (menú ⋮).' : 'A IA está bloqueada para este contato — só um operador responde até reativá-la (menu ⋮).')
+                            : (isSpanish ? 'La IA está en atención — responde automáticamente a la próxima mensaje de este contacto.' : 'A IA está no atendimento — responde automaticamente à próxima mensagem deste contato.')
+                        }
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${(selectedLead as any).aiBlockedAt ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+                        {(selectedLead as any).aiBlockedAt
+                          ? (isSpanish ? 'IA pausada' : 'IA pausada')
+                          : (isSpanish ? 'IA en atención' : 'IA no atendimento')}
+                      </span>
                       {/* TASK-0258 (pedido direto): quando a janela de 24h
                           está aberta e não há nenhuma ação pendente, a faixa
                           de status inteira (linha cheia, sempre visível)
@@ -5203,9 +5281,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             {!isAiBlocked && (
                               <button
-                                onClick={() => { handleUpdateConversationState(selectedLead.id, { releaseAiNow: true }); setIsHeaderMenuOpen(false); }}
+                                onClick={async () => {
+                                  setIsHeaderMenuOpen(false);
+                                  const released = await handleUpdateConversationState(selectedLead.id, { releaseAiNow: true });
+                                  // Pedido direto (09/09/2026): antes disso, "Devolver a IA agora"
+                                  // só limpava a pausa e esperava uma mensagem NOVA do lead pra
+                                  // responder — se a última mensagem dele já estava parada
+                                  // esperando (ex: o gate de pausa "operador ativo" nem era a causa
+                                  // real, e a mensagem simplesmente nunca teve resposta), o
+                                  // operador ficava sem jeito de fazer a IA responder JÁ. Mesmo
+                                  // padrão de "Ativar IA e preparar rascunho" (adLead) abaixo: lê o
+                                  // histórico real e leva a sugestão pro compositor, nunca envia
+                                  // sozinho — revisão humana continua obrigatória.
+                                  if (released) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
+                                }}
                                 className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora, sem esperar os 5min."
+                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora e já gerar um rascunho de resposta pra última mensagem pendente, sem esperar os 5min nem uma mensagem nova do lead."
                               >
                                 <RefreshCw className="w-3.5 h-3.5" />
                                 <span>{isSpanish ? 'Devolver la IA ahora' : 'Devolver a IA agora'}</span>
@@ -5489,11 +5580,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           isLead ? 'text-slate-400' : msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-200'
                         }`}
                       >
-                        {msg.sentBy === 'operator' && (
-                          <span className="font-extrabold tracking-wider text-slate-300 mr-1 uppercase">
-                            ESCRITA POR VOCÊ
-                          </span>
-                        )}
+                        {/* TASK-0370: "ESCRITA POR VOCÊ" aqui era redundante com o
+                            cabeçalho da bolha (hasSenderLabel acima, mesmo mensagem
+                            derivada de msg.sentBy === 'operator') — removido, o
+                            cabeçalho agora já identifica o operador específico. */}
                         {msg.timestamp}
                         {!isLead && (msg.sendFailed ? (
                           <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
@@ -5648,7 +5738,10 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                                 <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide">
                                   {msg.sentBy === 'ai' ? <Bot className="w-2.5 h-2.5 text-emerald-400" /> : <UserCheck className="w-2.5 h-2.5 text-slate-300" />}
                                   <span className={msg.sentBy === 'operator' ? 'text-slate-300' : 'text-emerald-400'}>
-                                    {msg.sentBy === 'ai' ? 'Atendente' : 'Você (equipe)'}
+                                    {/* TASK-0370 (pedido direto): identifica QUEM especificamente
+                                        escreveu, não só "algum operador da equipe" — cai no rótulo
+                                        genérico só pra mensagens antigas sem operatorName gravado. */}
+                                    {msg.sentBy === 'ai' ? 'Atendente' : msg.operatorName || 'Você (equipe)'}
                                   </span>
                                 </div>
                               )}
@@ -5987,12 +6080,20 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                   return (
                     <div className="flex items-center justify-between px-3 py-1.5 bg-[#111b21] rounded-xl border border-slate-800 text-[11px] mb-1">
                       {!isMetaChannel ? (
-                        <div className="flex items-center justify-between w-full gap-2">
-                          <div className="flex items-center gap-1.5 text-amber-400/90 font-semibold" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span>Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
+                        // Achado real (bug reportado, print anotado): o layout
+                        // era uma única linha (`flex items-center
+                        // justify-between`) sem `flex-wrap`/`min-w-0` — no
+                        // mobile, o texto e os botões brigavam pelo mesmo
+                        // espaço horizontal e o texto acabava quebrando
+                        // palavra por palavra. Agora empilha (texto em cima,
+                        // botões embaixo) até `sm`, e só vira uma linha só em
+                        // telas largas o bastante pra caber os dois.
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between w-full">
+                          <div className="flex items-start gap-1.5 text-amber-400/90 font-semibold min-w-0" title="Sem restrição técnica de envio nesse canal — mas mandar mensagem pra um contato inativo há muito tempo aumenta o risco desse número ser sinalizado como suspeito pelo WhatsApp. Prefira esperar o cliente escrever primeiro, ou modere o uso.">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span className="min-w-0">Mais de 24h sem {selectedLead.name} escrever. Você pode responder normalmente, mas reengajar aumenta o risco desse número ser sinalizado pelo WhatsApp.</span>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
+                          <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">
                             <button
                               type="button"
                               disabled={isGeneratingReengagement}

@@ -155,6 +155,22 @@ export const App: React.FC = () => {
   // Um perfil em localStorage só melhora a continuidade visual; nunca libera
   // a plataforma SaaS até que a sessão seja confirmada pelo servidor.
   const [isSaasSessionConfirmed, setIsSaasSessionConfirmed] = useState(false);
+  // Impersonação (TASK-0363, "saas_admin acessa como um operador") — vem de
+  // GET /api/auth/session.impersonation, nunca inferido no cliente. Alimenta
+  // a faixa de aviso persistente + "Voltar para admin" logo abaixo.
+  const [impersonation, setImpersonation] = useState<{ active: boolean; byOperatorId?: string; byOperatorName?: string }>({ active: false });
+  const [isEndingImpersonation, setIsEndingImpersonation] = useState(false);
+  const handleEndImpersonation = async () => {
+    setIsEndingImpersonation(true);
+    try {
+      const res = await apiFetch('/api/auth/end-impersonation', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      window.location.href = '/';
+    } catch {
+      setIsEndingImpersonation(false);
+      alert('Não foi possível voltar para a conta de admin agora. Tente de novo.');
+    }
+  };
 
   // TASK-0311 (TASK-0249 item 1): a sessão virou cookie httpOnly — o
   // frontend não tem mais como saber, antes de perguntar, se existe uma
@@ -185,11 +201,13 @@ export const App: React.FC = () => {
           department: previous?.department || 'Operador',
         }));
         setIsSaasSessionConfirmed(operator.role === 'saas_admin');
+        setImpersonation(data?.impersonation?.active ? data.impersonation : { active: false });
       })
       .catch(() => {
         if (cancelled) return;
         setIsSaasSessionConfirmed(false);
         setCurrentUser(null);
+        setImpersonation({ active: false });
       });
 
     return () => { cancelled = true; };
@@ -1502,6 +1520,27 @@ export const App: React.FC = () => {
     // verdade em todo aparelho Android (ver TASK-0337 acima, `--real-vh`
     // medido via `visualViewport`, mais robusto que `dvh` puro).
     <div className="min-h-[var(--real-vh,100dvh)] bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500 selection:text-slate-950">
+
+      {/* Faixa de aviso persistente de impersonação (TASK-0363) — fora do
+          wrapper que se esconde com uma conversa aberta no mobile (abaixo),
+          de propósito: quem está impersonando precisa SEMPRE conseguir ver
+          que está numa sessão emprestada e voltar, em qualquer tela/aba. */}
+      {impersonation.active && (
+        <div className="sticky top-0 z-[60] flex flex-wrap items-center justify-center gap-2 bg-amber-500 px-3 py-2 text-center text-xs font-semibold text-slate-950">
+          <span>
+            Você está vendo como <strong>{currentUser?.name || 'este usuário'}</strong>
+            {impersonation.byOperatorName ? ` (impersonado por ${impersonation.byOperatorName})` : ''}.
+          </span>
+          <button
+            type="button"
+            onClick={handleEndImpersonation}
+            disabled={isEndingImpersonation}
+            className="rounded-lg bg-slate-950 px-2.5 py-1 text-[11px] font-bold text-amber-300 transition hover:bg-slate-900 disabled:opacity-50"
+          >
+            {isEndingImpersonation ? 'Voltando...' : 'Voltar para admin'}
+          </button>
+        </div>
+      )}
 
       {/* Header Navigation — escondido no mobile enquanto uma conversa está
           aberta no Atendimento (pedido direto, 29/08/2026: "esse menu e

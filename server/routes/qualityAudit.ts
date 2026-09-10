@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { GoogleGenAI } from '@google/genai';
 import { Router, type RequestHandler } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
@@ -15,6 +16,10 @@ import {
   type QualityReviewStatus,
 } from '../services/qualityAuditStore';
 import { runAgentEvaluation } from '../services/agentEvalService';
+import { generateAutoReplyForText } from '../services/autoReply';
+import { getRuntimeKnowledgeBase, formatKnowledgeBaseForPrompt } from '../services/knowledgeBaseStore';
+import { getTenantSegment } from '../services/tenantProfileStore';
+import type { CalendarConfig } from '../services/googleCalendar';
 import { createAgentEvalRun, finishAgentEvalRun, listAgentEvalRuns, updateAgentEvalRunProgress } from '../services/agentEvalRunStore';
 import { recordAgentEvalRunCase, listAgentEvalRunCases } from '../services/agentEvalRunCaseStore';
 import { calculateControlledExperimentResult } from '../services/controlledExperimentResults';
@@ -40,6 +45,13 @@ interface QualityAuditRouterDeps {
   /** TASK-0208 — avaliação automática (botão "Rodar avaliação automática"). Getter deferido, mesmo padrão já usado em webhooks.ts. */
   getAi?: () => GoogleGenAI | null;
   groqApiKey?: string;
+  /** TASK-0375 — "Testar roteiro manual" precisa do calendário real pra
+   * ferramentas de consulta de disponibilidade funcionarem de verdade
+   * (mesmas credenciais de app compartilhadas usadas em webhooks.ts/
+   * conversations.ts — nunca um segredo por tenant aqui). */
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri?: string;
 }
 
 const EVAL_RUN_MAX_COUNT = 100;
@@ -62,9 +74,15 @@ function safeContext(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function createQualityAuditRouter({ authenticateToken, isQualityModuleEnabled, getAi, groqApiKey }: QualityAuditRouterDeps): Router {
+export function createQualityAuditRouter({ authenticateToken, isQualityModuleEnabled, getAi, groqApiKey, googleClientId, googleClientSecret, googleRedirectUri }: QualityAuditRouterDeps): Router {
   const router = Router();
   const qualityModuleEnabled = isQualityModuleEnabled || isQualityModuleEnabledForCurrentTenant;
+  // Mesmo formato de webhooks.ts/conversations.ts — CalendarConfig só carrega
+  // credenciais de app (OAuth), nunca segredo por tenant; a autorização real
+  // por tenant já mora no lado de dentro de checkFreeBusy/etc.
+  const calendarConfig: CalendarConfig | undefined = googleRedirectUri
+    ? { clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }
+    : undefined;
 
   function requireQualityModule() {
     return asyncHandler(async (req: AuthenticatedRequest, res, next) => {
@@ -504,6 +522,68 @@ export function createQualityAuditRouter({ authenticateToken, isQualityModuleEna
       payload: { decision, note: note || null, originalValue: originalValue || null, correctedValue: correctedValue || null, context: safeContext(context) },
     });
     res.status(201).json({ success: true, reviewId: reviewIdToAudit, event });
+  }));
+
+  /**
+   * TASK-0375 (pedido direto): "digitar as perguntas que eu quero testar,
+   * tipo gerar uma conversa fictícia com roteiro, sem passar pelo webhook,
+   * mas recebendo respostas reais do agente" — um turno de cada vez, o
+   * operador digita, vê a resposta REAL, decide a próxima mensagem
+   * considerando o que a IA respondeu (chat interativo, não um roteiro
+   * inteiro mandado de uma vez).
+   *
+   * Mesmo pipeline real (`generateAutoReplyForText`) que processa mensagem
+   * de WhatsApp de verdade — só que com telefone fictício (nunca colide com
+   * um contato real) e SEM `messageId`/persistência nenhuma: nada é gravado
+   * em `messages`/`conversations`, nenhum escalonamento, nenhum evento de
+   * calendário real. Isso é seguro mesmo passando o calendário REAL do
+   * tenant: as 4 ações de escrita (criar/remarcar/cancelar agendamento,
+   * criar_pre_reserva) já são só "planejadas" nesta etapa de rascunho
+   * (`runAgendamentoTools`/`isDeferredCalendarActionName` em autoReply.ts) —
+   * a execução de verdade só acontece num passo SEPARADO
+   * (`executeApprovedCalendarActions`, chamado só depois do revisor de
+   * segurança aprovar o ENVIO real em webhooks.ts), que esta rota nunca
+   * chama. Só as consultas de disponibilidade (leitura) rodam de verdade,
+   * o que é o que torna o teste de agendamento útil de verdade.
+   *
+   * Histórico da conversa fictícia é mantido pelo PRÓPRIO CLIENTE (array
+   * `history` enviado a cada turno) — sem tabela nova, sem estado no
+   * servidor entre chamadas.
+   */
+  router.post('/api/quality-audit/manual-test', authenticateToken, requireQualityModule(), requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const ai = getAi?.();
+    if (!ai) return res.status(503).json({ error: 'Gemini não configurado (GEMINI_API_KEY ausente) — teste manual indisponível.' });
+
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: 'text é obrigatório.' });
+    if (text.length > 2000) return res.status(400).json({ error: 'Mensagem muito longa (máximo 2000 caracteres).' });
+
+    const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+    if (rawHistory.length > 200) return res.status(400).json({ error: 'Histórico muito longo (máximo 200 mensagens).' });
+    const history = rawHistory
+      .filter((m: unknown): m is { sender: unknown; text: unknown } => !!m && typeof m === 'object')
+      .map((m: { sender: unknown; text: unknown }) => ({
+        sender: (m.sender === 'agent' ? 'agent' : 'lead') as 'lead' | 'agent',
+        text: typeof m.text === 'string' ? m.text.slice(0, 2000) : undefined,
+      }));
+
+    const tenantId = tenantOf(req);
+    const runtimeKb = await getRuntimeKnowledgeBase(tenantId);
+    if (runtimeKb.source === 'unavailable') {
+      return res.status(503).json({ error: 'Base de Conhecimento indisponível pra este tenant — não dá pra testar sem ela.' });
+    }
+    const kbContext = formatKnowledgeBaseForPrompt(runtimeKb.knowledgeBase);
+    const segment = await getTenantSegment(tenantId);
+    const fakePhone = `test-${randomUUID()}`;
+
+    const result = await generateAutoReplyForText(
+      tenantId, ai, text, undefined, kbContext, history, fakePhone,
+      calendarConfig, segment, undefined, undefined, undefined, undefined, groqApiKey, undefined, false
+    );
+    if (!result) {
+      return res.status(502).json({ error: 'Sem resposta (Gemini indisponível no momento — tente de novo).' });
+    }
+    res.json({ bubbles: result.bubbles, agent: result.agent, needsHumanConfirmation: result.needsHumanConfirmation });
   }));
 
   return router;

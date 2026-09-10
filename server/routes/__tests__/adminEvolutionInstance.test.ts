@@ -36,7 +36,7 @@ function startServer(
   app.use(
     createAdminRouter({
       authenticateToken,
-      supabase: supabase as any,
+      supabase: supabase as any, jwtSecret: 'test-secret', isProduction: false,
       publicBaseUrl: PUBLIC_BASE_URL,
       ...deps,
     })
@@ -576,5 +576,173 @@ describe('escopo por tenant pra admin comum (não saas_admin)', () => {
 
     const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
     expect(res.status).toBe(403);
+  });
+});
+
+// TASK-0371 (pedido direto, print real do painel SaaS Admin: tenant "Dr.
+// Daniel" com "Sem conexão" — só saas_admin conseguia iniciar a primeira
+// conexão via QR, apesar de POST .../evolution-instance já aceitar admin
+// comum). Esse endpoint decide se o botão self-service aparece pro admin.
+describe('GET /api/admin/tenants/:id/evolution-instance/available', () => {
+  function fakeAuthenticateTokenAsAdmin(req: any, _res: any, next: any) {
+    req.user = { id: 'op-admin-comum', tenantId: TENANT_ID, role: 'admin' };
+    next();
+  }
+
+  it('true (já conectado) quando o tenant já tem credencial Evolution', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'minha-instancia', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: true, alreadyConnected: true });
+  });
+
+  it('true (primeira conexão) quando o tenant não tem NENHUMA credencial própria e o servidor tem EVOLUTION_API_URL/KEY', async () => {
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: true, alreadyConnected: false });
+  });
+
+  it('false quando o tenant já tem credencial Meta própria configurada (canal escolhido deliberadamente)', async () => {
+    supabase.__tables.tenant_meta_credentials = [{ tenant_id: TENANT_ID, phone_number_id: 'pn-real-123' }];
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: false, alreadyConnected: false });
+  });
+
+  it('false quando o servidor não tem EVOLUTION_API_URL/KEY configurados, mesmo sem credencial Meta', async () => {
+    ({ server, baseUrl } = await startServer({}, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: false, alreadyConnected: false });
+  });
+
+  it('ignora o :id da URL pra admin comum — sempre resolve pelo tenantId do JWT', async () => {
+    const OTHER_TENANT_ID = 'tenant-de-outra-empresa';
+    supabase.__tables.tenant_meta_credentials = [{ tenant_id: OTHER_TENANT_ID, phone_number_id: 'pn-de-outra-empresa' }];
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsAdmin));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${OTHER_TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(200);
+    // Não bate na credencial Meta de OTHER_TENANT_ID — resolve pro tenant do JWT (TENANT_ID), sem credencial nenhuma.
+    expect(await res.json()).toEqual({ available: true, alreadyConnected: false });
+  });
+
+  it('403 pra operator/manager', async () => {
+    function fakeAuthenticateTokenAsOperator(req: any, _res: any, next: any) {
+      req.user = { id: 'op-comum', tenantId: TENANT_ID, role: 'operator' };
+      next();
+    }
+    ({ server, baseUrl } = await startServer(undefined, fakeAuthenticateTokenAsOperator));
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/available`);
+    expect(res.status).toBe(403);
+  });
+});
+
+// TASK-0374 (pedido direto): pairing code como alternativa ao QR — WhatsApp
+// > Aparelhos conectados > Conectar com número de telefone, sem escanear
+// nada. A Evolution API devolve `pairingCode` em vez de (ou junto com)
+// `qrcode.base64` quando um `number` é passado na criação/reconexão.
+describe('pairing code (conectar por número, sem QR)', () => {
+  it('POST .../evolution-instance repassa "number" no corpo do /instance/create e devolve o pairingCode recebido', async () => {
+    let createBody: any;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        createBody = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { pairingCode: 'ABCD-1234' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number: '+55 (67) 9924-9351' }),
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.pairingCode).toBe('ABCD-1234');
+    // Normalizado (só dígitos) antes de mandar pra Evolution API.
+    expect(createBody.number).toBe('556799249351');
+  });
+
+  it('GET .../qrcode repassa "number" como query string pro /instance/connect e devolve o pairingCode', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    let connectUrl: URL | undefined;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`)) {
+        connectUrl = new URL(urlStr);
+        return { ok: true, json: async () => ({ pairingCode: 'WXYZ-5678' }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode?number=556799249351`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.pairingCode).toBe('WXYZ-5678');
+    expect(connectUrl?.searchParams.get('number')).toBe('556799249351');
+  });
+
+  it('sem "number", o comportamento de QR Code normal continua igual (sem pairingCode)', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        return { ok: true, json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { base64: 'data:image/png;base64,ABC123' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,ABC123');
+    expect(data.pairingCode).toBeUndefined();
+  });
+
+  it('400 quando "number" não é um número plausível (poucos dígitos)', async () => {
+    ({ server, baseUrl } = await startServer());
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number: '123' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 no GET .../qrcode quando "number" na query é inválido, sem chegar a chamar a Evolution API', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      throw new Error(`não deveria chamar a Evolution API: ${url}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode?number=abc`);
+    expect(res.status).toBe(400);
   });
 });

@@ -563,19 +563,29 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
     documents: ensureUniqueIds(knowledgeBase.documents, 'doc'),
     firstContactBlocks: ensureUniqueIds(knowledgeBase.firstContactBlocks, 'fcblock'),
   }));
-  // "Reconectar WhatsApp (QR Code)" só existe pra tenants conectados via
-  // Evolution API (QR Code) — a Meta Cloud API oficial não tem esse fluxo.
-  // Mesma checagem que `WhatsAppLeadsSim.tsx` já fazia antes de mover o
-  // botão pra cá (TASK-0167); só busca quando a permissão de admin já libera
-  // o botão, pra não gastar uma chamada à toa pra quem nunca vai ver isso.
+  // "Reconectar WhatsApp (QR Code)" existe pra tenants já conectados via
+  // Evolution API OU que ainda não têm credencial própria nenhuma (nem Meta
+  // nem Evolution — ex: tenant recém-cadastrado, primeira conexão). Nunca
+  // aparece pra um tenant deliberadamente configurado com Meta Cloud API
+  // própria. TASK-0371 (pedido direto, print real: só saas_admin conseguia
+  // fazer a primeira conexão de um tenant novo, apesar do backend já aceitar
+  // `admin` comum pra isso) trocou de `/api/status/available` (que só cobre
+  // "já conectado", usado pela feature de Status/Stories) pro endpoint
+  // dedicado abaixo, que também cobre "ainda não conectado, mas pode
+  // conectar". Só busca quando a permissão de admin já libera o botão, pra
+  // não gastar uma chamada à toa pra quem nunca vai ver isso.
   const [whatsAppQrAvailable, setWhatsAppQrAvailable] = useState(false);
+  const [whatsAppAlreadyConnected, setWhatsAppAlreadyConnected] = useState(false);
   useEffect(() => {
-    if (!canManageWhatsAppConnection) return;
-    apiFetch('/api/status/available')
+    if (!canManageWhatsAppConnection || !activeTenantId) return;
+    apiFetch(`/api/admin/tenants/${activeTenantId}/evolution-instance/available`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setWhatsAppQrAvailable(!!data?.available))
+      .then((data) => {
+        setWhatsAppQrAvailable(!!data?.available);
+        setWhatsAppAlreadyConnected(!!data?.alreadyConnected);
+      })
       .catch(() => {});
-  }, [canManageWhatsAppConnection]);
+  }, [canManageWhatsAppConnection, activeTenantId]);
   const [isSavedToast, setIsSavedToast] = useState(false);
   const [isSavingKnowledgeBase, setIsSavingKnowledgeBase] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -2003,7 +2013,7 @@ export const AgentKnowledgeBaseView: React.FC<AgentKnowledgeBaseProps> = ({
               painel de Ferramentas do Atendimento — mudou pra cá, a tela de
               configuração operacional do tenant vista por admins (TASK-0167). */}
           {canManageWhatsAppConnection && whatsAppQrAvailable && activeTenantId && (
-            <ReconectarWhatsAppQrCode tenantId={activeTenantId} />
+            <ReconectarWhatsAppQrCode tenantId={activeTenantId} alreadyConnected={whatsAppAlreadyConnected} />
           )}
           <button
             onClick={handleResetToDefault}

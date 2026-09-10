@@ -22,11 +22,21 @@ function stripDataUriPrefix(base64: string): string {
 
 export type BroadcastNumberStatus = 'active' | 'paused' | 'banned' | 'warming';
 export type BroadcastQualityRating = 'unknown' | 'high' | 'medium' | 'low';
+/**
+ * TASK-0367 — `meta` (default, comportamento de sempre) manda por template
+ * aprovado via Meta Cloud API. `evolution` manda texto livre (sem template,
+ * Baileys não tem esse conceito) direto pro número operacional Evolution do
+ * próprio tenant — não existe "pool de números dedicados" pra Evolution
+ * como existe pra Meta, só o único número já conectado à instância.
+ */
+export type BroadcastNumberProvider = 'meta' | 'evolution';
 
 export interface BroadcastNumber {
   id: string;
   tenantId: string;
   label: string;
+  provider: BroadcastNumberProvider;
+  /** Pra `provider: 'meta'`, o phone_number_id real da Meta. Pra `provider: 'evolution'`, só um identificador único e informativo — a rota de envio de verdade é sempre o número operacional Evolution do tenant, resolvido em tempo de envio (ver broadcastSenderJob.ts). */
   phoneNumberId: string;
   wabaId: string | null;
   accessToken: string | null;
@@ -46,6 +56,7 @@ function mapNumberRow(row: any): BroadcastNumber {
     id: row.id,
     tenantId: row.tenant_id,
     label: row.label,
+    provider: row.provider === 'evolution' ? 'evolution' : 'meta',
     phoneNumberId: row.phone_number_id,
     wabaId: row.waba_id ?? null,
     accessToken: row.access_token ? decryptSecret(row.access_token) : null,
@@ -78,6 +89,7 @@ export async function getBroadcastNumber(tenantId: string, id: string): Promise<
 export interface CreateBroadcastNumberInput {
   label: string;
   phoneNumberId: string;
+  provider?: BroadcastNumberProvider;
   wabaId?: string | null;
   accessToken?: string | null;
   perMinuteCap?: number;
@@ -85,23 +97,37 @@ export interface CreateBroadcastNumberInput {
   minGapSeconds?: number;
 }
 
+// TASK-0367 — a Evolution/Baileys não tem conceito de "qualidade de
+// número"/quota oficial da Meta pra calibrar contra; o único jeito de
+// reduzir risco de bloqueio é ser bem mais conservador por padrão do que os
+// defaults da Meta (per_minute_cap 5, daily_cap 1000, min_gap 8s) — pedido
+// direto pelo dono do produto: "o menor lote possível primeiro e
+// espaçamento maior". Esses defaults só valem quando o campo não é
+// informado explicitamente — um operador pode sobrescrever se souber o que
+// está fazendo, mas o padrão nunca deve ser o mesmo tão permissivo da Meta.
+const EVOLUTION_DEFAULT_PER_MINUTE_CAP = 1;
+const EVOLUTION_DEFAULT_DAILY_CAP = 20;
+const EVOLUTION_DEFAULT_MIN_GAP_SECONDS = 60;
+
 export async function createBroadcastNumber(tenantId: string, input: CreateBroadcastNumberInput): Promise<BroadcastNumber> {
   const db = getDb();
+  const provider: BroadcastNumberProvider = input.provider === 'evolution' ? 'evolution' : 'meta';
   const { data, error } = await db
     .from('broadcast_numbers')
     .insert({
       tenant_id: tenantId,
       label: input.label,
+      provider,
       phone_number_id: input.phoneNumberId,
-      waba_id: input.wabaId || null,
-      access_token: input.accessToken ? encryptSecret(input.accessToken) : null,
+      waba_id: provider === 'evolution' ? null : input.wabaId || null,
+      access_token: provider === 'evolution' ? null : input.accessToken ? encryptSecret(input.accessToken) : null,
       status: 'warming',
       warmup_progress_days: 0,
       warmup_last_advanced_on: null,
       quality_rating: 'unknown',
-      per_minute_cap: input.perMinuteCap ?? 5,
-      daily_cap: input.dailyCap ?? 1000,
-      min_gap_seconds: input.minGapSeconds ?? 8,
+      per_minute_cap: input.perMinuteCap ?? (provider === 'evolution' ? EVOLUTION_DEFAULT_PER_MINUTE_CAP : 5),
+      daily_cap: input.dailyCap ?? (provider === 'evolution' ? EVOLUTION_DEFAULT_DAILY_CAP : 1000),
+      min_gap_seconds: input.minGapSeconds ?? (provider === 'evolution' ? EVOLUTION_DEFAULT_MIN_GAP_SECONDS : 8),
     })
     .select('*')
     .single();
@@ -286,7 +312,7 @@ export async function deleteBroadcastTemplate(tenantId: string, id: string): Pro
 
 // ─── Listas de contatos ─────────────────────────────────────────────────
 
-export type ContactListSource = 'csv' | 'segment_known_leads' | 'segment_has_appointment';
+export type ContactListSource = 'csv' | 'segment_known_leads' | 'segment_has_appointment' | 'segment_interested_no_appointment';
 
 export interface BroadcastContactList {
   id: string;
@@ -374,7 +400,7 @@ export async function importContactList(
   return { list: mapContactListRow(listRow), imported: contacts.length, duplicatesIgnored };
 }
 
-export type ContactListSegment = 'known_leads' | 'has_appointment';
+export type ContactListSegment = 'known_leads' | 'has_appointment' | 'interested_no_appointment';
 
 /**
  * Monta uma lista de contatos a partir de dados reais já existentes no
@@ -384,17 +410,29 @@ export type ContactListSegment = 'known_leads' | 'has_appointment';
  * - `has_appointment`: telefones com um `eventId` real no Google Calendar
  *   em `appointments` (agendamento confirmado, não uma reserva provisória
  *   ainda sem evento — ver appointmentStore.ts).
- * "Já se inscreveu em um evento" (a pergunta original que motivou esse
- * item do backlog) não vira um 3º segmento aqui: o sistema não tem
- * nenhuma entidade de "inscrição em evento" — inventar uma sem um caso de
- * uso real por trás violaria a mesma regra de "nunca fabricar dado de
- * negócio" que já vale pro conteúdo do agente.
+ * - `interested_no_appointment` (TASK-0366, pedido direto — campanha de
+ *   reaquecimento de leads de micropigmentação que não agendaram): filtra
+ *   `conversations.interest` (o serviço/produto do catálogo mais recente
+ *   que o lead demonstrou interesse, capturado a cada turno pelo
+ *   especialista — TASK-0185) por um termo livre (`interestKeyword`,
+ *   busca parcial case-insensitive, ex.: "micro" pega Microblading,
+ *   Microshading, Microlips e combos com "Micro"), e exclui qualquer
+ *   telefone que já tenha QUALQUER linha em `appointments` — mesmo uma
+ *   reserva provisória sem evento ainda (`heldUntil` sem `eventId`) conta
+ *   como "já em processo de agendar", pra não campanhar de novo quem já
+ *   está no meio do fluxo.
+ * "Já se inscreveu em um evento" (a pergunta original que motivou o
+ * backlog dos 2 primeiros segmentos) não vira um segmento aqui: o sistema
+ * não tem nenhuma entidade de "inscrição em evento" — inventar uma sem um
+ * caso de uso real por trás violaria a mesma regra de "nunca fabricar
+ * dado de negócio" que já vale pro conteúdo do agente.
  */
 export async function createContactListFromSegment(
   tenantId: string,
   name: string,
   segment: ContactListSegment,
-  createdBy: string | null
+  createdBy: string | null,
+  options?: { interestKeyword?: string }
 ): Promise<ImportContactListResult> {
   const db = getDb();
   let pairs: Array<{ phone: string; name: string | null }>;
@@ -403,9 +441,23 @@ export async function createContactListFromSegment(
     const { data, error } = await db.from('conversations').select('phone, name').eq('tenant_id', tenantId);
     if (error) throw error;
     pairs = (data || []).map((row: any) => ({ phone: row.phone, name: row.name ?? null }));
-  } else {
+  } else if (segment === 'has_appointment') {
     const appointments = await listAllAppointments(tenantId);
     pairs = appointments.filter((a) => !!a.eventId).map((a) => ({ phone: a.phone, name: null }));
+  } else {
+    const keyword = options?.interestKeyword?.trim();
+    if (!keyword) throw new Error('Informe um termo em "interestKeyword" pra filtrar o interesse (ex.: "micro" pra micropigmentação).');
+    const { data, error } = await db
+      .from('conversations')
+      .select('phone, name, interest')
+      .eq('tenant_id', tenantId)
+      .ilike('interest', `%${keyword}%`);
+    if (error) throw error;
+    const appointments = await listAllAppointments(tenantId);
+    const phonesAlreadyInBookingFlow = new Set(appointments.map((a) => a.phone));
+    pairs = (data || [])
+      .filter((row: any) => !phonesAlreadyInBookingFlow.has(row.phone))
+      .map((row: any) => ({ phone: row.phone, name: row.name ?? null }));
   }
 
   const seen = new Set<string>();
@@ -418,7 +470,8 @@ export async function createContactListFromSegment(
     throw new Error('Nenhum contato encontrado nesse segmento — a lista ficaria vazia.');
   }
 
-  const source: ContactListSource = segment === 'known_leads' ? 'segment_known_leads' : 'segment_has_appointment';
+  const source: ContactListSource =
+    segment === 'known_leads' ? 'segment_known_leads' : segment === 'has_appointment' ? 'segment_has_appointment' : 'segment_interested_no_appointment';
   const { data: listRow, error: listError } = await db
     .from('broadcast_contact_lists')
     .insert({ tenant_id: tenantId, name, source_filename: null, source, contact_count: uniquePairs.length, created_by: createdBy })

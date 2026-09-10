@@ -13,6 +13,7 @@ import {
   Filter,
   Lightbulb,
   LockKeyhole,
+  MessageCircle,
   RefreshCw,
   RotateCcw,
   Search,
@@ -352,6 +353,16 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
   const [loadingRunCases, setLoadingRunCases] = useState(false);
   const [runCasesError, setRunCasesError] = useState<string | null>(null);
 
+  // TASK-0375 (pedido direto): "roteiro manual" — chat interativo turno a
+  // turno com o agente REAL (mesmo generateAutoReplyForText do WhatsApp),
+  // sem telefone/conversa real nenhuma envolvida. Histórico vive só neste
+  // estado local (nunca persiste no servidor) — recarregar a página começa
+  // uma conversa fictícia nova.
+  const [manualTestMessages, setManualTestMessages] = useState<{ sender: 'lead' | 'agent'; text: string }[]>([]);
+  const [manualTestInput, setManualTestInput] = useState('');
+  const [manualTestSending, setManualTestSending] = useState(false);
+  const [manualTestError, setManualTestError] = useState<string | null>(null);
+
   /** TASK-0249 — pedido direto do dono do produto: ver a lista completa de pergunta+resposta de uma rodada, inclusive os casos APROVADOS, não só os que viraram achado de bug. */
   const openRunCases = async (runId: string) => {
     setViewingRunId(runId);
@@ -450,6 +461,31 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
       setEvalError(error?.message || 'Não foi possível iniciar a avaliação automática.');
     } finally {
       setStartingEval(false);
+    }
+  };
+
+  const handleSendManualTest = async () => {
+    const text = manualTestInput.trim();
+    if (!text || manualTestSending) return;
+    const historyBeforeThisTurn = manualTestMessages;
+    setManualTestMessages((prev) => [...prev, { sender: 'lead', text }]);
+    setManualTestInput('');
+    setManualTestError(null);
+    setManualTestSending(true);
+    try {
+      const response = await apiFetch('/api/quality-audit/manual-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, history: historyBeforeThisTurn }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || 'Não foi possível obter a resposta do agente.');
+      const bubbles: string[] = Array.isArray(data?.bubbles) ? data.bubbles : [];
+      setManualTestMessages((prev) => [...prev, ...bubbles.map((b) => ({ sender: 'agent' as const, text: b }))]);
+    } catch (error: any) {
+      setManualTestError(error?.message || 'Não foi possível obter a resposta do agente.');
+    } finally {
+      setManualTestSending(false);
     }
   };
 
@@ -811,6 +847,78 @@ export const QualityAuditCenter: React.FC<QualityAuditCenterProps> = ({ onToast 
                 })}
               </div>
             )}
+          </div>
+
+          <div className="bg-slate-900/70 border border-slate-800 rounded-card p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">{isSpanish ? 'Probar guion manual' : 'Testar roteiro manual'}</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {isSpanish
+                    ? 'Escribí lo que quieras y recibí la respuesta REAL del agente (mismo pipeline del WhatsApp) — sin pasar por webhook, sin número/conversa real, sin guardar nada. Conversación ficticia, se pierde al recargar la página.'
+                    : 'Digite o que quiser e receba a resposta REAL do agente (mesmo pipeline do WhatsApp) — sem passar pelo webhook, sem número/conversa real, sem gravar nada. Conversa fictícia, some ao recarregar a página.'}
+                </p>
+              </div>
+              <MessageCircle className="w-5 h-5 text-sky-300" />
+            </div>
+
+            {manualTestMessages.length > 0 && (
+              <div className="mb-3 max-h-80 overflow-y-auto space-y-2 pr-1">
+                {manualTestMessages.map((m, i) => (
+                  <div key={i} className={`flex ${m.sender === 'lead' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[80%] rounded-panel px-3 py-2 text-xs whitespace-pre-wrap ${
+                        m.sender === 'lead' ? 'bg-sky-500/20 border border-sky-400/30 text-sky-100' : 'bg-slate-800 border border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      {m.text}
+                    </div>
+                  </div>
+                ))}
+                {manualTestSending && (
+                  <div className="flex justify-start">
+                    <div className="rounded-panel px-3 py-2 text-xs bg-slate-800 border border-slate-700 text-slate-500 italic">
+                      {isSpanish ? 'El agente está escribiendo...' : 'O agente está digitando...'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {manualTestError && <p className="text-xs text-rose-400 mb-2">{manualTestError}</p>}
+
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleSendManualTest(); }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={manualTestInput}
+                onChange={(e) => setManualTestInput(e.target.value)}
+                placeholder={isSpanish ? 'Escribí como si fueras un cliente...' : 'Digite como se fosse um cliente...'}
+                disabled={manualTestSending}
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-control px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-400/50 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={manualTestSending || !manualTestInput.trim()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-control bg-sky-500/15 border border-sky-400/30 text-sky-200 text-xs font-semibold hover:bg-sky-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send className="w-3.5 h-3.5" />
+                {isSpanish ? 'Enviar' : 'Enviar'}
+              </button>
+              {manualTestMessages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setManualTestMessages([]); setManualTestError(null); }}
+                  disabled={manualTestSending}
+                  title={isSpanish ? 'Empezar una conversación ficticia nueva' : 'Começar uma conversa fictícia nova'}
+                  className="p-2 rounded-control border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 transition-colors disabled:opacity-50"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </form>
           </div>
         </>
       )}

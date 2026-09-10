@@ -17,6 +17,7 @@
 import { startPeriodicJob } from './periodicJob';
 import { runWithTenantDbContext } from './tenantDbContext';
 import { sendWhatsAppTemplateMessage } from './metaSend';
+import { sendEvolutionTextMessage } from './evolutionSend';
 import { resolveCredentialsForConversation } from './tenantResolver';
 import { getOrCreateConversationForBroadcast, recordOutgoingMessage } from './conversationStore';
 import { effectiveDailyCap, hasCompletedWarmup } from './warmupCurve';
@@ -57,6 +58,16 @@ import {
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 /** Lote máximo processado por combinação (campanha, número) a cada tick — evita um tick único demorado demais mesmo com fila grande e cota alta. */
 const MAX_BATCH_PER_TICK = 20;
+/**
+ * TASK-0367 — teto adicional só pra números Evolution, bem mais baixo que o
+ * da Meta: pedido direto ("o menor lote possível primeiro e espaçamento
+ * maior"), já que a Evolution/Baileys não tem quota oficial nem curva de
+ * qualidade calibrada pela própria Meta pra confiar — o número operacional
+ * de verdade do tenant está em jogo, não um número de disparo descartável.
+ * Aplica mesmo que `per_minute_cap`/`daily_cap` do número estejam
+ * configurados mais permissivos.
+ */
+const EVOLUTION_MAX_BATCH_PER_TICK = 2;
 
 export interface BroadcastSenderJobDeps {
   metaAccessToken?: string;
@@ -122,7 +133,8 @@ async function processCampaignNumber(
   const effectiveCap = number.status === 'warming' ? effectiveDailyCap(number.warmupProgressDays, number.dailyCap) : number.dailyCap;
   const remainingMinute = number.perMinuteCap - sentLastMinute;
   const remainingDay = effectiveCap - sentLastDay;
-  const quota = Math.max(0, Math.min(remainingMinute, remainingDay, MAX_BATCH_PER_TICK));
+  const maxBatchPerTick = number.provider === 'evolution' ? EVOLUTION_MAX_BATCH_PER_TICK : MAX_BATCH_PER_TICK;
+  const quota = Math.max(0, Math.min(remainingMinute, remainingDay, maxBatchPerTick));
   if (quota <= 0) return;
 
   const recipients = await dequeuePendingRecipients(campaignId, number.id, quota);
@@ -160,32 +172,56 @@ async function processCampaignNumber(
     const contact = contactsById.get(recipient.contactId);
     const variables = contact?.variables || {};
     try {
-      // Busca-ou-cria a conversa: se já existir (contato conhecido que
-      // passou pelo toggle "incluir mesmo assim"), NUNCA sobrescreve o
-      // phone_number_id dela — usa o que ela já tinha. Protege contra a
-      // colisão de roteamento mesmo no caso raro de a conversa ter sido
-      // criada por outra via entre a alocação da campanha e o envio real.
-      const conversation = await getOrCreateConversationForBroadcast(tenantId, recipient.phone, contact?.name ?? null, number.phoneNumberId);
-      const credentials = await resolveCredentialsForConversation(
-        tenantId,
-        conversation.phoneNumberId,
-        { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
-        { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
-      );
-
-      const bodyParams = template.bodyVariableLabels.map((label) => variables[label] ?? '');
-      const { messageId } = await sendWhatsAppTemplateMessage(
-        credentials.metaPhoneNumberId,
-        credentials.metaAccessToken,
-        recipient.phone,
-        template.name,
-        template.language,
-        bodyParams,
-        undefined,
-        headerMediaId || undefined
-      );
-
       const displayText = renderTemplateDisplayText(template.bodyText, variables) || template.name;
+      let messageId: string | undefined;
+      let conversation: { id: string; phoneNumberId: string | null };
+
+      if (number.provider === 'evolution') {
+        // TASK-0367 — Evolution não tem "número de disparo" separado do
+        // operacional (Baileys só conecta UM número por instância): a
+        // conversa fica sem phone_number_id próprio (null), pra sair pelo
+        // mesmo caminho de sempre (resolveCredentialsForConversation cai no
+        // operacional real do tenant quando não há phone_number_id
+        // dedicado — mesmo comportamento de uma conversa comum).
+        conversation = await getOrCreateConversationForBroadcast(tenantId, recipient.phone, contact?.name ?? null, null);
+        const credentials = await resolveCredentialsForConversation(
+          tenantId,
+          conversation.phoneNumberId,
+          { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
+          { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
+        );
+        if (credentials.provider !== 'evolution' || !credentials.evolutionInstanceName) {
+          throw new Error('Número marcado como Evolution, mas o tenant não tem credencial Evolution configurada (tenant_evolution_credentials).');
+        }
+        messageId = await sendEvolutionTextMessage(credentials.evolutionInstanceName, credentials.evolutionApiUrl, credentials.evolutionApiKey, recipient.phone, displayText);
+      } else {
+        // Busca-ou-cria a conversa: se já existir (contato conhecido que
+        // passou pelo toggle "incluir mesmo assim"), NUNCA sobrescreve o
+        // phone_number_id dela — usa o que ela já tinha. Protege contra a
+        // colisão de roteamento mesmo no caso raro de a conversa ter sido
+        // criada por outra via entre a alocação da campanha e o envio real.
+        conversation = await getOrCreateConversationForBroadcast(tenantId, recipient.phone, contact?.name ?? null, number.phoneNumberId);
+        const credentials = await resolveCredentialsForConversation(
+          tenantId,
+          conversation.phoneNumberId,
+          { metaAccessToken: deps.metaAccessToken, metaPhoneNumberId: deps.metaPhoneNumberId },
+          { evolutionApiUrl: deps.evolutionApiUrl, evolutionApiKey: deps.evolutionApiKey, evolutionInstanceName: deps.evolutionInstanceName }
+        );
+
+        const bodyParams = template.bodyVariableLabels.map((label) => variables[label] ?? '');
+        const sent = await sendWhatsAppTemplateMessage(
+          credentials.metaPhoneNumberId,
+          credentials.metaAccessToken,
+          recipient.phone,
+          template.name,
+          template.language,
+          bodyParams,
+          undefined,
+          headerMediaId || undefined
+        );
+        messageId = sent.messageId;
+      }
+
       await recordOutgoingMessage(
         tenantId,
         recipient.phone,
