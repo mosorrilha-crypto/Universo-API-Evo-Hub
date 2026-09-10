@@ -2292,6 +2292,41 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     lastMessageCountRef.current = messageCount;
   }, [selectedLead?.id, selectedLead?.messages?.length]);
 
+  // TASK-0380 — Achado real (relato do operador, print anexado): abrir uma
+  // conversa longa (semanas de histórico, muita imagem/áudio) não caía na última
+  // mensagem — sempre sobrava rolar manualmente até o fim, mesmo com o
+  // efeito acima chamando scrollToLatestMessage('auto') na troca de
+  // conversa. Causa: aquele scroll roda num ÚNICO requestAnimationFrame,
+  // mas o conteúdo pode continuar crescendo DEPOIS desse frame — um
+  // histórico grande leva mais de um frame pra terminar de montar no DOM
+  // em aparelhos mais lentos (a captura de tela era num Android antigo,
+  // bateria em 15%), então `scrollTo({ top: scrollHeight })` acerta uma
+  // altura que já ficou desatualizada assim que o resto do conteúdo entra.
+  // Este observer prende a rolagem no fim enquanto o operador estiver lá
+  // (`shouldAutoScrollRef` — nunca briga com quem rolou pra cima de
+  // propósito pra ler o histórico, isso já desliga a flag em
+  // handleMessagesScroll) toda vez que o próprio conteúdo do chat muda,
+  // não só quando `messages.length` muda (cobre qualquer crescimento
+  // tardio de altura, não um caso específico).
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || typeof MutationObserver === 'undefined') return;
+    let frame: number | null = null;
+    const observer = new MutationObserver(() => {
+      if (!shouldAutoScrollRef.current) return;
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        scrollToLatestMessage('auto');
+      });
+    });
+    observer.observe(container, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [Boolean(selectedLead)]);
+
   // Issue #82, item 3 — o backend de verificação de pagamento
   // (setPaymentVerification/verify-payment) já existia e funcionava, mas o
   // agendamento com o status do comprovante nunca chegava até aqui: não

@@ -152,6 +152,21 @@ async function startServer() {
   // tarefa: um push com esse comentário continuou gerando o alerta).
   app.use(cookieParser());
 
+  // Achado de segurança (TASK-0379): nenhum header de proteção contra
+  // clickjacking existia — um site malicioso conseguia embutir o painel
+  // (que roda autenticado via cookie httpOnly, anexado automaticamente pelo
+  // navegador) num <iframe> invisível e enganar o operador a clicar em ações
+  // reais sem perceber. `X-Frame-Options: DENY` bloqueia qualquer framing,
+  // inclusive same-origin (o app nunca se embute em si mesmo, então não há
+  // custo). `X-Content-Type-Options: nosniff` fecha o MIME-sniffing que
+  // permitiria o navegador reinterpretar uma resposta (ex: upload de mídia)
+  // como HTML/JS executável mesmo com um Content-Type diferente.
+  app.use((_req, res, next) => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  });
+
   // O catálogo público é montado sem autenticação, mas resolve o tenant pelo
   // slug e só publica tenants explicitamente habilitados na migration 0042.
   app.use(createPublicCatalogRouter({ supabaseUrl: config.supabaseUrl, supabaseKey: config.supabaseKey }));
