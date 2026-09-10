@@ -4878,6 +4878,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           Contador de mensagens continua, é útil no
                           cabeçalho e não é dado sensível. */}
                       <span className="truncate min-w-0">{selectedLead.messages?.length || 0} mensagens</span>
+                      {/* TASK-0373 (pedido direto): indicador visual de que
+                          a IA está no atendimento deste lead — antes só
+                          existia dentro da Ficha do Contato (painel lateral,
+                          precisa abrir), e a única forma de saber "a IA vai
+                          responder a próxima mensagem?" direto no cabeçalho
+                          era clicar no menu ⋮ e ver se o item era "Bloquear"
+                          ou "Reativar". Mesmo dado já usado no sidebar
+                          (`aiBlockedAt`), só que visível sem clique extra. */}
+                      <span
+                        className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                          (selectedLead as any).aiBlockedAt
+                            ? 'text-amber-400 bg-amber-950/60 border-amber-700/50'
+                            : 'text-emerald-400 bg-emerald-950/60 border-emerald-700/50'
+                        }`}
+                        title={
+                          (selectedLead as any).aiBlockedAt
+                            ? (isSpanish ? 'La IA está bloqueada para este contacto — solo un operador responde hasta reactivarla (menú ⋮).' : 'A IA está bloqueada para este contato — só um operador responde até reativá-la (menu ⋮).')
+                            : (isSpanish ? 'La IA está en atención — responde automáticamente a la próxima mensaje de este contacto.' : 'A IA está no atendimento — responde automaticamente à próxima mensagem deste contato.')
+                        }
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${(selectedLead as any).aiBlockedAt ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+                        {(selectedLead as any).aiBlockedAt
+                          ? (isSpanish ? 'IA pausada' : 'IA pausada')
+                          : (isSpanish ? 'IA en atención' : 'IA no atendimento')}
+                      </span>
                       {/* TASK-0258 (pedido direto): quando a janela de 24h
                           está aberta e não há nenhuma ação pendente, a faixa
                           de status inteira (linha cheia, sempre visível)
@@ -5256,9 +5281,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             {!isAiBlocked && (
                               <button
-                                onClick={() => { handleUpdateConversationState(selectedLead.id, { releaseAiNow: true }); setIsHeaderMenuOpen(false); }}
+                                onClick={async () => {
+                                  setIsHeaderMenuOpen(false);
+                                  const released = await handleUpdateConversationState(selectedLead.id, { releaseAiNow: true });
+                                  // Pedido direto (09/09/2026): antes disso, "Devolver a IA agora"
+                                  // só limpava a pausa e esperava uma mensagem NOVA do lead pra
+                                  // responder — se a última mensagem dele já estava parada
+                                  // esperando (ex: o gate de pausa "operador ativo" nem era a causa
+                                  // real, e a mensagem simplesmente nunca teve resposta), o
+                                  // operador ficava sem jeito de fazer a IA responder JÁ. Mesmo
+                                  // padrão de "Ativar IA e preparar rascunho" (adLead) abaixo: lê o
+                                  // histórico real e leva a sugestão pro compositor, nunca envia
+                                  // sozinho — revisão humana continua obrigatória.
+                                  if (released) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
+                                }}
                                 className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora, sem esperar os 5min."
+                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora e já gerar um rascunho de resposta pra última mensagem pendente, sem esperar os 5min nem uma mensagem nova do lead."
                               >
                                 <RefreshCw className="w-3.5 h-3.5" />
                                 <span>{isSpanish ? 'Devolver la IA ahora' : 'Devolver a IA agora'}</span>
