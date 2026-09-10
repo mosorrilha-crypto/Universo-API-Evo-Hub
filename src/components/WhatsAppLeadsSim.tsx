@@ -5256,9 +5256,22 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                             </button>
                             {!isAiBlocked && (
                               <button
-                                onClick={() => { handleUpdateConversationState(selectedLead.id, { releaseAiNow: true }); setIsHeaderMenuOpen(false); }}
+                                onClick={async () => {
+                                  setIsHeaderMenuOpen(false);
+                                  const released = await handleUpdateConversationState(selectedLead.id, { releaseAiNow: true });
+                                  // Pedido direto (09/09/2026): antes disso, "Devolver a IA agora"
+                                  // só limpava a pausa e esperava uma mensagem NOVA do lead pra
+                                  // responder — se a última mensagem dele já estava parada
+                                  // esperando (ex: o gate de pausa "operador ativo" nem era a causa
+                                  // real, e a mensagem simplesmente nunca teve resposta), o
+                                  // operador ficava sem jeito de fazer a IA responder JÁ. Mesmo
+                                  // padrão de "Ativar IA e preparar rascunho" (adLead) abaixo: lê o
+                                  // histórico real e leva a sugestão pro compositor, nunca envia
+                                  // sozinho — revisão humana continua obrigatória.
+                                  if (released) await handleAnalyzeConversation(selectedLead, { draftAfterAnalysis: true });
+                                }}
                                 className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:bg-slate-700/60 transition-colors cursor-pointer"
-                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora, sem esperar os 5min."
+                                title="Achado real (01/09/2026): depois de responder manualmente, a IA fica em pausa por 5min pra não cruzar com sua resposta — cada mensagem manual sua renova essa pausa. Use isto pra devolver o controle pra IA agora e já gerar um rascunho de resposta pra última mensagem pendente, sem esperar os 5min nem uma mensagem nova do lead."
                               >
                                 <RefreshCw className="w-3.5 h-3.5" />
                                 <span>{isSpanish ? 'Devolver la IA ahora' : 'Devolver a IA agora'}</span>
