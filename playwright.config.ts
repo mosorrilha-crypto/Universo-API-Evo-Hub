@@ -36,7 +36,19 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        /* Este ambiente já vem com um Chromium pré-instalado fora do cache
+           padrão do Playwright (`/opt/pw-browsers`), numa revisão que pode
+           não bater com a que este `@playwright/test` espera baixar sozinho
+           — sem isso, o launch falha com "Executable doesn't exist" em vez
+           de reusar o binário já disponível. Só se aplica quando essa var
+           existe (ex.: este ambiente de sandbox); em outro lugar (CI, outra
+           máquina) o Playwright usa o cache normal dele. */
+        launchOptions: process.env.PLAYWRIGHT_BROWSERS_PATH
+          ? { executablePath: '/opt/pw-browsers/chromium' }
+          : undefined,
+      },
     },
 
     // {
