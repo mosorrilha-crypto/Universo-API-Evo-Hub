@@ -6566,6 +6566,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onResyncAppointment={handleResyncAppointment}
                 journeyEvents={visibleContactJourney}
                 isJourneyLoading={isContactJourneyLoading}
+                onSaveMemory={handleSaveContactMemory}
               />
             ) : rightPanelTab === 'escalations' ? (
               renderEscalationHistoryPanel()
@@ -6702,6 +6703,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                 onResyncAppointment={handleResyncAppointment}
                 journeyEvents={visibleContactJourney}
                 isJourneyLoading={isContactJourneyLoading}
+                onSaveMemory={handleSaveContactMemory}
                 isMobile
               />
             ) : rightPanelTab === 'escalations' ? (

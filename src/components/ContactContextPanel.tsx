@@ -9,6 +9,8 @@ export interface OperatorMemoryEditPayload {
   serviceInterest: string | null;
   objections: string[];
   nextBestAction: string | null;
+  /** Mesmo campo mostrado como "Observações" na Ficha do Contato (`ConversationContextSidebar`) — TASK-0375. */
+  conversationSummary: string | null;
 }
 
 type ContactContextPanelProps = {
@@ -68,6 +70,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
     serviceInterest: null,
     objections: [],
     nextBestAction: null,
+    conversationSummary: null,
   });
 
   const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim() || null;
@@ -80,6 +83,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
       serviceInterest: source?.serviceInterest || null,
       objections: source?.objections || [],
       nextBestAction: source?.nextBestAction || null,
+      conversationSummary: source?.conversationSummary || null,
     };
     setEditBaseline(next);
     setEditForm(next);
@@ -99,6 +103,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
       serviceInterest: normalizeText(editForm.serviceInterest || ''),
       objections: editForm.objections.map((item) => normalizeText(item) || '').filter(Boolean),
       nextBestAction: normalizeText(editForm.nextBestAction || ''),
+      conversationSummary: normalizeText(editForm.conversationSummary || ''),
     };
     const patch: Partial<OperatorMemoryEditPayload> = {};
     if (next.preferredLanguage !== editBaseline.preferredLanguage) patch.preferredLanguage = next.preferredLanguage;
@@ -107,6 +112,7 @@ export const ContactContextPanel: React.FC<ContactContextPanelProps> = ({
     if (next.serviceInterest !== editBaseline.serviceInterest) patch.serviceInterest = next.serviceInterest;
     if (JSON.stringify(next.objections) !== JSON.stringify(editBaseline.objections)) patch.objections = next.objections;
     if (next.nextBestAction !== editBaseline.nextBestAction) patch.nextBestAction = next.nextBestAction;
+    if (next.conversationSummary !== editBaseline.conversationSummary) patch.conversationSummary = next.conversationSummary;
     if (!Object.keys(patch).length) return cancelEditing();
 
     setIsSaving(true);
@@ -379,6 +385,9 @@ function OperatorMemoryEditor({
       </label>
       <label className="block text-[10px] font-bold text-slate-400">{isSpanish ? 'Próximo paso sugerido' : 'Próximo passo sugerido'}
         <textarea value={form.nextBestAction || ''} onChange={(event) => onChange((current) => ({ ...current, nextBestAction: event.target.value || null }))} className={`${inputClass} min-h-16 resize-y`} maxLength={240} />
+      </label>
+      <label className="block text-[10px] font-bold text-slate-400">{isSpanish ? 'Observaciones' : 'Observações'}
+        <textarea value={form.conversationSummary || ''} onChange={(event) => onChange((current) => ({ ...current, conversationSummary: event.target.value || null }))} className={`${inputClass} min-h-20 resize-y`} maxLength={900} />
       </label>
 
       <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-950/20 p-2 text-[10px] leading-relaxed text-amber-100/85">

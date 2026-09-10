@@ -85,6 +85,29 @@ describe('memória de contexto e traces do agente', () => {
     expect(() => normalizeOperatorContactMemoryPatch({ preferredName: 123 })).toThrow('deve ser texto ou nulo');
   });
 
+  // TASK-0375 (pedido direto): "Observações" na Ficha do Contato é o mesmo
+  // `conversation_summary` da Ficha IA — liberado pra edição humana nos dois
+  // lugares (é só um resumo textual solto, não um estado vivo).
+  it('permite operador corrigir conversationSummary sem afetar os demais campos', async () => {
+    await upsertContactAgentMemory({
+      tenantId: TENANT_A,
+      phone: PHONE,
+      patch: { preferredName: 'Ana', serviceInterest: 'Lash Lift', conversationSummary: 'Resumo gerado pela IA.' },
+    });
+
+    const updated = await updateContactAgentMemoryByOperator({
+      tenantId: TENANT_A,
+      phone: PHONE,
+      patch: { conversationSummary: 'Cliente prefere atendimento à tarde.' },
+    });
+
+    expect(updated.conversation_summary).toBe('Cliente prefere atendimento à tarde.');
+    // Campos não incluídos no patch permanecem intactos.
+    expect(updated.preferred_name).toBe('Ana');
+    expect(updated.service_interest).toBe('Lash Lift');
+    expect(updated.updated_by).toBe('operator');
+  });
+
   it('redige payload sensível no trace e registra a flag de confirmação humana', async () => {
     const trace = await recordAgentTurnTrace({
       tenantId: TENANT_A,
