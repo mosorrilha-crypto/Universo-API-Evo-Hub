@@ -647,3 +647,102 @@ describe('GET /api/admin/tenants/:id/evolution-instance/available', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// TASK-0374 (pedido direto): pairing code como alternativa ao QR — WhatsApp
+// > Aparelhos conectados > Conectar com número de telefone, sem escanear
+// nada. A Evolution API devolve `pairingCode` em vez de (ou junto com)
+// `qrcode.base64` quando um `number` é passado na criação/reconexão.
+describe('pairing code (conectar por número, sem QR)', () => {
+  it('POST .../evolution-instance repassa "number" no corpo do /instance/create e devolve o pairingCode recebido', async () => {
+    let createBody: any;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        createBody = JSON.parse(options.body);
+        return { ok: true, json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { pairingCode: 'ABCD-1234' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number: '+55 (67) 9924-9351' }),
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.pairingCode).toBe('ABCD-1234');
+    // Normalizado (só dígitos) antes de mandar pra Evolution API.
+    expect(createBody.number).toBe('556799249351');
+  });
+
+  it('GET .../qrcode repassa "number" como query string pro /instance/connect e devolve o pairingCode', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    let connectUrl: URL | undefined;
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/instance/connect/cliente-novo-abc123`)) {
+        connectUrl = new URL(urlStr);
+        return { ok: true, json: async () => ({ pairingCode: 'WXYZ-5678' }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode?number=556799249351`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.pairingCode).toBe('WXYZ-5678');
+    expect(connectUrl?.searchParams.get('number')).toBe('556799249351');
+  });
+
+  it('sem "number", o comportamento de QR Code normal continua igual (sem pairingCode)', async () => {
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith(baseUrl)) return realFetch(url, options);
+      if (urlStr === `${EVOLUTION_API_URL}/instance/create`) {
+        return { ok: true, json: async () => ({ hash: { apikey: 'instance-specific-key' }, qrcode: { base64: 'data:image/png;base64,ABC123' } }) } as any;
+      }
+      if (urlStr.startsWith(`${EVOLUTION_API_URL}/webhook/set/`)) return { ok: true, json: async () => ({}) } as any;
+      throw new Error(`URL inesperada no teste: ${urlStr}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, { method: 'POST' });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.qrCodeBase64).toBe('data:image/png;base64,ABC123');
+    expect(data.pairingCode).toBeUndefined();
+  });
+
+  it('400 quando "number" não é um número plausível (poucos dígitos)', async () => {
+    ({ server, baseUrl } = await startServer());
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number: '123' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 no GET .../qrcode quando "number" na query é inválido, sem chegar a chamar a Evolution API', async () => {
+    supabase.__tables.tenant_evolution_credentials = [
+      { tenant_id: TENANT_ID, instance_name: 'cliente-novo-abc123', api_url: EVOLUTION_API_URL, api_key: 'instance-specific-key' },
+    ];
+    global.fetch = vi.fn(async (url: any, options?: any) => {
+      if (String(url).startsWith(baseUrl)) return realFetch(url, options);
+      throw new Error(`não deveria chamar a Evolution API: ${url}`);
+    }) as any;
+    ({ server, baseUrl } = await startServer());
+
+    const res = await fetch(`${baseUrl}/api/admin/tenants/${TENANT_ID}/evolution-instance/qrcode?number=abc`);
+    expect(res.status).toBe(400);
+  });
+});

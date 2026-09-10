@@ -582,8 +582,29 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
   /** Erro de "connect" numa instância que a Evolution API já não conhece (deletada por fora, ex: recriação que falhou no meio) — distinto de outras falhas pra quem chama poder se autocurar recriando em vez de só devolver erro. */
   class InstanceNotFoundError extends Error {}
 
-  async function reconnectExistingInstance(cred: { instance_name: string; api_url: string; api_key: string }) {
-    const connectRes = await fetch(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`, {
+  /**
+   * Normaliza um número pra pairing code (alternativa ao QR — WhatsApp >
+   * Aparelhos conectados > Conectar com número de telefone): remove tudo
+   * que não é dígito e exige formato internacional plausível (DDI+DDD+
+   * número, 8 a 15 dígitos, mesma faixa do E.164). `undefined`/vazio
+   * devolve `undefined` (fluxo de QR normal, sem pairing code); qualquer
+   * outra coisa que não vire um número plausível lança erro explícito em
+   * vez de mandar lixo pra Evolution API.
+   */
+  function normalizePairingPhoneNumber(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value !== 'string') throw new Error('Número para pairing code precisa ser texto.');
+    const digits = value.replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 15) {
+      throw new Error('Número para pairing code inválido — use o formato internacional, só dígitos (ex: 5567999249351).');
+    }
+    return digits;
+  }
+
+  async function reconnectExistingInstance(cred: { instance_name: string; api_url: string; api_key: string }, phoneNumber?: string) {
+    const connectUrl = new URL(`${cred.api_url.replace(/\/$/, '')}/instance/connect/${cred.instance_name}`);
+    if (phoneNumber) connectUrl.searchParams.set('number', phoneNumber);
+    const connectRes = await fetch(connectUrl, {
       headers: { apikey: cred.api_key },
       signal: AbortSignal.timeout(20000),
     });
@@ -594,15 +615,16 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
       throw new Error(message);
     }
     const qrCodeBase64 = data?.base64 || data?.qrcode?.base64;
+    const pairingCode: string | undefined = data?.pairingCode || data?.qrcode?.pairingCode;
 
     let webhookWarning: string | undefined;
     try {
       await setEvolutionWebhook(cred.instance_name, cred.api_url, cred.api_key, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
     } catch (err: any) {
-      webhookWarning = `QR Code pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
+      webhookWarning = `${pairingCode ? 'Código' : 'QR Code'} pronto, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
     }
 
-    return { instanceName: cred.instance_name, qrCodeBase64, warning: webhookWarning };
+    return { instanceName: cred.instance_name, qrCodeBase64, pairingCode, warning: webhookWarning };
   }
 
   /**
@@ -617,13 +639,13 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
    * `persist: 'insert'` quando não existe nenhuma linha ainda pra esse
    * tenant, `'update'` quando já existe (troca instance_name + api_key).
    */
-  async function createFreshInstance(tenantId: string, instanceName: string, persist: 'insert' | 'update'): Promise<{ instanceName: string; qrCodeBase64?: string; warning?: string }> {
+  async function createFreshInstance(tenantId: string, instanceName: string, persist: 'insert' | 'update', phoneNumber?: string): Promise<{ instanceName: string; qrCodeBase64?: string; pairingCode?: string; warning?: string }> {
     let created: any;
     try {
       const createRes = await fetch(`${evolutionApiUrl!.replace(/\/$/, '')}/instance/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey! },
-        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS', ...(phoneNumber ? { number: phoneNumber } : {}) }),
         signal: AbortSignal.timeout(20000),
       });
       created = await createRes.json().catch(() => ({}));
@@ -636,6 +658,7 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
 
     const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey!;
     const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
+    const pairingCode: string | undefined = created?.qrcode?.pairingCode || created?.pairingCode;
 
     const { error: credError } =
       persist === 'insert'
@@ -655,7 +678,8 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
     return {
       instanceName,
       qrCodeBase64,
-      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
+      pairingCode,
+      warning: webhookWarning || (qrCodeBase64 || pairingCode ? undefined : 'Instância criada, mas a resposta não trouxe QR Code nem pairing code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
     };
   }
 
@@ -713,6 +737,12 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
       return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível provisionar instância nova.' });
     }
     const tenantId = resolveEvolutionTenantId(req);
+    let phoneNumber: string | undefined;
+    try {
+      phoneNumber = normalizePairingPhoneNumber(req.body?.number);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
     const { data: tenant, error: tenantError } = await db().from('tenants').select('id, slug, name').eq('id', tenantId).maybeSingle();
     if (tenantError) return res.status(500).json({ error: tenantError.message });
     if (!tenant) return res.status(404).json({ error: 'Tenant não encontrado.' });
@@ -730,7 +760,7 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
       existingCred.api_key = decryptSecret(existingCred.api_key);
       assertValidHttpUrl(existingCred.api_url);
       try {
-        const result = await reconnectExistingInstance(existingCred as any);
+        const result = await reconnectExistingInstance(existingCred as any, phoneNumber);
         return res.json(result);
       } catch (err: any) {
         if (err instanceof InstanceNotFoundError) {
@@ -739,7 +769,7 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
           // apagou a antiga mas falhou ao recriar) — recria do zero com nome
           // novo em vez de devolver 502 pra sempre com nenhuma saída no painel.
           try {
-            const result = await createFreshInstance(tenantId, withFreshSuffix(existingCred.instance_name), 'update');
+            const result = await createFreshInstance(tenantId, withFreshSuffix(existingCred.instance_name), 'update', phoneNumber);
             return res.json(result);
           } catch (recreateErr: any) {
             return res.status(502).json({ error: recreateErr.message });
@@ -756,53 +786,12 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
     const baseName = (requestedName || tenant.slug || tenant.id.slice(0, 8)).toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const instanceName = withFreshSuffix(baseName);
 
-    let created: any;
     try {
-      const createRes = await fetch(`${evolutionApiUrl.replace(/\/$/, '')}/instance/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: evolutionApiKey },
-        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
-        signal: AbortSignal.timeout(20000),
-      });
-      created = await createRes.json().catch(() => ({}));
-      if (!createRes.ok) {
-        return res.status(502).json({ error: `Falha ao criar instância na Evolution API: HTTP ${createRes.status} — ${JSON.stringify(created).slice(0, 300)}` });
-      }
+      const result = await createFreshInstance(tenantId, instanceName, 'insert', phoneNumber);
+      res.status(201).json(result);
     } catch (err: any) {
-      return res.status(502).json({ error: `Falha ao falar com a Evolution API: ${err.message}` });
+      res.status(502).json({ error: err.message });
     }
-
-    // A resposta de /instance/create varia por versão do servidor Evolution
-    // — tenta os formatos conhecidos antes de desistir. A instância em si já
-    // foi criada do lado da Evolution mesmo se não conseguirmos ler o QR
-    // daqui; por isso devolve um aviso em vez de erro puro nesse caso.
-    const instanceApiKey: string = created?.hash?.apikey || created?.hash || evolutionApiKey;
-    const qrCodeBase64: string | undefined = created?.qrcode?.base64 || created?.qrcode || created?.base64;
-
-    const { error: credError } = await db()
-      .from('tenant_evolution_credentials')
-      .insert({ tenant_id: tenant.id, instance_name: instanceName, api_url: evolutionApiUrl, api_key: encryptSecret(instanceApiKey) });
-    if (credError) {
-      return res.status(500).json({ error: `Instância criada na Evolution API, mas falha ao salvar credencial: ${credError.message}` });
-    }
-
-    // Bug real em produção (12/08/2026): sem isso, a instância recebe a
-    // mensagem normalmente (por isso aparece no WhatsApp do celular, síncrono
-    // direto com a Meta) mas nunca avisa o Universo — o agente nunca vê nada
-    // chegar. Melhor esforço: instância+credencial já estão salvas mesmo se
-    // isso falhar, e reabrir o QR Code (rota abaixo) tenta de novo.
-    let webhookWarning: string | undefined;
-    try {
-      await setEvolutionWebhook(instanceName, evolutionApiUrl, instanceApiKey, `${publicBaseUrl.replace(/\/$/, '')}/api/webhooks/evolution`);
-    } catch (err: any) {
-      webhookWarning = `Instância e QR Code prontos, mas falha ao configurar o webhook (mensagens não vão chegar até isso ser corrigido): ${err.message}`;
-    }
-
-    res.status(201).json({
-      instanceName,
-      qrCodeBase64,
-      warning: webhookWarning || (qrCodeBase64 ? undefined : 'Instância criada, mas a resposta não trouxe QR Code — use GET /api/admin/tenants/:id/evolution-instance/qrcode pra buscar.'),
-    });
   }));
 
   // Reconecta/renova o QR Code de uma instância já criada — o QR do
@@ -810,6 +799,12 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
   // onboarding depois desse tempo.
   router.get('/api/admin/tenants/:id/evolution-instance/qrcode', authenticateToken, requireRole('admin'), asyncHandler(async (req: AuthenticatedRequest, res) => {
     const tenantId = resolveEvolutionTenantId(req);
+    let phoneNumber: string | undefined;
+    try {
+      phoneNumber = normalizePairingPhoneNumber(req.query?.number);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
     const { data: cred, error: credError } = await db()
       .from('tenant_evolution_credentials')
       .select('instance_name, api_url, api_key')
@@ -821,14 +816,14 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
     assertValidHttpUrl(cred.api_url);
 
     try {
-      const result = await reconnectExistingInstance(cred as any);
+      const result = await reconnectExistingInstance(cred as any, phoneNumber);
       res.json(result);
     } catch (err: any) {
       // Mesma autocura do POST .../evolution-instance acima — ver comentário
       // na definição de createFreshInstance.
       if (err instanceof InstanceNotFoundError && evolutionApiUrl && evolutionApiKey) {
         try {
-          const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update');
+          const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update', phoneNumber);
           return res.json(result);
         } catch (recreateErr: any) {
           return res.status(502).json({ error: recreateErr.message });
@@ -938,6 +933,12 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
       return res.status(503).json({ error: 'EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados neste servidor — não é possível recriar a instância.' });
     }
     const tenantId = resolveEvolutionTenantId(req);
+    let phoneNumber: string | undefined;
+    try {
+      phoneNumber = normalizePairingPhoneNumber(req.body?.number);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
     const { data: cred, error: credError } = await db()
       .from('tenant_evolution_credentials')
       .select('instance_name, api_url, api_key')
@@ -973,7 +974,7 @@ export function createAdminRouter({ authenticateToken, supabase, jwtSecret, isPr
     }
 
     try {
-      const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update');
+      const result = await createFreshInstance(tenantId, withFreshSuffix(cred.instance_name), 'update', phoneNumber);
       res.json(result);
     } catch (err: any) {
       res.status(502).json({ error: `Instância apagada — ${err.message}` });
