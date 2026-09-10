@@ -1512,6 +1512,19 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // o histórico aberto nem o aviso de erro do tenant novo.
   const activeTenantIdRef = useRef(activeTenant.id);
   activeTenantIdRef.current = activeTenant.id;
+  // Achado real em produção (mensagem só aparecia ao sair e reabrir a
+  // conversa): o handler `source.onmessage` do SSE (mais abaixo) mora num
+  // `useEffect` que só reexecuta quando o tenant muda — então ele fica
+  // fechado pra sempre sobre o `leads` de quando essa conexão foi aberta.
+  // `loadNewerMessages` (abaixo) lia `leads.find(...)` direto desse
+  // closure "congelado", então o guard `!lead?.historyLoaded` via um lead
+  // desatualizado (às vezes nem encontrava o lead) e saía sem fazer nada —
+  // silencioso, sem erro no console. Reabrir a conversa "funcionava" só
+  // porque `handleSelectLead` é recriado a cada render, com `leads` real.
+  // Mesmo padrão já usado por `activeTenantIdRef` acima: uma ref espelhando
+  // o estado, sempre atualizada, imune ao closure velho do efeito do SSE.
+  const leadsRef = useRef(leads);
+  leadsRef.current = leads;
 
   // Formata pra exibição (HH:MM) mas preserva o ISO cru em rawTimestamp — os
   // cursores de paginação (oldest/newestLoadedMessageTimestamp) e o separador
@@ -1616,7 +1629,7 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
   // antigas já carregadas pelo scroll) por buscar só o que é mais novo que o
   // já exibido e anexar ao final.
   const loadNewerMessages = async (phone: string, leadId: string) => {
-    const lead = leads.find((l) => l.id === leadId) as any;
+    const lead = leadsRef.current.find((l) => l.id === leadId) as any;
     if (!lead?.historyLoaded || newerMessagesRequestsInFlightRef.current.has(phone)) return;
     const cursor = lead.newestLoadedMessageTimestamp;
     if (!cursor) return;
