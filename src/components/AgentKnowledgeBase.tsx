@@ -174,17 +174,10 @@ export function ensureUniqueIds<T extends { id?: string }>(items: T[] | undefine
 // `emptyKnowledgeBase` é o fallback correto pra esses casos — o catálogo
 // de exemplo da Monique continua disponível, mas só como escolha explícita
 // em PRESET_TEMPLATES abaixo (o admin escolhe carregar, nunca é automático).
-export const emptyKnowledgeBase: AgentKnowledgeBase = {
-  companyName: '',
-  agentGoal: '',
-  toneOfVoice: '',
-  businessModel: '',
-  pricingAndPolicies: '',
-  products: [],
-  businessRules: [],
-  faqs: [],
-  documents: [],
-};
+// TASK-0376: movido pra `lib/emptyKnowledgeBase.ts` (módulo pequeno, sem
+// puxar este arquivo inteiro) — reexportado aqui só pra não quebrar quem já
+// importava deste caminho.
+export { emptyKnowledgeBase } from '../lib/emptyKnowledgeBase';
 
 // Espelha o "PROMPT FINAL — MONIQUE SORRILHA BEAUTY STUDIO" (versão final
 // fechada em 07/08/2026). TASK-0327 — o script que antes gravava a cópia

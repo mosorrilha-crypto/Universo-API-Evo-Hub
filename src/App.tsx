@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import { Loader2 } from 'lucide-react';
 import {
   ActiveTab,
   Tenant,
@@ -14,23 +15,44 @@ import {
 } from './types';
 import { stripLegacyImageBase64FromProduct } from './lib/knowledgeBaseImageCache';
 import { Header } from './components/Header';
-import { SaaSAdminDashboard } from './components/SaaSAdminDashboard';
 import { WhatsAppLeadsSim } from './components/WhatsAppLeadsSim';
 import AtendimentoWorkspaceFrame from './components/AtendimentoWorkspaceFrame';
 import OperationsModuleFrame from './components/OperationsModuleFrame';
-import { CrmWorkspace } from './components/CrmWorkspace';
-import { EscalationsPanel } from './components/EscalationsPanel';
-import { SystemLogsPanel } from './components/SystemLogsPanel';
-import { BroadcastAdminPanel } from './components/BroadcastAdminPanel';
-import { AgendaWorkspace } from './components/AgendaWorkspace';
-import { FinancialWorkspace } from './components/FinancialWorkspace';
-import { AdAttributionCAPI } from './components/AdAttributionCAPI';
-import { AgentKnowledgeBaseView, emptyKnowledgeBase } from './components/AgentKnowledgeBase';
-import { PublicCatalogSettings } from './components/PublicCatalogSettings';
+import { emptyKnowledgeBase } from './lib/emptyKnowledgeBase';
 import { TenantActivationChecklist } from './components/TenantActivationChecklist';
 import { evaluateTenantActivation } from './lib/tenantActivation';
-import { QualityAuditCenter } from './components/QualityAuditCenter';
 import { FloatingAttendanceButton } from './components/FloatingAttendanceButton';
+// TASK-0376 (pedido direto, "o carregamento das páginas pode ficar mais
+// rápido"): o bundle inicial do frontend passava de 1,9MB porque toda aba —
+// mesmo as que um operador comum nunca abre (Empresas, Qualidade, Logs do
+// Sistema, Disparo em Massa, Anúncios...) — vinha junto no mesmo arquivo
+// carregado por QUALQUER pessoa, em QUALQUER aba. Diferente da aba
+// Atendimento (que precisa ficar sempre montada — ver comentário mais
+// abaixo, perto de `canSeeConversations &&`), todas as abas abaixo já
+// desmontam de verdade ao trocar (`{activeTab === 'x' && <Componente/>}`),
+// então `React.lazy` é seguro aqui: o código só baixa na primeira vez que a
+// aba é aberta, sem perder nenhum estado que já não seria perdido mesmo sem
+// lazy (a troca de aba já desmontava o componente antes desta mudança).
+const SaaSAdminDashboard = lazy(() => import('./components/SaaSAdminDashboard').then((m) => ({ default: m.SaaSAdminDashboard })));
+const CrmWorkspace = lazy(() => import('./components/CrmWorkspace').then((m) => ({ default: m.CrmWorkspace })));
+const EscalationsPanel = lazy(() => import('./components/EscalationsPanel').then((m) => ({ default: m.EscalationsPanel })));
+const SystemLogsPanel = lazy(() => import('./components/SystemLogsPanel').then((m) => ({ default: m.SystemLogsPanel })));
+const BroadcastAdminPanel = lazy(() => import('./components/BroadcastAdminPanel').then((m) => ({ default: m.BroadcastAdminPanel })));
+const AgendaWorkspace = lazy(() => import('./components/AgendaWorkspace').then((m) => ({ default: m.AgendaWorkspace })));
+const FinancialWorkspace = lazy(() => import('./components/FinancialWorkspace').then((m) => ({ default: m.FinancialWorkspace })));
+const AdAttributionCAPI = lazy(() => import('./components/AdAttributionCAPI').then((m) => ({ default: m.AdAttributionCAPI })));
+const AgentKnowledgeBaseView = lazy(() => import('./components/AgentKnowledgeBase').then((m) => ({ default: m.AgentKnowledgeBaseView })));
+const PublicCatalogSettings = lazy(() => import('./components/PublicCatalogSettings').then((m) => ({ default: m.PublicCatalogSettings })));
+const QualityAuditCenter = lazy(() => import('./components/QualityAuditCenter').then((m) => ({ default: m.QualityAuditCenter })));
+
+// Fallback simples e consistente enquanto o código de uma aba ainda não
+// carregada baixa — aparece só na primeira troca pra cada aba, o navegador
+// cacheia o chunk depois disso.
+const TabLoadingFallback: React.FC = () => (
+  <div className="flex min-h-[40vh] items-center justify-center text-slate-400">
+    <Loader2 className="h-6 w-6 animate-spin" />
+  </div>
+);
 import { AtendimentoSecondaryNav } from './components/AtendimentoSecondaryNav';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
@@ -1664,25 +1686,27 @@ export const App: React.FC = () => {
               canConfigure={canSeeAdminTools}
               onNavigate={handleSetActiveTab}
             />
-            <SaaSAdminDashboard
-              tenants={tenants}
-              activeTenant={activeTenant}
-              onSelectTenant={handleSelectTenant}
-              onEnterTenant={(tenant) => {
-                handleSelectTenant(tenant);
-                handleSetActiveTab('whatsapp');
-              }}
-              onAddTenant={(newT) => {
-                setTenants((prev) => [newT, ...prev]);
-                showToast(`Nova empresa ${newT.name} cadastrada`);
-              }}
-              onUpdateTenant={(updatedT) => {
-                setTenants((prev) => prev.map((t) => (t.id === updatedT.id ? updatedT : t)));
-                if (activeTenant.id === updatedT.id) setActiveTenant(updatedT);
-                showToast('Empresa atualizada');
-              }}
-              currentUser={currentUser || GUEST_USER}
-            />
+            <Suspense fallback={<TabLoadingFallback />}>
+              <SaaSAdminDashboard
+                tenants={tenants}
+                activeTenant={activeTenant}
+                onSelectTenant={handleSelectTenant}
+                onEnterTenant={(tenant) => {
+                  handleSelectTenant(tenant);
+                  handleSetActiveTab('whatsapp');
+                }}
+                onAddTenant={(newT) => {
+                  setTenants((prev) => [newT, ...prev]);
+                  showToast(`Nova empresa ${newT.name} cadastrada`);
+                }}
+                onUpdateTenant={(updatedT) => {
+                  setTenants((prev) => prev.map((t) => (t.id === updatedT.id ? updatedT : t)));
+                  if (activeTenant.id === updatedT.id) setActiveTenant(updatedT);
+                  showToast('Empresa atualizada');
+                }}
+                currentUser={currentUser || GUEST_USER}
+              />
+            </Suspense>
           </>
         )}
 
@@ -1799,20 +1823,22 @@ export const App: React.FC = () => {
                 </div>}
         {activeTab === 'crm' && canSeeCrm && (
           <OperationsModuleFrame title="CRM e Vendas" eyebrow="Relacionamento comercial" description="Acompanhe oportunidades, clientes e próximas ações em uma visão conectada ao atendimento." accent="blue" compact>
-          <CrmWorkspace
-            leads={leads}
-            onUpdateLead={handleUpdateLead}
-            onDeleteLead={handleDeleteLead}
-            onClearAllLeads={() => {
-              setLeads([]);
-              showToast('Leads limpos do CRM');
-            }}
-            currentUser={currentUser || GUEST_USER}
-            onNavigateToFinancial={handleNavigateToFinancial}
-            escalations={escalations}
-            transactions={transactions}
-            onGoToEscalations={() => handleSetActiveTab('escalations')}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <CrmWorkspace
+              leads={leads}
+              onUpdateLead={handleUpdateLead}
+              onDeleteLead={handleDeleteLead}
+              onClearAllLeads={() => {
+                setLeads([]);
+                showToast('Leads limpos do CRM');
+              }}
+              currentUser={currentUser || GUEST_USER}
+              onNavigateToFinancial={handleNavigateToFinancial}
+              escalations={escalations}
+              transactions={transactions}
+              onGoToEscalations={() => handleSetActiveTab('escalations')}
+            />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'agenda' && canSeeAgenda && (
@@ -1824,19 +1850,21 @@ export const App: React.FC = () => {
             compact
             hideHeader
           >
-          <AgendaWorkspace
-            transactions={transactions}
-            onAddTransaction={handleAddTransaction}
-            onUpdateTransactionStatus={handleUpdateTransactionStatus}
-            onDeleteTransaction={handleDeleteTransaction}
-            leads={leads}
-            currentUser={currentUser || GUEST_USER}
-            currency={activeTenant.currency}
-            locale={activeTenant.locale}
-            financialModuleEnabled={canSeeFinancial}
-            onToast={showToast}
-            catalogProducts={knowledgeBase.products}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <AgendaWorkspace
+              transactions={transactions}
+              onAddTransaction={handleAddTransaction}
+              onUpdateTransactionStatus={handleUpdateTransactionStatus}
+              onDeleteTransaction={handleDeleteTransaction}
+              leads={leads}
+              currentUser={currentUser || GUEST_USER}
+              currency={activeTenant.currency}
+              locale={activeTenant.locale}
+              financialModuleEnabled={canSeeFinancial}
+              onToast={showToast}
+              catalogProducts={knowledgeBase.products}
+            />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'financial' && canSeeFinancial && (
@@ -1848,34 +1876,38 @@ export const App: React.FC = () => {
             compact
             hideHeader
           >
-          <FinancialWorkspace
-            transactions={transactions}
-            onAddTransaction={handleAddTransaction}
-            onUpdateTransactionStatus={handleUpdateTransactionStatus}
-            onDeleteTransaction={handleDeleteTransaction}
-            leads={leads}
-            currentUser={currentUser || GUEST_USER}
-            currency={activeTenant.currency}
-            locale={activeTenant.locale}
-            onToast={showToast}
-            recurringExpenses={recurringExpenses}
-            onAddRecurringExpense={handleAddRecurringExpense}
-            onToggleRecurringExpense={handleToggleRecurringExpense}
-            onDeleteRecurringExpense={handleDeleteRecurringExpense}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <FinancialWorkspace
+              transactions={transactions}
+              onAddTransaction={handleAddTransaction}
+              onUpdateTransactionStatus={handleUpdateTransactionStatus}
+              onDeleteTransaction={handleDeleteTransaction}
+              leads={leads}
+              currentUser={currentUser || GUEST_USER}
+              currency={activeTenant.currency}
+              locale={activeTenant.locale}
+              onToast={showToast}
+              recurringExpenses={recurringExpenses}
+              onAddRecurringExpense={handleAddRecurringExpense}
+              onToggleRecurringExpense={handleToggleRecurringExpense}
+              onDeleteRecurringExpense={handleDeleteRecurringExpense}
+            />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'attribution' && canSeeGrowth && (
-          <AdAttributionCAPI
-            leads={leads}
-            onTriggerCAPIEvent={(lead, eventName) => {
-              showToast(`Evento Meta CAPI [${eventName}] enviado para ${lead.name}`);
-            }}
-            onAddNewAttributedLead={(newLead) => {
-              setLeads((prev) => [newLead, ...prev]);
-              showToast(`Lead ${newLead.name} adicionado via simulador CAPI`);
-            }}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <AdAttributionCAPI
+              leads={leads}
+              onTriggerCAPIEvent={(lead, eventName) => {
+                showToast(`Evento Meta CAPI [${eventName}] enviado para ${lead.name}`);
+              }}
+              onAddNewAttributedLead={(newLead) => {
+                setLeads((prev) => [newLead, ...prev]);
+                showToast(`Lead ${newLead.name} adicionado via simulador CAPI`);
+              }}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'knowledge' && canManageAgent && !kbLoaded && (
@@ -1883,6 +1915,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'knowledge' && canManageAgent && kbLoaded && (
+          <Suspense fallback={<TabLoadingFallback />}>
           <AgentKnowledgeBaseView
             knowledgeBase={knowledgeBase}
             activeTenantId={activeTenant.id}
@@ -1933,9 +1966,11 @@ export const App: React.FC = () => {
               }
             }}
           />
+          </Suspense>
         )}
 
         {activeTab === 'catalog' && canSeeCatalog && (
+          <Suspense fallback={<TabLoadingFallback />}>
           <PublicCatalogSettings
             tenantSlug={activeTenant.slug}
             tenantName={activeTenant.name}
@@ -1947,25 +1982,30 @@ export const App: React.FC = () => {
               handleSetActiveTab('whatsapp');
             }}
           />
+          </Suspense>
         )}
 
         {activeTab === 'system_logs' && canSeeSystemLogs && (
           <OperationsModuleFrame title="Logs do Sistema" eyebrow="Auditoria técnica" description="Incidentes técnicos por empresa, com recorrência e sugestões para decisão humana — sem alertas automáticos." accent="blue">
-            <SystemLogsPanel
-              incidents={systemIncidents}
-              isLoading={systemLogsLoading}
-              onRefresh={refreshSystemIncidents}
-              onReview={(id) => void updateSystemIncident(id, 'review')}
-              onResolve={(id, note) => void updateSystemIncident(id, 'resolve', note)}
-              onArchive={(id) => void updateSystemIncident(id, 'archive')}
-              onRestore={(id) => void updateSystemIncident(id, 'restore')}
-            />
+            <Suspense fallback={<TabLoadingFallback />}>
+              <SystemLogsPanel
+                incidents={systemIncidents}
+                isLoading={systemLogsLoading}
+                onRefresh={refreshSystemIncidents}
+                onReview={(id) => void updateSystemIncident(id, 'review')}
+                onResolve={(id, note) => void updateSystemIncident(id, 'resolve', note)}
+                onArchive={(id) => void updateSystemIncident(id, 'archive')}
+                onRestore={(id) => void updateSystemIncident(id, 'restore')}
+              />
+            </Suspense>
           </OperationsModuleFrame>
         )}
 
         {activeTab === 'broadcast' && canSeeBroadcast && (
           <OperationsModuleFrame title="Disparo em Massa" eyebrow="Marketing via WhatsApp" description="Campanhas de disparo com aquecimento guiado, deduplicação e integração com o Atendimento." accent="blue">
-            <BroadcastAdminPanel tenantName={activeTenant?.name} />
+            <Suspense fallback={<TabLoadingFallback />}>
+              <BroadcastAdminPanel tenantName={activeTenant?.name} />
+            </Suspense>
           </OperationsModuleFrame>
         )}
 
@@ -1978,6 +2018,7 @@ export const App: React.FC = () => {
           // deste frame ("Resolva pendências...") migrou pro header interno
           // do EscalationsPanel em vez de sumir.
           <OperationsModuleFrame title="Escalonamentos" eyebrow="Decisões humanas" description="Resolva pendências e retome a conversa no ponto exato em que a operação precisa de você." accent="green" compact hideHeader>
+          <Suspense fallback={<TabLoadingFallback />}>
           <EscalationsPanel
             escalations={escalations}
             onResolve={handleResolveEscalation}
@@ -1995,11 +2036,14 @@ export const App: React.FC = () => {
               handleSetActiveTab('whatsapp');
             }}
                     />
+          </Suspense>
           </OperationsModuleFrame>
         )}
         {activeTab === 'quality' && canSeeQuality && (
           <OperationsModuleFrame title="Qualidade da IA" eyebrow="Aprendizado operacional" description="Transforme revisões humanas em regras e melhorias consistentes para o atendimento." accent="green">
-            <QualityAuditCenter onToast={showToast} />
+            <Suspense fallback={<TabLoadingFallback />}>
+              <QualityAuditCenter onToast={showToast} />
+            </Suspense>
           </OperationsModuleFrame>
         )}
 
