@@ -2292,8 +2292,8 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
     lastMessageCountRef.current = messageCount;
   }, [selectedLead?.id, selectedLead?.messages?.length]);
 
-  // Achado real (relato do operador, print anexado): abrir uma conversa
-  // longa (semanas de histórico, muita imagem/áudio) não caía na última
+  // TASK-0380 — Achado real (relato do operador, print anexado): abrir uma
+  // conversa longa (semanas de histórico, muita imagem/áudio) não caía na última
   // mensagem — sempre sobrava rolar manualmente até o fim, mesmo com o
   // efeito acima chamando scrollToLatestMessage('auto') na troca de
   // conversa. Causa: aquele scroll roda num ÚNICO requestAnimationFrame,
