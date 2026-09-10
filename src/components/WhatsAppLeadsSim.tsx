@@ -4878,6 +4878,31 @@ export const WhatsAppLeadsSim: React.FC<WhatsAppLeadsSimProps> = ({
                           Contador de mensagens continua, é útil no
                           cabeçalho e não é dado sensível. */}
                       <span className="truncate min-w-0">{selectedLead.messages?.length || 0} mensagens</span>
+                      {/* TASK-0373 (pedido direto): indicador visual de que
+                          a IA está no atendimento deste lead — antes só
+                          existia dentro da Ficha do Contato (painel lateral,
+                          precisa abrir), e a única forma de saber "a IA vai
+                          responder a próxima mensagem?" direto no cabeçalho
+                          era clicar no menu ⋮ e ver se o item era "Bloquear"
+                          ou "Reativar". Mesmo dado já usado no sidebar
+                          (`aiBlockedAt`), só que visível sem clique extra. */}
+                      <span
+                        className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                          (selectedLead as any).aiBlockedAt
+                            ? 'text-amber-400 bg-amber-950/60 border-amber-700/50'
+                            : 'text-emerald-400 bg-emerald-950/60 border-emerald-700/50'
+                        }`}
+                        title={
+                          (selectedLead as any).aiBlockedAt
+                            ? (isSpanish ? 'La IA está bloqueada para este contacto — solo un operador responde hasta reactivarla (menú ⋮).' : 'A IA está bloqueada para este contato — só um operador responde até reativá-la (menu ⋮).')
+                            : (isSpanish ? 'La IA está en atención — responde automáticamente a la próxima mensaje de este contacto.' : 'A IA está no atendimento — responde automaticamente à próxima mensagem deste contato.')
+                        }
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${(selectedLead as any).aiBlockedAt ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+                        {(selectedLead as any).aiBlockedAt
+                          ? (isSpanish ? 'IA pausada' : 'IA pausada')
+                          : (isSpanish ? 'IA en atención' : 'IA no atendimento')}
+                      </span>
                       {/* TASK-0258 (pedido direto): quando a janela de 24h
                           está aberta e não há nenhuma ação pendente, a faixa
                           de status inteira (linha cheia, sempre visível)
