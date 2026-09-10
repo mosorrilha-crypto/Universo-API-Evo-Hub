@@ -4,20 +4,66 @@
  * conversas ativas). Cobre: pendência vencida gera 1 escalonamento; rodar o
  * job duas vezes não duplica; pendência ainda não vencida não gera nada;
  * cancelar (clearPendingFollowUp) remove antes do job rodar.
+ *
+ * ★ 10/09/2026 — reengajamento automático (pedido real do dono do
+ * produto): 'customer_reply' agora tenta UMA mensagem automática da IA
+ * antes de escalar, só dentro da janela de 24h da Meta e só entre 7h-19h
+ * (America/Asuncion). Sem `ai`/credenciais nos deps (todos os testes
+ * antigos acima, que chamam checkPendingFollowUps() sem argumento), o
+ * comportamento continua idêntico a antes: escala direto.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { initDb } from '../db';
 import { createFakeSupabase } from './fakeSupabase';
 import { markPendingFollowUp, clearPendingFollowUp, listPendingFollowUps } from '../pendingFollowUpStore';
 import { listEscalations } from '../escalationStore';
+
+vi.mock('../conversationStore', () => ({
+  getConversation: vi.fn().mockResolvedValue({ messages: [{ sender: 'lead', text: 'oi', timestamp: new Date().toISOString() }] }),
+  recordOutgoingMessage: vi.fn().mockResolvedValue(undefined),
+  // escalationStore.ts (usado por logEscalation, chamado em todo o arquivo) importa isto de conversationStore.
+  inferCountryFromPhone: vi.fn().mockReturnValue('Paraguai'),
+}));
+vi.mock('../agentStatus', () => ({
+  isAgentPaused: vi.fn().mockResolvedValue(false),
+}));
+vi.mock('../tenantProfileStore', () => ({
+  getTenantReminderLanguage: vi.fn().mockResolvedValue('es'),
+}));
+vi.mock('../replySafetyGate', () => ({
+  reviewAutoReplyBeforeSend: vi.fn().mockResolvedValue({ approved: true, source: 'gemini-reviewer', severity: 'low', reason: 'ok' }),
+}));
+vi.mock('../tenantResolver', () => ({
+  resolveCredentialsForTenant: vi.fn().mockResolvedValue({ provider: 'meta', metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' }),
+}));
+vi.mock('../metaSend', () => ({
+  sendWhatsAppTextMessage: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../evolutionSend', () => ({
+  sendEvolutionTextMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { getConversation, recordOutgoingMessage } from '../conversationStore';
+import { isAgentPaused } from '../agentStatus';
+import { sendWhatsAppTextMessage } from '../metaSend';
+import { resolveCredentialsForTenant } from '../tenantResolver';
 import { checkPendingFollowUps } from '../pendingFollowUpJob';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 
+function fakeAi(text = '¡Hola! ¿Seguís con interés en tu turno? Puedo ayudarte a elegir el mejor horario 😊') {
+  return { models: { generateContent: vi.fn().mockResolvedValue({ text }) } } as any;
+}
+
 beforeEach(() => {
   initDb(createFakeSupabase());
   vi.useFakeTimers();
+  // 2026-08-15T18:00:00Z = 15:00 em America/Asuncion (UTC-3) — dentro da janela 7h-19h.
   vi.setSystemTime(new Date('2026-08-15T18:00:00Z'));
+  vi.clearAllMocks();
+  (isAgentPaused as any).mockResolvedValue(false);
+  (getConversation as any).mockResolvedValue({ messages: [{ sender: 'lead', text: 'oi', timestamp: new Date().toISOString() }] });
+  (resolveCredentialsForTenant as any).mockResolvedValue({ provider: 'meta', metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
 });
 
 afterEach(() => {
@@ -96,5 +142,92 @@ describe('pendingFollowUpJob', () => {
     const escalations = await listEscalations(TENANT_A);
     expect(escalations[0].reason).toContain('avaliação');
     expect(escalations[0].reason).toContain('trabalho anterior de cejas');
+  });
+});
+
+describe('pendingFollowUpJob — reengajamento automático (customer_reply)', () => {
+  it('dentro da janela de 24h e das 7h-19h: manda UMA mensagem automática, marca autoFollowUpSentAt e NÃO escala ainda', async () => {
+    const ai = fakeAi();
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(await listEscalations(TENANT_A)).toHaveLength(0);
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1);
+    expect(recordOutgoingMessage).toHaveBeenCalledWith(
+      TENANT_A,
+      '595981111111',
+      expect.objectContaining({ type: 'text' }),
+      'ai'
+    );
+
+    const [pending] = await (await import('../pendingFollowUpStore')).listPendingFollowUps(TENANT_A);
+    expect(pending.autoFollowUpSentAt).toBeTruthy();
+    // due_at foi empurrado pra frente (mesma janela de novo antes de escalar).
+    expect(new Date(pending.dueAt).getTime()).toBeGreaterThan(new Date('2026-08-15T18:00:00Z').getTime());
+  });
+
+  it('cliente continua em silêncio até o novo vencimento: escala pro operador em vez de tentar reengajar de novo', async () => {
+    const ai = fakeAi();
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+    expect(await listEscalations(TENANT_A)).toHaveLength(0);
+
+    // Avança o relógio pra depois do novo due_at (~2h30 à frente).
+    vi.setSystemTime(new Date('2026-08-15T21:00:00Z'));
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(sendWhatsAppTextMessage).toHaveBeenCalledTimes(1); // não tentou de novo
+    const escalations = await listEscalations(TENANT_A);
+    expect(escalations).toHaveLength(1);
+    expect(escalations[0].reason).toContain('já tentou reengajar automaticamente');
+  });
+
+  it('fora da janela de 7h-19h: não manda mensagem nem escala ainda — fica pendente pro próximo tick dentro do horário', async () => {
+    const ai = fakeAi();
+    // 2026-08-15T04:00:00Z = 01:00 em America/Asuncion — fora de 7h-19h.
+    vi.setSystemTime(new Date('2026-08-15T04:00:00Z'));
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T03:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(await listEscalations(TENANT_A)).toHaveLength(0);
+    const pending = await listPendingFollowUps(TENANT_A);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].autoFollowUpSentAt).toBeFalsy();
+  });
+
+  it('janela de 24h da Meta já fechada: escala direto, mesmo com IA disponível (nunca manda texto livre fora da janela)', async () => {
+    const ai = fakeAi();
+    (getConversation as any).mockResolvedValue({ messages: [{ sender: 'lead', text: 'oi', timestamp: '2026-08-10T12:00:00Z' }] });
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    const escalations = await listEscalations(TENANT_A);
+    expect(escalations).toHaveLength(1);
+  });
+
+  it('agente pausado pro tenant: não manda reengajamento automático, escala como de costume', async () => {
+    const ai = fakeAi();
+    (isAgentPaused as any).mockResolvedValue(true);
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'customer_reply', 'ofereceu sábado ou segunda', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(await listEscalations(TENANT_A)).toHaveLength(1);
+  });
+
+  it('owner_review nunca tenta reengajamento automático — sempre escala direto', async () => {
+    const ai = fakeAi();
+    await markPendingFollowUp(TENANT_A, '595981111111', 'Cliente A', 'owner_review', 'foto de trabalho anterior', '2026-08-15T17:00:00Z');
+
+    await checkPendingFollowUps({ getAi: () => ai, metaAccessToken: 'token', metaPhoneNumberId: 'phone-id' });
+
+    expect(sendWhatsAppTextMessage).not.toHaveBeenCalled();
+    expect(await listEscalations(TENANT_A)).toHaveLength(1);
   });
 });

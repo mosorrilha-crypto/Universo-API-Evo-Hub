@@ -144,16 +144,32 @@ const paidTrafficKnowledgeBase = {
       repo: 'Universo-API-Evo-Hub',
       role: 'Sustenta as etapas 4–7 do funil (lead qualificado → turno confirmado).',
       capiStatus: `
-        JÁ PRONTO: captura de ctwa_clid por conversa; evento "Schedule" disparado
-        automaticamente ao criar agendamento real, com telefone hasheado (SHA-256),
-        moeda PYG e valor do serviço; não dispara sem ctwa_clid real nem sem
-        credencial do tenant (nunca fabrica atribuição); pagamento só é confirmado
-        após verificação humana.
+        ★ v2.1 — CORRIGIDO (01/09/2026). A versão anterior deste bloco dizia
+        "JÁ PRONTO: captura de ctwa_clid...". Isso é código real e funciona —
+        mas só pro canal Meta Cloud API oficial. O tenant da Monique roda em
+        EVOLUTION API (self-hosted/Baileys, WhatsApp Web não-oficial) —
+        confirmado no banco: tenant_meta_credentials.phone_number_id é null,
+        só existe tenant_evolution_credentials real. O parser de webhook da
+        Evolution (parseEvolutionWebhookPayload, webhookParsers.ts) NUNCA
+        popula o campo referral/ctwa_clid — esse conceito só existe no
+        payload da Meta Cloud API.
 
-        FALTA: evento CAPI no momento da SEÑA VERIFICADA (hoje a Meta otimiza para
-        "conseguiu agendar", não para "cliente pagou" — risco de agendamento fantasma);
-        e a rota manual do painel tem currency:'USD' hardcoded (o fluxo automático
-        já usa PYG corretamente).
+        Consequência: fireMetaCapiEventForTenant (metaCapiService.ts) tem uma
+        trava dura (if (!params.ctwaClid) return;) — o evento "Schedule" está
+        implementado e correto, mas NUNCA disparou uma vez sequer pra Monique,
+        porque ctwa_clid nunca chega nesse canal. Confirmado empiricamente:
+        0 de 167 conversas reais (26/08–08/09/2026) têm ctwa_clid, incluindo
+        as vindas de campanha nativa Clique-para-WhatsApp.
+
+        Isso não é um gap ocasional — é estrutural enquanto o canal for
+        Evolution API. NÃO tratar CAPI/ctwa_clid como fonte de atribuição
+        disponível nesta conta. Ver knownDataGaps e realAttributionMechanism.
+
+        FALTA: evento CAPI no momento da SEÑA VERIFICADA — mas mesmo se
+        implementado, não dispararia por este mesmo motivo; e a rota manual
+        do painel tem currency:'USD' hardcoded (o fluxo automático já usa
+        PYG corretamente, quando dispara em outro tenant que use Meta Cloud
+        API de verdade).
       `
     }
   },
@@ -164,7 +180,9 @@ const paidTrafficKnowledgeBase = {
     'Comparecimento (no-show) — não é registrado em nenhuma fonte. Proíbe: tratar seña paga como receita realizada.',
     'CRM não exportado para análise — os estágios de lead existem no sistema Universo mas não chegam ao relatório de tráfego. Proíbe: calcular taxa de qualificação real.',
     'Taxa de câmbio BRL↔PYG não fixada. Proíbe: calcular CAC, ROAS ou receita atribuída.',
-    'CAC máximo aceitável por serviço não definido. Proíbe: chamar um custo por seña de "alto" ou "baixo".'
+    'CAC máximo aceitável por serviço não definido. Proíbe: chamar um custo por seña de "alto" ou "baixo".',
+    // ★ v2.1 — achado real, 01/09/2026 (ver capiStatus).
+    'ctwa_clid/Meta CAPI NUNCA chegam nesta conta — o tenant roda em Evolution API (self-hosted), que não carrega esse referral. O único mecanismo de atribuição real disponível é o reconhecimento por texto da primeira mensagem (ad_trigger_messages, prefixo configurado em agent_status). Proíbe: propor ou assumir CAPI/ctwa_clid como caminho de atribuição pra esta conta; proíbe: reportar "Schedule" do CAPI como evento que está disparando de verdade.'
   ],
 
   // ★ v2 — NOVO. Erro silencioso mais provável neste projeto.
@@ -722,19 +740,29 @@ const paidTrafficKnowledgeBase = {
     ],
     // ★ v2 — como a atribuição funciona de verdade neste projeto.
     realAttributionMechanism: `
-      A atribuição real não vem de UTM (o tráfego vai para o WhatsApp, não para
-      uma landing page). Vem do ctwa_clid: quando a lead clica num anúncio
-      "Clique para WhatsApp", a Meta manda o referral no webhook e o sistema
-      Universo grava ctwa_clid na conversa, uma vez, nunca sobrescrito.
+      ★ v2.1 — CORRIGIDO (01/09/2026). A descrição anterior (ctwa_clid via
+      Meta CAPI) é código real, mas NÃO se aplica a esta conta — ver
+      knownDataGaps e capiStatus (dataSources.system). O tenant da Monique
+      roda em Evolution API, que nunca carrega o referral ctwa_clid; 0 de 167
+      conversas reais auditadas (26/08–08/09/2026) tinham esse campo,
+      inclusive vindas de campanha nativa Clique-para-WhatsApp.
 
-      É esse ctwa_clid que amarra evento de conversão ao anúncio de origem via
-      Meta CAPI. Sem ele, a conversa não tem origem conhecida — e nesse caso
-      NADA deve ser atribuído a campanha nenhuma.
+      A atribuição real e disponível hoje, pra esta conta, é só uma:
+      reconhecimento da PRIMEIRA mensagem do lead contra a lista de frases
+      configuradas em agent_status.ad_trigger_messages (prefixo, ver
+      matchesAdTriggerMessage em agentStatus.ts). Por isso a copy de cada
+      anúncio/botão deve ter uma frase pré-preenchida ÚNICA e específica
+      (ex: "Hola, quiero información sobre Combo Full Face") — é o único
+      dado que liga uma conversa de volta a uma campanha/produto específico
+      nesta conta. Sem bater com um gatilho configurado, a conversa não tem
+      origem conhecida — e nesse caso NADA deve ser atribuído a campanha
+      nenhuma.
     `,
     capiEventMapping: {
-      implemented: ['Schedule — disparado ao criar agendamento real (valor do serviço, moeda PYG)'],
-      missing: ['Evento no momento da SEÑA VERIFICADA — sem ele a Meta otimiza para "agendou", não para "pagou"'],
-      recommendation: 'Priorizar o evento de seña verificada. É a diferença entre a Meta buscar quem agenda e a Meta buscar quem paga.'
+      implemented: [],
+      structurallyBlocked: ['Schedule — código existe e está correto (metaCapiService.ts), mas nunca dispara nesta conta porque exige ctwa_clid e esse campo nunca chega via Evolution API (guarda: if (!params.ctwaClid) return;)'],
+      missing: ['Evento no momento da SEÑA VERIFICADA — mesmo se implementado, cairia na mesma trava de ctwa_clid ausente'],
+      recommendation: 'CAPI não é um caminho de atribuição viável pra esta conta enquanto o canal for Evolution API. Investir em frases de gatilho únicas por anúncio/produto (ver realAttributionMechanism) é o retorno real hoje.'
     },
     attributionRules: [
       'Não atribuir conversão somente pelo último clique se houver histórico de múltiplos contatos.',
@@ -742,7 +770,8 @@ const paidTrafficKnowledgeBase = {
       'Usar o CRM como fonte da seña paga.',
       'Registrar conversões offline quando a cliente pagar ou comparecer.',
       'Informar quando a atribuição for estimada.',
-      'Conversa sem ctwa_clid = origem desconhecida. Não atribuir a nenhuma campanha.' // ★ v2
+      'Conversa sem ctwa_clid = origem desconhecida. Não atribuir a nenhuma campanha.', // ★ v2
+      'ctwa_clid nunca chega nesta conta (canal Evolution API) — não usar como critério de decisão nem prometer que vai chegar depois; o gatilho de texto configurado é a atribuição real disponível.' // ★ v2.1
     ]
   },
 

@@ -299,13 +299,20 @@ async function startServer() {
   // nada sozinho. Ver server/services/preReservationFollowUpJob.ts.
   startPreReservationFollowUpJob();
 
-  // Job em background que escala pro operador quando um lead esfria no meio
-  // do funil — esperando avaliação da dona do negócio (foto de trabalho
-  // anterior) ou sumiu depois que a IA ofereceu horário/opção. Achado real
-  // (15/08/2026): auditoria de conversas do dia mostrou zero agendamentos
-  // fechados apesar de dezenas de conversas ativas. Nunca reabre contato
-  // sozinho, só avisa. Ver server/services/pendingFollowUpJob.ts.
-  startPendingFollowUpJob();
+  // Job em background que acompanha lead esfriado no meio do funil —
+  // esperando avaliação da dona do negócio (foto de trabalho anterior) só
+  // escala pro operador, nunca decide sozinho. Já "sumiu depois que a IA
+  // ofereceu horário/opção" (pedido real, 10/09/2026): dentro da janela de
+  // 24h e só entre 7h-19h, a própria IA manda UMA mensagem de reengajamento
+  // antes de escalar — ver server/services/pendingFollowUpJob.ts.
+  startPendingFollowUpJob({
+    getAi: () => getGeminiClient(config),
+    metaAccessToken: config.metaAccessToken,
+    metaPhoneNumberId: config.metaPhoneNumberId,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    evolutionInstanceName: config.evolutionInstanceName,
+  });
 
   // Job em background que alerta o operador quando o agente automático fica
   // pausado tempo demais com lead sem resposta acumulando (issue #115) —
