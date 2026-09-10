@@ -20,6 +20,8 @@ export interface PendingFollowUp {
   dueAt: string;
   createdAt: string;
   followupAlertedAt?: string;
+  /** Quando a IA já mandou a única tentativa automática de reengajamento pra este registro (kind 'customer_reply') — ver pendingFollowUpJob.ts. */
+  autoFollowUpSentAt?: string;
 }
 
 type PendingFollowUpRow = {
@@ -32,6 +34,7 @@ type PendingFollowUpRow = {
   due_at: string;
   created_at: string;
   followup_alerted_at: string | null;
+  auto_followup_sent_at: string | null;
 };
 
 function toPendingFollowUp(row: PendingFollowUpRow): PendingFollowUp {
@@ -45,6 +48,7 @@ function toPendingFollowUp(row: PendingFollowUpRow): PendingFollowUp {
     dueAt: row.due_at,
     createdAt: row.created_at,
     followupAlertedAt: row.followup_alerted_at || undefined,
+    autoFollowUpSentAt: row.auto_followup_sent_at || undefined,
   };
 }
 
@@ -134,6 +138,22 @@ export async function markFollowUpAlerted(tenantId: string, id: string): Promise
   const { error } = await db
     .from('pending_followups')
     .update({ followup_alerted_at: new Date().toISOString() })
+    .eq('tenant_id', tenantId)
+    .eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * Marca que a IA já mandou a única tentativa automática de reengajamento
+ * pra este registro (kind 'customer_reply', ver pendingFollowUpJob.ts) e
+ * empurra o `due_at` pra frente — se o cliente continuar em silêncio até lá,
+ * o job escala pro operador humano em vez de tentar reengajar de novo.
+ */
+export async function markAutoFollowUpSent(tenantId: string, id: string, nextDueAt: string): Promise<void> {
+  const db = getDb();
+  const { error } = await db
+    .from('pending_followups')
+    .update({ auto_followup_sent_at: new Date().toISOString(), due_at: nextDueAt })
     .eq('tenant_id', tenantId)
     .eq('id', id);
   if (error) throw error;
